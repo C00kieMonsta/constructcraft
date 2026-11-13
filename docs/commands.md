@@ -8,11 +8,11 @@ Every command runs the same way from the desktop app, `ccad run` / `ccad script`
 
 - **Project and files**: [`project_new`](#project_new), [`project_open`](#project_open), [`project_save`](#project_save), [`project_info`](#project_info), [`project_info_set`](#project_info_set), [`site_get`](#site_get), [`site_set`](#site_set), [`site_context_import`](#site_context_import), [`undo`](#undo), [`redo`](#redo), [`units_get`](#units_get), [`units_set`](#units_set), [`language_set`](#language_set), [`ifc_import`](#ifc_import), [`skp_import`](#skp_import), [`skp_component_load`](#skp_component_load), [`obj_import`](#obj_import), [`gltf_import`](#gltf_import), [`ifc_export`](#ifc_export), [`sheet_export`](#sheet_export), [`view_export`](#view_export), [`schedule_export_csv`](#schedule_export_csv), [`component_load`](#component_load), [`component_library_list`](#component_library_list), [`component_save`](#component_save), [`cad_import`](#cad_import), [`image_import`](#image_import), [`cad_layers`](#cad_layers), [`cad_layers_set`](#cad_layers_set), [`cad_explode`](#cad_explode)
 - **Queries**: [`categories_list`](#categories_list), [`levels_list`](#levels_list), [`types_list`](#types_list), [`type_get`](#type_get), [`elements_list`](#elements_list), [`element_get`](#element_get), [`groups_list`](#groups_list), [`measure`](#measure), [`views_list`](#views_list), [`view_get`](#view_get), [`materials_list`](#materials_list), [`material_get`](#material_get), [`schedule_table`](#schedule_table)
-- **Creating elements**: [`wall_create`](#wall_create), [`curtain_type_create`](#curtain_type_create), [`curtain_get`](#curtain_get), [`curtain_grid_set`](#curtain_grid_set), [`curtain_panel_set`](#curtain_panel_set), [`door_create`](#door_create), [`door_type_create`](#door_type_create), [`window_create`](#window_create), [`floor_create`](#floor_create), [`floor_opening_add`](#floor_opening_add), [`floor_opening_remove`](#floor_opening_remove), [`ceiling_create`](#ceiling_create), [`roof_create`](#roof_create), [`roof_edge_set`](#roof_edge_set), [`roof_opening_remove`](#roof_opening_remove), [`room_create`](#room_create), [`grid_create`](#grid_create), [`column_create`](#column_create), [`beam_create`](#beam_create), [`columns_at_grids`](#columns_at_grids), [`beams_on_grids`](#beams_on_grids), [`beams_between_columns`](#beams_between_columns), [`slab_join_supports`](#slab_join_supports), [`structure_number`](#structure_number), [`brace_create`](#brace_create), [`braces_between_columns`](#braces_between_columns), [`truss_create`](#truss_create), [`steel_connection_macros`](#steel_connection_macros), [`steel_connection_create`](#steel_connection_create), [`steel_connections_auto`](#steel_connections_auto), [`rebar_create`](#rebar_create), [`rebar_typical`](#rebar_typical), [`analytical_model`](#analytical_model), [`analytical_export`](#analytical_export), [`footing_create`](#footing_create), [`strip_footing_create`](#strip_footing_create), [`foundation_slab_create`](#foundation_slab_create), [`footings_under_columns`](#footings_under_columns), [`strip_footings_under_walls`](#strip_footings_under_walls), [`stair_create`](#stair_create), [`stair_check`](#stair_check), [`stair_railings_add`](#stair_railings_add), [`railing_host_set`](#railing_host_set), [`ramp_create`](#ramp_create), [`ramp_check`](#ramp_check), [`roof_check`](#roof_check), [`mass_create`](#mass_create), [`sketch_get`](#sketch_get), [`sketch_set`](#sketch_set), [`mass_floors_set`](#mass_floors_set), [`mass_floors`](#mass_floors), [`mass_type_create`](#mass_type_create), [`sweep_create`](#sweep_create), [`sweep_type_create`](#sweep_type_create), [`sweep_profile_set`](#sweep_profile_set), [`shaft_create`](#shaft_create), [`shaft_type_create`](#shaft_type_create), [`topography_create`](#topography_create), [`topography_points_set`](#topography_points_set), [`topography_type_create`](#topography_type_create), [`pad_create`](#pad_create), [`pad_type_create`](#pad_type_create), [`mass_face_move`](#mass_face_move), [`mass_walls_create`](#mass_walls_create), [`mass_slabs_create`](#mass_slabs_create), [`mass_roof_create`](#mass_roof_create), [`ramp_type_create`](#ramp_type_create), [`railing_create`](#railing_create), [`component_place`](#component_place)
+- **Creating elements**: [`wall_create`](#wall_create), [`curtain_type_create`](#curtain_type_create), [`curtain_get`](#curtain_get), [`curtain_grid_set`](#curtain_grid_set), [`curtain_panel_set`](#curtain_panel_set), [`door_create`](#door_create), [`door_type_create`](#door_type_create), [`window_create`](#window_create), [`floor_create`](#floor_create), [`floor_opening_add`](#floor_opening_add), [`floor_opening_remove`](#floor_opening_remove), [`ceiling_create`](#ceiling_create), [`roof_create`](#roof_create), [`roof_edge_set`](#roof_edge_set), [`roof_opening_remove`](#roof_opening_remove), [`room_create`](#room_create), [`grid_create`](#grid_create), [`column_create`](#column_create), [`beam_create`](#beam_create), [`columns_at_grids`](#columns_at_grids), [`beams_on_grids`](#beams_on_grids), [`beams_between_columns`](#beams_between_columns), [`grid_frame_create`](#grid_frame_create), [`slab_join_supports`](#slab_join_supports), [`structure_number`](#structure_number), [`brace_create`](#brace_create), [`braces_between_columns`](#braces_between_columns), [`truss_create`](#truss_create), [`bracing_create`](#bracing_create), [`steel_connection_macros`](#steel_connection_macros), [`steel_connection_create`](#steel_connection_create), [`steel_connections_auto`](#steel_connections_auto), [`rebar_create`](#rebar_create), [`rebar_typical`](#rebar_typical), [`connections_create`](#connections_create), [`analytical_model`](#analytical_model), [`analytical_export`](#analytical_export), [`footing_create`](#footing_create), [`strip_footing_create`](#strip_footing_create), [`foundation_slab_create`](#foundation_slab_create), [`footings_under_columns`](#footings_under_columns), [`strip_footings_under_walls`](#strip_footings_under_walls), [`stair_create`](#stair_create), [`stair_check`](#stair_check), [`stair_railings_add`](#stair_railings_add), [`railing_host_set`](#railing_host_set), [`ramp_create`](#ramp_create), [`ramp_check`](#ramp_check), [`roof_check`](#roof_check), [`mass_create`](#mass_create), [`sketch_get`](#sketch_get), [`sketch_set`](#sketch_set), [`mass_floors_set`](#mass_floors_set), [`mass_floors`](#mass_floors), [`mass_type_create`](#mass_type_create), [`sweep_create`](#sweep_create), [`sweep_type_create`](#sweep_type_create), [`sweep_profile_set`](#sweep_profile_set), [`shaft_create`](#shaft_create), [`shaft_type_create`](#shaft_type_create), [`topography_create`](#topography_create), [`topography_points_set`](#topography_points_set), [`topography_type_create`](#topography_type_create), [`pad_create`](#pad_create), [`pad_type_create`](#pad_type_create), [`mass_face_move`](#mass_face_move), [`mass_walls_create`](#mass_walls_create), [`mass_slabs_create`](#mass_slabs_create), [`mass_roof_create`](#mass_roof_create), [`ramp_type_create`](#ramp_type_create), [`railing_create`](#railing_create), [`component_place`](#component_place)
 - **Building services**: [`pipe_create`](#pipe_create), [`conduit_create`](#conduit_create), [`cable_tray_create`](#cable_tray_create), [`cable_tray_type_create`](#cable_tray_type_create), [`valve_place`](#valve_place), [`valve_type_create`](#valve_type_create), [`device_type_create`](#device_type_create), [`lps_conductor_create`](#lps_conductor_create), [`lps_conductor_type_create`](#lps_conductor_type_create), [`earth_ring_create`](#earth_ring_create), [`air_terminal_place`](#air_terminal_place), [`earth_electrode_place`](#earth_electrode_place), [`lps_check`](#lps_check), [`rack_place`](#rack_place), [`data_outlet_place`](#data_outlet_place), [`cabling_list`](#cabling_list), [`systems_list`](#systems_list), [`system_create`](#system_create), [`system_set`](#system_set), [`system_delete`](#system_delete), [`system_assign`](#system_assign), [`circuit_loads`](#circuit_loads), [`mep_fittings`](#mep_fittings), [`mep_connect`](#mep_connect), [`mep_sizing`](#mep_sizing), [`mep_size_apply`](#mep_size_apply)
 - **Modifying elements**: [`elements_delete`](#elements_delete), [`elements_move`](#elements_move), [`elements_copy`](#elements_copy), [`elements_rotate`](#elements_rotate), [`elements_mirror`](#elements_mirror), [`elements_pin`](#elements_pin), [`element_flip`](#element_flip), [`elements_turn`](#elements_turn), [`elements_export`](#elements_export), [`elements_paste`](#elements_paste), [`wall_join`](#wall_join), [`wall_attach`](#wall_attach), [`geometry_join`](#geometry_join), [`geometry_unjoin`](#geometry_unjoin), [`group_create`](#group_create), [`group_ungroup`](#group_ungroup), [`trim_corner`](#trim_corner), [`trim_extend`](#trim_extend), [`element_split`](#element_split), [`element_offset`](#element_offset), [`element_align`](#element_align), [`element_move_end`](#element_move_end), [`grids_align_ends`](#grids_align_ends), [`element_set`](#element_set), [`elements_set`](#elements_set), [`elements_set_type`](#elements_set_type)
 - **Dimensions and text**: [`dimension_create`](#dimension_create), [`tag_move`](#tag_move), [`dimension_chain_create`](#dimension_chain_create), [`dimension_ordinate_create`](#dimension_ordinate_create), [`dimension_set_value`](#dimension_set_value), [`text_create`](#text_create), [`detail_line_create`](#detail_line_create), [`detail_component_create`](#detail_component_create), [`detail_component_place`](#detail_component_place), [`browser_schemes_list`](#browser_schemes_list), [`browser_scheme_create`](#browser_scheme_create), [`browser_scheme_set`](#browser_scheme_set), [`browser_scheme_delete`](#browser_scheme_delete), [`browser_scheme_use`](#browser_scheme_use), [`browser_tree`](#browser_tree), [`line_styles_list`](#line_styles_list), [`line_style_create`](#line_style_create), [`line_style_set`](#line_style_set), [`line_style_delete`](#line_style_delete), [`filled_region_create`](#filled_region_create), [`masking_region_create`](#masking_region_create), [`filled_region_type_create`](#filled_region_type_create), [`level_mark_create`](#level_mark_create), [`level_mark_type_create`](#level_mark_type_create), [`text_add_leader`](#text_add_leader), [`text_remove_leader`](#text_remove_leader)
-- **Types, components, materials**: [`type_set`](#type_set), [`type_duplicate`](#type_duplicate), [`type_delete`](#type_delete), [`component_create`](#component_create), [`component_get`](#component_get), [`component_param_add`](#component_param_add), [`component_param_set`](#component_param_set), [`component_param_delete`](#component_param_delete), [`component_ref_plane_add`](#component_ref_plane_add), [`component_ref_plane_set`](#component_ref_plane_set), [`component_ref_plane_delete`](#component_ref_plane_delete), [`component_ref_line_add`](#component_ref_line_add), [`component_ref_line_delete`](#component_ref_line_delete), [`component_dimension_add`](#component_dimension_add), [`component_dimension_set`](#component_dimension_set), [`component_dimension_delete`](#component_dimension_delete), [`component_equal_add`](#component_equal_add), [`component_equal_delete`](#component_equal_delete), [`component_piece_add`](#component_piece_add), [`component_piece_set`](#component_piece_set), [`component_piece_delete`](#component_piece_delete), [`component_connector_add`](#component_connector_add), [`component_connector_set`](#component_connector_set), [`component_connector_delete`](#component_connector_delete), [`component_script_set`](#component_script_set), [`component_params_get`](#component_params_get), [`component_params_set`](#component_params_set), [`component_hotspot_move`](#component_hotspot_move), [`material_create`](#material_create), [`material_duplicate`](#material_duplicate), [`material_rename`](#material_rename), [`material_set`](#material_set), [`material_delete`](#material_delete), [`material_texture_set`](#material_texture_set), [`material_texture_clear`](#material_texture_clear), [`material_library_import`](#material_library_import), [`fill_patterns_list`](#fill_patterns_list), [`fill_pattern_get`](#fill_pattern_get), [`fill_pattern_create`](#fill_pattern_create), [`fill_pattern_set`](#fill_pattern_set), [`fill_pattern_duplicate`](#fill_pattern_duplicate), [`fill_pattern_delete`](#fill_pattern_delete), [`fill_pattern_import`](#fill_pattern_import), [`fill_pattern_export`](#fill_pattern_export), [`profiles_list`](#profiles_list), [`profile_get`](#profile_get), [`profile_create`](#profile_create), [`profile_set`](#profile_set), [`profile_duplicate`](#profile_duplicate), [`profile_delete`](#profile_delete), [`profile_catalog`](#profile_catalog), [`profile_import`](#profile_import), [`profile_type_create`](#profile_type_create), [`paint`](#paint), [`paint_remove`](#paint_remove), [`paints_list`](#paints_list)
+- **Types, components, materials**: [`type_set`](#type_set), [`type_duplicate`](#type_duplicate), [`type_delete`](#type_delete), [`component_create`](#component_create), [`component_get`](#component_get), [`component_param_add`](#component_param_add), [`component_param_set`](#component_param_set), [`component_param_delete`](#component_param_delete), [`component_ref_plane_add`](#component_ref_plane_add), [`component_ref_plane_set`](#component_ref_plane_set), [`component_ref_plane_delete`](#component_ref_plane_delete), [`component_ref_line_add`](#component_ref_line_add), [`component_ref_line_delete`](#component_ref_line_delete), [`component_dimension_add`](#component_dimension_add), [`component_dimension_set`](#component_dimension_set), [`component_dimension_delete`](#component_dimension_delete), [`component_equal_add`](#component_equal_add), [`component_equal_delete`](#component_equal_delete), [`component_piece_add`](#component_piece_add), [`component_piece_set`](#component_piece_set), [`component_piece_delete`](#component_piece_delete), [`component_connector_add`](#component_connector_add), [`component_connector_set`](#component_connector_set), [`component_connector_delete`](#component_connector_delete), [`component_script_set`](#component_script_set), [`component_params_get`](#component_params_get), [`component_params_set`](#component_params_set), [`component_hotspot_move`](#component_hotspot_move), [`material_create`](#material_create), [`material_duplicate`](#material_duplicate), [`material_rename`](#material_rename), [`material_set`](#material_set), [`material_delete`](#material_delete), [`material_texture_set`](#material_texture_set), [`material_texture_clear`](#material_texture_clear), [`material_library_import`](#material_library_import), [`fill_patterns_list`](#fill_patterns_list), [`fill_pattern_get`](#fill_pattern_get), [`fill_pattern_create`](#fill_pattern_create), [`fill_pattern_set`](#fill_pattern_set), [`fill_pattern_duplicate`](#fill_pattern_duplicate), [`fill_pattern_delete`](#fill_pattern_delete), [`fill_pattern_import`](#fill_pattern_import), [`fill_pattern_export`](#fill_pattern_export), [`profiles_list`](#profiles_list), [`profile_get`](#profile_get), [`profile_create`](#profile_create), [`profile_set`](#profile_set), [`profile_duplicate`](#profile_duplicate), [`profile_delete`](#profile_delete), [`profile_catalog`](#profile_catalog), [`profile_import`](#profile_import), [`profile_type_create`](#profile_type_create), [`structural_type_for`](#structural_type_for), [`steel_building_create`](#steel_building_create), [`wall_framing_create`](#wall_framing_create), [`paint`](#paint), [`paint_remove`](#paint_remove), [`paints_list`](#paints_list)
 - **Levels and views**: [`level_create`](#level_create), [`level_set`](#level_set), [`level_delete`](#level_delete), [`view_create`](#view_create), [`view_set`](#view_set), [`view_duplicate`](#view_duplicate), [`view_delete`](#view_delete), [`callout_create`](#callout_create), [`callout_remove`](#callout_remove), [`callouts_list`](#callouts_list), [`sheet_place_view`](#sheet_place_view), [`sheet_remove_viewport`](#sheet_remove_viewport), [`sheet_set`](#sheet_set), [`sheet_fields`](#sheet_fields), [`title_block_create`](#title_block_create), [`component_sheet_piece_add`](#component_sheet_piece_add), [`component_sheet_piece_set`](#component_sheet_piece_set), [`component_sheet_piece_delete`](#component_sheet_piece_delete)
 - **View graphics**: [`view_graphics_get`](#view_graphics_get), [`view_graphics_set`](#view_graphics_set), [`element_override_set`](#element_override_set), [`element_hide_in_view`](#element_hide_in_view), [`filters_list`](#filters_list), [`filter_create`](#filter_create), [`filter_set`](#filter_set), [`filter_delete`](#filter_delete), [`filter_elements`](#filter_elements), [`view_filter_add`](#view_filter_add), [`view_filter_set`](#view_filter_set), [`view_filter_remove`](#view_filter_remove), [`view_filter_move`](#view_filter_move), [`templates_list`](#templates_list), [`template_create`](#template_create), [`template_set`](#template_set), [`template_delete`](#template_delete), [`view_template_apply`](#view_template_apply), [`view_template_assign`](#view_template_assign), [`view_temporary`](#view_temporary), [`view_temporary_apply`](#view_temporary_apply)
 - **Phases**: [`phases_list`](#phases_list), [`phase_create`](#phase_create), [`phase_set`](#phase_set), [`phase_delete`](#phase_delete), [`elements_phase_set`](#elements_phase_set), [`elements_demolish`](#elements_demolish), [`phase_creation_set`](#phase_creation_set), [`phase_filters_list`](#phase_filters_list), [`phase_filter_create`](#phase_filter_create), [`phase_filter_set`](#phase_filter_set), [`phase_filter_delete`](#phase_filter_delete), [`phase_graphics_get`](#phase_graphics_get), [`phase_graphics_set`](#phase_graphics_set)
@@ -23,9 +23,11 @@ Every command runs the same way from the desktop app, `ccad run` / `ccad script`
 
 ### `project_new`
 
-*file* — Start a new project from the template (unsaved changes are discarded).
+*file* — Start a new project from a template (unsaved changes are discarded).
 
-No parameters.
+| Parameter | Type | | Description |
+|---|---|---|---|
+| `template` | string | optional | The template: `metric` (the default; meters, metric sizes) or `imperial` (feet and inches, round imperial sizes). |
 
 ### `project_open`
 
@@ -384,7 +386,7 @@ No parameters.
 
 ### `view_get`
 
-*query* — A view with all its parameters (`params`, editable with `view_set`).
+*query* — A view with all its parameters (`params`, editable with `view_set`), its `scale` denominator and `scale_text`, the scale as the project writes it (`1:50`, or `1/4" = 1'-0"` in imperial projects).
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -424,7 +426,7 @@ No parameters.
 | `start` | [x, y] | required | Start point of the wall line. |
 | `base_offset` | number | optional | Base offset from the level, meters. |
 | `bulge` | number | optional | Arc walls: tan(sweep / 4), positive when the arc turns counter-clockwise from `start` to `end` (1 is a half circle; at most 10 either way). Ignored when `mid` is given. |
-| `height` | number | optional | Unconnected height in meters (default 3). |
+| `height` | number | optional | Unconnected height in meters (default 3; 10'-0" in imperial projects). |
 | `level` | id or name | optional | Level id or name (default: the lowest level). |
 | `location_line` | string | optional | Which line of the wall `start`-`end` is: `Centerline` (default), `CoreCenter`, `FinishExterior`, `FinishInterior`, `CoreExterior` or `CoreInterior`. |
 | `major_arc` | boolean | optional | With `radius`: take the longer of the two arcs (default: the shorter). |
@@ -436,7 +438,7 @@ No parameters.
 
 ### `curtain_type_create`
 
-*edit* — Create a curtain wall type: walls of it are a grid of panels and mullions. `curtain` changes the defaults (vertical and horizontal lines every 1.5 m, glass panels, 5 x 15 cm mullions inside and around) and is shaped like `params.curtain` in `type_get`: `vertical` and `horizontal` {layout: `None`, `FixedDistance`, `FixedNumber` or `MaxSpacing`, spacing, count, justification: `Start`, `Center` or `End`}, `panel` {kind: `Glass` or `Solid`, thickness, material} or {kind: `Empty`} or {kind: `Component`, component: type id}, and `vertical_mullion`, `horizontal_mullion`, `border_mullion` {width, depth, material} or null for none. Place walls of it with `wall_create`.
+*edit* — Create a curtain wall type: walls of it are a grid of panels and mullions. `curtain` changes the defaults (vertical and horizontal lines every 1.5 m, glass panels, 5 x 15 cm mullions inside and around; in imperial projects lines every 5'-0" and 2" x 6" mullions) and is shaped like `params.curtain` in `type_get`: `vertical` and `horizontal` {layout: `None`, `FixedDistance`, `FixedNumber` or `MaxSpacing`, spacing, count, justification: `Start`, `Center` or `End`}, `panel` {kind: `Glass` or `Solid`, thickness, material} or {kind: `Empty`} or {kind: `Component`, component: type id}, and `vertical_mullion`, `horizontal_mullion`, `border_mullion` {width, depth, material} or null for none. Place walls of it with `wall_create`.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -497,14 +499,14 @@ No parameters.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
-| `bottom_rail` | number | optional | French doors: height of the solid bottom rail of each leaf, meters (default 0.4). |
+| `bottom_rail` | number | optional | French doors: height of the solid bottom rail of each leaf, meters (default 0.4; 1'-4" in imperial projects). |
 | `glass` | string | optional | French doors: material of the panes (default: the template's glass, if the project has it). |
-| `height` | number | optional | Height of the opening, meters (default 2.1, French doors 2.2). |
+| `height` | number | optional | Height of the opening, meters (default 2.1, French doors 2.2; 6'-8" in imperial projects). |
 | `leaves` | integer | optional | Number of leaves: 1 (default) or 2. |
 | `material` | string | optional | Material of the leaves (default: the template's wood, if the project has it). |
-| `name` | string | optional | Type name, unique among door types (default: the component's name and size in centimeters). |
+| `name` | string | optional | Type name, unique among door types (default: the component's name and size, in centimeters; in feet and inches in imperial projects). |
 | `style` | string | optional | `swing` (default) or `french`. |
-| `width` | number | optional | Width of the opening, meters (default 0.8 for one leaf, 1.4 for two). |
+| `width` | number | optional | Width of the opening, meters (default 0.8 for one leaf, 1.4 for two; 2'-8" and 5'-0" in imperial projects). |
 
 ### `window_create`
 
@@ -530,7 +532,7 @@ No parameters.
 | `curves` | [JSON, …] | optional | The outline drawn with curves (lines, arcs, circles, ellipses, rectangles, polygons) instead of `boundary`; loops inside the outline are openings (floors and roofs). The element keeps the curves (see `sketch_get`). |
 | `from_walls` | boolean | optional | Follow the outer boundary of the walls of the level, leaving interior walls out (exterior faces; interior faces for ceilings). |
 | `level` | id or name | optional | Level id or name (default: the lowest level). |
-| `offset` | number | optional | Floors: top above the level (default 0). Ceilings: bottom above the level (default 2.6). Roofs: base above the level (default: top of the tallest wall). |
+| `offset` | number | optional | Floors: top above the level (default 0). Ceilings: bottom above the level (default 2.6; 8'-0" in imperial projects). Roofs: base above the level (default: top of the tallest wall). |
 | `openings` | [[[x, y], …], …] | optional | Openings through the slab (shafts, stairwells): closed outlines inside the boundary, apart from each other. |
 | `type` | id or name | optional | Type id or name (default: the category's default type). |
 
@@ -562,7 +564,7 @@ No parameters.
 | `curves` | [JSON, …] | optional | The outline drawn with curves (lines, arcs, circles, ellipses, rectangles, polygons) instead of `boundary`; loops inside the outline are openings (floors and roofs). The element keeps the curves (see `sketch_get`). |
 | `from_walls` | boolean | optional | Follow the outer boundary of the walls of the level, leaving interior walls out (exterior faces; interior faces for ceilings). |
 | `level` | id or name | optional | Level id or name (default: the lowest level). |
-| `offset` | number | optional | Floors: top above the level (default 0). Ceilings: bottom above the level (default 2.6). Roofs: base above the level (default: top of the tallest wall). |
+| `offset` | number | optional | Floors: top above the level (default 0). Ceilings: bottom above the level (default 2.6; 8'-0" in imperial projects). Roofs: base above the level (default: top of the tallest wall). |
 | `type` | id or name | optional | Type id or name (default: the category's default type). |
 
 ### `roof_create`
@@ -576,7 +578,7 @@ No parameters.
 | `from_walls` | boolean | optional | Follow the outer boundary of the walls of the level, leaving interior walls out (exterior faces; interior faces for ceilings). |
 | `holes` | [[[x, y], …], …] | optional | Openings through the roof (courtyards): closed outlines inside the boundary, apart from each other. Pitched roofs slope down to their eaves too. |
 | `level` | id or name | optional | Level id or name (default: the lowest level). |
-| `offset` | number | optional | Floors: top above the level (default 0). Ceilings: bottom above the level (default 2.6). Roofs: base above the level (default: top of the tallest wall). |
+| `offset` | number | optional | Floors: top above the level (default 0). Ceilings: bottom above the level (default 2.6; 8'-0" in imperial projects). Roofs: base above the level (default: top of the tallest wall). |
 | `overhang` | number | optional | Overhang beyond the outline, meters (default 0.5). |
 | `type` | id or name | optional | Type id or name (default: the category's default type). |
 
@@ -688,6 +690,20 @@ No parameters.
 | `top_offset` | number | optional | Top of the beams above the level, meters (default: the level height). |
 | `type` | id or name | optional | Beam type id or name (default: the category's default type). |
 
+### `grid_frame_create`
+
+*edit* — Frame a range of levels on the grids: on every storey (each pair of consecutive levels from `base_level` to `top_level`), a column at each grid intersection of the lower level with its top attached to the upper one, and beams on the upper level along each grid between neighboring columns. Columns and beams already modeled are skipped. With `secondary`, each bay between two grids parallel to `parallel_to` and two crossing grids gets beams parallel to it, at most `spacing` apart. One undo step; returns the new `columns`, `beams` and `secondary` beams and how many were `skipped` (and bays `skipped_bays`).
+
+| Parameter | Type | | Description |
+|---|---|---|---|
+| `base_level` | id or name | optional | The lowest level (default: the lowest level of the project). |
+| `beam_type` | id or name | optional | Beam type id or name (default: the first of `material`, made when missing). |
+| `column_type` | id or name | optional | Column type id or name (default: the first of `material`, made when missing). |
+| `grids` | [id, …] | optional | Grid ids (default: every grid). |
+| `material` | string | optional | `concrete`, `steel` (default) or `timber`: the default types' material. |
+| `secondary` | object | optional | Secondary beams in each bay. |
+| `top_level` | id or name | optional | The highest level (default: the level above the base). |
+
 ### `slab_join_supports`
 
 *edit* — Join each slab with the structure that carries it: beams, structural columns and structural walls whose bodies overlap it (default: every floor, or every floor of `level`). Beams and columns cut the slab, the slab cuts walls, and the shared volume counts once. Pairs already joined are left as they are.
@@ -729,20 +745,45 @@ No parameters.
 
 ### `truss_create`
 
-*edit* — Lay out a plane truss from `start` to `end`: a bottom and a top chord `height` apart, `panels` panels and the web of `pattern` (`pratt`, the default, `howe` or `warren`). Pratt and Howe trusses get a post at every panel point, Warren trusses only at the ends; posts are columns. The members form a group, so the truss moves as one.
+*edit* — Lay out a parametric plane truss from `start` to `end`: a `flat` (default), `mono` or `gable` outline `height` deep (the rise at the apex or high end for mono and gable), `panels` bottom-chord panels and the web of `pattern` (`pratt`, the default, `howe`, `warren`, or for gables `kingpost`, `queenpost` and `fink`; a gable-only pattern on another shape is laid out as Pratt). Chords and diagonals are beams, verticals are columns, all ordinary elements the truss keeps in step with its parameters (`element_set` regenerates them, keeping their ids); a member edited or deleted by hand is detached and left alone. `copies` trusses are made `spacing` apart to the left of start → end. Default types come from the profile catalog for the `material` (steel: `Ue 150x60x20x2,00` chords, `Ue 100x50x17x2,00` web and posts; timber: `Peça 6x16` chords, `Peça 6x12` web and posts), made when missing; concrete is refused. Out-of-range values are refused. One undo step; returns the truss's `id` and its `members`.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
-| `end` | [x, y] | required | End of the truss in plan. |
-| `height` | number | required | Distance between the chord axes, meters. |
-| `start` | [x, y] | required | Start of the truss in plan. |
+| `end` | [x, y] | required | End of the span line in plan (the other support), 0.5 to 200 m from the start. |
+| `height` | number | required | Chord axis to chord axis (flat), or the rise at the apex or high end (mono, gable), meters, 0.1 to 20. |
+| `start` | [x, y] | required | Start of the span line in plan (a support). |
+| `bottom_chord_type` | id or name | optional | Beam type of the bottom chord (default: `chord_type`, else the catalog chord). |
 | `bottom_offset` | number | optional | Elevation of the bottom chord's axis above the level (default: the level height minus `height`). |
-| `chord_type` | id or name | optional | Beam type of the chords (default: the category's default type). |
+| `chord_type` | id or name | optional | Beam type of both chords (default: the material's catalog chord). |
+| `copies` | integer | optional | How many trusses, 1 to 200 (default 1). |
 | `level` | id or name | optional | Level id or name (default: the lowest level). |
-| `panels` | integer | optional | Number of panels (default: about one per 1.5 m). |
-| `pattern` | string | optional | `pratt`, `howe` or `warren`. |
-| `post_type` | id or name | optional | Column type of the posts (default: the first column type of a steel or cold-formed profile, else of a steel section). |
-| `web_type` | id or name | optional | Beam type of the diagonals (default: the chord type). |
+| `material` | string | optional | `steel` (default) or `timber`: the catalog rows of the types not given (a given `chord_type` does not change it, so give `material` with a timber chord). |
+| `panels` | integer | optional | Bottom-chord panels, 2 to 64, even on a gable (default: about one per 1.5 m). |
+| `pattern` | string | optional | `pratt` (default), `howe`, `warren`, `kingpost`, `queenpost` or `fink`. |
+| `post_type` | id or name | optional | Column type of the verticals (default: a column type of the material's catalog web row). |
+| `shape` | string | optional | `flat` (default), `mono` (rising toward `end`) or `gable` (rising toward mid-span). |
+| `spacing` | number | optional | Distance between copies, to the left of start → end, meters, 0.3 to 20 (default 1.5). |
+| `top_chord_type` | id or name | optional | Beam type of the top chord (default: `chord_type`, else the catalog chord). |
+| `web_type` | id or name | optional | Beam type of the diagonals (default: the material's catalog web row). |
+
+### `bracing_create`
+
+*edit* — Brace one bay of a frame, storey by storey: the bay runs from `start` to `end` in plan (the axes of its two columns), or between two `columns`, whose level, base and height it then takes. `pattern` is `x` (default: both diagonals), `diagonal` (one, rising toward `end`; `flip` turns it, `alternate` turns every other storey), `v` (from the top corners down to the middle of the bay), `chevron` (from the bottom corners up to the middle, an inverted V) or `k` (from the mid-height of each column to the middle of the bay at the top and at the bottom of the storey). `stories` storeys of `height` are braced one above the other from `base_offset`. The braces are ordinary beams the bracing keeps in step with its parameters (`element_set` regenerates them, keeping their ids); a brace edited or deleted by hand is detached and left alone. The default brace type comes from the profile catalog for the `material` (steel: `SHS 100x100x4`; timber: `Peça 6x12`), made when missing; concrete needs a `type`. Out-of-range values are refused. One undo step; returns the bracing's `id` and its `members`.
+
+| Parameter | Type | | Description |
+|---|---|---|---|
+| `alternate` | boolean | optional | `diagonal` braces change direction storey by storey. |
+| `base_offset` | number | optional | The foot of the lowest storey above the level, meters (default: the columns' base, else 0). |
+| `columns` | [id, …] | optional | The two column ids of the bay, instead of `start` and `end`. |
+| `end` | [x, y] | optional | The other column axis, 0.5 to 200 m from the start (not with `columns`). |
+| `flip` | boolean | optional | A `diagonal` rises toward the start instead of the end. |
+| `height` | number | optional | One storey, meters, 0.5 to 50 (default: the columns' common height over `stories`, else the level's height). |
+| `level` | id or name | optional | Level id or name (default: the first column's level, else the lowest level). |
+| `material` | string | optional | `steel` (default) or `timber`: the catalog row of the brace type when `type` is not given. |
+| `pattern` | string | optional | `x` (default), `diagonal`, `v`, `chevron` or `k`. |
+| `start` | [x, y] | optional | One column axis of the bay in plan (not with `columns`). |
+| `stories` | integer | optional | Storeys braced one above the other, 1 to 100 (default 1). |
+| `type` | id or name | optional | Beam type of the braces, id or name (default: the material's catalog row). |
 
 ### `steel_connection_macros`
 
@@ -799,9 +840,9 @@ No parameters.
 | `host` | integer | required | Beam or column id. |
 | `layout` | string | required | `top`, `bottom`, `perimeter` or `stirrups`. |
 | `count` | integer | optional | Number of longitudinal bars (default: 2 in beams, 4 in columns). |
-| `cover` | number | optional | Concrete cover, meters (default 0.025). |
-| `spacing` | number | optional | Stirrup spacing, meters (default 0.15). |
-| `type` | id or name | optional | Bar type id or name (default: the type nearest 10 mm, or 5 mm for stirrups). |
+| `cover` | number | optional | Concrete cover, meters (default 0.025; 1 1/2" in imperial projects). |
+| `spacing` | number | optional | Stirrup spacing, meters (default 0.15; 6" in imperial projects). |
+| `type` | id or name | optional | Bar type id or name (default: the type nearest 10 mm, or 5 mm for stirrups; 1/2" and 3/8" in imperial projects). |
 
 ### `rebar_typical`
 
@@ -811,6 +852,17 @@ No parameters.
 |---|---|---|---|
 | `elements` | [id, …] | optional | Beam and column ids (default: all of `level`, or of the project). |
 | `level` | id or name | optional | Level id or name, when no elements are given. |
+
+### `connections_create`
+
+*edit* — Place steel or timber connections of one `kind` at every member end that suits it: `base_plate` under columns; `end_plate` and `timber_bolts` at beam ends that stop at a column; `fin_plate` at beam ends at a column or another beam; `hanger` at beam ends at another beam. Ends that already have a connection are skipped. Plates and bolts follow their member. One undo step; returns the new ids (`created`) and how many ends were `skipped`.
+
+| Parameter | Type | | Description |
+|---|---|---|---|
+| `kind` | string | required | `base_plate`, `end_plate`, `fin_plate`, `timber_bolts` or `hanger`. |
+| `level` | id or name | optional | Level id or name when no `members` are given (default: the active level, else every level); ignored with `members`. |
+| `members` | [id, …] | optional | Column ids (base plates) or beam ids (the other kinds); default: every one of `level`. |
+| `params` | JSON | optional | Sizes to change from the kind's defaults, meters: `thickness`, `width` and `length` (0: from the member's section plus `edge`), `bolt_diameter`, `rows` and `columns` (1 to 10), `spacing`, `edge`, `anchor_length`. Lengths are 0.001 to 2. |
 
 ### `analytical_model`
 
@@ -864,7 +916,7 @@ No parameters.
 | `curves` | [JSON, …] | optional | The outline drawn with curves (lines, arcs, circles, ellipses, rectangles, polygons) instead of `boundary`; loops inside the outline are openings (floors and roofs). The element keeps the curves (see `sketch_get`). |
 | `from_walls` | boolean | optional | Follow the outer boundary of the walls of the level, leaving interior walls out (exterior faces; interior faces for ceilings). |
 | `level` | id or name | optional | Level id or name (default: the lowest level). |
-| `offset` | number | optional | Floors: top above the level (default 0). Ceilings: bottom above the level (default 2.6). Roofs: base above the level (default: top of the tallest wall). |
+| `offset` | number | optional | Floors: top above the level (default 0). Ceilings: bottom above the level (default 2.6; 8'-0" in imperial projects). Roofs: base above the level (default: top of the tallest wall). |
 | `type` | id or name | optional | Type id or name (default: the category's default type). |
 
 ### `footings_under_columns`
@@ -895,9 +947,9 @@ No parameters.
 |---|---|---|---|
 | `start` | [x, y] | required | Start of the run (center of the first step's edge). |
 | `direction` | number | optional | Direction of the first flight in plan, degrees counter-clockwise from +X. |
-| `gap` | number | optional | Clear gap between the flights of a U-shaped stair, meters (default 0.1). |
-| `height` | number | optional | Height when there is no level above (default 3). |
-| `inner_radius` | number | optional | Radius of the inner edge of a spiral stair, meters (default 0.15). |
+| `gap` | number | optional | Clear gap between the flights of a U-shaped stair, meters (default 0.1; 4" in imperial projects). |
+| `height` | number | optional | Height when there is no level above (default 3; 10'-0" in imperial projects). |
+| `inner_radius` | number | optional | Radius of the inner edge of a spiral stair, meters (default 0.15; 6" in imperial projects). |
 | `landing` | number | optional | Landing depth along the first flight, meters (default: the stair width). |
 | `level` | id or name | optional | Level id or name (default: the lowest level). |
 | `number_start` | integer | optional | Number of the first tread (default 1), from -9999 to 9999: another value continues the count of a stair below, for instance. |
@@ -953,9 +1005,9 @@ No parameters.
 |---|---|---|---|
 | `start` | [x, y] | required | Foot of the ramp (middle of its lower edge). |
 | `direction` | number | optional | Direction of the first flight in plan, degrees counter-clockwise from +X. |
-| `gap` | number | optional | Clear gap between the flights of a U-shaped ramp, meters (default 0.1). |
-| `height` | number | optional | Height when there is no level above (default 3). |
-| `inner_radius` | number | optional | Radius of the inner edge of a spiral ramp, meters (default 1.5). |
+| `gap` | number | optional | Clear gap between the flights of a U-shaped ramp, meters (default 0.1; 4" in imperial projects). |
+| `height` | number | optional | Height when there is no level above (default 3; 10'-0" in imperial projects). |
+| `inner_radius` | number | optional | Radius of the inner edge of a spiral ramp, meters (default 1.5; 5'-0" in imperial projects). |
 | `landing` | number | optional | Landing length, meters (default: the type's shortest landing). |
 | `level` | id or name | optional | Level id or name (default: the lowest level). |
 | `shape` | string | optional | Plan shape: `straight` (default), `l_shaped`, `u_shaped` or `spiral`. |
@@ -989,7 +1041,7 @@ No parameters.
 | `base_offset` | number | optional | Offset of the base from the level elevation, meters (default 0). |
 | `curves` | [JSON, …] | optional | The base outline drawn with curves (lines, arcs, circles, ellipses, rectangles, polygons) in one loop, instead of `outline`; the mass keeps them. |
 | `floors` | [id or name, …] | optional | Levels (ids or names) where mass floors are taken (default: every level the mass spans). |
-| `height` | number | optional | Height above the base, meters (default: up to the level above, else 3). |
+| `height` | number | optional | Height above the base, meters (default: up to the level above, else 3; 10'-0" in imperial projects). |
 | `level` | id or name | optional | Level id or name (default: the lowest level). |
 | `outline` | [[x, y], …] | optional | Base outline `[[x, y], …]` in plan, closed (at least three points); or `curves`. |
 | `top` | [[x, y], …] | optional | Top outline of a loft `[[x, y], …]` (default: the base outline, an extrusion). |
@@ -1082,7 +1134,7 @@ No parameters.
 |---|---|---|---|
 | `base_offset` | number | optional | Bottom above the level, meters (default 0). |
 | `curves` | [JSON, …] | optional | The outline drawn with curves (lines, arcs, circles, rectangles…). |
-| `height` | number | optional | Height when there is no level above, meters (default 3). |
+| `height` | number | optional | Height when there is no level above, meters (default 3; 10'-0" in imperial projects). |
 | `level` | id or name | optional | Level id or name of the bottom (default: the lowest level). |
 | `outline` | [[x, y], …] | optional | Outline `[[x, y], …]` in plan, closed (at least three points); or `curves`. |
 | `top_level` | id or name | optional | Level the shaft rises to (default: the highest level above its own). |
@@ -1103,7 +1155,7 @@ No parameters.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
-| `base_depth` | number | optional | Depth of the flat base below the lowest point of the surface, meters (default 2). |
+| `base_depth` | number | optional | Depth of the flat base below the lowest point of the surface, meters (default 2; 6'-0" in imperial projects). |
 | `boundary` | [[x, y], …] | optional | Boundary `[[x, y], …]` in plan, closed (at least three points); or `curves`. |
 | `curves` | [JSON, …] | optional | The boundary drawn with curves (lines, arcs, circles, rectangles…). |
 | `level` | id or name | optional | Level id or name the elevations are measured from (default: the lowest level). |
@@ -1128,7 +1180,7 @@ No parameters.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
-| `contour_interval` | number | optional | Spacing of the contour lines, meters (default 1). |
+| `contour_interval` | number | optional | Spacing of the contour lines, meters (default 1; 1'-0" in imperial projects). |
 | `major_every` | integer | optional | Every this many contours, a major one (default 5). |
 | `material` | string | optional | Material name (default: the project's earth material, added if missing). |
 | `name` | string | optional | Type name (default: the template's terrain name). |
@@ -1205,12 +1257,12 @@ No parameters.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
-| `max_flight_rise` | number | optional | Highest rise of one flight, meters (default 0.80). |
+| `max_flight_rise` | number | optional | Highest rise of one flight, meters (default 0.80; 30" in imperial projects). |
 | `max_slope` | number | optional | Steepest slope, percent (default 8.33). |
-| `min_landing` | number | optional | Shortest landing, meters (default 1.20). |
+| `min_landing` | number | optional | Shortest landing, meters (default 1.20; 60" in imperial projects). |
 | `name` | string | optional | Type name (default: the template's ramp name). |
-| `thickness` | number | optional | Slab thickness, meters (default 0.15). |
-| `width` | number | optional | Width, meters (default 1.2). |
+| `thickness` | number | optional | Slab thickness, meters (default 0.15; 6" in imperial projects). |
+| `width` | number | optional | Width, meters (default 1.2; 4'-0" in imperial projects). |
 
 ### `railing_create`
 
@@ -1225,7 +1277,7 @@ No parameters.
 
 ### `component_place`
 
-*edit* — Place a component (furniture, plumbing fixture, electrical device…) of a component type. Electrical devices default to their usual mounting height (outlets 0.30 m, switches 1.10 m, boards 1.30 m, wall lights 2.10 m, ceiling lights at the level height, data outlets 0.30 m, racks 1.40 m, air terminals on the roof under them, earth electrodes 0.50 m below the level) and may be put on a circuit or system of their kind; lightning protection devices join the first lightning protection system by default.
+*edit* — Place a component (furniture, plumbing fixture, electrical device…) of a component type. Electrical devices default to their usual mounting height (outlets 0.30 m, switches 1.10 m, boards 1.30 m, wall lights 2.10 m, ceiling lights at the level height, data outlets 0.30 m, racks 1.40 m, air terminals on the roof under them, earth electrodes 0.50 m below the level; in imperial projects outlets 1'-6", switches 4'-0", boards and racks 4'-6", wall lights 7'-0") and may be put on a circuit or system of their kind; lightning protection devices join the first lightning protection system by default.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -1240,7 +1292,7 @@ No parameters.
 
 ### `pipe_create`
 
-*edit* — Create a pipe from `start` to `end` (or a vertical riser at `start` up or down to `end_offset`), in a plumbing system. Its center line starts `offset` above the level (default: where it starts on a pipe of its system, such as the end of a run or a riser; else 0.60 m for supply and vent pipes, -0.30 m for drains). Drains fall along the flow by `slope` (percent; default 2 % up to 75 mm, 1 % above); other pipes are level unless `end_offset` or `slope` says otherwise.
+*edit* — Create a pipe from `start` to `end` (or a vertical riser at `start` up or down to `end_offset`), in a plumbing system. Its center line starts `offset` above the level (default: where it starts on a pipe of its system, such as the end of a run or a riser; else 0.60 m for supply and vent pipes, -0.30 m for drains; 2'-0" and -1'-0" in imperial projects). Drains fall along the flow by `slope` (percent; default 2 % up to 75 mm, 1 % above; in imperial projects 1/4" per foot up to 3", 1/8" above); other pipes are level unless `end_offset` or `slope` says otherwise.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -1269,7 +1321,7 @@ No parameters.
 
 ### `cable_tray_create`
 
-*edit* — Create a cable tray from `start` to `end` (or a vertical run at `start` to `end_offset`) carrying `circuits`. Its center line runs `offset` above the level (default: where it starts on another cable tray, such as the end of a run; else 0.30 m under the level above). Trays meet other trays at their ends or along them (elbows, tees and crosses are derived), not conduits or pipes. A project without a cable tray type gets one (200 × 100 mm, ladder).
+*edit* — Create a cable tray from `start` to `end` (or a vertical run at `start` to `end_offset`) carrying `circuits`. Its center line runs `offset` above the level (default: where it starts on another cable tray, such as the end of a run; else 0.30 m under the level above). Trays meet other trays at their ends or along them (elbows, tees and crosses are derived), not conduits or pipes. A project without a cable tray type gets one (200 × 100 mm, 8" × 4" in imperial projects; ladder).
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -1283,7 +1335,7 @@ No parameters.
 
 ### `cable_tray_type_create`
 
-*edit* — Create a cable tray type: an open channel `width` × `height` (meters; default 0.2 × 0.1, at most 2 × 1), built as `style` says (`ladder`, the default, `solid_bottom` or `perforated`), in `material` (default: the project's first metal). The name defaults to its section.
+*edit* — Create a cable tray type: an open channel `width` × `height` (meters; default 0.2 × 0.1, 8" × 4" in imperial projects; at most 2 × 1), built as `style` says (`ladder`, the default, `solid_bottom` or `perforated`), in `material` (default: the project's first metal). The name defaults to its section.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -1341,11 +1393,11 @@ No parameters.
 
 ### `lps_conductor_type_create`
 
-*edit* — Create a lightning protection conductor type: a round conductor of `diameter` (meters, 2 to 50 mm; default 8 mm) in `material` (default: copper, else the first metal), named by its diameter unless `name` is given.
+*edit* — Create a lightning protection conductor type: a round conductor of `diameter` (meters, 2 to 50 mm; default 8 mm, 3/8" in imperial projects) in `material` (default: copper, else the first metal), named by its diameter unless `name` is given.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
-| `diameter` | number | optional | Diameter, meters. |
+| `diameter` | number | optional | Diameter, meters (default 0.008; 3/8" in imperial projects). |
 | `material` | string | optional | Material name. |
 | `name` | string | optional | Type name. |
 
@@ -1399,7 +1451,7 @@ No parameters.
 
 ### `rack_place`
 
-*edit* — Place a communications rack at `position` (on the wall, `offset` above the level, default 1.40 m) and create the data system its outlets are cabled to. The rack's mark and the system's code are `mark` (default the next free `R1`, `R2`…). A project without a rack type gets one.
+*edit* — Place a communications rack at `position` (on the wall, `offset` above the level, default 1.40 m, 4'-6" in imperial projects) and create the data system its outlets are cabled to. The rack's mark and the system's code are `mark` (default the next free `R1`, `R2`…). A project without a rack type gets one.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -1412,7 +1464,7 @@ No parameters.
 
 ### `data_outlet_place`
 
-*edit* — Place a data (or voice) outlet at `position` (on the wall, `offset` above the level, default 0.30 m), cabled to `rack` (a rack element: its data system) or to the data system `system`; by default to the project's only rack, if it has one. `ports` picks a type with that many jacks (one cable each), made when the project has none; a project without a data outlet type gets one (two jacks).
+*edit* — Place a data (or voice) outlet at `position` (on the wall, `offset` above the level, default 0.30 m, 1'-6" in imperial projects), cabled to `rack` (a rack element: its data system) or to the data system `system`; by default to the project's only rack, if it has one. `ports` picks a type with that many jacks (one cable each), made when the project has none; a project without a data outlet type gets one (two jacks).
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -2036,7 +2088,7 @@ No parameters.
 | `finished_suffix` | string | optional | Text after the finished level (default: the language's, e.g. "(N.A.)"). |
 | `name` | string | optional | Type name (default: the language's). |
 | `raw_suffix` | string | optional | Text after the raw level (default: the language's, e.g. "(N.O.)"). |
-| `text_size` | number | optional | Text size, paper millimeters (default 2.5). |
+| `text_size` | number | optional | Text size, paper millimeters (default 2.5; 3/32", 2.38125, in imperial projects). |
 
 ### `text_add_leader`
 
@@ -2631,6 +2683,50 @@ No parameters.
 | `material` | string | optional | Material name (default: the first project material of the profile's class, metal, wood or concrete; else the template's concrete). |
 | `name` | string | optional | Type name (unique in its category; default: the profile's name, made unique). |
 
+### `structural_type_for`
+
+*edit* — The column or beam type new members of a structural material get: the first type of that material, else a default made in one undo step (steel `W200x26,6`, timber `MLC 9x32` from the profile catalog, concrete a 0.20 x 0.40 rectangle named `20x40`). Returns its `id`, `name` and whether it was `created`.
+
+| Parameter | Type | | Description |
+|---|---|---|---|
+| `category` | string | required | `column` or `beam`. |
+| `material` | string | required | `concrete`, `steel` or `timber`. |
+
+### `steel_building_create`
+
+*edit* — Create a parametric steel building: portal frames (two columns and the rafters of a gable or mono-pitch roof) every `bay_spacing` along it, purlins on the roof and girts on both long sides, as ordinary columns and beams the building keeps in step with its parameters (`element_set` regenerates them, keeping their ids). A member edited or deleted by hand is detached and left alone. Default types come from the profile catalog (`W310x38,7` for columns and rafters, `Ue 150x60x20x2,00` for purlins and girts), made when missing. Out-of-range values are refused. One undo step; returns the building's `id` and its `members`.
+
+| Parameter | Type | | Description |
+|---|---|---|---|
+| `bay_spacing` | number | optional | Frame to frame, meters, 1 to 30 (default 6). |
+| `bays` | integer | optional | Bays, 1 to 100 (default 5); there is one frame more. |
+| `column_type` | id or name | optional | Column type id or name (default: catalog `W310x38,7`). |
+| `eave_height` | number | optional | Underside of the rafters at the columns above the level, meters, 1 to 50 (default 6). |
+| `girts` | object | optional | Girts on both long sides `{ "type", "spacing" }`, or `null` for none (default: on). |
+| `level` | id or name | optional | Level id or name (default: the lowest level). |
+| `origin` | [x, y] | optional | Plan point `[x, y]` of the first frame's left column (default `[0, 0]`). |
+| `purlins` | object | optional | Purlins `{ "type", "spacing" }`, or `null` for none (default: on). |
+| `rafter_type` | id or name | optional | Rafter (beam) type id or name (default: catalog `W310x38,7`). |
+| `roof` | string | optional | `gable` (ridge at mid-span, default) or `mono` (rising toward the far columns). |
+| `rotation` | number | optional | Turn of the span direction, degrees counter-clockwise (default 0). |
+| `slope_percent` | number | optional | Roof slope, percent, 0 to 100 (default 10). |
+| `span` | number | optional | Column axis to column axis, meters, 2 to 100 (default 20). |
+
+### `wall_framing_create`
+
+*edit* — Frame straight walls in light steel or wood, one framing per wall. Studs stand every `spacing` from the wall start (plus one flush with each end) between a bottom track or plate and one top track (two plates for wood). Each door or window gets king and jack studs, a header, a sill (windows) and cripples. Blocking at mid-height is optional. The studs are columns and the rest are beams, all ordinary elements that the framing keeps in step with its parameters, its wall and the wall's doors and windows (`element_set` on the framing regenerates them, keeping their ids). A member edited or deleted by hand is detached and left alone, and deleting the wall deletes its framing and members. The framing and its members follow the wall's phases, design option and level. Default types come from the profile catalog, made when missing: - light steel: `Ue 90x40x12x0,95` studs, `U 92x38x0,95` tracks and `Ue 140x40x12x0,95` headers; - wood: `Peça 6x8` studs and plates, and `Peça 6x16` headers. The tracks and plates lie flat: their default beam type has the profile turned 90 degrees, so its depth runs across the wall and its width (38 mm, 6 cm) is their height. A given type is used as it draws: the height of its section is the height of the track. Curved walls, walls already framed and out-of-range values are refused before anything is made. One undo step; returns `framings`, each with its `id`, `wall` and `members`.
+
+| Parameter | Type | | Description |
+|---|---|---|---|
+| `walls` | [id, …] | required | Ids of the straight walls to frame (each gets its own framing). |
+| `blocking` | boolean | optional | A row of blocking at mid-height between the studs (default off). |
+| `double_top` | boolean | optional | An extra top plate (wood only; default on for wood). |
+| `header_type` | id or name | optional | Beam type of the headers and sills, id or name (default: the system's catalog header). |
+| `spacing` | number | optional | Stud spacing on center from the wall start, meters, 0.2 to 1.2 (default 0.4 for light steel, 0.6 for wood). |
+| `stud_type` | id or name | optional | Column type of the studs, id or name (default: the system's catalog stud). |
+| `system` | string | optional | `light_steel` (default) or `wood`. |
+| `track_type` | id or name | optional | Beam type of the tracks or plates and of the blocking, id or name (default: the system's catalog track or plate). |
+
 ### `paint`
 
 *edit* — Paint a face of an element with a material: the face at `point` (and those touching it in its plane, or the rest of a curved surface). It shows the material's colors, surface pattern and texture over the type's material; painting a painted surface again replaces its paint. The paint follows the face when the element changes (the face turned like it that passes nearest its point).
@@ -2696,7 +2792,7 @@ No parameters.
 
 ### `view_create`
 
-*edit* — Create a view. `kind` is `floor_plan` or `ceiling_plan` (with `level`), `section` (with `start`, `end` and optional `depth`), `elevation` (with `direction`: north, south, east or west), `structural_plan` (with `level`: a formwork plan of the structure, tagged), `plumbing_plan`, `electrical_plan`, `communications_plan` and `lightning_plan` (with `level`: the pipes, the conduits and devices, the structured cabling, or the lightning protection, over the architecture, tagged), `three_d`, `analytical` (a 3D view of the analytical model), `rebar` (a 3D view of the reinforcement), `legend` (all types), `drafting` (a 2D view independent of the model, showing only the text, dimensions and imported drawings placed in it; 1:10 by default), `schedule` (with `category`), `panel_diagram` (with `panel`: the single-line diagram and load schedule of a distribution board; default the only board) or `sheet` (A3, numbered after the others, with the first title block type).
+*edit* — Create a view. `kind` is `floor_plan` or `ceiling_plan` (with `level`), `section` (with `start`, `end` and optional `depth`), `elevation` (with `direction`: north, south, east or west), `structural_plan` (with `level`: a formwork plan of the structure, tagged), `plumbing_plan`, `electrical_plan`, `communications_plan` and `lightning_plan` (with `level`: the pipes, the conduits and devices, the structured cabling, or the lightning protection, over the architecture, tagged), `three_d`, `analytical` (a 3D view of the analytical model), `rebar` (a 3D view of the reinforcement), `legend` (all types), `drafting` (a 2D view independent of the model, showing only the text, dimensions and imported drawings placed in it; 1:10 by default), `schedule` (with `category`), `panel_diagram` (with `panel`: the single-line diagram and load schedule of a distribution board; default the only board) or `sheet` (A3, ANSI B in imperial projects, numbered after the others, with the first title block type).
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -2708,7 +2804,7 @@ No parameters.
 | `level` | id or name | optional | Plans: level id or name (default: the lowest). |
 | `name` | string | optional | View name (default: by kind). |
 | `panel` | integer | optional | Distribution board element id, for a panel diagram. |
-| `scale` | integer | optional | Scale denominator (e.g. 50 for 1:50). |
+| `scale` | integer or string | optional | Scale: the denominator (e.g. 50 for 1:50), or text such as `"1:50"` or an imperial label like `"1/4\" = 1'-0\""` (48). |
 | `start` | [x, y] | optional | Sections: start of the cut line. |
 
 ### `view_set`
@@ -2724,7 +2820,7 @@ No parameters.
 | `params` | JSON | optional | Fields of the view's parameters to change, shaped like `params` in `view_get`. |
 | `phase` | id or name | optional | Phase the view shows (id or name; plans, elevations, sections, 3D views, schedules). |
 | `phase_filter` | id or name | optional | Phase filter (id or name), or `null` for none (every status by category). |
-| `scale` | integer | optional | Scale denominator (e.g. 100 for 1:100). |
+| `scale` | integer or string | optional | Scale: the denominator (e.g. 100 for 1:100), or text such as `"1:100"` or an imperial label like `"1/8\" = 1'-0\""` (96). |
 | `visual_style` | string | optional | Visual style: `wireframe` (every edge, no faces), `hidden_line` (white faces), `shaded`, `consistent_colors` (material colors, unlit), `textures` (appearance colors and surface patterns), or `default` (plans hidden line, other views shaded). |
 
 ### `view_duplicate`
@@ -2754,7 +2850,7 @@ No parameters.
 | `rect` | [[x, y], [x, y]] | required | Two opposite corners of the rectangle, in the parent's drawing coordinates (meters; in sections and elevations `y` is the height). |
 | `drafting` | id or name | optional | An existing drafting view (id or name) the callout points to instead of a new detail view. |
 | `name` | string | optional | Name of the detail view (default "Detail N"). |
-| `scale` | integer | optional | Scale denominator of the detail view (default: a standard scale about five times larger than the parent's, 1:10 under 1:50). |
+| `scale` | integer or string | optional | Scale of the detail view: the denominator, or text such as `"1:10"` or an imperial label like `"1 1/2\" = 1'-0\""` (default: a standard scale of the project's units about five times larger than the parent's, 1:10 under 1:50). |
 
 ### `callout_remove`
 
@@ -2802,7 +2898,7 @@ No parameters.
 | `issue_date` | string | optional | Issue date, `YYYY-MM-DD`; empty to clear. |
 | `number` | string | optional | Sheet number. |
 | `portrait` | boolean | optional | The long side runs up. |
-| `size` | string or object | optional | Paper: `"A0"`…`"A4"`, or `{width, height}` in millimeters (50 to 5000). |
+| `size` | string or object | optional | Paper: `"A0"`…`"A4"`, `"ANSI A"`…`"ANSI E"`, `"ARCH A"`…`"ARCH E1"`, `"ARCH E"`, or `{width, height}` in millimeters (50 to 5000). |
 | `title_block` | id or name | optional | The title block type (id or name), or `null` for none. |
 
 ### `sheet_fields`
@@ -3025,7 +3121,7 @@ No parameters.
 | `include` | JSON | optional | Which properties the template controls: `scale`, `categories`, `filters`, `cut_height`, `discipline`, `structural`, `phase_filter`, `detail`, `visual_style`, `underlay`, `design_options` (true/false). `design_options` is off unless set. |
 | `name` | string | optional | New name. |
 | `phase_filter` | id or name | optional | Phase filter (id or name), or `null` for none. |
-| `scale` | integer | optional | Scale denominator. |
+| `scale` | integer or string | optional | Scale: the denominator (e.g. 50 for 1:50), or text such as `"1:50"` or an imperial label like `"1/4\" = 1'-0\""` (48). |
 | `structural` | boolean | optional | Floor plans: structural (formwork) display. |
 | `structure_tags` | boolean | optional | Floor plans: tag beams and columns. |
 | `underlay` | JSON | optional | Plans: other levels' plans drawn under them, merged like `view_set`'s `underlay` (e.g. `{"below": {"level": "Next", "looking": "Down"}}`). |

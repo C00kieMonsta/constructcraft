@@ -71,6 +71,16 @@ pub enum ElementKind {
     Sweep(crate::profile_sweep::Sweep),
     /// A vertical opening through floors, ceilings and roofs.
     Shaft(crate::shaft::Shaft),
+    /// A parametric steel building: it owns the columns and beams of its frames.
+    SteelBuilding(Box<crate::steel_building::SteelBuilding>),
+    /// A parametric truss: it owns the beams and columns of its chords and web.
+    Truss(Box<crate::truss::Truss>),
+    /// A parametric bracing: it owns the braces of one bay of a frame.
+    Bracing(Box<crate::bracing::Bracing>),
+    /// Light steel or wood framing of a wall: it owns the studs and the beams of its tracks, headers and sills.
+    WallFraming(Box<crate::wall_framing::WallFraming>),
+    /// A steel or timber joint at one end of a column or beam (placed by its member).
+    Connection(crate::connection::Connection),
     /// A terrain surface from measured points inside a boundary.
     Topography(crate::topography::Topography),
     /// A building pad graded into its terrain.
@@ -117,6 +127,11 @@ impl Element {
             ElementKind::Mass(_) => Category::Mass,
             ElementKind::Sweep(_) => Category::Sweep,
             ElementKind::Shaft(_) => Category::Shaft,
+            ElementKind::SteelBuilding(_) => Category::SteelBuilding,
+            ElementKind::Truss(_) => Category::Truss,
+            ElementKind::Bracing(_) => Category::Bracing,
+            ElementKind::WallFraming(_) => Category::WallFraming,
+            ElementKind::Connection(_) => Category::Connection,
             ElementKind::Topography(_) => Category::Topography,
             ElementKind::Pad(_) => Category::Pad,
             ElementKind::DetailLine(_) => Category::DetailLine,
@@ -329,6 +344,17 @@ impl Element {
             ElementKind::Railing(r) => r.path.iter_mut().for_each(|p| *p += delta),
             ElementKind::Sweep(s) => s.path.iter_mut().for_each(|p| *p += delta),
             ElementKind::Shaft(s) => s.outline.iter_mut().for_each(|p| *p += delta),
+            ElementKind::SteelBuilding(b) => b.origin += delta,
+            ElementKind::Truss(t) => {
+                t.start += delta;
+                t.end += delta;
+            }
+            ElementKind::Bracing(b) => {
+                b.start += delta;
+                b.end += delta;
+            }
+            // Placed by its wall.
+            ElementKind::WallFraming(_) => {}
             ElementKind::Topography(t) => {
                 t.boundary.iter_mut().for_each(|p| *p += delta);
                 t.points.iter_mut().for_each(|p| *p += delta.extend(0.0));
@@ -350,7 +376,11 @@ impl Element {
             ElementKind::Mass(m) => m.outline.iter_mut().chain(m.top.iter_mut().flatten()).for_each(|p| *p += delta),
             ElementKind::ShapedRebar(r) => r.points_mut().for_each(|p| *p += delta.extend(0.0)),
             // Placed by their hosts.
-            ElementKind::Door(_) | ElementKind::Window(_) | ElementKind::Rebar(_) | ElementKind::Valve(_) => {}
+            ElementKind::Door(_)
+            | ElementKind::Window(_)
+            | ElementKind::Rebar(_)
+            | ElementKind::Valve(_)
+            | ElementKind::Connection(_) => {}
         }
     }
 }

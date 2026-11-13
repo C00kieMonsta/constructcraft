@@ -164,6 +164,8 @@ pub struct ModelGeometry {
     pub beams: BTreeMap<ElementId, BeamGeom>,
     /// Reinforcement sets: their bars, placed in their hosts.
     pub rebar: BTreeMap<ElementId, crate::rebar::RebarGeom>,
+    /// Connections: their plates and bolts, from their members' geometry.
+    pub connections: BTreeMap<ElementId, crate::connection::ConnectionGeom>,
     /// Pipes, conduits and cable trays: their center lines and sections.
     pub segments: BTreeMap<ElementId, crate::mep::SegmentGeom>,
     /// Valves placed on their pipes.
@@ -396,6 +398,7 @@ impl ModelGeometry {
         geom.build_foundations(project);
         geom.build_structure(project);
         geom.rebar = crate::rebar::build_rebar(project, &geom.beams);
+        geom.build_connections(project);
         geom.build_components(project);
         geom.build_masses(project);
         geom.build_topographies(project);
@@ -526,6 +529,21 @@ impl ModelGeometry {
         }
     }
 
+    /// Connections: the plates and bolts of each from its member (after the
+    /// beams' ends are resolved), one steel solid per connection.
+    fn build_connections(&mut self, project: &Project) {
+        self.connections = crate::connection::build_connections(project, &self.beams);
+        for g in self.connections.values() {
+            let faces = g.faces();
+            if faces.is_empty() {
+                continue;
+            }
+            let mut s = crate::connection::solid(project, g.element);
+            s.add_polygons(faces);
+            self.solids.push(s);
+        }
+    }
+
     /// Conceptual masses: see-through bodies, and their mass floors.
     fn build_masses(&mut self, project: &Project) {
         for e in project.elements.values() {
@@ -566,6 +584,12 @@ impl ModelGeometry {
                     let (base, top) = project.column_span(e, c);
                     let (outer, holes) = crate::section::column_body(&section.outline, c.position, c.rotation_deg);
                     crate::section::add_column_body(&mut s, &outer, &holes, base, top, section.curved);
+                    // Exact for sections with arcs (the solid meshes them with chords).
+                    if section.curved
+                        && let Some(area) = project.exact_section_area(&ty.data)
+                    {
+                        self.curved_volumes.insert(e.id, area * (top - base).max(0.0));
+                    }
                 }
                 (ElementKind::Beam(_), TypeData::Beam { .. }) => {
                     let Some(g) = self.beams.get(&e.id) else { continue };
@@ -633,6 +657,18 @@ impl ModelGeometry {
             }
         }
         self.beams = resolve_beams(&beams, &columns).into_iter().map(|g| (g.element, g)).collect();
+        // Exact for sections with arcs: the swept volume scaled from the
+        // chorded outline's area to the section's.
+        for g in self.beams.values().filter(|g| g.curved) {
+            let Some(e) = project.element(g.element) else { continue };
+            let Some(exact) = project.element_type(e.type_id).and_then(|t| project.exact_section_area(&t.data)) else {
+                continue;
+            };
+            let chorded = g.section.properties(0.0).area;
+            if chorded > 0.0 {
+                self.curved_volumes.insert(g.element, g.volume() * exact / chorded);
+            }
+        }
     }
 
     /// Pads, strips (meeting at corners and tees like beams) and slabs.

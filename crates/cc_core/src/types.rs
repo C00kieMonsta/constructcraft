@@ -34,6 +34,14 @@ pub enum Category {
     Sweep,
     /// Shaft openings through floors, ceilings and roofs.
     Shaft,
+    /// Parametric steel buildings: hosts of portal frames, purlins and girts.
+    SteelBuilding,
+    /// Parametric trusses: hosts of chords, diagonals and posts.
+    Truss,
+    /// Parametric bracings: hosts of the braces of a bay of a frame.
+    Bracing,
+    /// Light steel and wood framing of walls: hosts of studs, tracks, headers and sills.
+    WallFraming,
     /// Terrain surfaces.
     Topography,
     /// Building pads graded into terrain.
@@ -56,10 +64,12 @@ pub enum Category {
     Valve,
     /// Conductors of lightning protection systems.
     LightningConductor,
+    /// Steel and timber connections: plates and bolts at member ends.
+    Connection,
 }
 
 impl Category {
-    pub const ALL: [Category; 34] = [
+    pub const ALL: [Category; 39] = [
         Category::Wall,
         Category::Door,
         Category::Window,
@@ -70,6 +80,7 @@ impl Category {
         Category::Beam,
         Category::Foundation,
         Category::Rebar,
+        Category::Connection,
         Category::Pipe,
         Category::Conduit,
         Category::CableTray,
@@ -92,6 +103,10 @@ impl Category {
         Category::CadImport,
         Category::Mass,
         Category::Shaft,
+        Category::SteelBuilding,
+        Category::Truss,
+        Category::Bracing,
+        Category::WallFraming,
         Category::Topography,
         Category::Pad,
     ];
@@ -109,7 +124,7 @@ impl Category {
     };
 
     /// Categories with physical elements (shown in legends and 3D).
-    pub const MODEL: [Category; 21] = [
+    pub const MODEL: [Category; 22] = [
         Category::Wall,
         Category::Door,
         Category::Window,
@@ -120,6 +135,7 @@ impl Category {
         Category::Beam,
         Category::Foundation,
         Category::Rebar,
+        Category::Connection,
         Category::Pipe,
         Category::Conduit,
         Category::CableTray,
@@ -134,7 +150,7 @@ impl Category {
     ];
 
     /// Categories that can be listed in a schedule.
-    pub const SCHEDULABLE: [Category; 24] = [
+    pub const SCHEDULABLE: [Category; 25] = [
         Category::Wall,
         Category::Door,
         Category::Window,
@@ -145,6 +161,7 @@ impl Category {
         Category::Beam,
         Category::Foundation,
         Category::Rebar,
+        Category::Connection,
         Category::Pipe,
         Category::Conduit,
         Category::CableTray,
@@ -187,6 +204,11 @@ impl Category {
             Category::Railing => "category-railing",
             Category::Sweep => "category-sweep",
             Category::Shaft => "category-shaft",
+            Category::SteelBuilding => "category-steel-building",
+            Category::Truss => "category-truss",
+            Category::Bracing => "category-bracing",
+            Category::Connection => "category-connection",
+            Category::WallFraming => "category-wall-framing",
             Category::Topography => "category-topography",
             Category::Pad => "category-pad",
             Category::Component => "category-component",
@@ -510,6 +532,16 @@ pub enum TypeData {
     },
     /// Shaft openings (no properties of their own).
     Shaft {},
+    /// Steel buildings (no properties of their own; types name them).
+    SteelBuilding {},
+    /// Trusses (no properties of their own; types name them).
+    Truss {},
+    /// Bracings (no properties of their own; types name them).
+    Bracing {},
+    /// Connections (no properties of their own; types name them).
+    Connection {},
+    /// Wall framings (no properties of their own; types name them).
+    WallFraming {},
     /// Terrain surfaces: the earth `material` they are cut in, and the
     /// spacing of their contour lines, every `major_every`-th one a major.
     Topography {
@@ -596,6 +628,11 @@ impl TypeData {
             | TypeData::FilledRegion { .. }
             | TypeData::MaskingRegion {}
             | TypeData::Shaft {}
+            | TypeData::SteelBuilding {}
+            | TypeData::Truss {}
+            | TypeData::Bracing {}
+            | TypeData::Connection {}
+            | TypeData::WallFraming {}
             | TypeData::Pad { .. } => Vec::new(),
         }
     }
@@ -669,6 +706,11 @@ impl TypeData {
             | TypeData::FilledRegion { .. }
             | TypeData::MaskingRegion {}
             | TypeData::Shaft {}
+            | TypeData::SteelBuilding {}
+            | TypeData::Truss {}
+            | TypeData::Bracing {}
+            | TypeData::Connection {}
+            | TypeData::WallFraming {}
             | TypeData::Pad { .. } => {}
         }
     }
@@ -824,6 +866,11 @@ impl ElementType {
             TypeData::Mass { .. } => Category::Mass,
             TypeData::Sweep { .. } => Category::Sweep,
             TypeData::Shaft {} => Category::Shaft,
+            TypeData::SteelBuilding {} => Category::SteelBuilding,
+            TypeData::Truss {} => Category::Truss,
+            TypeData::Bracing {} => Category::Bracing,
+            TypeData::Connection {} => Category::Connection,
+            TypeData::WallFraming {} => Category::WallFraming,
             TypeData::Topography { .. } => Category::Topography,
             TypeData::Pad { .. } => Category::Pad,
         }
@@ -982,6 +1029,11 @@ impl ElementType {
             | TypeData::FilledRegion { .. }
             | TypeData::MaskingRegion {}
             | TypeData::Shaft {}
+            | TypeData::SteelBuilding {}
+            | TypeData::Truss {}
+            | TypeData::Bracing {}
+            | TypeData::Connection {}
+            | TypeData::WallFraming {}
             | TypeData::Pad { .. } => "",
             TypeData::Column { material, .. }
             | TypeData::Beam { material, .. }

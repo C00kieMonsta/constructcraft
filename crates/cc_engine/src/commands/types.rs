@@ -285,6 +285,12 @@ impl Command for TypeDelete {
         if curtains_use {
             return Err(EngineError::rejected("curtain walls use this type as a panel"));
         }
+        let host_use = p.elements.values().filter_map(|e| e.member_host()).any(|h| h.member_types().contains(&id));
+        if host_use {
+            return Err(EngineError::rejected(
+                "member hosts (steel buildings, trusses) use this type for their members",
+            ));
+        }
         // Sheets may go without a title block, so the last one may go too.
         let title_block = category == cc_core::Category::TitleBlock;
         if p.types_of(category).count() <= 1 && !title_block {

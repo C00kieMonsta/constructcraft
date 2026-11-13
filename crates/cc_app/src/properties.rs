@@ -15,8 +15,6 @@ use cc_views::format;
 use egui::{DragValue, Response, RichText, Sense, Ui, vec2};
 use std::hash::{Hash, Hasher};
 
-const SCALES: [u32; 12] = [1, 2, 5, 10, 20, 25, 50, 75, 100, 200, 500, 1000];
-
 pub(crate) fn key(parts: impl Hash) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     parts.hash(&mut h);
@@ -363,7 +361,7 @@ fn shared_rows(
                 let mut on = values.first().and_then(|v| v.as_bool()).unwrap_or(false);
                 // Differing values show as an indeterminate box.
                 let r = row(ui, &crate::i18n::tr(label), |ui| {
-                    ui.add(egui::Checkbox::without_text(&mut on).indeterminate(!same))
+                    ui.add(crate::table::boxed(egui::Checkbox::without_text(&mut on).indeterminate(!same)))
                 });
                 if r.changed() {
                     crate::engine_edit::elements(state, ids, None, None, Some(patch_at(path, on.into())));
@@ -539,6 +537,11 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
     }
 
     match &el.kind {
+        ElementKind::SteelBuilding(b) => crate::steel_building_ui::props(ui, state, id, b),
+        ElementKind::Truss(t) => crate::truss_ui::props(ui, state, id, t),
+        ElementKind::Bracing(b) => crate::bracing_ui::props(ui, state, id, b),
+        ElementKind::WallFraming(f) => crate::wall_framing_ui::props(ui, state, id, f),
+        ElementKind::Connection(c) => crate::connection_ui::props(ui, state, id, c),
         ElementKind::Mass(m) => mass_props(ui, state, &el, m),
         ElementKind::Topography(t) => topography_props(ui, state, &el, t),
         ElementKind::Pad(p) => pad_props(ui, state, &el, p),
@@ -547,7 +550,7 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
             section(ui, "constraints", t!("section-constraints"), |ui| wall_constraints(ui, state, &el, w));
             section(ui, "structural", t!("section-structural"), |ui| {
                 let mut on = w.structural;
-                if row(ui, &t!("prop-structural"), |ui| ui.checkbox(&mut on, "")).changed() {
+                if row(ui, &t!("prop-structural"), |ui| crate::table::checkbox(ui, &mut on)).changed() {
                     modify(state, id, "structural", |e| {
                         if let ElementKind::Wall(w) = &mut e.kind {
                             w.structural = on;
@@ -594,7 +597,7 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
                 let height = state.project().wall_height(&el, w);
                 readonly_row(ui, &t!("prop-height"), format::length(height));
                 let thickness = state.project().thickness_of(&el);
-                readonly_row(ui, &t!("prop-thickness"), format::length(thickness));
+                readonly_row(ui, &t!("prop-thickness"), format::size(thickness, format::MetricSize::Length));
                 readonly_row(ui, &t!("prop-volume"), format::volume(state.session.geom().volume(id)));
             });
             crate::curtain_ui::palette_rows(ui, state, &el, w);
@@ -630,7 +633,7 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
                     [(t!("prop-flip-facing"), "ff", h.flip_facing), (t!("prop-flip-hand"), "fh", h.flip_hand)]
                 {
                     let mut v = value;
-                    if row(ui, &label, |ui| ui.checkbox(&mut v, "")).changed() {
+                    if row(ui, &label, |ui| crate::table::checkbox(ui, &mut v)).changed() {
                         crate::engine_edit::element(state, id, None, |x| {
                             if let Some(h) = x.as_hosted_mut() {
                                 if field == "ff" {
@@ -673,7 +676,7 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
             });
             section(ui, "structural", t!("section-structural"), |ui| {
                 let mut on = c.structural;
-                if row(ui, &t!("prop-structural"), |ui| ui.checkbox(&mut on, "")).changed() {
+                if row(ui, &t!("prop-structural"), |ui| crate::table::checkbox(ui, &mut on)).changed() {
                     modify(state, id, "structural", |e| {
                         if let ElementKind::Column(c) = &mut e.kind {
                             c.structural = on;
@@ -725,7 +728,7 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
                     [(t!("prop-join-start"), true, b.join_start), (t!("prop-join-end"), false, b.join_end)]
                 {
                     let mut on = value;
-                    if row(ui, &label, |ui| ui.checkbox(&mut on, "")).changed() {
+                    if row(ui, &label, |ui| crate::table::checkbox(ui, &mut on)).changed() {
                         crate::engine_edit::element(state, id, None, |x| {
                             if let ElementKind::Beam(b) = &mut x.kind {
                                 *(if at_start { &mut b.join_start } else { &mut b.join_end }) = on;
@@ -783,7 +786,7 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
                     readonly_row(ui, &t!("prop-radius"), format::length(arc.radius));
                 }
                 if let Some(g) = state.session.geom().foundations.get(&id).cloned() {
-                    readonly_row(ui, &t!("col-area"), format::area(g.area()));
+                    readonly_row(ui, &field_label(cc_core::ScheduleField::Area), format::area(g.area()));
                 }
                 readonly_row(ui, &t!("prop-volume"), format::volume(state.session.geom().volume(id)));
             });
@@ -900,7 +903,11 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
             section(ui, "dimensions", t!("section-dimensions"), |ui| {
                 let (bottom, top) = state.project().shaft_span(&el, sh);
                 readonly_row(ui, &t!("col-height"), format::length(top - bottom));
-                readonly_row(ui, &t!("col-area"), format::area(cc_geom::polygon::area(&sh.outline)));
+                readonly_row(
+                    ui,
+                    &field_label(cc_core::ScheduleField::Area),
+                    format::area(cc_geom::polygon::area(&sh.outline)),
+                );
             });
         }
         ElementKind::Sweep(sw) => {
@@ -912,14 +919,14 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
                     }
                 });
                 let (mut closed, mut flip) = (sw.closed, sw.flip);
-                if row(ui, &t!("opt-sweep-closed"), |ui| ui.checkbox(&mut closed, "")).changed() {
+                if row(ui, &t!("opt-sweep-closed"), |ui| crate::table::checkbox(ui, &mut closed)).changed() {
                     modify(state, id, "sweep-closed", |e| {
                         if let ElementKind::Sweep(s) = &mut e.kind {
                             s.closed = closed;
                         }
                     });
                 }
-                if row(ui, &t!("opt-sweep-flip"), |ui| ui.checkbox(&mut flip, "")).changed() {
+                if row(ui, &t!("opt-sweep-flip"), |ui| crate::table::checkbox(ui, &mut flip)).changed() {
                     modify(state, id, "sweep-flip", |e| {
                         if let ElementKind::Sweep(s) = &mut e.kind {
                             s.flip = flip;
@@ -1030,7 +1037,7 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
                 });
             });
             section(ui, "dimensions", t!("section-dimensions"), |ui| {
-                readonly_row(ui, &t!("col-area"), format::area(f.area()));
+                readonly_row(ui, &field_label(cc_core::ScheduleField::Area), format::area(f.area()));
                 // Openings (shafts, stairwells): sketch one more.
                 row(ui, &t!("prop-roof-openings"), |ui| {
                     ui.label(f.openings.len().to_string());
@@ -1057,7 +1064,7 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
             });
             section(ui, "dimensions", t!("section-dimensions"), |ui| {
                 let area = cc_geom::polygon::area(&c.boundary);
-                readonly_row(ui, &t!("col-area"), format::area(area));
+                readonly_row(ui, &field_label(cc_core::ScheduleField::Area), format::area(area));
             });
         }
         ElementKind::Roof(r) => {
@@ -1081,6 +1088,7 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
             roofing_rows(ui, state, &el);
         }
     }
+    crate::wall_framing_ui::member_row(ui, state, id);
 
     // Rooms, grids and dimensions have their own identity rows; only model elements carry a mark.
     let mut identity = vec![(t!("col-comments"), "comments", el.comments.clone())];
@@ -1104,7 +1112,7 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
             finish(state, &r);
         }
         let mut pinned = state.project().is_pinned(id);
-        if row(ui, &t!("prop-pinned"), |ui| ui.checkbox(&mut pinned, "")).changed() {
+        if row(ui, &t!("prop-pinned"), |ui| crate::table::checkbox(ui, &mut pinned)).changed() {
             crate::actions::run_command(state, cc_engine::commands::modify::ElementsPin { ids: vec![id.0], pinned });
         }
     });
@@ -1274,7 +1282,9 @@ pub fn underlay_rows(
         }
     }
     let mut printed = u.printed;
-    row(ui, &t!("prop-underlay-printed"), |ui| ui.add_enabled(enabled, egui::Checkbox::without_text(&mut printed)));
+    row(ui, &t!("prop-underlay-printed"), |ui| {
+        ui.add_enabled(enabled, crate::table::boxed(egui::Checkbox::without_text(&mut printed)))
+    });
     u.printed = printed;
     *u != before
 }
@@ -1302,6 +1312,78 @@ pub fn length_drag(value: &mut f64) -> DragValue<'_> {
     if unit.is_fractional() { drag } else { drag.suffix(format!(" {}", unit.symbol())) }
 }
 
+/// Drag value for a small size stored in meters (a layer, a section's side,
+/// a diameter, a riser): a length in metric projects (see [`length_drag`]),
+/// inches with a fraction in imperial ones (`3/4"`; a bare number typed is
+/// inches, see [`format::parse_size`]).
+pub fn size_drag(value: &mut f64) -> DragValue<'_> {
+    let (units, comma) = format::current();
+    if units.system() == cc_core::MeasurementSystem::Metric {
+        return length_drag(value);
+    }
+    let parse_units = units.clone();
+    DragValue::new(value)
+        .speed(0.001)
+        .custom_formatter(move |v, _| format::inch_size_with(&units, comma, v))
+        .custom_parser(move |s| format::parse_size_with(&parse_units, s))
+}
+
+/// The header of a schedule field as a label in the current units: `Area
+/// (m²)` in metric projects, `Area` in imperial ones, whose values carry
+/// their own symbols (see [`cc_core::ScheduleField::key_in`]).
+pub fn field_label(field: cc_core::ScheduleField) -> String {
+    crate::i18n::tr(field.key_in(format::system()))
+}
+
+/// Drag value for a slope stored as rise over run, shown and typed in the
+/// project's slope unit (`8,3 %`, `4,76°`, `6:12`; a typed unit or ratio
+/// overrides it, see [`format::parse_slope`]).
+pub fn slope_drag(value: &mut f64) -> DragValue<'_> {
+    let (units, comma) = format::current();
+    let parse_units = units.clone();
+    let speed = match units.slope.unit {
+        cc_core::SlopeUnit::Percent => 0.005,
+        cc_core::SlopeUnit::Degrees => 0.01,
+        cc_core::SlopeUnit::RisePer12 => 1.0 / 48.0,
+    };
+    DragValue::new(value)
+        .speed(speed)
+        .custom_formatter(move |v, _| format::slope_with(&units, comma, v))
+        .custom_parser(move |s| format::parse_slope_with(&parse_units, s))
+}
+
+/// Drag value for a size on paper stored in millimeters (text heights,
+/// bubbles, gaps, sheet sides): ` mm` after the number in metric
+/// projects; in imperial ones inches with a fraction (`3/32"`), typed in
+/// inches unless a unit says otherwise (see [`format::parse_paper`]).
+pub fn paper_drag(value: &mut f64) -> DragValue<'_> {
+    paper_drag_with(value, format::paper_with)
+}
+
+/// Drag value for a pen weight stored in millimeters: ` mm` after the
+/// number in metric projects, decimal inches in imperial ones (`0.010"`).
+pub fn weight_drag(value: &mut f64) -> DragValue<'_> {
+    paper_drag_with(value, format::paper_weight_with)
+}
+
+/// Drag value for a paper length shown as decimal inches in imperial
+/// projects (`0.125"`, drafting fill patterns), ` mm` after the number in
+/// metric ones.
+pub fn decimal_paper_drag(value: &mut f64) -> DragValue<'_> {
+    paper_drag_with(value, format::paper_weight_with)
+}
+
+fn paper_drag_with(value: &mut f64, show: fn(&cc_core::Units, bool, f64) -> String) -> DragValue<'_> {
+    let (units, comma) = format::current();
+    if units.system() == cc_core::MeasurementSystem::Metric {
+        return DragValue::new(value).suffix(" mm");
+    }
+    let parse_units = units.clone();
+    DragValue::new(value)
+        .custom_formatter(move |v, _| show(&units, comma, v))
+        .custom_parser(move |s| format::parse_paper_with(&parse_units, s))
+}
+
 /// A new value typed in a [`param_editor`].
 pub enum ParamEdit {
     Number(f64),
@@ -1322,7 +1404,7 @@ pub fn param_editor(
     match p.kind {
         ParamKind::Boolean => {
             let mut on = number != 0.0;
-            let r = ui.checkbox(&mut on, "");
+            let r = crate::table::checkbox(ui, &mut on);
             let changed = r.changed().then(|| ParamEdit::Number(f64::from(u8::from(on))));
             (r, changed)
         }
@@ -1430,7 +1512,7 @@ fn segment_props(ui: &mut Ui, state: &mut AppState, el: &Element, s: &cc_core::M
                 .collect();
             for (cid, label) in circuits {
                 let mut on = s.systems.contains(&cid);
-                if row(ui, &label, |ui| ui.checkbox(&mut on, "")).changed() {
+                if row(ui, &label, |ui| crate::table::checkbox(ui, &mut on)).changed() {
                     crate::engine_edit::element(state, id, None, |e| {
                         if let Some(s) = e.as_segment_mut() {
                             s.systems.retain(|x| *x != cid);
@@ -1446,11 +1528,11 @@ fn segment_props(ui: &mut Ui, state: &mut AppState, el: &Element, s: &cc_core::M
     section(ui, "dimensions", t!("section-dimensions"), |ui| {
         let ty = state.project().element_type(el.type_id);
         if let Some(d) = ty.and_then(|t| t.diameter()) {
-            readonly_row(ui, &t!("col-diameter"), format::length(d));
+            readonly_row(ui, &t!("col-diameter"), format::size(d, format::MetricSize::Length));
         }
         if let Some((width, height, style)) = ty.and_then(|t| t.tray_section()) {
-            readonly_row(ui, &t!("col-width"), format::length(width));
-            readonly_row(ui, &t!("col-height"), format::length(height));
+            readonly_row(ui, &t!("col-width"), format::size(width, format::MetricSize::Length));
+            readonly_row(ui, &t!("col-height"), format::size(height, format::MetricSize::Length));
             readonly_row(ui, &t!("prop-tray-style"), tr(style.key()));
         }
         readonly_row(ui, &t!("prop-length"), format::length(s.length()));
@@ -1488,7 +1570,7 @@ fn valve_props(ui: &mut Ui, state: &mut AppState, el: &Element, v: &cc_core::Val
         if let Some((_, _, system, diameter)) = &host {
             readonly_row(ui, &t!("col-system"), system.clone().unwrap_or_else(|| t!("value-none")));
             if let Some(d) = diameter {
-                readonly_row(ui, &t!("col-diameter"), format::length(*d));
+                readonly_row(ui, &t!("col-diameter"), format::size(*d, format::MetricSize::Length));
             }
         }
     });
@@ -1577,8 +1659,8 @@ fn topography_props(ui: &mut Ui, state: &mut AppState, el: &Element, t: &cc_core
         let Some(g) = geom else { return };
         readonly_row(ui, &t!("prop-lowest"), format::length(g.min_z));
         readonly_row(ui, &t!("prop-highest"), format::length(g.max_z));
-        readonly_row(ui, &t!("col-area"), format::area(g.area));
-        readonly_row(ui, &t!("col-volume"), format::volume(g.volume));
+        readonly_row(ui, &field_label(cc_core::ScheduleField::Area), format::area(g.area));
+        readonly_row(ui, &field_label(cc_core::ScheduleField::Volume), format::volume(g.volume));
         for w in &g.warnings {
             readonly_row(ui, &t!("prop-warning"), crate::i18n::tr(&format!("topo-warning-{}", w.code())));
         }
@@ -1661,7 +1743,7 @@ fn pad_props(ui: &mut Ui, state: &mut AppState, el: &Element, p: &cc_core::pad::
     let geom = state.session.geom().pads.get(&id).cloned();
     section(ui, "dimensions", t!("section-dimensions"), |ui| {
         let Some(g) = geom else { return };
-        readonly_row(ui, &t!("col-area"), format::area(g.area));
+        readonly_row(ui, &field_label(cc_core::ScheduleField::Area), format::area(g.area));
         readonly_row(ui, &t!("col-cut-volume"), format::volume(g.cut));
         readonly_row(ui, &t!("col-fill-volume"), format::volume(g.fill));
         readonly_row(ui, &t!("prop-net-volume"), format::volume(g.fill - g.cut));
@@ -1690,7 +1772,7 @@ fn slope_row(
     let mut v = own.unwrap_or(of_type);
     let (toggled, r) = row(ui, label, |ui| {
         ui.horizontal(|ui| {
-            let toggled = ui.checkbox(&mut by_type, t!("prop-by-type")).changed();
+            let toggled = crate::table::labeled_checkbox(ui, &mut by_type, t!("prop-by-type")).changed();
             let drag = egui::DragValue::new(&mut v).speed(0.05).range(MIN_SLOPE..=MAX_SLOPE).prefix("1:");
             (toggled, ui.add_enabled(!by_type, drag))
         })
@@ -1747,7 +1829,7 @@ fn mass_props(ui: &mut Ui, state: &mut AppState, el: &Element, m: &cc_core::mass
             let mut on = m.floors.contains(&level);
             let area = geom.as_ref().and_then(|g| g.floors.iter().find(|f| f.level == level)).map(|f| f.area);
             let changed = row(ui, &name, |ui| {
-                let r = ui.checkbox(&mut on, area.map(format::area).unwrap_or_default());
+                let r = crate::table::labeled_checkbox(ui, &mut on, area.map(format::area).unwrap_or_default());
                 r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, on, &name));
                 r.changed()
             });
@@ -1932,15 +2014,13 @@ fn text_props(ui: &mut Ui, state: &mut AppState, id: ElementId, note: &cc_core::
         }
         finish(state, &r);
         let mut multiline = note.width.is_some();
-        if row(ui, &t!("text-multiline"), |ui| ui.checkbox(&mut multiline, "")).changed() {
+        if row(ui, &t!("text-multiline"), |ui| crate::table::checkbox(ui, &mut multiline)).changed() {
             let width = multiline.then_some(state.text_options.width);
             set(state, "multiline", &|n| n.width = width);
         }
         if let Some(width) = note.width {
             let mut w = width;
-            let r = row(ui, &t!("prop-text-width"), |ui| {
-                ui.add(DragValue::new(&mut w).speed(1.0).range(5.0..=1000.0).suffix(" mm"))
-            });
+            let r = row(ui, &t!("prop-text-width"), |ui| ui.add(paper_drag(&mut w).speed(1.0).range(5.0..=1000.0)));
             if r.changed() {
                 set(state, "width", &|n| n.width = Some(w));
             }
@@ -2071,11 +2151,15 @@ fn room_props(ui: &mut Ui, state: &mut AppState, el: &Element, r: &cc_core::Room
     section(ui, "dimensions", t!("section-dimensions"), |ui| match state.session.geom().rooms.get(&id).cloned() {
         Some(boundary) => {
             let area = cc_geom::polygon::area(&boundary);
-            readonly_row(ui, &t!("col-area"), format::area(area));
-            readonly_row(ui, &t!("col-perimeter"), format::length(cc_geom::polygon::perimeter(&boundary)));
+            readonly_row(ui, &field_label(cc_core::ScheduleField::Area), format::area(area));
+            readonly_row(
+                ui,
+                &field_label(cc_core::ScheduleField::Perimeter),
+                format::length(cc_geom::polygon::perimeter(&boundary)),
+            );
             readonly_row(ui, &t!("prop-volume"), format::volume(area * r.height));
         }
-        None => readonly_row(ui, &t!("col-area"), t!("room-not-enclosed")),
+        None => readonly_row(ui, &field_label(cc_core::ScheduleField::Area), t!("room-not-enclosed")),
     });
 }
 
@@ -2144,7 +2228,7 @@ fn reinforcement(ui: &mut Ui, state: &mut AppState, host: ElementId) {
         if !sets.is_empty() {
             let geom = state.session.geom();
             let weight: f64 = sets.iter().filter_map(|(id, ..)| geom.rebar.get(id)).map(|r| r.weight()).sum();
-            readonly_row(ui, &t!("col-weight"), format!("{} kg", format::number(weight, 2)));
+            readonly_row(ui, &t!("col-weight"), format::quantity(format::Quantity::Mass, weight, 2));
         }
     });
 }
@@ -2175,7 +2259,7 @@ fn rebar_dimensions(ui: &mut Ui, state: &mut AppState, id: cc_core::ElementId) {
             readonly_row(ui, &t!("col-bar-count"), set.count().to_string());
             readonly_row(ui, &t!("col-bar-length"), format::length(set.bar_length()));
             readonly_row(ui, &t!("prop-length"), format::length(set.total_length()));
-            readonly_row(ui, &t!("col-weight"), format!("{} kg", format::number(set.weight(), 2)));
+            readonly_row(ui, &t!("col-weight"), format::quantity(format::Quantity::Mass, set.weight(), 2));
         });
     }
 }
@@ -2244,7 +2328,11 @@ fn roofing_rows(ui: &mut Ui, state: &mut AppState, el: &Element) {
             if let Some(n) = spec.tiles(g.sloped_area) {
                 readonly_row(ui, &t!("col-tile-count"), format!("{n:.0}"));
             }
-            readonly_row(ui, &t!("col-weight"), format!("{:.0} kg", spec.weight_on(g.sloped_area)));
+            readonly_row(
+                ui,
+                &t!("col-weight"),
+                format::quantity(format::Quantity::Mass, spec.weight_on(g.sloped_area), 0),
+            );
         }
         if !g.members.is_empty() {
             if g.trusses > 0 {
@@ -2294,7 +2382,7 @@ fn wall_constraints(ui: &mut Ui, state: &mut AppState, el: &Element, w: &cc_core
         [(t!("prop-join-start"), true, w.join_start), (t!("prop-join-end"), false, w.join_end)]
     {
         let mut on = value;
-        if row(ui, &label, |ui| ui.checkbox(&mut on, "")).changed() {
+        if row(ui, &label, |ui| crate::table::checkbox(ui, &mut on)).changed() {
             crate::engine_edit::element(state, id, None, |x| {
                 if let ElementKind::Wall(w) = &mut x.kind {
                     if at_start {
@@ -2384,7 +2472,7 @@ fn wall_constraints(ui: &mut Ui, state: &mut AppState, el: &Element, w: &cc_core
     }
 
     let mut bounding = w.room_bounding;
-    if row(ui, &t!("prop-room-bounding"), |ui| ui.checkbox(&mut bounding, "")).changed() {
+    if row(ui, &t!("prop-room-bounding"), |ui| crate::table::checkbox(ui, &mut bounding)).changed() {
         set(state, "bounding", &|w| w.room_bounding = bounding);
     }
 }
@@ -2454,17 +2542,16 @@ fn roof_rows(ui: &mut Ui, state: &mut AppState, id: ElementId, r: &cc_core::Roof
     }
     if let RoofShape::Gable { slope, ridge_deg } | RoofShape::Shed { slope, direction_deg: ridge_deg } = r.shape {
         let is_gable = matches!(r.shape, RoofShape::Gable { .. });
-        let mut pct = slope * 100.0;
-        let rs = row(ui, &t!("prop-slope"), |ui| {
-            ui.add(DragValue::new(&mut pct).speed(0.5).range(0.0..=200.0).suffix(" %"))
-        });
+        // Rise over run, shown in the project's slope unit.
+        let mut ratio = slope;
+        let rs = row(ui, &t!("prop-slope"), |ui| ui.add(slope_drag(&mut ratio).range(0.0..=2.0)));
         let mut dir = ridge_deg;
         let label = if is_gable { t!("prop-ridge-direction") } else { t!("prop-direction") };
         let rd = row(ui, &label, |ui| ui.add(DragValue::new(&mut dir).speed(1.0).suffix("°")));
         if rs.changed() || rd.changed() {
             modify(state, id, "shape", |e| {
                 if let ElementKind::Roof(r) = &mut e.kind {
-                    let (slope, angle) = (pct / 100.0, dir.rem_euclid(360.0));
+                    let (slope, angle) = (ratio, dir.rem_euclid(360.0));
                     r.shape = if is_gable {
                         RoofShape::Gable { slope, ridge_deg: angle }
                     } else {
@@ -2477,14 +2564,12 @@ fn roof_rows(ui: &mut Ui, state: &mut AppState, id: ElementId, r: &cc_core::Roof
         finish(state, &rd);
     }
     if let RoofShape::Hip { slope } = r.shape {
-        let mut pct = slope * 100.0;
-        let rs = row(ui, &t!("prop-slope"), |ui| {
-            ui.add(DragValue::new(&mut pct).speed(0.5).range(0.0..=200.0).suffix(" %"))
-        });
+        let mut ratio = slope;
+        let rs = row(ui, &t!("prop-slope"), |ui| ui.add(slope_drag(&mut ratio).range(0.0..=2.0)));
         if rs.changed() {
             modify(state, id, "shape", |e| {
                 if let ElementKind::Roof(r) = &mut e.kind {
-                    r.shape = RoofShape::Hip { slope: pct / 100.0 };
+                    r.shape = RoofShape::Hip { slope: ratio };
                 }
             });
         }
@@ -2536,7 +2621,7 @@ fn roof_edge_rows(ui: &mut Ui, state: &mut AppState, id: ElementId, r: &cc_core:
             Some(_) => 2,
         };
         let mut choice = current;
-        let mut pct = effective.get(i).copied().unwrap_or(slope) * 100.0;
+        let mut ratio = effective.get(i).copied().unwrap_or(slope);
         let label = t!("prop-roof-edge", "n" => i + 1, "length" => format::length(a.distance(b)));
         let mut drag = None;
         row(ui, &label, |ui| {
@@ -2549,7 +2634,7 @@ fn roof_edge_rows(ui: &mut Ui, state: &mut AppState, id: ElementId, r: &cc_core:
                 },
             );
             if current == 2 {
-                drag = Some(ui.add(DragValue::new(&mut pct).speed(0.5).range(0.1..=200.0).suffix(" %")));
+                drag = Some(ui.add(slope_drag(&mut ratio).range(0.001..=2.0)));
             }
         });
         if choice != current {
@@ -2567,7 +2652,7 @@ fn roof_edge_rows(ui: &mut Ui, state: &mut AppState, id: ElementId, r: &cc_core:
                             r.edge_slopes.resize(i + 1, None);
                         }
                         if let Some(s) = r.edge_slopes.get_mut(i) {
-                            *s = Some((pct / 100.0).max(0.001));
+                            *s = Some(ratio.max(0.001));
                         }
                     }
                 });
@@ -2612,18 +2697,18 @@ fn view_sections(ui: &mut Ui, state: &mut AppState, id: ViewId) {
         section(ui, "graphics", t!("section-graphics"), |ui| {
             crate::graphics_dialog::view_rows(ui, state, id);
             let mut scale = view.scale;
+            let system = state.project().measurement_system();
             if crate::graphics_dialog::controlled(state, id, "scale") {
-                readonly_row(ui, &t!("prop-scale"), format!("1:{scale}"));
+                readonly_row(ui, &t!("prop-scale"), cc_core::scale::label(system, scale));
             } else {
                 row(ui, &t!("prop-scale"), |ui| {
-                    egui::ComboBox::from_id_salt(("scale", id.0)).selected_text(format!("1:{scale}")).show_ui(
-                        ui,
-                        |ui| {
-                            for s in SCALES {
-                                ui.selectable_value(&mut scale, s, format!("1:{s}"));
+                    egui::ComboBox::from_id_salt(("scale", id.0))
+                        .selected_text(cc_core::scale::label(system, scale))
+                        .show_ui(ui, |ui| {
+                            for &s in cc_core::scale::choices(system) {
+                                ui.selectable_value(&mut scale, s, cc_core::scale::label(system, s));
                             }
-                        },
-                    );
+                        });
                 });
             }
             if scale != view.scale {
@@ -2676,7 +2761,7 @@ fn view_sections(ui: &mut Ui, state: &mut AppState, id: ViewId) {
             }
             if let ViewKind::ThreeD { analytical, .. } = view.kind {
                 let mut on = analytical;
-                if row(ui, &t!("prop-analytical"), |ui| ui.checkbox(&mut on, "")).changed() {
+                if row(ui, &t!("prop-analytical"), |ui| crate::table::checkbox(ui, &mut on)).changed() {
                     crate::engine_edit::view(state, id, None, |v| {
                         if let ViewKind::ThreeD { analytical, .. } = &mut v.kind {
                             *analytical = on;
@@ -2698,11 +2783,11 @@ fn view_sections(ui: &mut Ui, state: &mut AppState, id: ViewId) {
                 section(ui, "structure-display", t!("section-structural"), |ui| {
                     let (mut s, mut tags) = (structural, structure_tags);
                     let a = row(ui, &t!("prop-structural-plan"), |ui| {
-                        ui.add_enabled(!locked, egui::Checkbox::without_text(&mut s))
+                        ui.add_enabled(!locked, crate::table::boxed(egui::Checkbox::without_text(&mut s)))
                     })
                     .changed();
                     let b = row(ui, &t!("prop-structure-tags"), |ui| {
-                        ui.add_enabled(!locked, egui::Checkbox::without_text(&mut tags))
+                        ui.add_enabled(!locked, crate::table::boxed(egui::Checkbox::without_text(&mut tags)))
                     })
                     .changed();
                     if a || b {
@@ -2765,7 +2850,7 @@ fn view_sections(ui: &mut Ui, state: &mut AppState, id: ViewId) {
                 }
                 finish(state, &r);
                 let mut split = segments.is_some();
-                if row(ui, &t!("prop-split-line"), |ui| ui.checkbox(&mut split, "")).changed() {
+                if row(ui, &t!("prop-split-line"), |ui| crate::table::checkbox(ui, &mut split)).changed() {
                     crate::section_mark::set_split(state, id, split);
                 }
                 if let Some(pieces) = segments {
@@ -2832,7 +2917,7 @@ fn legend_types(ui: &mut Ui, state: &mut AppState, id: ViewId, current: &[cc_cor
     let all: Vec<_> = state.project().types.values().map(|t| (t.id, t.name.clone())).collect();
     for (tid, name) in all {
         let mut on = current.contains(&tid);
-        if row(ui, &name, |ui| ui.checkbox(&mut on, "")).changed() {
+        if row(ui, &name, |ui| crate::table::checkbox(ui, &mut on)).changed() {
             crate::engine_edit::view(state, id, None, |x| {
                 if let ViewKind::Legend { types } = &mut x.kind {
                     if on {
@@ -2885,7 +2970,7 @@ fn viewport_props(ui: &mut Ui, state: &mut AppState, sheet: ViewId, index: usize
     section(ui, "position", t!("section-position"), |ui| {
         for (label, axis) in [(t!("prop-center-x"), 0), (t!("prop-center-y"), 1)] {
             let mut v = vp.center[axis];
-            let r = row(ui, &label, |ui| ui.add(DragValue::new(&mut v).speed(1.0).fixed_decimals(1).suffix(" mm")));
+            let r = row(ui, &label, |ui| ui.add(paper_drag(&mut v).speed(1.0).fixed_decimals(1)));
             if r.changed() {
                 crate::engine_edit::view(state, sheet, Some(key((sheet, index, axis))), |x| {
                     if let ViewKind::Sheet { viewports, .. } = &mut x.kind

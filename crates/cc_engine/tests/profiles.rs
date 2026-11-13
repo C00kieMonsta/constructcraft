@@ -201,7 +201,8 @@ fn beams_with_w_profiles_meet_in_a_mitered_l() {
     };
     let a = make(&mut s, [0.0, 0.0], [4.0, 0.0]);
     let b = make(&mut s, [4.0, 0.0], [4.0, 4.0]);
-    let area = W310.outline().unwrap().properties(0.0).area;
+    // Volumes count the root radii whole, not as their chords.
+    let area = W310.area().unwrap();
     let length = 4.0;
     let g = s.geometry();
     let (ga, gb) = (&g.beams[&a], &g.beams[&b]);
@@ -655,31 +656,32 @@ fn a_type_without_a_profile_reads_its_legacy_section() {
 }
 
 #[test]
-fn truss_posts_prefer_a_steel_profile_column_type() {
+fn truss_posts_default_to_the_material_catalog_column_type() {
     let mut s = Session::default();
-    // Only plain rectangular column types, no profiles.
-    let mut p = s.project().clone();
-    for t in p.types.values_mut() {
-        if let TypeData::Column { section, profile, .. } = &mut t.data {
-            *section = ColumnSection::Rectangular { width: 0.2, depth: 0.2 };
-            *profile = None;
-        }
-    }
-    s = Session::new(Document::new(p));
-    let name = import_first(&mut s, "NBR6355-Ue");
-    let t = run(&mut s, "profile_type_create", json!({"profile": name, "category": "column"}))["id"].as_u64().unwrap();
     let out = run(&mut s, "truss_create", json!({"start": [0, 0], "end": [6, 0], "height": 1.0, "panels": 4}));
-    let posts: Vec<u64> = out["created"]
+    let posts: Vec<u64> = out["members"]
         .as_array()
         .unwrap()
         .iter()
         .map(|i| i.as_u64().unwrap())
         .filter(|i| matches!(s.project().element(ElementId(*i)).unwrap().kind, ElementKind::Column(_)))
         .collect();
-    assert!(!posts.is_empty());
+    assert_eq!(posts.len(), 5);
     for post in posts {
-        assert_eq!(s.project().element(ElementId(post)).unwrap().type_id.0, t);
+        let e = s.project().element(ElementId(post)).unwrap();
+        let t = s.project().element_type(e.type_id).unwrap();
+        assert_eq!((t.name.as_str(), t.category()), ("Ue 100x50x17x2,00", cc_core::Category::Column));
     }
+    // A given post type wins.
+    let column = run(&mut s, "profile_type_create", json!({"profile": "Ue 150x60x20x2,00", "category": "column"}));
+    let out = run(
+        &mut s,
+        "truss_create",
+        json!({"start": [0, 5], "end": [6, 5], "height": 1.0, "panels": 4, "post_type": column["id"]}),
+    );
+    let host = s.project().element(ElementId(out["id"].as_u64().unwrap())).unwrap();
+    let ElementKind::Truss(t) = &host.kind else { panic!("a truss") };
+    assert_eq!(t.post_type.0, column["id"].as_u64().unwrap());
 }
 
 #[test]
@@ -798,6 +800,42 @@ fn resizing_a_turned_type_keeps_the_typed_box() {
     let data = &s.project().element_type(ElementTypeId(t.as_u64().unwrap())).unwrap().data;
     let (lo, hi) = s.project().type_section(data).unwrap().outline.bbox();
     assert!(((hi - lo) - glam::DVec2::new(0.6, 0.2)).abs().max_element() < 1e-9, "{:?}", hi - lo);
+}
+
+/// A round column's volume is the circle's, not its chorded outline's: IFC
+/// export writes it as a quantity next to an exact `IfcCircleProfileDef`.
+#[test]
+fn round_columns_have_their_exact_volume() {
+    let mut s = Session::default();
+    for (name, shape, params) in
+        [("R30", "round", json!({"d": 0.3})), ("T200", "round_tube", json!({"d": 0.2, "t": 0.008}))]
+    {
+        run(&mut s, "profile_create", json!({"material": "steel", "shape": shape, "name": name, "params": params}));
+        let t = run(&mut s, "profile_type_create", json!({"profile": name, "category": "column"}))["id"].clone();
+        let col = run(&mut s, "column_create", json!({"type": t, "position": [0.0, 0.0]}))["id"].as_u64().unwrap();
+        let id = ElementId(col);
+        let e = s.project().element(id).unwrap();
+        let ElementKind::Column(c) = &e.kind else { panic!() };
+        let (base, top) = s.project().column_span(e, c);
+        let disk = |d: f64| std::f64::consts::PI * d * d / 4.0;
+        let area = if shape == "round" { disk(0.3) } else { disk(0.2) - disk(0.184) };
+        let volume = s.geometry().volume(id);
+        let want = area * (top - base);
+        assert!((volume - want).abs() / want < 1e-5, "{name}: {volume} vs {want}");
+    }
+}
+
+/// A free beam of a round profile sweeps the circle's exact area along it.
+#[test]
+fn round_beams_have_their_exact_volume() {
+    let mut s = Session::default();
+    run(&mut s, "profile_create", json!({"material": "steel", "shape": "round", "name": "R30", "params": {"d": 0.3}}));
+    let t = run(&mut s, "profile_type_create", json!({"profile": "R30", "category": "beam"}))["id"].clone();
+    let id = run(&mut s, "beam_create", json!({"type": t, "start": [0.0, 0.0], "end": [4.0, 0.0]}))["id"].as_u64();
+    let id = ElementId(id.unwrap());
+    let want = std::f64::consts::PI * 0.0225 * 4.0;
+    let volume = s.geometry().volume(id);
+    assert!((volume - want).abs() / want < 1e-5, "{volume} vs {want}");
 }
 
 #[test]

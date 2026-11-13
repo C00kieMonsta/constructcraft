@@ -1,13 +1,14 @@
 //! The Type Properties rows of a dimension type: the marks, witness and
 //! dimension lines and pens (Graphics) and the text (Text).
 
+use crate::properties::{paper_drag, weight_drag};
 use crate::state::AppState;
 use crate::t;
 use crate::table::{row, section};
 use cc_core::detail::{MAX_WEIGHT_MM, MIN_WEIGHT_MM};
 use cc_core::dim_style::{DimensionStyle, MAX_AFFIX, MAX_LENGTH_MM, MIN_MARK_MM};
 use cc_core::{ElementType, TypeData};
-use egui::{DragValue, Response, Ui};
+use egui::{Response, Ui};
 
 /// What one frame's rows did.
 #[derive(Default)]
@@ -25,7 +26,7 @@ impl Edits {
 
 /// A paper-millimeter length row.
 fn mm_row(ui: &mut Ui, edits: &mut Edits, label: &str, value: &mut f64, min: f64) {
-    let r = row(ui, label, |ui| ui.add(DragValue::new(value).speed(0.05).range(min..=MAX_LENGTH_MM).suffix(" mm")));
+    let r = row(ui, label, |ui| ui.add(paper_drag(value).speed(0.05).range(min..=MAX_LENGTH_MM)));
     edits.add(&r);
 }
 
@@ -41,7 +42,7 @@ fn optional_row<T: Copy>(
     let r = row(ui, label, |ui| {
         ui.horizontal(|ui| {
             let mut on = value.is_some();
-            let mut r = ui.checkbox(&mut on, "");
+            let mut r = crate::table::checkbox(ui, &mut on);
             if on != value.is_some() {
                 *value = on.then_some(default);
                 // A click is one whole edit.
@@ -60,7 +61,7 @@ fn optional_row<T: Copy>(
 
 fn weight_row(ui: &mut Ui, edits: &mut Edits, label: &str, value: &mut Option<f64>) {
     optional_row(ui, edits, label, value, 0.25, |ui, w| {
-        ui.add(DragValue::new(w).speed(0.01).range(MIN_WEIGHT_MM..=MAX_WEIGHT_MM).suffix(" mm"))
+        ui.add(weight_drag(w).speed(0.01).range(MIN_WEIGHT_MM..=MAX_WEIGHT_MM))
     });
 }
 
@@ -96,14 +97,13 @@ pub fn type_sections(ui: &mut Ui, state: &mut AppState, ty: &ElementType) {
         mm_row(ui, &mut edits, &t!("prop-dim-line-extension"), &mut s.line_extension, 0.0);
     });
     section(ui, "type-dimension-text", t!("section-text"), |ui| {
-        let r = row(ui, &t!("prop-text-size"), |ui| {
-            ui.add(DragValue::new(&mut size).speed(0.1).range(0.5..=MAX_LENGTH_MM).suffix(" mm"))
-        });
+        let r =
+            row(ui, &t!("prop-text-size"), |ui| ui.add(paper_drag(&mut size).speed(0.1).range(0.5..=MAX_LENGTH_MM)));
         edits.add(&r);
         mm_row(ui, &mut edits, &t!("prop-dim-text-offset"), &mut s.text_offset, 0.0);
         text_row(ui, &mut edits, &t!("prop-dim-prefix"), &mut s.prefix);
         text_row(ui, &mut edits, &t!("prop-dim-suffix"), &mut s.suffix);
-        let r = row(ui, &t!("prop-dim-opaque-text"), |ui| ui.checkbox(&mut s.opaque_text, ""));
+        let r = row(ui, &t!("prop-dim-opaque-text"), |ui| crate::table::checkbox(ui, &mut s.opaque_text));
         edits.done |= r.changed();
         edits.add(&r);
     });

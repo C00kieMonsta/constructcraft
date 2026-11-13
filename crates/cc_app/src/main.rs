@@ -5,6 +5,7 @@
 
 mod actions;
 mod app;
+mod bracing_ui;
 mod browser;
 mod browser_org_dialog;
 mod cad_ui;
@@ -15,6 +16,7 @@ mod commands;
 mod component_editor;
 mod component_env;
 mod component_sketch;
+mod connection_ui;
 mod curtain_ui;
 mod design_options_ui;
 mod detail_component_ui;
@@ -29,6 +31,7 @@ mod gestures;
 mod gpu;
 mod graph_ui;
 mod graphics_dialog;
+mod grid_frame_ui;
 mod home;
 mod i18n;
 mod icons;
@@ -39,8 +42,10 @@ mod line_styles_dialog;
 mod lps_cabling_ui;
 mod material_browser;
 mod mcp_bridge;
+mod member_host_ui;
 mod modify;
 mod modify3d;
+mod new_project_dialog;
 mod obj_ui;
 mod opening_place;
 mod paint;
@@ -66,6 +71,7 @@ mod sketch_mode;
 mod snap_geom;
 mod stair_ui;
 mod state;
+mod steel_building_ui;
 mod steel_connection_dialog;
 mod systems_dialog;
 mod table;
@@ -74,6 +80,7 @@ mod theme;
 mod thumbnails;
 mod title_block_env;
 mod tools;
+mod truss_ui;
 mod type_dialog;
 #[cfg(test)]
 mod ui_tests;
@@ -82,6 +89,7 @@ mod update;
 mod update_install;
 mod view3d;
 mod view_cube;
+mod wall_framing_ui;
 
 fn main() -> eframe::Result<()> {
     let raw: Vec<String> = std::env::args().skip(1).collect();

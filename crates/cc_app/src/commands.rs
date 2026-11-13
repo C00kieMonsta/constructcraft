@@ -63,6 +63,8 @@ pub enum UiCommand {
     Default3D,
     /// The placement tool of a model category.
     Place(Category),
+    /// Start the column or beam tool on a type of the given structural material.
+    StructurePlace(Category, cc_core::StructuralMaterial),
     NewComponent,
     LoadComponent,
     ComponentLibrary,
@@ -112,6 +114,13 @@ pub enum UiCommand {
     Select,
     SelectInstances,
     ColumnsAtGrids,
+    /// Opens the Grid Frame dialog.
+    GridFrame,
+    SteelBuilding,
+    /// Opens the Wall Framing dialog for light steel.
+    LightSteelFrame,
+    /// Opens the Wall Framing dialog for wood.
+    WoodFrame,
     AlignGridEnds,
     BeamsOnGrids,
     BeamsBetweenColumns,
@@ -123,10 +132,13 @@ pub enum UiCommand {
     AnalyticalView,
     AnalyticalExport,
     Truss,
-    BracesX,
+    /// Brace the bay between two selected columns, else start the Bracing tool.
+    Bracing,
     SteelConnection,
     SteelConnections,
     TypicalRebar,
+    /// Place connections of a kind on the selected members, else the active level's.
+    Connection(cc_core::connection::ConnectionKind),
     RebarView,
     SteelSchedule,
     StructuralPlan,
@@ -346,19 +358,21 @@ impl UiCommand {
             TbText,
             TbImage,
         ]);
-        all.extend([AlignGridEnds, ColumnsAtGrids, BeamsOnGrids, BeamsBetweenColumns, StructuralSchedules]);
-        all.extend([FootingsUnderColumns, StripFootingsUnderWalls, FoundationSlab, SlabJoinSupports]);
         all.extend([
-            AnalyticalView,
-            AnalyticalExport,
-            Truss,
-            BracesX,
-            SteelConnection,
-            SteelConnections,
-            TypicalRebar,
-            RebarView,
-            SteelSchedule,
+            AlignGridEnds,
+            ColumnsAtGrids,
+            GridFrame,
+            SteelBuilding,
+            LightSteelFrame,
+            WoodFrame,
+            BeamsOnGrids,
+            BeamsBetweenColumns,
+            StructuralSchedules,
         ]);
+        all.extend([FootingsUnderColumns, StripFootingsUnderWalls, FoundationSlab, SlabJoinSupports]);
+        all.extend([AnalyticalView, AnalyticalExport, Truss, Bracing, TypicalRebar, RebarView, SteelSchedule]);
+        all.extend(cc_core::connection::ConnectionKind::ALL.map(Connection));
+        all.extend([SteelConnection, SteelConnections]);
         all.extend([StructuralPlan, NumberStructure, StructureTags]);
         all.extend([PlaceFixture, PlaceDevice, MepConnect, Systems, MepSizing, PlumbingPlan, ElectricalPlan]);
         all.extend([MepSchedules, PanelDiagram]);
@@ -487,7 +501,7 @@ impl UiCommand {
             Undo => Icon::Undo,
             Redo => Icon::Redo,
             Default3D | New3D => Icon::View3D,
-            Place(category) => category_icon(category),
+            Place(category) | StructurePlace(category, _) => category_icon(category),
             NewComponent | LoadComponent | EditComponent => Icon::Component,
             CompExtrusion => Icon::Extrusion,
             CompRevolution => Icon::Revolution,
@@ -523,6 +537,9 @@ impl UiCommand {
             Select => Icon::Select,
             SelectInstances => Icon::SelectInstances,
             ColumnsAtGrids => Icon::ColumnsAtGrids,
+            GridFrame => Icon::GridFrame,
+            SteelBuilding => Icon::SteelBuilding,
+            LightSteelFrame | WoodFrame => Icon::WallFraming,
             AlignGridEnds => Icon::AlignGridEnds,
             BeamsOnGrids => Icon::BeamsOnGrids,
             BeamsBetweenColumns => Icon::BeamsBetweenColumns,
@@ -533,9 +550,10 @@ impl UiCommand {
             SlabJoinSupports => Icon::SlabSupports,
             AnalyticalView | AnalyticalExport => Icon::Analytical,
             Truss => Icon::Truss,
-            BracesX => Icon::Brace,
+            Bracing => Icon::Brace,
             SteelConnection | SteelConnections => Icon::Connector,
             TypicalRebar => Icon::Rebar,
+            Connection(_) => Icon::Connection,
             RebarView => Icon::RebarView,
             SteelSchedule => Icon::Schedule,
             StructuralPlan => Icon::StructuralPlan,
@@ -697,7 +715,7 @@ impl UiCommand {
             Undo => t!("action-undo"),
             Redo => t!("action-redo"),
             Default3D => t!("action-default-3d"),
-            Place(category) => place_label(category),
+            Place(category) | StructurePlace(category, _) => place_label(category),
             NewComponent => t!("action-new-component"),
             EditComponent => t!("action-edit-component"),
             CompExtrusion => t!("comp-env-extrusion"),
@@ -736,6 +754,10 @@ impl UiCommand {
             Select => t!("tool-select"),
             SelectInstances => t!("action-select-instances"),
             ColumnsAtGrids => t!("action-columns-at-grids"),
+            GridFrame => t!("action-grid-frame"),
+            SteelBuilding => t!("action-steel-building"),
+            LightSteelFrame => t!("action-light-steel-frame"),
+            WoodFrame => t!("action-wood-frame"),
             AlignGridEnds => t!("action-align-grid-ends"),
             BeamsOnGrids => t!("action-beams-on-grids"),
             BeamsBetweenColumns => t!("action-beams-between-columns"),
@@ -747,10 +769,11 @@ impl UiCommand {
             AnalyticalView => t!("action-analytical-view"),
             AnalyticalExport => t!("action-analytical-export"),
             Truss => t!("tool-truss"),
-            BracesX => t!("action-braces-x"),
+            Bracing => t!("action-bracing"),
             SteelConnection => t!("action-steel-connection"),
             SteelConnections => t!("action-steel-connections"),
             TypicalRebar => t!("action-rebar-typical"),
+            Connection(kind) => crate::i18n::tr(kind.key()),
             RebarView => t!("action-rebar-view"),
             SteelSchedule => t!("action-steel-schedule"),
             StructuralPlan => t!("action-structural-plan"),
@@ -904,7 +927,7 @@ impl UiCommand {
             Undo => t!("cmd-desc-undo"),
             Redo => t!("cmd-desc-redo"),
             Default3D => t!("cmd-desc-default-3d"),
-            Place(category) => place_description(category),
+            Place(category) | StructurePlace(category, _) => place_description(category),
             NewComponent => t!("cmd-desc-new-component"),
             EditComponent => t!("cmd-desc-edit-component"),
             CompExtrusion => t!("cmd-desc-comp-extrusion"),
@@ -943,6 +966,10 @@ impl UiCommand {
             Select => t!("cmd-desc-select"),
             SelectInstances => t!("cmd-desc-select-instances"),
             ColumnsAtGrids => t!("cmd-desc-columns-at-grids"),
+            GridFrame => t!("cmd-desc-grid-frame"),
+            SteelBuilding => t!("cmd-desc-steel-building"),
+            LightSteelFrame => t!("cmd-desc-light-steel-frame"),
+            WoodFrame => t!("cmd-desc-wood-frame"),
             AlignGridEnds => t!("cmd-desc-align-grid-ends"),
             BeamsOnGrids => t!("cmd-desc-beams-on-grids"),
             BeamsBetweenColumns => t!("cmd-desc-beams-between-columns"),
@@ -954,10 +981,17 @@ impl UiCommand {
             AnalyticalView => t!("cmd-desc-analytical-view"),
             AnalyticalExport => t!("cmd-desc-analytical-export"),
             Truss => t!("cmd-desc-truss"),
-            BracesX => t!("cmd-desc-braces-x"),
+            Bracing => t!("cmd-desc-bracing"),
             SteelConnection => t!("cmd-desc-steel-connection"),
             SteelConnections => t!("cmd-desc-steel-connections"),
             TypicalRebar => t!("cmd-desc-rebar-typical"),
+            Connection(kind) => match kind {
+                cc_core::connection::ConnectionKind::BasePlate => t!("cmd-desc-base-plate"),
+                cc_core::connection::ConnectionKind::EndPlate => t!("cmd-desc-end-plate"),
+                cc_core::connection::ConnectionKind::FinPlate => t!("cmd-desc-fin-plate"),
+                cc_core::connection::ConnectionKind::TimberBolts => t!("cmd-desc-timber-bolts"),
+                cc_core::connection::ConnectionKind::Hanger => t!("cmd-desc-hanger"),
+            },
             RebarView => t!("cmd-desc-rebar-view"),
             SteelSchedule => t!("cmd-desc-steel-schedule"),
             StructuralPlan => t!("cmd-desc-structural-plan"),
@@ -1210,6 +1244,9 @@ impl UiCommand {
             Undo => "undo",
             SelectInstances => "elements_list",
             ColumnsAtGrids => "columns_at_grids",
+            GridFrame => "grid_frame_create",
+            SteelBuilding => "steel_building_create",
+            LightSteelFrame | WoodFrame => "wall_framing_create",
             AlignGridEnds => "grids_align_ends",
             BeamsOnGrids => "beams_on_grids",
             BeamsBetweenColumns => "beams_between_columns",
@@ -1259,10 +1296,11 @@ impl UiCommand {
             AnalyticalView => "view_create",
             AnalyticalExport => "analytical_export",
             Truss => "truss_create",
-            BracesX => "braces_between_columns",
+            Bracing => "bracing_create",
             SteelConnection => "steel_connection_create",
             SteelConnections => "steel_connections_auto",
             TypicalRebar => "rebar_typical",
+            Connection(_) => "connections_create",
             RebarView | SteelSchedule | StructuralPlan => "view_create",
             NumberStructure => "structure_number",
             StructureTags => "view_set",
@@ -1349,6 +1387,9 @@ impl UiCommand {
     /// Why the command cannot run now, or `None` when it can.
     pub fn unavailable(self, state: &AppState) -> Option<String> {
         use UiCommand::*;
+        if let StructurePlace(category, _) = self {
+            return Place(category).unavailable(state);
+        }
         let project_open = state.project_open && !state.show_home;
         match self {
             Home | New | Open | ImportIfc | About | CheckUpdates | Preferences | ToggleRibbon | CommandPalette => {
@@ -1457,7 +1498,7 @@ impl UiCommand {
             Pin | Unpin | Delete | Cut | ClipboardCopy | SelectInstances if !has_sel => Some(t!("msg-select-first")),
             SelectInstances if state.active_view.is_none() => Some(t!("why-no-view")),
             Group if state.selection.len() < 2 => Some(t!("msg-group-two")),
-            ColumnsAtGrids if crate::actions::grids_for(state).len() < 2 => Some(t!("msg-grids-two")),
+            ColumnsAtGrids | GridFrame if crate::actions::grids_for(state).len() < 2 => Some(t!("msg-grids-two")),
             AlignGridEnds if crate::actions::reference_grid(state).is_none() => Some(t!("why-select-one-grid")),
             BeamsOnGrids if crate::actions::grids_for(state).is_empty() => Some(t!("why-no-grids")),
             BeamsBetweenColumns if crate::actions::selected_columns(state).len() < 2 => Some(t!("msg-columns-two")),
@@ -1472,8 +1513,12 @@ impl UiCommand {
             FoundationSlab if crate::tools::foundation_type(project, cc_core::FoundationKind::Slab).is_none() => {
                 Some(t!("msg-no-type"))
             }
-            Truss if project.default_type(Category::Beam).is_none() => Some(t!("msg-no-type")),
-            BracesX if crate::actions::selected_columns(state).len() != 2 => Some(t!("msg-columns-two-exactly")),
+            Truss if state.prefs.structure_material == cc_core::StructuralMaterial::Concrete => {
+                Some(t!("msg-truss-material"))
+            }
+            Bracing if state.prefs.structure_material == cc_core::StructuralMaterial::Concrete => {
+                Some(t!("msg-bracing-material"))
+            }
             TypicalRebar if project.default_type(Category::Rebar).is_none() => Some(t!("msg-no-rebar-type")),
             StructuralPlan | PlumbingPlan | ElectricalPlan | CommunicationsPlan | LightningPlan | EarthRing
                 if project.levels.is_empty() =>
@@ -1548,6 +1593,7 @@ impl UiCommand {
             PlaceDevice => is_component_group(state, ComponentGroup::Device),
             PlaceDeviceOf(device) => is_component_group(state, ComponentGroup::Own(device)),
             Truss => matches!(tool, Tool::Truss { .. }),
+            Bracing => matches!(tool, Tool::Bracing { .. }),
             StructureTags => crate::actions::active_floor_plan(state).is_some_and(|(_, tags)| tags),
             Select if state.sketch.is_some() => {
                 state.sketch.as_ref().is_some_and(|s| s.draw == crate::sketch_mode::Draw::Select)
@@ -1705,6 +1751,11 @@ fn place_label(category: Category) -> String {
         Category::CadImport => t!("action-import-cad"),
         Category::Mass => t!("tool-mass"),
         Category::Shaft => t!("tool-shaft"),
+        Category::SteelBuilding => t!("category-steel-building"),
+        Category::Truss => t!("category-truss"),
+        Category::Bracing => t!("category-bracing"),
+        Category::Connection => t!("category-connection"),
+        Category::WallFraming => t!("category-wall-framing"),
         Category::Topography => t!("tool-topography"),
         Category::Pad => t!("tool-pad"),
     }
@@ -1745,6 +1796,11 @@ fn place_description(category: Category) -> String {
         Category::CadImport => t!("cmd-desc-import-cad"),
         Category::Mass => t!("cmd-desc-mass"),
         Category::Shaft => t!("cmd-desc-shaft"),
+        Category::SteelBuilding => t!("cmd-desc-steel-building"),
+        Category::Truss => t!("cmd-desc-truss"),
+        Category::Bracing => t!("cmd-desc-bracing"),
+        Category::Connection => t!("category-connection"),
+        Category::WallFraming => t!("cmd-desc-light-steel-frame"),
         Category::Topography => t!("cmd-desc-topography"),
         Category::Pad => t!("cmd-desc-pad"),
     }
@@ -1793,7 +1849,7 @@ pub fn run(state: &mut AppState, ctx: &egui::Context, command: UiCommand) {
     state.ribbon_peek = false;
     match command {
         Home => state.show_home = true,
-        New => actions::guarded(state, PendingAction::New),
+        New => crate::new_project_dialog::open(state),
         Open => actions::guarded(state, PendingAction::Open),
         Save => {
             actions::save(state, false);
@@ -1836,6 +1892,7 @@ pub fn run(state: &mut AppState, ctx: &egui::Context, command: UiCommand) {
         },
         Default3D => actions::open_default_3d(state),
         Place(category) => actions::activate_category_tool(state, category),
+        StructurePlace(category, material) => actions::structure_place(state, category, material),
         NewComponent => {
             state.dialogs.component_editor = Some(crate::component_editor::Editor::new_component());
         }
@@ -1899,6 +1956,10 @@ pub fn run(state: &mut AppState, ctx: &egui::Context, command: UiCommand) {
         SelectInstances => crate::actions::select_instances(state),
         Group => crate::actions::group_selection(state),
         ColumnsAtGrids => crate::actions::columns_at_grids(state),
+        GridFrame => crate::grid_frame_ui::open(state),
+        SteelBuilding => crate::steel_building_ui::open(state),
+        LightSteelFrame => crate::wall_framing_ui::open(state, cc_core::wall_framing::FramingSystem::LightSteel),
+        WoodFrame => crate::wall_framing_ui::open(state, cc_core::wall_framing::FramingSystem::Wood),
         AlignGridEnds => crate::actions::align_grid_ends(state),
         BeamsOnGrids => crate::actions::beams_on_grids(state),
         BeamsBetweenColumns => crate::actions::beams_between_columns(state),
@@ -1914,15 +1975,17 @@ pub fn run(state: &mut AppState, ctx: &egui::Context, command: UiCommand) {
         AnalyticalView => crate::actions::open_analytical_view(state),
         AnalyticalExport => crate::actions::export_analytical(state),
         Truss => {
-            if let Some(type_id) = state.project().default_type(Category::Beam) {
-                state.set_tool(Tool::Truss { type_id });
+            let material = state.prefs.structure_material;
+            if material != cc_core::StructuralMaterial::Concrete {
+                state.set_tool(Tool::Truss { material });
                 state.message = t!("hint-truss");
             }
         }
-        BracesX => crate::actions::braces_x(state),
+        Bracing => crate::bracing_ui::start(state),
         SteelConnection => crate::actions::start_steel_connection(state),
         SteelConnections => crate::actions::steel_connections(state),
         TypicalRebar => crate::actions::typical_rebar(state),
+        Connection(kind) => crate::connection_ui::place(state, kind),
         RebarView => crate::actions::open_rebar_view(state),
         SteelSchedule => {
             actions::new_schedule(state, Category::Rebar);

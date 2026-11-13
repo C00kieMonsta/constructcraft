@@ -51,6 +51,11 @@ pub fn category_icon(category: Category) -> Icon {
         Category::MaskingRegion => Icon::MaskingRegion,
         Category::Mass => Icon::Mass,
         Category::Shaft => Icon::Shaft,
+        Category::SteelBuilding => Icon::SteelBuilding,
+        Category::Truss => Icon::Truss,
+        Category::Bracing => Icon::Brace,
+        Category::Connection => Icon::Connection,
+        Category::WallFraming => Icon::WallFraming,
         Category::Topography => Icon::Topography,
         Category::Pad => Icon::Pad,
         Category::Sweep => Icon::Sweep,
@@ -693,24 +698,69 @@ fn massing_site_tab(ui: &mut Ui, state: &mut AppState) {
     group(ui, t!("group-site"), |ui| command_buttons(ui, state, &[place(Category::Topography), place(Category::Pad)]));
 }
 
+/// The Structure tab's material: three stacked toggles.
+fn material_selector(ui: &mut Ui, state: &mut AppState) {
+    ui.vertical(|ui| {
+        for m in cc_core::StructuralMaterial::ALL {
+            let on = state.prefs.structure_material == m;
+            let label = crate::i18n::tr(m.key());
+            let response = ui.selectable_label(on, label.clone());
+            response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, on, label.clone()));
+            if response.clicked() {
+                state.prefs.structure_material = m;
+            }
+        }
+    });
+}
+
 fn structure_tab(ui: &mut Ui, state: &mut AppState) {
     use UiCommand::*;
+    use cc_core::StructuralMaterial as M;
+    use cc_core::connection::ConnectionKind as K;
+    let m = state.prefs.structure_material;
+    group(ui, t!("group-structure-material"), |ui| material_selector(ui, state));
+    let (column, beam) = (StructurePlace(Category::Column, m), StructurePlace(Category::Beam, m));
+    match m {
+        M::Concrete => {
+            group(ui, t!("group-structure"), |ui| {
+                command_buttons(ui, state, &[column, beam, place(Category::Floor)]);
+            });
+            group(ui, t!("group-reinforcement"), |ui| stacks(ui, state, &[&[TypicalRebar, RebarView, SteelSchedule]]));
+        }
+        M::Steel => {
+            group(ui, t!("group-structure"), |ui| command_buttons(ui, state, &[column, beam, Bracing]));
+            group(ui, t!("group-framing"), |ui| {
+                stacks(
+                    ui,
+                    state,
+                    &[&[ColumnsAtGrids, BeamsOnGrids, BeamsBetweenColumns], &[GridFrame, Truss, SteelBuilding]],
+                );
+                command_button(ui, state, LightSteelFrame);
+            });
+            group(ui, t!("group-connections"), |ui| {
+                stacks(ui, state, &[&[Connection(K::BasePlate), Connection(K::EndPlate), Connection(K::FinPlate)]])
+            });
+            group(ui, t!("group-steel-connections"), |ui| {
+                command_button(ui, state, SteelConnection);
+                stacks(ui, state, &[&[SteelConnections]]);
+            });
+        }
+        M::Timber => {
+            group(ui, t!("group-structure"), |ui| command_buttons(ui, state, &[column, beam, Bracing]));
+            group(ui, t!("group-framing"), |ui| {
+                stacks(ui, state, &[&[ColumnsAtGrids, BeamsOnGrids, BeamsBetweenColumns], &[GridFrame, Truss]]);
+                command_button(ui, state, WoodFrame);
+            });
+            group(ui, t!("group-connections"), |ui| {
+                stacks(ui, state, &[&[Connection(K::TimberBolts), Connection(K::Hanger)]])
+            });
+        }
+    }
     group(ui, t!("group-profiles"), |ui| command_buttons(ui, state, &[Profiles, Materials]));
-    group(ui, t!("group-structure"), |ui| {
-        command_buttons(ui, state, &[place(Category::Column), place(Category::Beam), place(Category::Foundation)]);
-    });
-    // Layout from grids and foundations under what exists, as small stacked buttons.
-    group(ui, t!("group-framing"), |ui| {
-        stacks(ui, state, &[&[ColumnsAtGrids, BeamsOnGrids, BeamsBetweenColumns], &[BracesX, Truss]]);
-    });
-    group(ui, t!("group-steel-connections"), |ui| {
-        command_button(ui, state, SteelConnection);
-        stacks(ui, state, &[&[SteelConnections]]);
-    });
     group(ui, t!("group-foundation"), |ui| {
+        command_button(ui, state, place(Category::Foundation));
         stacks(ui, state, &[&[FootingsUnderColumns, StripFootingsUnderWalls, FoundationSlab]]);
     });
-    group(ui, t!("group-reinforcement"), |ui| stacks(ui, state, &[&[TypicalRebar, RebarView, SteelSchedule]]));
     group(ui, t!("group-analytical"), |ui| {
         stacks(ui, state, &[&[SlabJoinSupports, AnalyticalView, AnalyticalExport]]);
     });
@@ -1019,16 +1069,19 @@ fn segment_options(ui: &mut Ui, state: &mut AppState, type_id: cc_core::ElementT
     let project = state.project();
     let kind = system.and_then(|id| project.system(id)).map(|s| s.kind);
     let default_offset = match (run, state.active_level()) {
-        (Run::Pipe, _) => cc_engine::pipe_offset(kind),
+        (Run::Pipe, _) => cc_engine::pipe_offset(project, kind),
         (Run::Conduit, Some(level)) => cc_engine::conduit_offset(project, level),
         (Run::Tray, Some(level)) => cc_engine::tray_offset(project, level),
         // Conductors lie on the roof under them unless an elevation is given.
         (Run::Conductor, _) => 0.0,
-        (_, None) => 2.8,
+        (_, None) => project.defaults().ceiling,
     };
     let diameter = project.element_type(type_id).and_then(|t| t.diameter()).unwrap_or(0.1);
-    let default_slope =
-        if kind.is_some_and(cc_core::SystemKind::is_drainage) { cc_engine::drain_slope(diameter) * 100.0 } else { 0.0 };
+    let default_slope = if kind.is_some_and(cc_core::SystemKind::is_drainage) {
+        cc_engine::drain_slope(project, diameter) * 100.0
+    } else {
+        0.0
+    };
     ui.label(t!("prop-elevation-offset"));
     let mut offset = state.mep.offset.unwrap_or(default_offset);
     if ui.add(crate::properties::length_drag(&mut offset).speed(0.01)).changed() {
@@ -1042,9 +1095,10 @@ fn segment_options(ui: &mut Ui, state: &mut AppState, type_id: cc_core::ElementT
     }
     if pipe {
         ui.label(t!("col-slope"));
-        let mut slope = state.mep.slope.unwrap_or(default_slope);
-        if ui.add(DragValue::new(&mut slope).speed(0.1).range(-20.0..=20.0).suffix(" %")).changed() {
-            state.mep.slope = Some(slope);
+        // Kept in percent; shown and typed in the project's slope unit.
+        let mut slope = state.mep.slope.unwrap_or(default_slope) / 100.0;
+        if ui.add(crate::properties::slope_drag(&mut slope).range(-0.2..=0.2)).changed() {
+            state.mep.slope = Some(slope * 100.0);
         }
     }
     ui.separator();
@@ -1104,7 +1158,7 @@ pub fn options_bar(ui: &mut Ui, state: &mut AppState) {
             });
         ui.separator();
         if let (Some(category), Some(type_id)) = (state.tool.category(), state.tool.type_id()) {
-            let types = crate::tools::tool_types(state.project(), category, type_id);
+            let types = crate::tools::tool_types(state.project(), category, type_id, state.tool.material());
             let mut selected = type_id;
             // Walls: a project without a curtain type gets one from the list.
             let offer_curtain = category == Category::Wall && !crate::curtain_ui::has_curtain_type(state);
@@ -1249,28 +1303,8 @@ pub fn options_bar(ui: &mut Ui, state: &mut AppState) {
             Tool::Footing { .. } => {
                 ui.label(theme::muted(t!("hint-footing")));
             }
-            Tool::Truss { .. } => {
-                let o = &mut state.truss;
-                ui.label(t!("prop-truss-height"));
-                ui.add(crate::properties::length_drag(&mut o.height).speed(0.01).range(0.1..=20.0));
-                ui.label(t!("prop-truss-panels"));
-                ui.add(
-                    DragValue::new(&mut o.panels)
-                        .range(0..=100)
-                        .custom_formatter(|n, _| if n < 0.5 { t!("truss-panels-auto") } else { format!("{n:.0}") }),
-                );
-                let current = crate::tools::TRUSS_PATTERNS
-                    .iter()
-                    .find(|(p, _)| *p == o.pattern)
-                    .map_or(String::new(), |(_, key)| crate::i18n::tr(key));
-                egui::ComboBox::from_id_salt("truss-pattern").selected_text(current).show_ui(ui, |ui| {
-                    for (pattern, key) in crate::tools::TRUSS_PATTERNS {
-                        ui.selectable_value(&mut o.pattern, pattern, crate::i18n::tr(key));
-                    }
-                });
-                ui.separator();
-                ui.label(theme::muted(t!("hint-truss")));
-            }
+            Tool::Truss { .. } => crate::truss_ui::tool_options(ui, state),
+            Tool::Bracing { .. } => crate::bracing_ui::tool_options(ui, state),
             Tool::Stair { .. } => crate::stair_ui::tool_options(ui, state),
             Tool::Ramp { .. } => crate::stair_ui::ramp_tool_options(ui, state),
             Tool::Pipe { type_id } => segment_options(ui, state, type_id, Run::Pipe),

@@ -247,6 +247,10 @@ pub(crate) fn element_json(s: &mut Session, id: ElementId) -> Option<Value> {
         ElementKind::Sweep(sw) => {
             derived.insert("length".into(), json!(sw.length()));
         }
+        ElementKind::SteelBuilding(b) => super::steel_building::derived(p, b, &mut derived),
+        ElementKind::WallFraming(f) => super::wall_framing::derived(p, f, &mut derived),
+        ElementKind::Truss(t) => super::framing::derived(t, &mut derived),
+        ElementKind::Bracing(b) => super::bracing::derived(b, &mut derived),
         ElementKind::Shaft(sh) => {
             let (bottom, top) = p.shaft_span(&e, sh);
             derived.insert("bottom".into(), json!(bottom));
@@ -395,6 +399,9 @@ pub(crate) fn element_json(s: &mut Session, id: ElementId) -> Option<Value> {
         derived.insert("kind".into(), json!(v.kind.name()));
         derived.insert("diameter".into(), json!(v.diameter));
     }
+    if let Some(c) = geom.connections.get(&id) {
+        super::connection::derived(c, &mut derived);
+    }
     if let Some(t) = geom.segments.get(&id).and_then(|g| g.tray) {
         derived.insert("width".into(), json!(t.width));
         derived.insert("height".into(), json!(t.height));
@@ -477,6 +484,7 @@ pub(crate) fn view_json(s: &Session, id: ViewId) -> Option<Value> {
         "name": v.name,
         "category": snake(&format!("{:?}", v.category())),
         "scale": v.scale,
+        "scale_text": cc_core::scale::label(s.project().measurement_system(), v.scale),
         "detail": v.detail.name(),
         "visual_style": v.style().name(),
         "params": params,
@@ -514,7 +522,9 @@ impl Command for ViewsList {
     }
 }
 
-/// A view with all its parameters (`params`, editable with `view_set`).
+/// A view with all its parameters (`params`, editable with `view_set`), its
+/// `scale` denominator and `scale_text`, the scale as the project writes it
+/// (`1:50`, or `1/4" = 1'-0"` in imperial projects).
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ViewGet {

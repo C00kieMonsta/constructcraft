@@ -12,7 +12,7 @@ use cc_core::{ElementId, ElementKind, ElementTypeId, TypeData, View, ViewKind};
 use cc_engine::Ref;
 use cc_engine::commands::level_mark::LevelMarkCreate;
 use cc_views::{Drawing2D, Prim, format};
-use egui::{DragValue, Painter, Response, Stroke, Ui};
+use egui::{Painter, Response, Stroke, Ui};
 use glam::DVec2;
 
 /// Whether level marks go in `view`: plans, elevations and sections.
@@ -100,7 +100,7 @@ pub fn tool(
 fn level_row(ui: &mut Ui, label: &str, set: &mut Option<f64>, measured: Option<f64>) -> (bool, Response) {
     row(ui, label, |ui| {
         let mut on = set.is_some();
-        let toggled = ui.checkbox(&mut on, "").changed();
+        let toggled = crate::table::checkbox(ui, &mut on).changed();
         if toggled {
             *set = on.then(|| measured.unwrap_or(0.0));
         }
@@ -125,11 +125,11 @@ pub fn props(ui: &mut Ui, state: &mut AppState, id: ElementId, mark: &LevelMark)
     let mut done = false;
     section(ui, "level-mark", t!("section-level-mark"), |ui| {
         readonly_row(ui, &t!("prop-view"), view_name);
-        done |= row(ui, &t!("prop-level-mark-flip"), |ui| ui.checkbox(&mut m.flip, "")).changed();
+        done |= row(ui, &t!("prop-level-mark-flip"), |ui| crate::table::checkbox(ui, &mut m.flip)).changed();
         let (toggled, r) =
             level_row(ui, &t!("prop-level-mark-finished"), &mut m.finished, measured.map(|l| l.finished));
         done |= toggled || r.drag_stopped() || r.lost_focus();
-        done |= row(ui, &t!("prop-level-mark-show-raw"), |ui| ui.checkbox(&mut m.show_raw, "")).changed();
+        done |= row(ui, &t!("prop-level-mark-show-raw"), |ui| crate::table::checkbox(ui, &mut m.show_raw)).changed();
         if m.show_raw {
             let (toggled, r) = level_row(ui, &t!("prop-level-mark-raw"), &mut m.raw, measured.and_then(|l| l.raw));
             done |= toggled || r.drag_stopped() || r.lost_focus();
@@ -156,7 +156,7 @@ pub fn type_rows(ui: &mut Ui, state: &mut AppState, tid: ElementTypeId, data: &T
     let mut done = false;
     section(ui, "type-level-mark", t!("section-level-mark"), |ui| {
         let r = row(ui, &t!("prop-text-size"), |ui| {
-            ui.add(DragValue::new(&mut size).speed(0.1).range(0.5..=50.0).suffix(" mm"))
+            ui.add(crate::properties::paper_drag(&mut size).speed(0.1).range(0.5..=50.0))
         });
         changed |= r.changed();
         done |= r.drag_stopped() || r.lost_focus();

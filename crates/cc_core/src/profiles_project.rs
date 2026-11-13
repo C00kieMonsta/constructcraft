@@ -72,6 +72,29 @@ pub fn section_name(shape: &ProfileShape, material: ProfileMaterial) -> String {
     }
 }
 
+/// [`section_name`], or in an imperial project the same name with every
+/// size in inches (`I 8"x8"x5/16"x7/16"`, `Rect 8"x8"`, `Ø12"`).
+pub fn section_name_in(shape: &ProfileShape, material: ProfileMaterial, system: crate::MeasurementSystem) -> String {
+    if system == crate::MeasurementSystem::Metric {
+        return section_name(shape, material);
+    }
+    let i = crate::units::inch_text;
+    match *shape {
+        ProfileShape::I { d, bf, tw, tf, .. } => format!("I {}x{}x{}x{}", i(d), i(bf), i(tw), i(tf)),
+        ProfileShape::Channel { d, bf, tw, tf, .. } => format!("U {}x{}x{}x{}", i(d), i(bf), i(tw), i(tf)),
+        ProfileShape::Angle { h, b, t, .. } => format!("L {}x{}x{}", i(h), i(b), i(t)),
+        ProfileShape::RectTube { h, b, t, .. } => format!("Tube {}x{}x{}", i(h), i(b), i(t)),
+        ProfileShape::RoundTube { d, t } => format!("Ø{}x{}", i(d), i(t)),
+        ProfileShape::Rect { b, h, .. } => format!("Rect {}x{}", i(b), i(h)),
+        ProfileShape::Round { d } => format!("Ø{}", i(d)),
+        ProfileShape::Sketch(_) => "Sketch".to_string(),
+        _ => {
+            let values: Vec<String> = shape.params().into_iter().map(|(_, v)| i(v)).collect();
+            format!("{} {}", shape.code(), values.join("x"))
+        }
+    }
+}
+
 /// `outline` mirrored across its vertical axis when `mirror`, then turned
 /// `rotation_deg` counterclockwise (a non-finite angle reads as none).
 fn place_outline(mut outline: SectionOutline, rotation_deg: f64, mirror: bool) -> SectionOutline {
@@ -265,6 +288,15 @@ impl Project {
         matches!(shape, ProfileShape::Round { .. } | ProfileShape::RoundTube { .. })
     }
 
+    /// The exact area of a column or beam type's section (its profile's,
+    /// else its legacy section's): arcs count whole, where the outline only
+    /// follows them with chords. `None` when the shape makes no outline.
+    pub fn exact_section_area(&self, data: &TypeData) -> Option<f64> {
+        let s = section_data(data)?;
+        let shape = s.profile.and_then(|id| self.profile(id)).map_or(&s.legacy, |d| &d.shape);
+        shape.area().ok()
+    }
+
     /// The column and beam types that use a profile.
     pub fn profile_users(&self, id: ProfileId) -> Vec<ElementTypeId> {
         self.types
@@ -443,7 +475,7 @@ impl Project {
         if self.profiles.contains_key(&pid) {
             return None;
         }
-        let name = self.free_profile_name(&section_name(&shape, material));
+        let name = self.free_profile_name(&section_name_in(&shape, material, self.measurement_system()));
         let def = ProfileDef {
             id: pid,
             uid: Uid::generate(),
