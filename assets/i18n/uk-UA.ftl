@@ -1037,6 +1037,8 @@ mat-class = Клас
 mat-color = Колір
 mat-cut-pattern = Штриховка розрізу
 mat-delete = Видалити
+mat-import-brazil = Бразилія (NBR)
+mat-import-brazil-tip = Імпортувати конструкційні сталі (NBR 7007/7008, ASTM), арматуру (NBR 7480) та бетони C20–C90 (NBR 6118)
 mat-descriptive = Описові дані
 mat-duplicate = Дублювати
 mat-finish = Оздоблення
@@ -3134,6 +3136,9 @@ profile-series-glulam = Клеєна шарувата деревина
 profile-series-shs = Квадратні труби (SHS)
 profile-series-rhs = Прямокутні труби (RHS)
 profile-series-chs = Круглі труби (CHS)
+profile-series-cs = Зварний двотавр CS (ABNT NBR 5884)
+profile-series-cvs = Зварний двотавр CVS (ABNT NBR 5884)
+profile-series-br = Круглі сталеві стержні (BR)
 
 # OBJ import
 action-import-obj = Імпортувати OBJ…
@@ -3176,3 +3181,16 @@ browser-org-default-name = Організація { $n }
 browser-org-group-by = Групувати за
 browser-org-then-by = Потім за
 browser-org-none = Немає
+tx-create-steel-connection = Створити сталеве з'єднання
+action-steel-connections = Сталеві з'єднання
+cmd-desc-steel-connections = Розпізнає колони, балки, ферми та зв'язки і застосовує макроси типових сталевих з'єднань (опорна плита, фланцева пластина, фасонка, стик).
+msg-steel-connections-placed = Створено сталевих з'єднань: { $count } (вузлів, що вже мали з'єднання: { $skipped }).
+profile-series-u-lam = Rolled U channel (ABNT NBR)
+profile-series-l-lam = Rolled equal/unequal angle L (ABNT NBR)
+
+group-steel-connections = Steel Connections
+action-steel-connection = Steel Connection
+cmd-desc-steel-connection = Pick two beams or columns (or one column) to configure and place a steel connection.
+tool-steel-connection = Steel Connection
+hint-steel-conn-first = Click the first beam or column for the steel connection
+hint-steel-conn-second = Click the second beam or column to configure the connection

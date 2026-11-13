@@ -124,6 +124,8 @@ pub enum UiCommand {
     AnalyticalExport,
     Truss,
     BracesX,
+    SteelConnection,
+    SteelConnections,
     TypicalRebar,
     RebarView,
     SteelSchedule,
@@ -346,7 +348,17 @@ impl UiCommand {
         ]);
         all.extend([AlignGridEnds, ColumnsAtGrids, BeamsOnGrids, BeamsBetweenColumns, StructuralSchedules]);
         all.extend([FootingsUnderColumns, StripFootingsUnderWalls, FoundationSlab, SlabJoinSupports]);
-        all.extend([AnalyticalView, AnalyticalExport, Truss, BracesX, TypicalRebar, RebarView, SteelSchedule]);
+        all.extend([
+            AnalyticalView,
+            AnalyticalExport,
+            Truss,
+            BracesX,
+            SteelConnection,
+            SteelConnections,
+            TypicalRebar,
+            RebarView,
+            SteelSchedule,
+        ]);
         all.extend([StructuralPlan, NumberStructure, StructureTags]);
         all.extend([PlaceFixture, PlaceDevice, MepConnect, Systems, MepSizing, PlumbingPlan, ElectricalPlan]);
         all.extend([MepSchedules, PanelDiagram]);
@@ -522,6 +534,7 @@ impl UiCommand {
             AnalyticalView | AnalyticalExport => Icon::Analytical,
             Truss => Icon::Truss,
             BracesX => Icon::Brace,
+            SteelConnection | SteelConnections => Icon::Connector,
             TypicalRebar => Icon::Rebar,
             RebarView => Icon::RebarView,
             SteelSchedule => Icon::Schedule,
@@ -735,6 +748,8 @@ impl UiCommand {
             AnalyticalExport => t!("action-analytical-export"),
             Truss => t!("tool-truss"),
             BracesX => t!("action-braces-x"),
+            SteelConnection => t!("action-steel-connection"),
+            SteelConnections => t!("action-steel-connections"),
             TypicalRebar => t!("action-rebar-typical"),
             RebarView => t!("action-rebar-view"),
             SteelSchedule => t!("action-steel-schedule"),
@@ -940,6 +955,8 @@ impl UiCommand {
             AnalyticalExport => t!("cmd-desc-analytical-export"),
             Truss => t!("cmd-desc-truss"),
             BracesX => t!("cmd-desc-braces-x"),
+            SteelConnection => t!("cmd-desc-steel-connection"),
+            SteelConnections => t!("cmd-desc-steel-connections"),
             TypicalRebar => t!("cmd-desc-rebar-typical"),
             RebarView => t!("cmd-desc-rebar-view"),
             SteelSchedule => t!("cmd-desc-steel-schedule"),
@@ -1243,6 +1260,8 @@ impl UiCommand {
             AnalyticalExport => "analytical_export",
             Truss => "truss_create",
             BracesX => "braces_between_columns",
+            SteelConnection => "steel_connection_create",
+            SteelConnections => "steel_connections_auto",
             TypicalRebar => "rebar_typical",
             RebarView | SteelSchedule | StructuralPlan => "view_create",
             NumberStructure => "structure_number",
@@ -1600,6 +1619,7 @@ impl UiCommand {
             Measure => *tool == Tool::Measure,
             JoinGeometry => *tool == Tool::JoinGeometry { unjoin: false },
             UnjoinGeometry => *tool == Tool::JoinGeometry { unjoin: true },
+            SteelConnection => *tool == Tool::SteelConnection,
             AttachTop => *tool == Tool::AttachTop,
             Paint => *tool == Tool::Paint { remove: false },
             RemovePaint => *tool == Tool::Paint { remove: true },
@@ -1900,6 +1920,8 @@ pub fn run(state: &mut AppState, ctx: &egui::Context, command: UiCommand) {
             }
         }
         BracesX => crate::actions::braces_x(state),
+        SteelConnection => crate::actions::start_steel_connection(state),
+        SteelConnections => crate::actions::steel_connections(state),
         TypicalRebar => crate::actions::typical_rebar(state),
         RebarView => crate::actions::open_rebar_view(state),
         SteelSchedule => {

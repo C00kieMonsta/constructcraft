@@ -57,6 +57,7 @@ pub mod site;
 pub mod sketch;
 pub mod sketch_edit;
 pub mod stair;
+pub mod steel_connection;
 pub mod structural_profile;
 pub mod sweep;
 pub mod title_block;

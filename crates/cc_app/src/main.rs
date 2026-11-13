@@ -66,6 +66,7 @@ mod sketch_mode;
 mod snap_geom;
 mod stair_ui;
 mod state;
+mod steel_connection_dialog;
 mod systems_dialog;
 mod table;
 mod text_tool;

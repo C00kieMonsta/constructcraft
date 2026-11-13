@@ -1037,6 +1037,8 @@ mat-class = Clase
 mat-color = Color
 mat-cut-pattern = Patrón de corte
 mat-delete = Eliminar
+mat-import-brazil = Brasil (NBR)
+mat-import-brazil-tip = Importar aceros estructurales (NBR 7007/7008, ASTM), armaduras (NBR 7480) y hormigones C20–C90 (NBR 6118)
 mat-descriptive = Información descriptiva
 mat-duplicate = Duplicar
 mat-finish = Acabado
@@ -3133,6 +3135,9 @@ profile-series-glulam = Madera laminada encolada
 profile-series-shs = Tubos cuadrados (SHS)
 profile-series-rhs = Tubos rectangulares (RHS)
 profile-series-chs = Tubos circulares (CHS)
+profile-series-cs = Perfil I soldado CS (ABNT NBR 5884)
+profile-series-cvs = Perfil I soldado CVS (ABNT NBR 5884)
+profile-series-br = Barras redondas de acero (BR)
 
 # OBJ import
 action-import-obj = Importar OBJ…
@@ -3175,3 +3180,16 @@ browser-org-default-name = Organización { $n }
 browser-org-group-by = Agrupar por
 browser-org-then-by = Después por
 browser-org-none = Ninguno
+tx-create-steel-connection = Crear unión metálica
+action-steel-connections = Uniones Metálicas
+cmd-desc-steel-connections = Reconoce pilares, vigas, celosías y arriostramientos y aplica macros de uniones metálicas típicas (placa base, placa frontal, placa simple, cartela, empalme).
+msg-steel-connections-placed = { $count } uniones metálicas creadas ({ $skipped } nudos ya tenían unión).
+profile-series-u-lam = Perfil U laminado (ABNT NBR)
+profile-series-l-lam = Angular laminado L (ABNT NBR)
+
+group-steel-connections = Steel Connections
+action-steel-connection = Steel Connection
+cmd-desc-steel-connection = Pick two beams or columns (or one column) to configure and place a steel connection.
+tool-steel-connection = Steel Connection
+hint-steel-conn-first = Click the first beam or column for the steel connection
+hint-steel-conn-second = Click the second beam or column to configure the connection

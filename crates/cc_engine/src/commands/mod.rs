@@ -50,6 +50,7 @@ pub mod sheets;
 pub mod site;
 pub mod sketch;
 pub mod stair;
+pub mod steel_connection;
 pub mod structure;
 pub mod sweep;
 pub mod topography;
