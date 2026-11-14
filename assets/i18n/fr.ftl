@@ -1422,6 +1422,7 @@ wall-side-interior = face intérieure
 msg-no-rebar-type = Le projet n'a aucun type de barre.
 msg-rebar-host = Les armatures se placent dans les poutres et les poteaux.
 tx-create-rebar = Ajouter des armatures
+tx-copy-rebar = Copier les armatures
 default-rebar-view-name = Armatures { $n }
 msg-member-vertical = Les extrémités d'un contreventement ne peuvent pas être l'une au-dessus de l'autre.
 tx-create-brace = Créer un contreventement

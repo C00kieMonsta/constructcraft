@@ -1427,6 +1427,7 @@ wall-side-interior = 内侧
 msg-no-rebar-type = 项目中没有钢筋类型。
 msg-rebar-host = 钢筋放置在梁和柱中。
 tx-create-rebar = 添加钢筋
+tx-copy-rebar = 复制钢筋
 default-rebar-view-name = 钢筋 { $n }
 msg-member-vertical = 支撑的两端不能上下重叠。
 tx-create-brace = 创建支撑

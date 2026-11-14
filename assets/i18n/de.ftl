@@ -1422,6 +1422,7 @@ wall-side-interior = Innenseite
 msg-no-rebar-type = Das Projekt hat keine Stabtypen.
 msg-rebar-host = Bewehrung gehört in Träger und Stützen.
 tx-create-rebar = Bewehrung hinzufügen
+tx-copy-rebar = Bewehrung kopieren
 default-rebar-view-name = Bewehrung { $n }
 msg-member-vertical = Die Enden einer Strebe können nicht übereinander liegen.
 tx-create-brace = Strebe erstellen

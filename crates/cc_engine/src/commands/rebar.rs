@@ -1,4 +1,4 @@
-//! Reinforcement: sets of bars in beams and columns.
+//! Reinforcement: sets of bars in beams and columns, and copying a host's sets to others.
 
 use super::{add_element, created, edit, ids_json};
 use crate::error::{EngineError, Result};
@@ -414,5 +414,154 @@ impl Command for RebarTypical {
             Ok(todo.into_iter().map(|(level, ty, kind)| add_element(e, level, ty, kind)).collect::<Vec<_>>())
         })?;
         Ok(json!({"created": ids_json(&created), "skipped": skipped}))
+    }
+}
+
+/// What a host of reinforcement is, for copying its sets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HostKind {
+    Column,
+    Beam,
+    Wall,
+    Strip,
+}
+
+/// The kind of host `e` is; `None` for floors and slab foundations (their
+/// sets keep plan points) and for anything that takes no reinforcement.
+fn host_kind(e: &cc_core::Element) -> Option<HostKind> {
+    match &e.kind {
+        ElementKind::Column(_) => Some(HostKind::Column),
+        ElementKind::Beam(_) => Some(HostKind::Beam),
+        ElementKind::Wall(_) => Some(HostKind::Wall),
+        ElementKind::Foundation(f) if matches!(f.shape, cc_core::FoundationShape::Strip { .. }) => {
+            Some(HostKind::Strip)
+        }
+        _ => None,
+    }
+}
+
+/// Whether two loops are the same within a hundredth of a millimeter.
+fn same_loop(a: &[glam::DVec2], b: &[glam::DVec2]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(p, q)| p.distance(*q) < 1e-5)
+}
+
+/// Whether hosts `a` and `b` of one kind take the same sets: the same type,
+/// or (columns and beams) types with the same section as placed.
+fn same_section(p: &Project, a: &cc_core::Element, b: &cc_core::Element) -> bool {
+    if a.type_id == b.type_id {
+        return true;
+    }
+    if !matches!(a.kind, ElementKind::Column(_) | ElementKind::Beam(_)) {
+        return false;
+    }
+    let outline =
+        |e: &cc_core::Element| p.element_type(e.type_id).and_then(|t| p.type_section(&t.data)).map(|s| s.outline);
+    match (outline(a), outline(b)) {
+        (Some(x), Some(y)) => {
+            same_loop(&x.outer, &y.outer)
+                && x.holes.len() == y.holes.len()
+                && x.holes.iter().zip(&y.holes).all(|(h, k)| same_loop(h, k))
+        }
+        _ => false,
+    }
+}
+
+/// Copy the reinforcement sets of one host (all, or those of `sets`) to other
+/// hosts of the same kind and section in one step: columns and beams of the
+/// same type or of types with the same section, walls and strip footings of
+/// the same type. Each copy keeps its bar type, layout, cover, splices,
+/// partition and hand-given mark. Floors and slab foundations, whose sets keep
+/// plan points, are not copied. With `replace`, each target's own sets go
+/// first. Nothing is changed when a target does not match. Returns the
+/// created set ids and those replaced.
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields)]
+pub struct RebarCopy {
+    /// The host whose sets are copied: a column, beam, wall or strip footing.
+    pub from: u64,
+    /// The hosts that receive them.
+    pub to: Vec<u64>,
+    /// The sets of `from` to copy (default all).
+    #[serde(default)]
+    pub sets: Vec<u64>,
+    /// Delete the targets' own sets first (default false: add beside them).
+    #[serde(default)]
+    pub replace: Option<bool>,
+}
+
+impl Command for RebarCopy {
+    const NAME: &'static str = "rebar_copy";
+    const KIND: CommandKind = CommandKind::Edit;
+    fn run(self, s: &mut Session) -> Result<Value> {
+        let p = s.project();
+        let from = refs::element(p, self.from)?;
+        let source = p.element(from).ok_or_else(|| EngineError::not_found("host"))?;
+        let kind = host_kind(source).ok_or_else(|| {
+            EngineError::invalid(
+                "copy from a column, beam, wall or strip footing (sets of floors and slab foundations keep plan points)",
+            )
+        })?;
+        let own: Vec<ElementId> = p.rebar_of(from).map(|(e, _)| e.id).collect();
+        let mut sets: Vec<ElementId> = Vec::new();
+        for id in &self.sets {
+            let id = refs::element(p, *id)?;
+            if !own.contains(&id) {
+                return Err(EngineError::invalid(format!("set {} is not one of host {}'s", id.0, from.0)));
+            }
+            if !sets.contains(&id) {
+                sets.push(id);
+            }
+        }
+        if self.sets.is_empty() {
+            sets = own;
+        }
+        if sets.is_empty() {
+            return Err(EngineError::invalid("the host has no reinforcement to copy"));
+        }
+        if self.to.is_empty() {
+            return Err(EngineError::invalid("give at least one host to copy to"));
+        }
+        let mut targets: Vec<(ElementId, cc_core::LevelId)> = Vec::new();
+        for id in &self.to {
+            let id = refs::element(p, *id)?;
+            let e = p.element(id).ok_or_else(|| EngineError::not_found("host"))?;
+            if id == from {
+                return Err(EngineError::invalid("a host cannot be copied to itself"));
+            }
+            if host_kind(e) != Some(kind) || !same_section(p, source, e) {
+                return Err(EngineError::invalid(format!(
+                    "element {} is not a host of the same kind and section as {}",
+                    id.0, from.0
+                )));
+            }
+            if !targets.iter().any(|(t, _)| *t == id) {
+                targets.push((id, e.level));
+            }
+        }
+        let originals: Vec<(ElementTypeId, Rebar)> = sets
+            .iter()
+            .filter_map(|id| match p.element(*id).map(|e| (e.type_id, &e.kind)) {
+                Some((ty, ElementKind::Rebar(r))) => Some((ty, r.clone())),
+                _ => None,
+            })
+            .collect();
+        let replaced: Vec<ElementId> = match self.replace.unwrap_or(false) {
+            true => targets.iter().flat_map(|(t, _)| p.rebar_of(*t).map(|(e, _)| e.id)).collect(),
+            false => Vec::new(),
+        };
+        let created = edit(s, t!("tx-copy-rebar"), |e| {
+            for id in &replaced {
+                e.remove_element(*id);
+            }
+            let mut out = Vec::new();
+            for (target, level) in &targets {
+                for (ty, set) in &originals {
+                    let copy = Rebar { host: *target, ..set.clone() };
+                    out.push(add_element(e, *level, *ty, ElementKind::Rebar(copy)));
+                }
+            }
+            Ok(out)
+        })?;
+        Ok(json!({"created": ids_json(&created), "replaced": ids_json(&replaced)}))
     }
 }

@@ -1423,6 +1423,7 @@ wall-side-interior = внутрішня грань
 msg-no-rebar-type = У проєкті немає типів арматурних стрижнів.
 msg-rebar-host = Армування можна додавати до балок і колон.
 tx-create-rebar = Додати арматуру
+tx-copy-rebar = Копіювати арматуру
 default-rebar-view-name = Армування { $n }
 msg-member-vertical = Кінці розкоса не можуть розташовуватися один над одним.
 tx-create-brace = Створити розкіс

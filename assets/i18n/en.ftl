@@ -1427,6 +1427,7 @@ wall-side-interior = interior face
 msg-no-rebar-type = The project has no bar types.
 msg-rebar-host = Reinforcement goes in beams and columns.
 tx-create-rebar = Add Reinforcement
+tx-copy-rebar = Copy Reinforcement
 default-rebar-view-name = Reinforcement { $n }
 msg-member-vertical = The ends of a brace cannot be one above the other.
 tx-create-brace = Create Brace
