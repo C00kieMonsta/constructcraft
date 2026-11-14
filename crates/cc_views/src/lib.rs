@@ -114,10 +114,19 @@ pub fn generate_temporary(
             }
             d
         }
-        ViewKind::Elevation { direction } => elevation(project, geom, *direction, Look::of(project, view)),
+        ViewKind::Elevation { direction } => {
+            let mut d = elevation(project, geom, *direction, Look::of(project, view));
+            if let Some(frame) = projected::view_frame(view) {
+                annotate::projected_grids(&mut d, project, &frame, view.scale);
+            }
+            d
+        }
         ViewKind::Section { start, end, depth, .. } => {
             let mut d = section(project, geom, (*start, *end), *depth, view.scale, Look::of(project, view));
             joins::merge(project, &mut d);
+            if let Some(frame) = projected::view_frame(view) {
+                annotate::projected_grids(&mut d, project, &frame, view.scale);
+            }
             d
         }
         ViewKind::ThreeD { camera, analytical: true, .. } => projected::analytical(project, geom, camera),
@@ -250,6 +259,89 @@ mod tests {
         let project = cc_core::from_ron(include_str!("../../../examples/casa_simples.ccad")).unwrap();
         let geom = ModelGeometry::build(&project);
         (project, geom)
+    }
+
+    /// The names of the grids `d` draws, with where each line stands (x) when vertical.
+    fn grids_drawn(project: &Project, d: &Drawing2D) -> Vec<(String, f64)> {
+        let mut found: Vec<(String, f64)> = d
+            .prims
+            .iter()
+            .filter_map(|p| match p {
+                Prim::Line { a, b, style: LineStyle::Center, element: Some(id), .. } => {
+                    let cc_core::ElementKind::Grid(g) = &project.element(*id)?.kind else { return None };
+                    assert!((a.x - b.x).abs() < 1e-9 && b.y > a.y, "a vertical line, bubble on top");
+                    Some((g.name.clone(), a.x))
+                }
+                _ => None,
+            })
+            .collect();
+        found.sort_by(|a, b| a.0.cmp(&b.0));
+        found
+    }
+
+    /// Issue #332: elevations and sections draw the grids square to them,
+    /// where they stand; the view's graphics hide them.
+    #[test]
+    fn elevations_and_sections_draw_the_grids_square_to_them() {
+        let (mut project, geom) = sample();
+        let names = |found: &[(String, f64)]| found.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>();
+        let elevation = |project: &Project, direction| {
+            let view = project
+                .views
+                .values()
+                .find(|v| matches!(v.kind, ViewKind::Elevation { direction: d } if d == direction))
+                .unwrap();
+            grids_drawn(project, &generate(project, &geom, view).unwrap())
+        };
+        // Looking north (from the south): the grids along Y, at their x.
+        let south = elevation(&project, cc_core::Direction::South);
+        assert_eq!(names(&south), ["1", "2", "3"]);
+        for ((_, x), expected) in south.iter().zip([0.0, 5.0, 9.0]) {
+            assert!((x - expected).abs() < 1e-9, "{x} is not {expected}");
+        }
+        assert_eq!(names(&elevation(&project, cc_core::Direction::East)), ["A", "B"]);
+
+        // A section along X from -1 to 6 looking south: grid 3 stands past its end.
+        let id = project.views.values().find(|v| matches!(v.kind, ViewKind::Section { .. })).unwrap().id;
+        let section = |project: &mut Project, depth| {
+            let view = project.views.get_mut(&id).unwrap();
+            view.kind =
+                ViewKind::Section { start: DVec2::new(-1.0, 3.0), end: DVec2::new(6.0, 3.0), depth, segments: None };
+            let view = view.clone();
+            let d = generate(project, &geom, &view).unwrap();
+            // The bubbles stand over everything else the view draws.
+            let top = d.prims.iter().filter(|p| p.element().is_none()).filter_map(|p| match p {
+                Prim::Line { a, b, .. } => Some(a.y.max(b.y)),
+                _ => None,
+            });
+            let top = top.fold(f64::MIN, f64::max);
+            for p in &d.prims {
+                if let Prim::Line { b, style: LineStyle::Center, .. } = p {
+                    assert!(b.y > top, "the grid ends above the level lines");
+                }
+            }
+            grids_drawn(project, &d)
+        };
+        let cut = section(&mut project, 2.0);
+        assert_eq!(names(&cut), ["1", "2"]);
+        assert!((cut[0].1 + 1.0).abs() < 1e-9 && (cut[1].1 + 6.0).abs() < 1e-9, "{cut:?}");
+        // Grids that end before the cut and lie behind it are not seen.
+        for e in project.elements.values_mut() {
+            if let cc_core::ElementKind::Grid(g) = &mut e.kind
+                && g.name == "2"
+            {
+                (g.start.y, g.end.y) = (4.0, 7.5);
+            }
+        }
+        assert_eq!(names(&section(&mut project, 2.0)), ["1"]);
+
+        // Hidden with their category, in that view only.
+        let view = project.views.get_mut(&id).unwrap();
+        let mut hidden = view.graphics.category(Category::Grid);
+        hidden.visible = false;
+        view.graphics.set_category(Category::Grid, hidden);
+        assert!(section(&mut project, 2.0).is_empty());
+        assert_eq!(names(&elevation(&project, cc_core::Direction::South)), ["1", "2", "3"]);
     }
 
     /// Issue #154: the plan of the level below drawn halftone under a plan,

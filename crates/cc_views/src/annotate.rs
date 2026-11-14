@@ -226,6 +226,52 @@ fn grid_line(d: &mut Drawing2D, start: DVec2, end: DVec2, name: &str, bubble_mm:
     d.tag_text(center, name, bubble_mm * 0.45, Anchor::Center, 0.0, Some(id));
 }
 
+/// How far a grid may lean from the direction an elevation or a section
+/// looks in and still show there: the sine of the angle (about half a degree).
+const GRID_LEAN: f64 = 0.01;
+
+/// Grids in an elevation or a section looking through `frame` (issue #332):
+/// each grid running square to the view's plane, as a vertical line where it
+/// stands with its bubble on top, as tall as what the view draws. A section
+/// shows the grids that cross what it sees: between the ends of its line,
+/// and between its cut and its depth. They belong to their grid, so the
+/// view's graphics hide them with the category or one by one.
+pub fn projected_grids(d: &mut Drawing2D, project: &Project, frame: &crate::projected::Frame, scale: u32) {
+    let mm = mm(scale);
+    let levels = project.levels.iter().map(|l| frame.project(glam::DVec3::new(0.0, 0.0, l.elevation)).y);
+    let (lo, hi) = match d.bounds() {
+        Some((lo, hi)) => (lo.y, hi.y),
+        None => levels.fold((0.0_f64, 3.0_f64), |(lo, hi), y| (lo.min(y), hi.max(y))),
+    };
+    let (bottom, top) = (lo - 5.0 * mm, hi + 8.0 * mm);
+    if !(bottom.is_finite() && top.is_finite()) {
+        return;
+    }
+    for e in project.elements.values() {
+        let ElementKind::Grid(grid) = &e.kind else { continue };
+        let at = |p: DVec2| glam::DVec3::new(p.x, p.y, 0.0);
+        let (a, b) = (frame.project(at(grid.start)).x, frame.project(at(grid.end)).x);
+        let length = grid.start.distance(grid.end);
+        if !(a.is_finite() && b.is_finite() && length > 1e-9) || (a - b).abs() > length * GRID_LEAN {
+            continue;
+        }
+        let x = (a + b) * 0.5;
+        if frame.crop_x.is_some_and(|(x0, x1)| x < x0 - 1e-6 || x > x1 + 1e-6) {
+            continue;
+        }
+        let (near, far) = (frame.depth(at(grid.start)), frame.depth(at(grid.end)));
+        let (near, far) = (near.min(far), near.max(far));
+        if frame.near.is_some_and(|n| far < n - 1e-6) || frame.far.is_some_and(|f| near > f + 1e-6) {
+            continue;
+        }
+        let bubble = match project.element_type(e.type_id).map(|t| &t.data) {
+            Some(TypeData::Grid { bubble }) => *bubble,
+            _ => 8.0,
+        };
+        grid_line(d, DVec2::new(x, bottom), DVec2::new(x, top), &grid.name, bubble, mm, e.id);
+    }
+}
+
 fn opening_tags(
     d: &mut Drawing2D,
     project: &Project,
