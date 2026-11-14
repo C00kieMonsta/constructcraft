@@ -2967,16 +2967,8 @@ fn typed_end(state: &AppState, a: DVec2, p: DVec2) -> DVec2 {
 fn measure_tool(ui: &Ui, resp: &Response, painter: &Painter, state: &mut AppState, xf: &Xf, drawing: &Drawing2D) {
     let Some(raw) = resp.hover_pos().map(|p| xf.to_world(p)) else { return };
     let shift = ui.input(|i| i.modifiers.shift);
-    // The view's own linework (not its underlay).
-    let ends: Vec<DVec2> = drawing
-        .own_prims()
-        .iter()
-        .filter_map(|p| match p {
-            cc_views::Prim::Line { a, b, .. } => Some([*a, *b]),
-            _ => None,
-        })
-        .flatten()
-        .collect();
+    // The view's own linework (not its underlay or its hatches).
+    let ends: Vec<DVec2> = drawing.snap_lines().into_iter().flat_map(|(a, b)| [a, b]).collect();
     let points = state.interaction.points.clone();
     let anchor = match points.as_slice() {
         [a] => Some(*a),
@@ -3096,16 +3088,8 @@ fn dimension_tool(
     match mode {
         DimensionMode::Aligned | DimensionMode::Linear | DimensionMode::Ordinate => {
             let shift = ui.input(|i| i.modifiers.shift);
-            // Snap to the visible linework of the view (not its underlay).
-            let ends: Vec<DVec2> = drawing
-                .own_prims()
-                .iter()
-                .filter_map(|p| match p {
-                    cc_views::Prim::Line { a, b, .. } => Some([*a, *b]),
-                    _ => None,
-                })
-                .flatten()
-                .collect();
+            // Snap to the visible linework of the view (not its underlay or its hatches).
+            let ends: Vec<DVec2> = drawing.snap_lines().into_iter().flat_map(|(a, b)| [a, b]).collect();
             let linear = mode != DimensionMode::Aligned;
             // Ordinate dimensions always continue from their origin.
             let ordinate = mode == DimensionMode::Ordinate;

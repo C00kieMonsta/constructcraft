@@ -11,7 +11,7 @@ use cc_core::level_mark::{LevelMark, MAX_LEVEL};
 use cc_core::{ElementId, ElementKind, ElementTypeId, TypeData, View, ViewKind};
 use cc_engine::Ref;
 use cc_engine::commands::level_mark::LevelMarkCreate;
-use cc_views::{Drawing2D, Prim, format};
+use cc_views::{Drawing2D, format};
 use egui::{Painter, Response, Stroke, Ui};
 use glam::DVec2;
 
@@ -34,14 +34,7 @@ fn snap(ui: &Ui, state: &mut AppState, view: &View, raw: DVec2, xf: &Xf, drawing
     if view.is_plan() {
         return snap_at(state, view.level(), raw, None, &[], xf.scale, shift);
     }
-    let lines: Vec<(DVec2, DVec2)> = drawing
-        .own_prims()
-        .iter()
-        .filter_map(|p| match p {
-            Prim::Line { a, b, .. } => Some((*a, *b)),
-            _ => None,
-        })
-        .collect();
+    let lines = drawing.snap_lines();
     let ends: Vec<DVec2> = lines.iter().flat_map(|(a, b)| [*a, *b]).collect();
     let s = snap_at(state, None, raw, None, &ends, xf.scale, shift);
     if !s.is_free() {
