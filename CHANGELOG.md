@@ -6,8 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-14
+
 ### Added
 
+- Wall niches (#304). *Architecture → Build → Niche* places a niche in the face of a wall on the side clicked: a hosted component, like a door or a window, that recesses one face instead of opening the wall through, with a width, height, depth and sill from its type. It moves, is copied and deleted with its wall, which stays whole for joins, rooms, reinforcement and wall framing, and its volume is taken out of the wall's, exactly along arc walls; a niche deeper than the wall stops 1 cm short of the other face. Plans draw a cut niche as an open face with its sides and back, and dash one above or below the cut; elevations, sections and 3D views show the recess, and schedules have a *Niches* category. IFC export writes an `IfcOpeningElement` `RECESS` with `ConstructCAD_Niche`; import does not read niches back yet. Niches are rectangular. Commands: `niche_type_create`, `niche_create`; `elements_turn` moves a niche to the other face.
 - Photorealistic rendering of 3D views (#359). *View → Graphics → Render* opens a window that path traces the active 3D view on the processor (the new `cc_raytracing` crate, over the GPL-3.0-only `sort-raytracing` library), progressively and stoppable, under a generated sky, ground and the view's sun, with glass that lets the sun in, material textures, painted faces and a clay mode; a region can be rendered alone, exposure and tone mapping change without rendering again, and the image is saved as PNG, JPEG, EXR or HDR. The settings are kept per view (`view_set`/`view_get` `render`, one undo step per window session), and `view_render` renders and saves without the GUI.
 - Outlines from walls on the wall face asked for (#311). A sketch's *From Walls* follows the face chosen under *Wall face* in the options bar (finish or core, exterior or interior, core center, or centerline), each side on that face of its own wall, so a slab can stop at the core inside the plaster. `floor_create`, `ceiling_create`, `roof_create` and `foundation_slab_create` take it as `wall_face` with `from_walls`.
 - Object snaps to beams, footings and every element a view draws (#317). The location lines, faces and side midpoints of straight beams and footings are snap points, with the centers of columns, piles and pad footings, and the tools also snap to the lines of every element the active view draws. *Preferences → General → Object snaps* turns object snaps on or off as a whole, for the view's elements, and per kind of point.
@@ -542,7 +545,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Closing the last open view tab crashed the application.
 - Per-wall volumes in schedules were wrong for walls joined at corners; they are now computed exactly.
 
-[Unreleased]: https://github.com/francisreboucas/constructcraft/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/francisreboucas/constructcraft/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/francisreboucas/constructcraft/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/francisreboucas/constructcraft/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/francisreboucas/constructcraft/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/francisreboucas/constructcraft/compare/v0.9.1...v0.10.0
