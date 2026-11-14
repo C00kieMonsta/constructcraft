@@ -33,6 +33,9 @@ pub struct ModifyOptions {
     pub point_elevation: f64,
     /// Elevation of the next building pad sketched, meters above the level.
     pub pad_elevation: f64,
+    /// The face of the walls a sketch's *From Walls* follows (`None`: the
+    /// outside finish faces, the inside ones for ceilings).
+    pub wall_face: Option<cc_core::LocationLine>,
 }
 
 impl Default for ModifyOptions {
@@ -46,6 +49,7 @@ impl Default for ModifyOptions {
             offset: 1.0,
             point_elevation: 0.0,
             pad_elevation: 0.0,
+            wall_face: None,
         }
     }
 }

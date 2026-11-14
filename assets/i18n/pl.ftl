@@ -2245,6 +2245,7 @@ group-mode = Tryb
 group-sketch = Szkic
 sketch-chain = Łańcuch
 sketch-sides = Boki
+sketch-wall-face = Lico ściany
 hint-sketch-select = Kliknij krzywą, aby ją zaznaczyć (Ctrl dodaje) · dwuklik wybiera jej łańcuch · przeciągnij okno (w lewo: dotykane) · przeciągnij uchwyty, aby ją zmienić · Delete usuwa
 hint-sketch-line = Kliknij początek linii
 hint-sketch-line-next = Kliknij koniec linii · wpisz długość + Enter · Esc przerywa łańcuch

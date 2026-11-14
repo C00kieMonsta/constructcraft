@@ -2247,6 +2247,7 @@ group-mode = ໂໝດ
 group-sketch = ແບບຮ່າງ
 sketch-chain = ຕໍ່ເນື່ອງ
 sketch-sides = ຈຳນວນດ້ານ
+sketch-wall-face = ໜ້າຝາ
 hint-sketch-select = ຄລິກເສັ້ນໂຄ້ງເພື່ອເລືອກ (Ctrl ເພີ່ມ) · ຄລິກສອງເທື່ອເລືອກສາຍຂອງມັນ · ລາກກອບ (ໄປຊ້າຍ: ທີ່ສຳຜັດ) · ລາກຈຸດຈັບເພື່ອປ່ຽນ · Delete ລຶບ
 hint-sketch-line = ຄລິກຈຸດເລີ່ມຂອງເສັ້ນ
 hint-sketch-line-next = ຄລິກຈຸດສຸດທ້າຍຂອງເສັ້ນ · ພິມຄວາມຍາວ + Enter · Esc ຢຸດການຕໍ່ເນື່ອງ

@@ -2245,6 +2245,7 @@ group-mode = モード
 group-sketch = スケッチ
 sketch-chain = チェーン
 sketch-sides = 辺の数
+sketch-wall-face = 壁の面
 hint-sketch-select = 曲線をクリックして選択 (Ctrl で追加) · ダブルクリックでチェーンを選択 · ドラッグで窓選択 (左方向: 交差) · グリップをドラッグして変更 · Delete で削除
 hint-sketch-line = 線の始点をクリック
 hint-sketch-line-next = 線の終点をクリック · 長さを入力して Enter · Esc でチェーンを終了

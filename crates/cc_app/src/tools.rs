@@ -10,7 +10,6 @@ use cc_core::{
 use cc_engine::Ref;
 use cc_engine::commands::{create, modify as modify_cmd, views};
 use cc_engine::default_top;
-pub use cc_engine::walls_loop;
 use cc_geom::{ModelGeometry, polygon};
 use cc_views::{Drawing2D, format};
 use egui::{Color32, Key, Painter, Pos2, Response, Stroke, Ui};

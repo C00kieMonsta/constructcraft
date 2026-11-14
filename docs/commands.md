@@ -537,6 +537,7 @@ No parameters.
 | `openings` | [[[x, y], …], …] | optional | Openings through the slab (shafts, stairwells): closed outlines inside the boundary, apart from each other. |
 | `structural` | boolean | optional | A structural slab, one that takes reinforcement (default false). |
 | `type` | id or name | optional | Type id or name (default: the category's default type). |
+| `wall_face` | string | optional | With `from_walls`: the face of each wall the outline follows, `FinishExterior`, `FinishInterior`, `CoreExterior`, `CoreInterior`, `CoreCenter` or `Centerline`, where exterior is the side outside the loop of walls and the core is a wall's structure layers. Each side goes to that face of its own wall. Without it the outline is the walls' boundary moved out (in, for ceilings) by half the thickest wall. |
 
 ### `floor_opening_add`
 
@@ -568,6 +569,7 @@ No parameters.
 | `level` | id or name | optional | Level id or name (default: the lowest level). |
 | `offset` | number | optional | Floors: top above the level (default 0). Ceilings: bottom above the level (default 2.6; 8'-0" in imperial projects). Roofs: base above the level (default: top of the tallest wall). |
 | `type` | id or name | optional | Type id or name (default: the category's default type). |
+| `wall_face` | string | optional | With `from_walls`: the face of each wall the outline follows, `FinishExterior`, `FinishInterior`, `CoreExterior`, `CoreInterior`, `CoreCenter` or `Centerline`, where exterior is the side outside the loop of walls and the core is a wall's structure layers. Each side goes to that face of its own wall. Without it the outline is the walls' boundary moved out (in, for ceilings) by half the thickest wall. |
 
 ### `roof_create`
 
@@ -583,6 +585,7 @@ No parameters.
 | `offset` | number | optional | Floors: top above the level (default 0). Ceilings: bottom above the level (default 2.6; 8'-0" in imperial projects). Roofs: base above the level (default: top of the tallest wall). |
 | `overhang` | number | optional | Overhang beyond the outline, meters (default 0.5). |
 | `type` | id or name | optional | Type id or name (default: the category's default type). |
+| `wall_face` | string | optional | With `from_walls`: the face of each wall the outline follows, `FinishExterior`, `FinishInterior`, `CoreExterior`, `CoreInterior`, `CoreCenter` or `Centerline`, where exterior is the side outside the loop of walls and the core is a wall's structure layers. Each side goes to that face of its own wall. Without it the outline is the walls' boundary moved out (in, for ceilings) by half the thickest wall. |
 
 ### `roof_edge_set`
 
@@ -1024,6 +1027,7 @@ No parameters.
 | `level` | id or name | optional | Level id or name (default: the lowest level). |
 | `offset` | number | optional | Floors: top above the level (default 0). Ceilings: bottom above the level (default 2.6; 8'-0" in imperial projects). Roofs: base above the level (default: top of the tallest wall). |
 | `type` | id or name | optional | Type id or name (default: the category's default type). |
+| `wall_face` | string | optional | With `from_walls`: the face of each wall the outline follows, `FinishExterior`, `FinishInterior`, `CoreExterior`, `CoreInterior`, `CoreCenter` or `Centerline`, where exterior is the side outside the loop of walls and the core is a wall's structure layers. Each side goes to that face of its own wall. Without it the outline is the walls' boundary moved out (in, for ceilings) by half the thickest wall. |
 
 ### `footings_under_columns`
 

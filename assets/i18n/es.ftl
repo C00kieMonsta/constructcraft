@@ -2245,6 +2245,7 @@ group-mode = Modo
 group-sketch = Boceto
 sketch-chain = Encadenar
 sketch-sides = Lados
+sketch-wall-face = Cara del muro
 hint-sketch-select = Haga clic en una curva para seleccionarla (Ctrl añade) · doble clic elige su cadena · arrastre una ventana (hacia la izquierda: las que toca) · arrastre los pinzamientos para cambiarla · Supr la elimina
 hint-sketch-line = Haga clic en el inicio de la línea
 hint-sketch-line-next = Haga clic en el final de la línea · escriba una longitud + Enter · Esc detiene la cadena
