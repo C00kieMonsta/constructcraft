@@ -23,6 +23,7 @@ pub fn category_icon(category: Category) -> Icon {
         Category::Wall => Icon::Wall,
         Category::Door => Icon::Door,
         Category::Window => Icon::Window,
+        Category::Niche => Icon::Niche,
         Category::Floor => Icon::Floor,
         Category::Ceiling => Icon::Ceiling,
         Category::Roof => Icon::Roof,
@@ -671,7 +672,7 @@ fn architecture_tab(ui: &mut Ui, state: &mut AppState) {
     use Category::*;
     let buttons = |list: &[Category]| list.iter().map(|c| place(*c)).collect::<Vec<_>>();
     group(ui, t!("group-build"), |ui| {
-        command_buttons(ui, state, &buttons(&[Wall, Door, Window]));
+        command_buttons(ui, state, &buttons(&[Wall, Door, Window, Niche]));
         command_button(ui, state, UiCommand::CurtainGrid);
     });
     group(ui, t!("group-horizontal"), |ui| command_buttons(ui, state, &buttons(&[Floor, Ceiling, Roof, Shaft])));

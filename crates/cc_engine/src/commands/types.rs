@@ -48,6 +48,9 @@ pub(crate) fn validate(def: &ComponentDef) -> Result<()> {
     {
         return Err(EngineError::invalid("a door or window needs an opening with a positive width and height"));
     }
+    if def.kind == cc_core::ComponentKind::Niche && (def.opening_size().is_none() || def.opening_depth().is_none()) {
+        return Err(EngineError::invalid("a niche needs an opening with a positive width, height and depth"));
+    }
     let resolved = def.resolve_connectors(&Default::default());
     if let Some(c) = def.connectors.iter().enumerate().find(|(i, _)| !resolved.iter().any(|k| k.index == *i)) {
         return Err(EngineError::invalid(format!("connector '{}': invalid position or diameter", c.1.name)));
@@ -452,6 +455,7 @@ pub fn starter_def(kind: ComponentKind) -> Option<ComponentDef> {
         }
         ComponentKind::Door => cc_core::openings::door_def(&names(), 0.8, 2.1, ""),
         ComponentKind::Window => cc_core::openings::window_def(&names(), 1.2, 1.2, 1.0, ""),
+        ComponentKind::Niche => cc_core::openings::niche_def(&names(), (0.6, 0.6, 0.1, 0.9)),
         ComponentKind::TitleBlock | ComponentKind::Detail => return None,
     })
 }

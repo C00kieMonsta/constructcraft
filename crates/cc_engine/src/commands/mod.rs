@@ -39,6 +39,7 @@ pub mod mass;
 pub mod materials;
 pub mod mep;
 pub mod modify;
+pub mod niche;
 pub mod pad;
 pub mod paint;
 pub mod phases;

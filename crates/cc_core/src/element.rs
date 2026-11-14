@@ -37,6 +37,9 @@ pub enum ElementKind {
     Wall(Wall),
     Door(Hosted),
     Window(Hosted),
+    /// A recess in one face of its host wall (the left one; the right with
+    /// `flip_facing`), as deep as its type says: see [`crate::openings`].
+    Niche(Hosted),
     Floor(Floor),
     Ceiling(Ceiling),
     Roof(Roof),
@@ -108,6 +111,7 @@ impl Element {
             ElementKind::Wall(_) => Category::Wall,
             ElementKind::Door(_) => Category::Door,
             ElementKind::Window(_) => Category::Window,
+            ElementKind::Niche(_) => Category::Niche,
             ElementKind::Floor(_) => Category::Floor,
             ElementKind::Ceiling(_) => Category::Ceiling,
             ElementKind::Roof(_) => Category::Roof,
@@ -239,14 +243,14 @@ impl Element {
 
     pub fn as_hosted(&self) -> Option<&Hosted> {
         match &self.kind {
-            ElementKind::Door(h) | ElementKind::Window(h) => Some(h),
+            ElementKind::Door(h) | ElementKind::Window(h) | ElementKind::Niche(h) => Some(h),
             _ => None,
         }
     }
 
     pub fn as_hosted_mut(&mut self) -> Option<&mut Hosted> {
         match &mut self.kind {
-            ElementKind::Door(h) | ElementKind::Window(h) => Some(h),
+            ElementKind::Door(h) | ElementKind::Window(h) | ElementKind::Niche(h) => Some(h),
             _ => None,
         }
     }
@@ -421,6 +425,7 @@ impl Element {
             // Placed by their hosts.
             ElementKind::Door(_)
             | ElementKind::Window(_)
+            | ElementKind::Niche(_)
             | ElementKind::Rebar(_)
             | ElementKind::Valve(_)
             | ElementKind::Connection(_) => {}

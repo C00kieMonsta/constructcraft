@@ -278,7 +278,7 @@ fn multi_edit(ui: &mut Ui, state: &mut AppState, category: Category) {
             actions::run_command(state, command);
         }
         // The level, for elements that stand on one (doors and windows follow their walls).
-        if !matches!(category, Category::Door | Category::Window) {
+        if !matches!(category, Category::Door | Category::Window | Category::Niche) {
             let level0 = elements[0].level;
             let same_level = elements.iter().all(|e| e.level == level0);
             let mut level = same_level.then_some(level0);
@@ -608,7 +608,7 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
             }
             crate::curtain_ui::palette_rows(ui, state, &el, w);
         }
-        ElementKind::Door(h) | ElementKind::Window(h) => {
+        ElementKind::Door(h) | ElementKind::Window(h) | ElementKind::Niche(h) => {
             section(ui, "constraints", t!("section-constraints"), |ui| {
                 readonly_row(ui, &t!("prop-level"), state.project().level_name(el.level).to_string());
                 let host = state.project().element(h.host).map(|w| w.id.to_string()).unwrap_or_default();
@@ -619,7 +619,7 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
                     }
                 });
                 // Doors too may stand above the wall's base (a raised floor, a step).
-                let sill_label = if category == Category::Window { t!("prop-sill") } else { t!("prop-base-offset") };
+                let sill_label = if category == Category::Door { t!("prop-base-offset") } else { t!("prop-sill") };
                 length_row(ui, state, &sill_label, id, "sill", h.sill_height, |e, v| {
                     if let Some(h) = e.as_hosted_mut() {
                         h.sill_height = v.max(0.0);

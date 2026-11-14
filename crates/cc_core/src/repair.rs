@@ -24,7 +24,7 @@ fn top_ok(top: WallTop) -> bool {
 fn element_is_valid(e: &Element) -> bool {
     match &e.kind {
         ElementKind::Wall(w) => finite(&[w.base_offset, w.height]) && finite_points(&[w.start, w.end]) && top_ok(w.top),
-        ElementKind::Door(h) | ElementKind::Window(h) => finite(&[h.offset, h.sill_height]),
+        ElementKind::Door(h) | ElementKind::Window(h) | ElementKind::Niche(h) => finite(&[h.offset, h.sill_height]),
         ElementKind::Floor(f) => f.height_offset.is_finite() && f.boundary.len() >= 3 && finite_points(&f.boundary),
         ElementKind::Ceiling(c) => c.height_offset.is_finite() && c.boundary.len() >= 3 && finite_points(&c.boundary),
         ElementKind::Roof(r) => {
@@ -446,7 +446,7 @@ impl Project {
                     let type_ok = self.element_type(e.type_id).is_some_and(|t| t.category() == e.category());
                     let level_ok = self.level(e.level).is_some();
                     let host_ok = match &e.kind {
-                        ElementKind::Door(h) | ElementKind::Window(h) => {
+                        ElementKind::Door(h) | ElementKind::Window(h) | ElementKind::Niche(h) => {
                             self.element(h.host).is_some_and(|w| w.as_wall().is_some())
                         }
                         // Wall bars in walls, slab bars in floors and foundation

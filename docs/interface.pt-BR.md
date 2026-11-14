@@ -230,6 +230,17 @@ Cortinas de vidro são paredes de um tipo cortina (um projeto sem tipo cortina g
 - **Lado e hospedeiro**: as propriedades de um guarda-corpo hospedado mostram o hospedeiro e o *Lado* (subindo), que pode ser trocado. *Soltar do hospedeiro* o torna um guarda-corpo comum, que mantém o caminho que tem em planta.
 - Pela linha de comando ou MCP: `stair_railings_add` (com `near`, para o lado mais próximo de um ponto) e `railing_host_set` (põe um guarda-corpo existente numa escada ou rampa, no lado por onde seu caminho passa se `side` não for dado; troca o lado ou o recuo; ou o solta com `detach`).
 
+## Nichos
+
+*Arquitetura → Construir → Nicho* insere um nicho: um rebaixo em uma das faces de uma parede, hospedado como uma porta ou janela, mas sem atravessar a parede. Clique numa parede em planta (ou numa vista 3D) e o nicho fica na face do lado clicado; o primeiro nicho de um projeto traz um tipo padrão, de 60 × 60 cm e 10 cm de profundidade, com a base 90 cm acima da base da parede (2'-0" × 2'-0" × 4" a 3'-0" em projetos imperiais).
+
+- Um tipo de nicho é um componente com os parâmetros *Largura*, *Altura*, *Profundidade* e *Peitoril*, editados nas **Propriedades do tipo**; `niche_type_create` cria um com as medidas dadas. Numa parede mais fina que a profundidade mais 1 cm, o nicho para 1 cm antes da outra face: uma abertura que atravessa a parede é uma porta ou uma janela.
+- A paleta de propriedades tem a distância do nicho ao longo da parede e o peitoril; *Girar* (ou `flip_facing`) o passa para a outra face da parede. Ele acompanha a parede quando ela se move e é excluído com ela.
+- A parede continua inteira atrás do nicho: não é dividida, e ambientes, junções e a estrutura leve da parede o ignoram. As plantas mostram o nicho cortado como uma face aberta com as laterais e o fundo, e tracejam o que fica todo abaixo ou acima do corte; elevações, cortes e vistas 3D mostram o rebaixo, que também seleciona o nicho.
+- O volume da parede já desconta o nicho. Um quantitativo da categoria *Nichos* lista cada um com medidas, peitoril, parede e o volume retirado.
+- A exportação IFC grava o nicho como um `IfcOpeningElement` de tipo predefinido `RECESS`, com a profundidade do nicho, abrindo a parede (`IfcRelVoidsElement`), e as medidas no conjunto de propriedades `ConstructCAD_Niche`. A importação ainda não lê nichos de volta.
+- Um nicho que se sobreporia a uma porta, a uma janela ou a outro nicho da mesma parede não corta nada. Os nichos são retangulares; topo em arco e peças próprias (prateleira, forro) ainda não estão disponíveis.
+
 ## Shafts
 
 *Arquitetura → Pisos e coberturas → Shaft* (`SF`) esboça em planta o contorno de uma abertura vertical (um shaft de instalações, um poço de elevador ou de escada, um vazio de iluminação), como o contorno de um piso; ela sobe do seu nível até o nível mais alto acima (ou até um nível ou altura definidos nas propriedades). Um projeto sem tipo de shaft ganha um na primeira vez.

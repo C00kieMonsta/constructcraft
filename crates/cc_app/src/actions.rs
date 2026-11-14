@@ -234,6 +234,10 @@ pub fn activate_category_tool(state: &mut AppState, category: Category) {
         let kinds = cc_core::ValveKind::ALL.iter().map(|k| k.name().to_string()).collect();
         run_command(state, cc_engine::commands::valve::ValveTypeCreate { kinds, ..Default::default() });
     }
+    // A project without a niche type gets one.
+    if category == Category::Niche && state.project().default_type(Category::Niche).is_none() {
+        run_command(state, cc_engine::commands::niche::NicheTypeCreate::default());
+    }
     if category == Category::Sweep && state.project().default_type(Category::Sweep).is_none() {
         run_command(state, cc_engine::commands::sweep::SweepTypeCreate::default());
     }
@@ -436,9 +440,9 @@ fn component_loaded(state: &mut AppState, result: cc_engine::Result<serde_json::
                     return;
                 }
                 state.set_tool(match state.project().element_type(type_id).map(|t| t.category()) {
-                    Some(category @ (cc_core::Category::Door | cc_core::Category::Window)) => {
-                        crate::tools::Tool::Hosted { category, type_id }
-                    }
+                    Some(
+                        category @ (cc_core::Category::Door | cc_core::Category::Window | cc_core::Category::Niche),
+                    ) => crate::tools::Tool::Hosted { category, type_id },
                     _ => crate::tools::Tool::Component { type_id },
                 });
             }

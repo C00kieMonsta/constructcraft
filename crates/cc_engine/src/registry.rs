@@ -212,6 +212,8 @@ registry![
         create::DoorCreate,
         doors::DoorTypeCreate,
         create::WindowCreate,
+        niche::NicheTypeCreate,
+        niche::NicheCreate,
         create::FloorCreate,
         create::FloorOpeningAdd,
         create::FloorOpeningRemove,

@@ -142,6 +142,7 @@ pub fn plan_of(
     for (e, _) in project.walls().filter(|(e, _)| e.level == level && shown(e)) {
         if let Some(g) = geom.walls.get(&e.id) {
             draw_wall(&mut d, project, g, cut_z, spacing, detail);
+            draw_recesses(&mut d, g, cut_z, &|id| project.element(id).is_some_and(shown));
             if !structural {
                 draw_openings(&mut d, project, geom, g, (ceiling, cut_z), (detail, scale));
             }
@@ -633,7 +634,9 @@ fn draw_wall(d: &mut Drawing2D, project: &Project, g: &WallGeom, cut_z: f64, spa
             // with a core that reaches them).
             let face = |v: f64, plain: (f64, f64)| if layers.is_empty() { plain } else { g.layer_span(c, i, count, v) };
             for (side, (u0, u1)) in [(-1.0, face(-h, c.right)), (1.0, face(h, c.left))] {
-                for (a, b) in g.face_segments(side, u0, u1) {
+                // A cut wall's face is open where a niche is cut too.
+                let cut_at = if state == ColumnCut::Cut { cut_z } else { f64::NAN };
+                for (a, b) in g.face_segments_at(side, u0, u1, cut_at) {
                     d.polyline(&g.path(a, b, side * h), false, style, id);
                 }
             }
@@ -658,6 +661,31 @@ fn draw_wall(d: &mut Drawing2D, project: &Project, g: &WallGeom, cut_z: f64, spa
         }
     }
 }
+
+/// The niches of a wall in plan. One the cut passes through opens the wall's
+/// face: the wall's fill is covered from the face to the recess's back, and
+/// its sides and back are cut lines. One wholly below or above the cut is
+/// dashed. The lines and the cover belong to the niche, so hiding niches
+/// shows the wall whole.
+fn draw_recesses(d: &mut Drawing2D, g: &WallGeom, cut_z: f64, shown: &dyn Fn(cc_core::ElementId) -> bool) {
+    for r in g.recesses.iter().filter(|r| shown(r.element)) {
+        let id = Some(r.element);
+        let (face, back) = r.across(g.half);
+        let cut = r.z0 <= cut_z && cut_z <= r.z1;
+        if cut {
+            let mut area = g.path(r.u0, r.u1, face);
+            area.extend(g.path(r.u1, r.u0, back));
+            d.fill(area, PAPER, id);
+        }
+        let style = if cut { LineStyle::Cut } else { LineStyle::Hidden };
+        d.line(g.world(r.u0, face), g.world(r.u0, back), style, id);
+        d.polyline(&g.path(r.u0, r.u1, back), false, style, id);
+        d.line(g.world(r.u1, back), g.world(r.u1, face), style, id);
+    }
+}
+
+/// The paper showing through a cut niche, over its wall's fill.
+const PAPER: [u8; 4] = [255, 255, 255, 255];
 
 /// A curtain wall in plan: its mullions (cut with their material's pattern,
 /// or seen below the cut), a line along each glass panel and the outline of

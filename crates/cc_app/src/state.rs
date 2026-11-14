@@ -580,11 +580,12 @@ impl AppState {
         }
         .category();
         let id = self.session.doc.edit(name, |e| {
-            let mark = if matches!(category, cc_core::Category::Door | cc_core::Category::Window) {
-                e.project().next_mark(category)
-            } else {
-                String::new()
-            };
+            let mark =
+                if matches!(category, cc_core::Category::Door | cc_core::Category::Window | cc_core::Category::Niche) {
+                    e.project().next_mark(category)
+                } else {
+                    String::new()
+                };
             let id = ElementId(e.alloc_id());
             e.add_element(cc_core::Element {
                 id,

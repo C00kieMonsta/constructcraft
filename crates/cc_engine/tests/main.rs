@@ -39,6 +39,7 @@ mod lightning_cabling;
 mod macros;
 mod mep_trays_valves;
 mod multi_edit;
+mod niche;
 mod obj;
 mod pad;
 mod phases;
