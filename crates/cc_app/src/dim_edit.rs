@@ -561,7 +561,7 @@ pub fn temps(state: &AppState, drawing: &Drawing2D) -> Vec<Temp> {
                 probe(c.position, d, &skip);
             }
         }
-        ElementKind::Door(h) | ElementKind::Window(h) => {
+        ElementKind::Door(h) | ElementKind::Window(h) | ElementKind::Niche(h) => {
             let Some(w) = project.element(h.host).and_then(|e| e.as_wall()) else { return out };
             let Some(u) = (w.end - w.start).try_normalize() else { return out };
             let center = w.start + u * h.offset;

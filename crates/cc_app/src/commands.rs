@@ -263,10 +263,11 @@ pub const DEVICE_TOOLS: [cc_core::DeviceKind; 4] = [
 ];
 
 /// Model categories placed by a tool of their own (dimensions and text have their own commands).
-const PLACED: [Category; 25] = [
+const PLACED: [Category; 26] = [
     Category::Wall,
     Category::Door,
     Category::Window,
+    Category::Niche,
     Category::Floor,
     Category::Ceiling,
     Category::Roof,
@@ -1251,6 +1252,7 @@ impl UiCommand {
             Place(Category::Wall) => "wall_create",
             Place(Category::Door) => "door_create",
             Place(Category::Window) => "window_create",
+            Place(Category::Niche) => "niche_create",
             Place(Category::Floor) => "floor_create",
             Place(Category::Ceiling) => "ceiling_create",
             Place(Category::Roof) => "roof_create",
@@ -1717,6 +1719,7 @@ fn place_label(category: Category) -> String {
         Category::Wall => t!("tool-wall"),
         Category::Door => t!("tool-door"),
         Category::Window => t!("tool-window"),
+        Category::Niche => t!("tool-niche"),
         Category::Floor => t!("tool-floor"),
         Category::Ceiling => t!("tool-ceiling"),
         Category::Roof => t!("tool-roof"),
@@ -1765,6 +1768,7 @@ fn place_description(category: Category) -> String {
         Category::Wall => t!("cmd-desc-wall"),
         Category::Door => t!("cmd-desc-door"),
         Category::Window => t!("cmd-desc-window"),
+        Category::Niche => t!("cmd-desc-niche"),
         Category::Floor => t!("cmd-desc-floor"),
         Category::Ceiling => t!("cmd-desc-ceiling"),
         Category::Roof => t!("cmd-desc-roof"),

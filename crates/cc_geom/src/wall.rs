@@ -14,6 +14,36 @@ pub struct Opening {
     pub z1: f64,
 }
 
+/// A recess in one face of a wall (a niche): the wall is open from that
+/// face `depth` in, between `u0` and `u1` along it and `z0` and `z1` in
+/// height, and whole behind it. Unlike an [`Opening`] it does not split the
+/// wall into columns: the wall stands there for joins, rooms and bars.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Recess {
+    pub element: ElementId,
+    pub u0: f64,
+    pub u1: f64,
+    pub z0: f64,
+    pub z1: f64,
+    /// The face it is in: +1 the left one, -1 the right one.
+    pub side: f64,
+    pub depth: f64,
+}
+
+impl Recess {
+    /// Offsets across a wall `half` thick of the face it opens and of its back.
+    pub fn across(&self, half: f64) -> (f64, f64) {
+        (self.side * half, self.side * (half - self.depth))
+    }
+
+    fn overlaps(&self, u: (f64, f64), z: (f64, f64)) -> bool {
+        self.u0 < u.1 - 1e-9 && u.0 < self.u1 - 1e-9 && self.z0 < z.1 - 1e-9 && z.0 < self.z1 - 1e-9
+    }
+}
+
+/// The least a recess leaves of its wall behind it, meters.
+pub const RECESS_MIN_BACK: f64 = 0.01;
+
 /// A vertical slice of a wall between opening boundaries.
 ///
 /// Its footprint is a quad whose left (+v) edge spans `left` and right (-v)
@@ -60,6 +90,8 @@ pub struct WallGeom {
     pub start_joined: bool,
     pub end_joined: bool,
     pub openings: Vec<Opening>,
+    /// Recesses in its faces (niches), apart from each other and from the openings.
+    pub recesses: Vec<Recess>,
     pub columns: Vec<Column>,
     /// Layer boundaries as `(v_from, v_to, material)`, from the left face inward.
     pub layers: Vec<(f64, f64, String)>,
@@ -539,6 +571,7 @@ impl WallGeom {
             start_joined: start.is_some(),
             end_joined: end.is_some(),
             openings: Vec::new(),
+            recesses: Vec::new(),
             columns: Vec::new(),
             layers,
             face_gaps: Vec::new(),
@@ -661,6 +694,17 @@ impl WallGeom {
             if s == side {
                 parts = subtract(&parts, (g0, g1));
             }
+        }
+        parts.retain(|(a, b)| b - a > 1e-6);
+        parts
+    }
+
+    /// [`Self::face_segments`] of the wall cut at height `z`: also open where
+    /// a recess in that face is cut.
+    pub fn face_segments_at(&self, side: f64, u0: f64, u1: f64, z: f64) -> Vec<(f64, f64)> {
+        let mut parts = self.face_segments(side, u0, u1);
+        for r in self.recesses_at(z).filter(|r| r.side == side) {
+            parts = subtract(&parts, (r.u0, r.u1));
         }
         parts.retain(|(a, b)| b - a > 1e-6);
         parts
@@ -798,18 +842,116 @@ impl WallGeom {
         self.openings = openings;
     }
 
-    /// Net volume: each column's plan area times its solid height. Computed
-    /// analytically because the body solid omits end caps at joins (and
-    /// meshes arcs with chords).
+    /// Recess the faces (niches): each is kept inside the wall's faces and
+    /// height and no deeper than leaves [`RECESS_MIN_BACK`] behind it; one
+    /// that overlaps an opening or an earlier recess is left out. Call after
+    /// [`Self::set_openings`].
+    pub(crate) fn set_recesses(&mut self, recesses: Vec<Recess>) {
+        let (lo, hi) = self.inner_range();
+        let eps = 1e-4;
+        let mut kept: Vec<Recess> = Vec::new();
+        for mut r in recesses {
+            if !(r.u0.is_finite() && r.u1.is_finite() && r.z0.is_finite() && r.z1.is_finite() && r.depth.is_finite()) {
+                continue;
+            }
+            r.u0 = r.u0.max(lo + eps);
+            r.u1 = r.u1.min(hi - eps);
+            r.z0 = r.z0.max(self.base_z);
+            r.z1 = r.z1.min(self.top_z);
+            r.depth = r.depth.min(2.0 * self.half - RECESS_MIN_BACK);
+            r.side = if r.side < 0.0 { -1.0 } else { 1.0 };
+            if r.u1 - r.u0 <= eps || r.z1 - r.z0 <= eps || r.depth <= eps {
+                continue;
+            }
+            let (u, z) = ((r.u0, r.u1), (r.z0, r.z1));
+            let taken = self.openings.iter().any(|o| o.u0 < u.1 && u.0 < o.u1 && o.z0 < z.1 && z.0 < o.z1)
+                || kept.iter().any(|k| k.overlaps(u, z));
+            if !taken {
+                kept.push(r);
+            }
+        }
+        self.recesses = kept;
+    }
+
+    /// Exact plan area of a recess (between its face and its back).
+    pub fn recess_area(&self, r: &Recess) -> f64 {
+        let (face, back) = r.across(self.half);
+        match &self.arc {
+            Some(a) if a.radius > 1e-9 => {
+                let turn = (r.u1 - r.u0) / a.radius;
+                ((a.radius_at(face).powi(2) - a.radius_at(back).powi(2)) * 0.5 * turn).abs()
+            }
+            _ => (r.u1 - r.u0) * r.depth,
+        }
+    }
+
+    /// The volume a recess takes out of the wall.
+    pub fn recess_volume(&self, r: &Recess) -> f64 {
+        self.recess_area(r) * (r.z1 - r.z0)
+    }
+
+    /// The recess of `element`, if it made one.
+    pub fn recess_of(&self, element: ElementId) -> Option<&Recess> {
+        self.recesses.iter().find(|r| r.element == element)
+    }
+
+    /// The recesses cut by a horizontal plane at `z`.
+    pub fn recesses_at(&self, z: f64) -> impl Iterator<Item = &Recess> {
+        self.recesses.iter().filter(move |r| r.z0 <= z && z <= r.z1)
+    }
+
+    /// Net volume: each column's plan area times its solid height, less the
+    /// recesses. Computed analytically because the body solid omits end caps
+    /// at joins (and meshes arcs with chords).
     pub fn volume(&self) -> f64 {
-        self.columns
+        let body: f64 = self
+            .columns
             .iter()
             .map(|c| {
                 let mid = (c.left.0.max(c.right.0) + c.left.1.min(c.right.1)) * 0.5;
                 let height: f64 = self.intervals_at(c, mid).iter().map(|(z0, z1)| z1 - z0).sum();
                 self.outline_area(c.left, c.right) * height
             })
-            .sum()
+            .sum();
+        let recessed: f64 = self.recesses.iter().map(|r| self.recess_volume(r)).sum();
+        (body - recessed).max(0.0)
+    }
+
+    /// The pieces `(u0, u1, z0, top at u0, top at u1)` of the face on `side`
+    /// from `ua` to `ub`, from `z0` up to a top running from `za` to `zb`,
+    /// that no recess opens.
+    fn face_pieces(&self, side: f64, (ua, ub): (f64, f64), z0: f64, (za, zb): (f64, f64)) -> Vec<[f64; 5]> {
+        let (lo, hi) = (ua.min(ub), ua.max(ub));
+        let top = |u: f64| if (ub - ua).abs() > 1e-12 { za + (zb - za) * (u - ua) / (ub - ua) } else { za };
+        let zmax = za.max(zb);
+        let holes: Vec<&Recess> =
+            self.recesses.iter().filter(|r| r.side == side && r.overlaps((lo, hi), (z0, zmax))).collect();
+        if holes.is_empty() {
+            return vec![[lo, hi, z0, top(lo), top(hi)]];
+        }
+        let mut cuts = vec![lo, hi];
+        cuts.extend(holes.iter().flat_map(|r| [r.u0, r.u1]).filter(|u| *u > lo + 1e-9 && *u < hi - 1e-9));
+        cuts.sort_by(f64::total_cmp);
+        cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+        let mut out = Vec::new();
+        for w in cuts.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let mid = (a + b) * 0.5;
+            let mut over: Vec<(f64, f64)> =
+                holes.iter().filter(|r| r.u0 <= mid && mid <= r.u1).map(|r| (r.z0, r.z1)).collect();
+            over.sort_by(|x, y| x.0.total_cmp(&y.0));
+            let mut from = z0;
+            for (h0, h1) in over {
+                if h0 > from + 1e-9 {
+                    out.push([a, b, from, h0, h0]);
+                }
+                from = from.max(h1);
+            }
+            if top(a) > from + 1e-9 || top(b) > from + 1e-9 {
+                out.push([a, b, from, top(a).max(from), top(b).max(from)]);
+            }
+        }
+        out
     }
 
     pub fn column_at(&self, u: f64) -> Option<&Column> {
@@ -875,8 +1017,13 @@ impl WallGeom {
                     s.faces.push(Face::new(poly.iter().rev().map(|p| DVec3::new(p.x, p.y, z0)).collect(), -DVec3::Z));
                     let right_n = -flat(self.normal_at((r0 + r1) * 0.5));
                     let left_n = flat(self.normal_at((l0 + l1) * 0.5));
-                    s.faces.push(side(slanted(r0, -h, r1, -h, z0, tops[0], tops[1], right_n)));
-                    s.faces.push(side(slanted(l1, h, l0, h, z0, tops[2], tops[3], left_n)));
+                    // The faces, open where a recess is.
+                    for [a, b, from, ta, tb] in self.face_pieces(-1.0, (r0, r1), z0, (tops[0], tops[1])) {
+                        s.faces.push(side(slanted(a, -h, b, -h, from, ta, tb, right_n)));
+                    }
+                    for [a, b, from, ta, tb] in self.face_pieces(1.0, (l0, l1), z0, (tops[3], tops[2])) {
+                        s.faces.push(side(slanted(b, h, a, h, from, tb, ta, left_n)));
+                    }
                 }
             }
             // Faces on the boundary with the next column where only one side is solid.
@@ -900,6 +1047,29 @@ impl WallGeom {
                     }
                 }
             }
+        }
+        // Inside each recess: its back, its two sides, its bottom and its top.
+        for r in &self.recesses {
+            let (face, back) = r.across(h);
+            let (lo, hi) = (face.min(back), face.max(back));
+            let n = match &self.arc {
+                Some(a) => segments((r.u1 - r.u0) / a.radius.max(1e-9), ARC_STEP),
+                None => 1,
+            };
+            for i in 0..n {
+                let at = |i: usize| r.u0 + (r.u1 - r.u0) * i as f64 / n as f64;
+                let (a, b) = (at(i), at(i + 1));
+                let out = flat(self.normal_at((a + b) * 0.5)) * r.side;
+                // Seen from the open side the back runs the way that face of the wall does.
+                let (from, to) = if r.side > 0.0 { (b, a) } else { (a, b) };
+                s.faces.push(side(quad(from, back, to, back, r.z0, r.z1, out)));
+            }
+            s.faces.push(quad(r.u0, lo, r.u0, hi, r.z0, r.z1, flat(self.tangent(r.u0))));
+            s.faces.push(quad(r.u1, hi, r.u1, lo, r.z0, r.z1, -flat(self.tangent(r.u1))));
+            let mut floor = self.path(r.u0, r.u1, lo);
+            floor.extend(self.path(r.u1, r.u0, hi));
+            s.faces.push(Face::new(floor.iter().map(|p| DVec3::new(p.x, p.y, r.z0)).collect(), DVec3::Z));
+            s.faces.push(Face::new(floor.iter().rev().map(|p| DVec3::new(p.x, p.y, r.z1)).collect(), -DVec3::Z));
         }
         // End caps, omitted where another wall closes the joint.
         let cap = |s: &mut Solid, col: &Column, (ul, ur): (f64, f64), outward: f64| {
@@ -977,6 +1147,74 @@ mod tests {
         assert!((b.start_ext.0 - 0.1).abs() < 1e-9 && (b.start_ext.1 - 0.1).abs() < 1e-9);
         let a = geom(&walls, 0);
         assert!(!a.start_joined && !a.end_joined);
+    }
+
+    /// A niche: the wall keeps its columns, loses the recess's volume and
+    /// gets an open face with the recess's five faces behind it.
+    #[test]
+    fn a_recess_opens_one_face_and_takes_its_volume() {
+        let walls = [line((0.0, 0.0), (4.0, 0.0))];
+        let mut g = geom(&walls, 0);
+        g.set_openings(Vec::new());
+        let whole = g.volume();
+        let plain = g.to_solid([200; 3]).faces.len();
+        let niche = |u0: f64, side: f64, depth: f64| Recess {
+            element: ElementId(9),
+            u0,
+            u1: u0 + 1.0,
+            z0: 0.5,
+            z1: 1.5,
+            side,
+            depth,
+        };
+        g.set_recesses(vec![
+            niche(1.0, 1.0, 0.1),
+            // Overlapping the first: left out. Deeper than the wall: stops short of its other face.
+            niche(1.5, -1.0, 0.1),
+            niche(2.5, -1.0, 9.0),
+        ]);
+        assert_eq!(g.recesses.len(), 2);
+        assert_eq!(g.columns.len(), 1, "the wall is not split");
+        let deep = 2.0 * g.half - RECESS_MIN_BACK;
+        assert!((g.recesses[1].depth - deep).abs() < 1e-12);
+        assert!((whole - g.volume() - (0.1 + deep)).abs() < 1e-9, "1 m x 1 m recesses");
+        let solid = g.to_solid([200; 3]);
+        // Each recess: its face in four pieces instead of one, and five faces inside.
+        assert_eq!(solid.faces.len(), plain + 2 * (3 + 5));
+        // The back of the first one stands 10 cm inside the left face, facing left.
+        let back = solid
+            .faces
+            .iter()
+            .find(|f| f.normal.y > 0.9 && f.verts.iter().all(|v| (v.y - (g.half - 0.1)).abs() < 1e-9))
+            .expect("the back of the recess");
+        let (min, max) = back.verts.iter().fold((DVec3::MAX, DVec3::MIN), |(lo, hi), v| (lo.min(*v), hi.max(*v)));
+        assert!((min.x - 1.0).abs() < 1e-9 && (max.x - 2.0).abs() < 1e-9 && (min.z - 0.5).abs() < 1e-9);
+        // The mesh is closed and wound outward: its volume is the wall's less the recesses.
+        assert!((solid.volume() - g.volume()).abs() < 1e-9, "{} vs {}", solid.volume(), g.volume());
+    }
+
+    /// In an arc wall the recess follows the arc: its exact volume, and a
+    /// closed mesh whose chords come within a part in a thousand of it.
+    #[test]
+    fn a_recess_follows_an_arc_wall() {
+        let walls = [arc((0.0, 0.0), (6.0, 0.0), quarter())];
+        let mut g = geom(&walls, 0);
+        g.set_openings(Vec::new());
+        let whole = g.volume();
+        for side in [1.0, -1.0] {
+            let r = Recess { element: ElementId(9), u0: 1.0, u1: 2.5, z0: 0.3, z1: 1.3, side, depth: 0.08 };
+            g.set_recesses(vec![r]);
+            let r = &g.recesses[0];
+            let a = g.arc.unwrap();
+            // A ring sector: the mean radius of the band, its width, its angle.
+            let (face, back) = r.across(g.half);
+            let mean = (a.radius_at(face) + a.radius_at(back)) * 0.5;
+            let expected = mean * 0.08 * (1.5 / a.radius);
+            assert!((g.recess_area(r) - expected).abs() < 1e-9, "{} vs {expected}", g.recess_area(r));
+            assert!((whole - g.volume() - expected).abs() < 1e-9);
+            let mesh = g.to_solid([0; 3]).volume();
+            assert!((mesh - g.volume()).abs() < g.volume() * 1e-3, "{mesh} vs {}", g.volume());
+        }
     }
 
     #[test]

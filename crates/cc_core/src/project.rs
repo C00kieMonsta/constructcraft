@@ -1381,6 +1381,7 @@ pub fn template_default(key: &str) -> &'static str {
         "tpl-conn-cold-water" => "Água fria",
         "tpl-conn-hot-water" => "Água quente",
         "tpl-comp-window" => "Janela",
+        "tpl-comp-niche" => "Nicho",
         "tpl-param-sill" => "Peitoril",
         "tpl-piece-frame" => "Batente",
         "tpl-piece-leaf" => "Folha",

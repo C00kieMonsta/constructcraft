@@ -412,6 +412,16 @@ pub(crate) fn element_json(s: &mut Session, id: ElementId) -> Option<Value> {
     if geom.solids_of(id).next().is_some() {
         derived.insert("volume".into(), json!(geom.volume(id)));
     }
+    // A niche: its recess as the wall cut it (none when it overlaps another opening).
+    if let ElementKind::Niche(h) = &e.kind
+        && let Some((wall, r)) = geom.walls.get(&h.host).and_then(|w| w.recess_of(id).map(|r| (w, r)))
+    {
+        derived.insert("width".into(), json!(r.u1 - r.u0));
+        derived.insert("height".into(), json!(r.z1 - r.z0));
+        derived.insert("depth".into(), json!(r.depth));
+        derived.insert("face".into(), json!(if r.side > 0.0 { "left" } else { "right" }));
+        derived.insert("volume".into(), json!(wall.recess_volume(r)));
+    }
     // A foundation's plan area, exact for arc strips and slabs drawn with curves.
     if let Some(f) = geom.foundations.get(&id) {
         derived.entry("area").or_insert_with(|| json!(f.area()));

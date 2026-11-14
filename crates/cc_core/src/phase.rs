@@ -265,7 +265,7 @@ impl Category {
 /// wall of a wall framing, the member of a connection, the cap of a pile.
 pub fn phase_host(e: &Element) -> Option<ElementId> {
     match &e.kind {
-        ElementKind::Door(h) | ElementKind::Window(h) => Some(h.host),
+        ElementKind::Door(h) | ElementKind::Window(h) | ElementKind::Niche(h) => Some(h.host),
         ElementKind::Rebar(r) => Some(r.host),
         ElementKind::Pad(p) => Some(p.host),
         ElementKind::Valve(v) => Some(v.host),

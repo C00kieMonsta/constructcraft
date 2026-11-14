@@ -190,6 +190,7 @@ impl Tool {
             Tool::Select => "tool-select",
             Tool::Wall { .. } => "tool-wall",
             Tool::Hosted { category: Category::Door, .. } => "tool-door",
+            Tool::Hosted { category: Category::Niche, .. } => "tool-niche",
             Tool::Hosted { .. } => "tool-window",
             Tool::Sketch { category: Category::Ceiling, .. } => "tool-ceiling",
             Tool::Sketch { category: Category::Roof, .. } => "tool-roof",
@@ -359,7 +360,7 @@ impl Tool {
         let type_id = project.default_type(category)?;
         Some(match category {
             Category::Wall => Tool::Wall { type_id },
-            Category::Door | Category::Window => Tool::Hosted { category, type_id },
+            Category::Door | Category::Window | Category::Niche => Tool::Hosted { category, type_id },
             Category::Floor
             | Category::Ceiling
             | Category::Roof
@@ -3784,11 +3785,22 @@ fn create_opening(
         flip_hand: Some(flip_hand),
         point: None,
     };
-    if category == Category::Door {
-        run_create(state, create::DoorCreate { args });
-    } else {
-        run_create(state, create::WindowCreate { args });
-    }
+    match category {
+        Category::Door => run_create(state, create::DoorCreate { args }),
+        // A niche has no hand; it is in the face clicked.
+        Category::Niche => run_create(
+            state,
+            cc_engine::commands::niche::NicheCreate {
+                wall: args.wall,
+                offset: args.offset,
+                point: None,
+                sill: args.sill,
+                type_ref: args.type_ref,
+                flip_facing: args.flip_facing,
+            },
+        ),
+        _ => run_create(state, create::WindowCreate { args }),
+    };
 }
 
 /// A door or window tool clicked on `point` of wall `host` in a 3D view: the
@@ -4942,6 +4954,37 @@ mod tests {
         state.interaction.tracked.clear();
         let s = snap_at(&mut state, Some(level), p, None, &[], 2000.0, false);
         assert!(s.is_free(), "{:?} without the view's elements", s.kind);
+    }
+
+    /// Issue #304: the Niche tool makes the project's first niche type and
+    /// places niches in the face of the wall clicked.
+    #[test]
+    fn the_niche_tool_places_niches_in_the_face_clicked() {
+        let mut state = AppState::new(cc_core::Document::new(crate::home::sample_project("casa_simples").unwrap()));
+        state.session.geometry();
+        assert!(state.project().default_type(Category::Niche).is_none());
+        crate::actions::activate_category_tool(&mut state, Category::Niche);
+        let niche = state.project().default_type(Category::Niche).expect("a niche type was made");
+        let tool = state.tool.clone();
+        assert!(matches!(tool, Tool::Hosted { category: Category::Niche, type_id } if type_id == niche));
+        assert_eq!(tool.key(), "tool-niche");
+        // The longest wall with no door or window (a niche over one cuts nothing).
+        let walls = state.session.geom().walls.iter().filter(|(_, g)| g.openings.is_empty() && g.curtain.is_none());
+        let (wall, g) = walls.max_by(|a, b| a.1.length.total_cmp(&b.1.length)).unwrap();
+        let (wall, g) = (*wall, g.clone());
+        assert!(g.length > 2.0, "room for two niches");
+        for (u, side) in [(0.3, 1.0), (0.7, -1.0)] {
+            let before = state.project().elements.len();
+            place_opening_3d(&mut state, &tool, wall, g.world(g.length * u, side * g.half));
+            assert_eq!(state.project().elements.len(), before + 1);
+            let new = state.selection.iter().next().copied().unwrap();
+            let e = state.project().element(new).unwrap();
+            assert!(matches!(&e.kind, ElementKind::Niche(h) if h.host == wall && h.flip_facing == (side < 0.0)));
+        }
+        // The wall is recessed, not opened, by them.
+        let after = &state.session.geometry().walls[&wall];
+        assert!(after.openings.is_empty());
+        assert_eq!(after.recesses.len(), 2);
     }
 
     /// A window tool clicked on a wall in a 3D view places the window there.

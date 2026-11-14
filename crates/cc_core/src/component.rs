@@ -41,6 +41,9 @@ pub enum ComponentKind {
     Door,
     /// Windows: with a [`HostOpening`], their types are of the window category.
     Window,
+    /// Niches: with a [`HostOpening`] that has a `depth`, their types are of
+    /// the niche category and recess one face of their wall (see [`crate::openings`]).
+    Niche,
     /// A sheet layout (border, title block): 2D pieces in paper millimeters, see [`crate::title_block`].
     TitleBlock,
     /// A detail component: 2D pieces in meters placed in one view, see [`crate::detail_component`].
@@ -48,7 +51,7 @@ pub enum ComponentKind {
 }
 
 impl ComponentKind {
-    pub const ALL: [ComponentKind; 10] = [
+    pub const ALL: [ComponentKind; 11] = [
         ComponentKind::Furniture,
         ComponentKind::Casework,
         ComponentKind::Plumbing,
@@ -57,6 +60,7 @@ impl ComponentKind {
         ComponentKind::Generic,
         ComponentKind::Door,
         ComponentKind::Window,
+        ComponentKind::Niche,
         ComponentKind::TitleBlock,
         ComponentKind::Detail,
     ];
@@ -71,6 +75,7 @@ impl ComponentKind {
             ComponentKind::Generic => "comp-kind-generic",
             ComponentKind::Door => "comp-kind-door",
             ComponentKind::Window => "comp-kind-window",
+            ComponentKind::Niche => "comp-kind-niche",
             ComponentKind::TitleBlock => "comp-kind-title-block",
             ComponentKind::Detail => "comp-kind-detail",
         }
@@ -518,6 +523,11 @@ pub struct HostOpening {
     /// the elevation symbol and the IFC operation type.
     #[serde(default, skip_serializing_if = "DoorOperation::is_single_left")]
     pub door_operation: DoorOperation,
+    /// Niches: how far the opening goes into the wall from the face it is
+    /// on, an expression of the parameters; empty for an opening through
+    /// the wall (doors and windows).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub depth: String,
 }
 
 /// How the leaves of a swing door open, after IFC's door operation types:
@@ -940,6 +950,16 @@ impl ComponentDef {
         (w > 0.0 && h > 0.0).then_some((w, h))
     }
 
+    /// The depth of a niche's recess (see [`HostOpening::depth`]): `None`
+    /// for an opening through the wall, or a depth that does not evaluate
+    /// to a positive length.
+    pub fn opening_depth(&self) -> Option<f64> {
+        let o = self.opening.as_ref().filter(|o| !o.depth.trim().is_empty())?;
+        let scope = self.scope(&BTreeMap::new(), &[]);
+        let depth = expr::eval(&o.depth, &|name: &str| scope.get(name)).ok()?;
+        (depth.is_finite() && depth > 0.0).then_some(depth)
+    }
+
     /// The connectors whose expressions evaluate, in the component's frame.
     pub fn resolve_connectors(&self, overrides: &BTreeMap<String, f64>) -> Vec<ResolvedConnector> {
         let scope = self.scope(overrides, &[]);
@@ -978,6 +998,7 @@ impl ComponentDef {
             (ComponentKind::Detail, _) => crate::Category::DetailComponent,
             (ComponentKind::Door, Some(_)) => crate::Category::Door,
             (ComponentKind::Window, Some(_)) => crate::Category::Window,
+            (ComponentKind::Niche, Some(_)) => crate::Category::Niche,
             _ => crate::Category::Component,
         }
     }
