@@ -202,7 +202,7 @@ pub enum Icon {
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 186] = [
+    pub const ALL: [Icon; 187] = [
         Icon::New,
         Icon::Open,
         Icon::Save,
