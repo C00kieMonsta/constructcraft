@@ -487,6 +487,31 @@ impl Drawing2D {
         }
     }
 
+    /// The lines of elements passing within `tol` of `p`, with their
+    /// element: the model as the view draws it, for snapping. The underlay,
+    /// background elements (imported drawings), pattern lines, faded
+    /// linework and annotations are left out.
+    pub fn lines_near(&self, p: DVec2, tol: f64) -> Vec<(DVec2, DVec2, ElementId)> {
+        let near = |i: usize, prim: &Prim| match prim {
+            Prim::Line { a, b, style, element: Some(id), .. }
+                if i >= self.underlay
+                    && !matches!(style, LineStyle::Hatch | LineStyle::Faint | LineStyle::Annotation)
+                    && !self.background.contains(id)
+                    && cc_geom::polygon::closest_on_segment(*a, *b, p).0.distance(p) <= tol =>
+            {
+                Some((*a, *b, *id))
+            }
+            _ => None,
+        };
+        match self.index.candidates(&self.prims, p, tol) {
+            Some(found) => found
+                .iter()
+                .filter_map(|i| self.prims.get(*i as usize).and_then(|prim| near(*i as usize, prim)))
+                .collect(),
+            None => self.prims.iter().enumerate().filter_map(|(i, prim)| near(i, prim)).collect(),
+        }
+    }
+
     fn nearest_line<'a>(&self, prims: impl Iterator<Item = &'a Prim>, p: DVec2, tol: f64) -> Option<ElementId> {
         let mut best: Option<(f64, ElementId)> = None;
         for prim in prims {
