@@ -220,6 +220,16 @@ python scripts/validate_ifc.py casa_simples.ifc
 - Executar uma macro como um único passo de desfazer; parâmetros em macros.
 - Texturas de materiais.
 
+## Apoie o projeto
+
+O ConstructCraft é gratuito e desenvolvido no tempo livre. Se ele é útil para você, um café ajuda a manter o trabalho andando:
+
+<a href="https://www.buymeacoffee.com/francisreboucas"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy me a coffee" height="48"></a>
+
+Ou escaneie o QR code:
+
+<a href="https://www.buymeacoffee.com/francisreboucas"><img src="docs/images/buymeacoffee-qr.jpeg" alt="QR code da página do Buy Me a Coffee" width="150"></a>
+
 ## Independência
 
 O ConstructCraft é um projeto independente. O comportamento do programa foi projetado com base em documentação pública, convenções gerais de CAD e retorno dos usuários. Os testes de referência usam valores analíticos e ferramentas de código aberto. O ConstructCraft não tem afiliação com a Autodesk, nem é patrocinado ou endossado por ela. Autodesk e Revit são marcas registradas da Autodesk, Inc.
