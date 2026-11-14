@@ -239,6 +239,10 @@ ConstructCraft is free and developed in spare time. If it is useful to you, a co
 
 <a href="https://www.buymeacoffee.com/francisreboucas"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy me a coffee" height="48"></a>
 
+Or scan the QR code:
+
+<a href="https://www.buymeacoffee.com/francisreboucas"><img src="docs/images/buymeacoffee-qr.jpeg" alt="QR code for the Buy Me a Coffee page" width="150"></a>
+
 ## Independence
 
 ConstructCraft is independent. Behaviour is designed from public documentation, general CAD conventions and user feedback. Reference tests use analytic values and open-source tools. ConstructCraft is not affiliated with, sponsored by or endorsed by Autodesk. Autodesk and Revit are trademarks of Autodesk, Inc.
