@@ -47,6 +47,7 @@ mod profiles;
 mod project_templates;
 mod rebar_copy;
 mod regions;
+mod render_settings;
 mod ring_footings;
 mod schedule_def;
 mod section_marks;

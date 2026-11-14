@@ -838,6 +838,14 @@ impl Project {
                     repairs += 1;
                 }
             }
+            // Render settings: only on views that take them, their values in range.
+            if view.render.is_some() && !view.kind.takes_render() {
+                view.render = None;
+                repairs += 1;
+            }
+            if let Some(render) = &mut view.render {
+                repairs += usize::from(render.repair());
+            }
             if view.scale == 0 {
                 view.scale = 100;
                 repairs += 1;

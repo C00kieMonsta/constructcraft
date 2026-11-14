@@ -126,6 +126,7 @@ pub fn view(state: &mut AppState, id: ViewId, key: Option<u64>, f: impl FnOnce(&
         crop,
         sun: (new.sun != old.sun)
             .then(|| new.sun.as_ref().map(|sun| cc_engine::commands::sun::sun_arg(state.project(), sun))),
+        render: (new.render != old.render).then(|| new.render.as_ref().map(json)),
     };
     run(state, key, command)
 }

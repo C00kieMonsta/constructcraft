@@ -554,6 +554,7 @@ pub(crate) fn view_json(s: &Session, id: ViewId) -> Option<Value> {
         "crop": crop,
         "callout": callout,
         "sun": super::sun::view_sun_json(s.project(), v),
+        "render": serde_json::to_value(&v.render).unwrap_or(Value::Null),
     }))
 }
 

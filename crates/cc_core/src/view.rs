@@ -424,6 +424,10 @@ pub struct View {
     /// (see [`crate::sun`]); only views that [take one](ViewKind::takes_sun).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sun: Option<crate::sun::SunSettings>,
+    /// How the view is rendered photorealistically (see
+    /// [`crate::render_settings`]); only views that [take them](ViewKind::takes_render).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render: Option<crate::render_settings::RenderSettings>,
 }
 
 /// How a view shows the model's surfaces.
@@ -603,6 +607,12 @@ impl ViewKind {
         )
     }
 
+    /// Whether views of this kind can have render settings ([`View::render`]):
+    /// 3D views only.
+    pub fn takes_render(&self) -> bool {
+        matches!(self, ViewKind::ThreeD { .. })
+    }
+
     /// An ordinary ceiling plan of `level` cut at 1.20 m.
     pub fn ceiling_plan(level: LevelId) -> Self {
         ViewKind::CeilingPlan { level, cut_height: 1.2, underlay: Underlay::default() }
@@ -692,6 +702,7 @@ impl View {
             crop: None,
             callout: None,
             sun: None,
+            render: None,
         }
     }
 
