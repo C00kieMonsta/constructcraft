@@ -406,6 +406,20 @@ Every reinforcing bar has a mark naming its shape (the same diameter, grade, leg
 {"command": "bar_length_check", "args": {"max_length": 12}}
 ```
 
+### Photorealistic rendering
+
+A 3D view keeps its render settings in `render` (`view_get`), changed by `view_set` with a merge patch: `samples` per pixel, light bounces (`max_depth`), the image's `width` and `height` in pixels, `fov_deg`, `exposure` in stops, `tone_map` (`Filmic` or `Standard`), the firefly `clamp`, `clay` (every opaque surface one white matte, glass kept, under the same sky and sun) and the `environment` (`sky_strength`, `sun_strength`, `ground_color`, `ground_plane`); `null` removes them. The sun is the view's (`sun`). `view_render` path traces the view on the processor and writes the image (`.png`, `.jpg`, or linear `.exr`/`.hdr`) with the view's camera, as the 3D view shows it; `settings` patches the view's settings for that render only, and `region` (`[x, y, width, height]` in pixels) renders only part of the image. It returns the size, the samples, the seconds and the triangles, and changes nothing in the model.
+
+```text
+{"command": "view_set", "args": {"view": "{3D}", "render": {"samples": 256, "width": 1920, "height": 1080}}}
+{"command": "view_render", "args": {"view": "{3D}", "path": "house.png"}}
+{"command": "view_render", "args": {"view": "{3D}", "path": "clay.jpg", "settings": {"clay": true, "samples": 64}}}
+```
+
+```sh
+cargo run -p cc_cli -- -p examples/casa_simples.ccad run view_render view="{3D}" path=out.png 'settings={"samples":16,"width":320,"height":200}'
+```
+
 ## Lua scripts
 
 `ccad lua <file>` runs a [Lua 5.4](https://www.lua.org/manual/5.4/) script over the session. The script calls commands with `ccad.run`, keeps their results in variables and loops, so an id created by one step can be used by the next. Its arguments (the same forms as `run`: `key=value` pairs, a JSON object, `@file.json`) are `ccad.args`; what it prints goes to standard output and what it returns is printed as JSON.

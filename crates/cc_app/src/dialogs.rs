@@ -39,6 +39,8 @@ pub fn show(ctx: &Context, state: &mut AppState) {
     crate::line_styles_dialog::show(ctx, state);
     crate::browser_org_dialog::show(ctx, state);
     crate::sun_ui::show(ctx, state);
+    // After Sun Settings: the render window opens again when the Sun Settings it opened close.
+    crate::render_ui::show(ctx, state);
     // After the material browser, type properties and graphics, which open it over themselves.
     crate::fill_patterns_dialog::show(ctx, state);
     crate::profiles_dialog::show(ctx, state);

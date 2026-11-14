@@ -166,6 +166,17 @@ Com a ferramenta Selecionar, um clique escolhe o elemento sob o cursor (Ctrl som
 - **Sombras** (vistas 3D) projeta as sombras do sol no modelo enquanto ele está acima do horizonte; *Plano de chão no nível* as recebe também no plano desse nível. Elevações, cortes e vistas 3D sombreados são iluminados pelo sol, e só pela luz ambiente enquanto ele está abaixo do horizonte.
 - OK guarda todas as alterações como um passo de desfazer e Cancelar as desfaz; *Remover sol* tira o sol da vista. A bússola do cubo de vistas mostra o norte verdadeiro.
 
+## Renderizar
+
+*Vista → Gráficos → Renderizar* faz a renderização por traçado de caminhos da vista 3D ativa numa janela própria: a imagem à esquerda, as configurações de renderização da vista à direita. Ela usa a câmera que a vista mostra quando a janela abre (uma câmera ainda ajustada ao modelo é ajustada de novo ao tamanho e ao campo de visão da renderização). *Renderizar* começa; a imagem vai se refinando, e a linha abaixo dela dá as amostras feitas, o tempo gasto e os triângulos da cena; *Parar* guarda o que já foi renderizado. A roda do mouse dá zoom em torno do cursor, arrastar move a imagem e um clique duplo a ajusta de novo.
+
+- **Qualidade**: *Predefinição* (Rascunho, Médio, Alto; Personalizado quando os valores não batem com nenhuma), *Amostras* por pixel, *Rebatidas* da luz, *Limite* (o brilho máximo de uma amostra, contra pontos claros isolados; 0 desliga) e *Argila* (todas as superfícies opacas num mesmo branco fosco, com a iluminação de sempre).
+- **Saída**: *Tamanho* (o tamanho da vista, os tamanhos usuais de vídeo ou Personalizado), *Largura × altura*, *Campo de visão*, *Exposição* em EV e o *Mapa de tons* (Fílmico ou Padrão). Exposição e mapa de tons mudam na hora a imagem já renderizada, sem renderizar de novo; as outras alterações valem no próximo *Renderizar*, o que a linha abaixo da imagem lembra.
+- **Ambiente**: *Intensidade do céu*, *Intensidade do Sol*, *Cor do chão* e *Plano do chão*. O sol é o da vista: *Configuração do Sol…* abre o diálogo Configuração do Sol na vista e volta à janela quando ele fecha.
+- **Região**: com *Região* ligada, arrastar sobre a imagem desenha um retângulo, e *Renderizar* traça só essa parte, por cima da última imagem quando ela tem o mesmo tamanho; desligar *Região* a apaga.
+- **Salvar imagem…** grava a última imagem em PNG ou JPEG (com a exposição e o mapa de tons mostrados) ou em OpenEXR ou Radiance HDR (luz linear).
+- As configurações são da vista (`view_set` `render`, `view_get`): mudar uma a grava, e tudo o que se muda na janela é um passo de desfazer; *Fechar* mantém. `view_render` renderiza uma vista num arquivo sem a janela.
+
 ## Esboço de contornos
 
 Pisos, forros, telhados, radiers e massas são esboçados em planta. A ferramenta abre um esboço: o ribbon mostra *Criar contorno* com as ferramentas de desenho até *Concluir* ou *Cancelar*.

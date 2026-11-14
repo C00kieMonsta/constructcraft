@@ -930,7 +930,13 @@ fn view_tab(ui: &mut Ui, state: &mut AppState) {
         command_buttons(
             ui,
             state,
-            &[UiCommand::VisibilityGraphics, UiCommand::ViewFilters, UiCommand::ViewTemplates, UiCommand::SunSettings],
+            &[
+                UiCommand::VisibilityGraphics,
+                UiCommand::ViewFilters,
+                UiCommand::ViewTemplates,
+                UiCommand::SunSettings,
+                UiCommand::Render,
+            ],
         );
     });
     group(ui, t!("group-temporary"), |ui| {

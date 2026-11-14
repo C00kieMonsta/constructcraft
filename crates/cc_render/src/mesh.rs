@@ -143,60 +143,14 @@ struct SolidTess {
     edges: Vec<([f32; 3], [f32; 3])>,
 }
 
-/// The axes a texture is laid along on a face with normal `n`: plan X and Y
-/// on faces turned up or down, else level across the face (to the right,
-/// seen from outside) and up its slope.
-pub fn plane_axes(n: DVec3) -> (DVec3, DVec3) {
-    if n.z.abs() > 0.9 {
-        return (DVec3::X, if n.z >= 0.0 { DVec3::Y } else { -DVec3::Y });
-    }
-    let u = DVec3::new(-n.y, n.x, 0.0).normalize_or(DVec3::X);
-    (u, n.cross(u).normalize_or(DVec3::Z))
-}
+/// The axes a texture is laid along on a face (moved to `cc_geom`, which the
+/// path tracer shares).
+pub use cc_geom::plane_axes;
 
 /// What to add to the plane coordinates of each face of `solid` so they run
-/// on from one facet of a curved surface to the next: every facet has its own
-/// axes, so without it patterns and textures would start again at each one.
-/// Facets are reached from the first of their surface across shared edges and
-/// agree with the facet they were reached from at the middle of that edge
-/// (exactly along it when it runs up the surface, as on an arc wall); a
-/// surface that closes on itself keeps one seam.
+/// on across the facets of a curved surface (see [`cc_geom::Solid::facet_shifts`]).
 fn facet_shifts(solid: &cc_geom::Solid) -> Vec<[f64; 2]> {
-    let neighbors = solid.smooth_neighbors();
-    let coords = |fi: usize, p: DVec3| {
-        let (u, v) = plane_axes(solid.faces.get(fi)?.normal);
-        Some([p.dot(u), p.dot(v)])
-    };
-    let mut shifts = vec![[0.0; 2]; solid.faces.len()];
-    let mut seen = vec![false; solid.faces.len()];
-    let mut queue = std::collections::VecDeque::new();
-    for seed in 0..solid.faces.len() {
-        if seen.get(seed) != Some(&false) || neighbors.get(seed).is_none_or(|n| n.is_empty()) {
-            continue;
-        }
-        if let Some(s) = seen.get_mut(seed) {
-            *s = true;
-        }
-        queue.push_back(seed);
-        while let Some(fi) = queue.pop_front() {
-            let base = shifts.get(fi).copied().unwrap_or_default();
-            for &(fj, mid) in neighbors.get(fi).into_iter().flatten() {
-                if seen.get(fj) != Some(&false) {
-                    continue;
-                }
-                let (Some(here), Some(there)) = (coords(fi, mid), coords(fj, mid)) else { continue };
-                let shift = [base[0] + here[0] - there[0], base[1] + here[1] - there[1]];
-                if let (Some(s), Some(slot)) = (seen.get_mut(fj), shifts.get_mut(fj)) {
-                    *s = true;
-                    if shift.iter().all(|c| c.is_finite()) {
-                        *slot = shift;
-                    }
-                    queue.push_back(fj);
-                }
-            }
-        }
-    }
-    shifts
+    solid.facet_shifts()
 }
 
 impl Tessellation {

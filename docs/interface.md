@@ -166,6 +166,17 @@ With the Select tool, a click picks the element under the pointer (Ctrl adds or 
 - **Shadows** (3D views) casts the sun's shadows on the model while it is above the horizon; *Ground plane at level* catches them on that level's plane too. Shaded elevations, sections and 3D views are lit by the sun, and by ambient light only while it is below the horizon.
 - OK keeps every change as one undo step and Cancel undoes them; *Remove Sun* removes the view's sun. The view cube's compass shows true north.
 
+## Render
+
+*View → Graphics → Render* path traces the active 3D view in a window of its own: the picture on the left, the view's render settings on the right. It takes the camera the viewport shows when it opens (a camera still fitted to the model is fitted again for the render's size and field of view). *Render* starts it; the picture refines while it renders, and the line under it gives the samples done, the time taken and the scene's triangles; *Stop* keeps what is rendered so far. The wheel zooms about the pointer, a drag pans and a double click fits the picture again.
+
+- **Quality**: *Preset* (Draft, Medium, High; Custom when the values match none), *Samples* per pixel, light *Bounces*, *Clamp* (the brightest value of a sample, against isolated bright specks; 0 turns it off) and *Clay* (every opaque surface in one white matte, lit as usual).
+- **Output**: *Size* (the viewport's size, the usual video sizes or Custom), *Width × height*, *Field of view*, *Exposure* in EV and the *Tone map* (Filmic or Standard). Exposure and tone map change the picture already rendered at once, without rendering again; other changes take effect on the next *Render*, which the line under the picture recalls.
+- **Environment**: *Sky strength*, *Sun strength*, *Ground color* and *Ground plane*. The sun is the view's: *Sun Settings…* opens the Sun Settings dialog on the view and comes back to the window when it closes.
+- **Region**: with *Region* on, a drag on the picture draws a rectangle, and *Render* traces only that part, over the last picture when it has the same size; turning *Region* off clears it.
+- **Save Image…** writes the last picture as PNG or JPEG (exposed and tone mapped as shown) or as OpenEXR or Radiance HDR (linear light).
+- The settings are the view's (`view_set` `render`, `view_get`): changing one writes it, and everything changed in the window is one undo step; *Close* keeps it. `view_render` renders a view to a file without the window.
+
 ## Sketching outlines
 
 Floors, ceilings, roofs, foundation slabs and masses are sketched in a plan. Their tool opens a sketch: the ribbon shows *Create Boundary* with the drawing tools until *Finish* or *Cancel*.

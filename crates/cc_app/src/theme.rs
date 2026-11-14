@@ -48,6 +48,11 @@ pub struct Palette {
     pub icon_ink: Color32,
     /// Second tone of two-tone icons (their soft fills).
     pub icon_tint: Color32,
+    /// Neutral dark matte around a rendered picture (dark in both themes,
+    /// so the picture's tones read the same).
+    pub matte: Color32,
+    /// Text and marks drawn on [`Palette::matte`].
+    pub matte_text: Color32,
     /// Whether this is a dark theme (egui base visuals).
     pub dark: bool,
 }
@@ -76,6 +81,8 @@ pub const LIGHT: Palette = Palette {
     temporary: Color32::from_rgb(0x0E, 0x8C, 0x8F),
     icon_ink: Color32::from_rgb(0x1F, 0x23, 0x28),
     icon_tint: Color32::from_rgb(0x1F, 0x6F, 0xEB),
+    matte: Color32::from_rgb(0x2B, 0x2D, 0x31),
+    matte_text: Color32::from_rgb(0xA8, 0xAD, 0xB4),
     dark: false,
 };
 
@@ -103,6 +110,8 @@ pub const DARK: Palette = Palette {
     temporary: Color32::from_rgb(0x3C, 0xC4, 0xC6),
     icon_ink: Color32::from_rgb(0xE6, 0xE8, 0xEB),
     icon_tint: Color32::from_rgb(0x6A, 0xA2, 0xFA),
+    matte: Color32::from_rgb(0x14, 0x16, 0x19),
+    matte_text: Color32::from_rgb(0x9A, 0xA0, 0xA8),
     dark: true,
 };
 

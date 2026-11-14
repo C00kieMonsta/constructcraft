@@ -100,6 +100,10 @@ pub struct Dialogs {
     pub line_styles: Option<crate::line_styles_dialog::LineStylesDialog>,
     /// The Sun Settings of a view.
     pub sun: Option<crate::sun_ui::SunDialog>,
+    /// The render window of a 3D view (*View → Render*).
+    pub render: Option<crate::render_ui::RenderWindow>,
+    /// The render window waiting for Sun Settings, opened from it, to close.
+    pub render_resume: Option<crate::render_ui::Resume>,
     /// The fill pattern manager.
     pub fill_patterns: Option<crate::fill_patterns_dialog::FillPatternsDialog>,
     /// The Profile Manager.

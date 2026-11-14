@@ -1,13 +1,15 @@
 //! Views and sheets: create, change, duplicate, delete, place on sheets.
 
 use super::query::view_json;
-use super::{edit, patch_variant};
+use super::{edit, merge, patch_variant};
 use crate::error::{EngineError, Result};
 use crate::refs::{self, Point, Ref, ScaleArg, point, positive};
 use crate::registry::{Command, CommandKind};
 use crate::session::Session;
 use crate::t;
-use cc_core::{CameraState, Direction, Project, SheetSize, View, ViewCategory, ViewId, ViewKind, Viewport};
+use cc_core::{
+    CameraState, Direction, Project, RenderSettings, SheetSize, View, ViewCategory, ViewId, ViewKind, Viewport,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -243,7 +245,7 @@ fn capitalized(s: &str) -> String {
 /// Change a view: name, scale, phase and phase filter, and its `params` as
 /// `view_get` shows them (merged: cut height, section depth, legend types,
 /// schedule fields, sort, filter and totals, sheet number and size,
-/// viewport positions…), the crop and the sun.
+/// viewport positions…), the crop, the sun and the render settings.
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ViewSet {
@@ -288,6 +290,48 @@ pub struct ViewSet {
     /// 10:00), `{"preset": name}` to take a preset, or `null` to remove it.
     #[serde(default, deserialize_with = "refs::nullable", skip_serializing_if = "Option::is_none")]
     pub sun: Option<Option<super::sun::SunArg>>,
+    /// The view's photorealistic render settings (3D views only): the fields
+    /// to change, shaped like `render` in `view_get` (`samples` 1 to 16384,
+    /// `max_depth` 1 to 64, `width`/`height` 16 to 8192 pixels and at most
+    /// 7680x4320 in all, `fov_deg` 10 to 120, `exposure` -10 to 10 stops,
+    /// `tone_map` `Filmic` or `Standard` (or lowercase), `clamp` 0 (off) to 1000, `clay`,
+    /// and `environment` with `sky_strength` and `sun_strength` 0 to 100,
+    /// `ground_color` [r, g, b] and `ground_plane`); a view without settings
+    /// starts from the defaults. `null` removes them.
+    #[serde(default, deserialize_with = "refs::nullable", skip_serializing_if = "Option::is_none")]
+    pub render: Option<Option<Value>>,
+}
+
+/// The render settings `patch` makes of `current` (the defaults when none):
+/// a merge patch over their serde form, refused when it names an unknown
+/// field or leaves a value out of range.
+pub(crate) fn apply_render(current: Option<&RenderSettings>, patch: &Value) -> Result<RenderSettings> {
+    let base = current.cloned().unwrap_or_default();
+    let mut value = serde_json::to_value(&base).map_err(|e| EngineError::invalid(e.to_string()))?;
+    known_fields(&value, patch, "render")?;
+    merge(&mut value, patch);
+    let settings: RenderSettings =
+        serde_json::from_value(value).map_err(|e| EngineError::invalid(format!("render: {e}")))?;
+    if !settings.is_valid() {
+        return Err(EngineError::invalid(t!("msg-render-range")));
+    }
+    Ok(settings)
+}
+
+/// Every key of `patch` is a field of `form` (objects, recursively).
+fn known_fields(form: &Value, patch: &Value, path: &str) -> Result<()> {
+    let (Value::Object(f), Value::Object(p)) = (form, patch) else {
+        return match patch {
+            Value::Object(_) if !form.is_object() => Err(EngineError::invalid(format!("{path}: not an object"))),
+            _ if form.is_object() => Err(EngineError::invalid(format!("{path}: expected an object"))),
+            _ => Ok(()),
+        };
+    };
+    for (k, v) in p {
+        let field = f.get(k).ok_or_else(|| EngineError::invalid(format!("{path}: unknown field '{k}'")))?;
+        known_fields(field, v, &format!("{path}.{k}"))?;
+    }
+    Ok(())
 }
 
 impl Command for ViewSet {
@@ -351,6 +395,12 @@ impl Command for ViewSet {
             Some(None) => Some(None),
             None => None,
         };
+        let render = match &self.render {
+            Some(_) if !view.kind.takes_render() => return Err(EngineError::invalid(t!("msg-render-view"))),
+            Some(Some(patch)) => Some(Some(apply_render(view.render.as_ref(), patch)?)),
+            Some(None) => Some(None),
+            None => None,
+        };
         // Properties the view's template controls stay as the template has them.
         if let Some(t) = view.template.and_then(|t| p.template(t)) {
             let mut new = view.clone();
@@ -407,6 +457,9 @@ impl Command for ViewSet {
             }
             if let Some(sun) = sun {
                 v.sun = sun;
+            }
+            if let Some(render) = render {
+                v.render = render;
             }
             Ok(())
         })?;

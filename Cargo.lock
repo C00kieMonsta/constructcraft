@@ -281,7 +281,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parking_lot",
  "percent-encoding",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
  "x11rb",
 ]
 
@@ -494,6 +494,12 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "base64"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
+
+[[package]]
+name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
@@ -518,6 +524,12 @@ name = "bit-vec"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b71798fca2c1fe1086445a7258a4bc81e6e49dcd24c8d0dd9a1e57395b603f51"
+
+[[package]]
+name = "bit_field"
+version = "0.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb2907cc03d08cdb1c6724ad0670ce67c4a71e1c45a6d7635224011714cfc4b1"
 
 [[package]]
 name = "bitflags"
@@ -699,6 +711,7 @@ dependencies = [
  "cc_geom",
  "cc_ifc",
  "cc_plugins",
+ "cc_raytracing",
  "cc_render",
  "cc_script",
  "cc_views",
@@ -762,6 +775,7 @@ dependencies = [
  "cc_core",
  "cc_geom",
  "cc_ifc",
+ "cc_raytracing",
  "cc_script",
  "cc_skp",
  "cc_views",
@@ -806,6 +820,19 @@ dependencies = [
  "serde_json",
  "sha2",
  "toml",
+]
+
+[[package]]
+name = "cc_raytracing"
+version = "0.11.1"
+dependencies = [
+ "cc_core",
+ "cc_geom",
+ "cc_views",
+ "glam",
+ "image",
+ "sort-raytracing",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1504,7 +1531,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1540,6 +1567,21 @@ checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
 dependencies = [
  "event-listener",
  "pin-project-lite",
+]
+
+[[package]]
+name = "exr"
+version = "1.74.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb29d0be702adf92c645d9b2f93472906ba83d400e59f98adb3770ce5c18c2f6"
+dependencies = [
+ "bit_field",
+ "half",
+ "lebe",
+ "miniz_oxide 0.8.9",
+ "multiversion",
+ "smallvec",
+ "zune-inflate",
 ]
 
 [[package]]
@@ -1832,6 +1874,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "gltf"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3ce1918195723ce6ac74e80542c5a96a40c2b26162c1957a5cd70799b8cacf7"
+dependencies = [
+ "base64 0.13.1",
+ "byteorder",
+ "gltf-json",
+ "image",
+ "lazy_static",
+ "serde_json",
+ "urlencoding",
+]
+
+[[package]]
+name = "gltf-derive"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14070e711538afba5d6c807edb74bcb84e5dbb9211a3bf5dea0dfab5b24f4c51"
+dependencies = [
+ "inflections",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "gltf-json"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6176f9d60a7eab0a877e8e96548605dedbde9190a7ae1e80bbcc1c9af03ab14"
+dependencies = [
+ "gltf-derive",
+ "serde",
+ "serde_derive",
+ "serde_json",
+]
+
+[[package]]
 name = "glutin"
 version = "0.32.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2111,6 +2192,7 @@ dependencies = [
  "bytemuck",
  "byteorder-lite",
  "color_quant",
+ "exr",
  "gif 0.14.2",
  "image-webp",
  "moxcms",
@@ -2146,6 +2228,12 @@ dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
 ]
+
+[[package]]
+name = "inflections"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a257582fdcde896fd96463bf2d40eefea0580021c0712a0e2b028b60b47a837a"
 
 [[package]]
 name = "is-docker"
@@ -2369,6 +2457,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
+name = "lebe"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
+
+[[package]]
 name = "libc"
 version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2557,6 +2651,28 @@ checksum = "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b"
 dependencies = [
  "num-traits",
  "pxfm",
+]
+
+[[package]]
+name = "multiversion"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb8a68be21d0755f83bfe47e79b896cc732687cf1903f0e50585e8d6ecc53076"
+dependencies = [
+ "multiversion-macros",
+ "target-features",
+]
+
+[[package]]
+name = "multiversion-macros"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a05e0c3c3e4edaa21d87c645852ed0b0c3663752bcc6ec43353bd6189dce35e1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "target-features",
 ]
 
 [[package]]
@@ -3674,7 +3790,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4037,6 +4153,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sort-raytracing"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c72a3d204171f7f25987bed1a1e31a28e8d9ae39fa6523ac6d8ca22b626a27c8"
+dependencies = [
+ "glam",
+ "gltf",
+ "image",
+ "rayon",
+]
+
+[[package]]
 name = "spade"
 version = "2.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4137,6 +4265,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "target-features"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1bbb9f3c5c463a01705937a24fdabc5047929ac764b2d5b9cf681c1f5041ed5"
+
+[[package]]
 name = "tempfile"
 version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4146,7 +4280,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.6",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4441,6 +4575,12 @@ dependencies = [
  "percent-encoding",
  "serde",
 ]
+
+[[package]]
+name = "urlencoding"
+version = "2.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 
 [[package]]
 name = "usvg"
@@ -4991,7 +5131,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5578,6 +5718,15 @@ name = "zune-core"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d56377fd46368984a170bc5aac5567e52ca5da874caa60bea39fcbca78fb658b"
+
+[[package]]
+name = "zune-inflate"
+version = "0.2.54"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73ab332fe2f6680068f3582b16a24f90ad7096d5d39b974d1c0aff0125116f02"
+dependencies = [
+ "simd-adler32",
+]
 
 [[package]]
 name = "zune-jpeg"

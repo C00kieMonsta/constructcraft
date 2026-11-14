@@ -19,6 +19,7 @@ cc_core.workspace = true
 cc_geom.workspace = true
 cc_views.workspace = true
 cc_render.workspace = true
+cc_raytracing.workspace = true
 cc_ifc.workspace = true
 cc_engine.workspace = true
 cc_plugins.workspace = true

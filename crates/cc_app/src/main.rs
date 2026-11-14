@@ -60,6 +60,7 @@ mod profiles_dialog;
 mod properties;
 mod recovery;
 mod region_ui;
+mod render_ui;
 mod ribbon;
 mod schedule_ui;
 mod section_mark;

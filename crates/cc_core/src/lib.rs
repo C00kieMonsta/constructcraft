@@ -54,6 +54,7 @@ pub mod ramp;
 pub mod raster;
 pub mod recovery;
 pub mod region;
+pub mod render_settings;
 mod repair;
 pub mod roofing;
 pub mod scale;
@@ -124,6 +125,7 @@ pub use project::{
 };
 pub use ramp::{RampCheck, RampIssue, RampLayout, RampRules, RampShape, ramp_flights};
 pub use region::Region;
+pub use render_settings::{RenderEnvironment, RenderSettings, ToneMap};
 pub use schedule::{
     BendingOptions, ColumnAlign, ColumnFormat, ScheduleAppearance, ScheduleDef, ScheduleField, ScheduleFilter,
     SortLevel,

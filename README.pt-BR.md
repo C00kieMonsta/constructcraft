@@ -95,6 +95,7 @@ As traduções ficam em `assets/i18n/*.ftl`. Um teste garante que todos os idiom
 - **Edição**: seleção por clique ou janela (contida ou cruzada), mover arrastando, copiar com Ctrl+arrastar, excluir. Desfazer e refazer cobrem todas as edições.
 - **Componentes paramétricos**: mobiliário, louças e marcenaria feitos de caixas, cilindros e perfis de retas e arcos desenhados na planta, na frente ou na lateral, extrudados ou girados (revolução), com peças de vazio recortadas das demais; todas as coordenadas e medidas são expressões sobre parâmetros nomeados (do tipo ou da instância). Editor de componentes com verificação imediata e pré-visualização em planta, vista frontal e 3D, biblioteca inicial (mesa, cadeira, cama, sofá, bacia sanitária, lavatório, armário), ferramenta *Componente* (CM), tabelas e legendas, arquivos `.ccomp` para compartilhar e exportação/importação IFC como `IfcFurniture`, `IfcSanitaryTerminal`, `IfcLightFixture` ou `IfcBuildingElementProxy`.
 - **Materiais**: navegador com identidade, gráficos (sombreamento, transparência, padrões de superfície e de corte), aparência e propriedades físicas; os padrões de corte aparecem em plantas e cortes, a transparência no 3D.
+- **Renderização fotorrealista** (*Vista → Gráficos → Renderizar*, `view_render`): uma vista 3D renderizada por path tracing no processador sob um céu gerado e o sol da vista, com vidro, texturas e modo argila; as configurações ficam em cada vista e a imagem é salva em PNG, JPEG, EXR ou HDR.
 - **Unidades do projeto**: milímetros, centímetros ou metros, ou unidades imperiais — pés ou polegadas decimais, pés e polegadas fracionárias (`12'-6 1/2"`) ou polegadas fracionárias, até 1/64" — (e formatos de área, volume, ângulo, inclinação e moeda, inclusive pés quadrados e cúbicos, jardas cúbicas e galões americanos) com casas decimais, símbolos e agrupamento de dígitos.
 - **Ferramentas de modificação**: mover, copiar, girar, espelhar, matriz, aparar/estender, dividir, deslocar, alinhar, controle de união de paredes e fixação; recortar, copiar e colar, e corresponder propriedades de tipo.
 - **Navegação e auxílios de desenho**: cubo de navegação 3D, cotas e ângulos temporários editáveis (digite o comprimento, Tab para o ângulo), linhas de alinhamento, Espaço para girar ou inverter.
@@ -186,6 +187,7 @@ crates/
   cc_geom    geometria derivada: paredes com junções e aberturas, lajes, telhados, cortes, picking
   cc_views   geração de desenhos 2D (planta, forro, elevação, corte, axonometria, legenda), tabelas, montagem das folhas e exportação PDF/SVG
   cc_render  renderizador 3D offscreen em wgpu
+  cc_raytracing renderização fotorrealista de vistas 3D por path tracing (CPU)
   cc_ifc     exportação IFC4 e importação IFC2X3/IFC4: escritor e leitor STEP, mapeamento do modelo
   cc_engine  cada operação como comando nomeado com esquema JSON, numa sessão sem GUI
   cc_plugins scripts e plugins em Lua 5.4 (em sandbox) sobre os comandos do motor
@@ -242,4 +244,4 @@ Copyright © Francis Rebouças <francisreboucas@gmail.com>.
 
 O ConstructCraft é distribuído sob a [GNU General Public License v3.0 ou posterior](LICENSE) (GPL-3.0-or-later).
 
-O ícone do aplicativo é de [Magnific – Flaticon](https://www.flaticon.com/) (veja `assets/icons/FLATICON.txt`). A fonte [Inter](https://rsms.me/inter/) incluída é © The Inter Project Authors e distribuída sob a [SIL Open Font License 1.1](assets/fonts/OFL-Inter.txt).
+O ícone do aplicativo é de [Magnific – Flaticon](https://www.flaticon.com/) (veja `assets/icons/FLATICON.txt`). A fonte [Inter](https://rsms.me/inter/) incluída é © The Inter Project Authors e distribuída sob a [SIL Open Font License 1.1](assets/fonts/OFL-Inter.txt). A renderização usa o crate [sort-raytracing](https://crates.io/crates/sort-raytracing), distribuído sob a GPL-3.0-only.

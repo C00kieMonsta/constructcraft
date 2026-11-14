@@ -98,6 +98,7 @@ Translations live in `assets/i18n/*.ftl`. A test ensures every language has the 
 - **Grids and annotation**: grid lines with bubbles in every plan, named in series as they are placed (1, 2, 3… and A, B, C… across them), with ends that snap into line with the other grids' bubbles and an *Align Grid Ends* command; aligned, linear, ordinate (running totals from an origin), angular, radial and diameter dimensions in any 2D view (*Annotate* tab); single-line and multiline text notes (word-wrapped to a width, rotatable, edited with a double click) with leaders of one or two segments ending in an arrow, open arrow, triangle, dot, circle, square or tick; door and window marks tagged automatically.
 - **Parametric components**: furniture, fixtures and casework made of boxes, cylinders, and profiles of lines and arcs drawn on the plan, front or side plane, extruded or revolved, with void pieces cut out of the others; every coordinate and size is an expression over named parameters (type or instance). A component editor with live checking and plan, front and 3D previews, a starter library (table, chair, bed, sofa, toilet, washbasin, wardrobe), the *Component* tool (CM), schedules and legends, `.ccomp` files to share them, and IFC export/import as `IfcFurniture`, `IfcSanitaryTerminal`, `IfcLightFixture` or `IfcBuildingElementProxy`.
 - **Materials**: browser with identity, graphics (shading, transparency, surface and cut patterns), render appearance and physical properties; cut patterns show in plans and sections, transparency in 3D.
+- **Photorealistic rendering** (*View → Graphics → Render*, `view_render`): a 3D view path traced on the processor under a generated sky and the view's sun, with glass, textures and a clay mode; the settings are kept per view and the image saved as PNG, JPEG, EXR or HDR.
 - **Project units**: millimeters, centimeters or meters, or imperial units — decimal feet or inches, feet and fractional inches (`12'-6 1/2"`) or fractional inches, to 1/64" — (and area, volume, angle, slope and currency formats, including square and cubic feet, cubic yards and US gallons) with decimals, symbols and digit grouping.
 - **Modify tools**: move, copy, rotate, mirror, array, trim/extend, split, offset, align, wall join control and pinning; cut, copy and paste, and match type properties.
 - **Navigation and drawing aids**: 3D navigation cube, editable temporary dimensions and angles (type a length, Tab for the angle), alignment guides, Space to rotate or flip.
@@ -196,6 +197,7 @@ crates/
   cc_geom    derived geometry: walls with joins and openings, slabs, roofs, cuts, picking
   cc_views   2D drawing generation (plan, ceiling, elevation, section, axonometric, legend), schedules, sheet composition and PDF/SVG export
   cc_render  offscreen wgpu 3D renderer
+  cc_raytracing photorealistic path traced rendering of 3D views (CPU)
   cc_ifc     IFC4 export and IFC2X3/IFC4 import: STEP writer and parser, model mapping
   cc_skp     SketchUp (.skp) reader and writer (MIT-licensed, see its LICENSE)
   cc_engine  every operation as a named command with a JSON Schema, on a session without GUI
@@ -253,4 +255,4 @@ Copyright © Francis Rebouças <francisreboucas@gmail.com>.
 
 ConstructCraft is licensed under the [GNU General Public License v3.0 or later](LICENSE) (GPL-3.0-or-later).
 
-The application icon is by [Magnific – Flaticon](https://www.flaticon.com/) (see `assets/icons/FLATICON.txt`). The bundled [Inter](https://rsms.me/inter/) typeface is © The Inter Project Authors and licensed under the [SIL Open Font License 1.1](assets/fonts/OFL-Inter.txt). The `cc_skp` crate is derived from OpenSKP, © 2024-2026 Ahsan Mehmood, and keeps its [MIT License](crates/cc_skp/LICENSE).
+The application icon is by [Magnific – Flaticon](https://www.flaticon.com/) (see `assets/icons/FLATICON.txt`). The bundled [Inter](https://rsms.me/inter/) typeface is © The Inter Project Authors and licensed under the [SIL Open Font License 1.1](assets/fonts/OFL-Inter.txt). The `cc_skp` crate is derived from OpenSKP, © 2024-2026 Ahsan Mehmood, and keeps its [MIT License](crates/cc_skp/LICENSE). Rendering uses the [sort-raytracing](https://crates.io/crates/sort-raytracing) crate, licensed under GPL-3.0-only.
