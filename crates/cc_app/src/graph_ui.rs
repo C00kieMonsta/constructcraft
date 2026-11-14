@@ -82,6 +82,8 @@ pub struct GraphEditor {
     pub report: Option<Result<Value, String>>,
     pan: Vec2,
     zoom: f32,
+    /// The size of the canvas when it was last shown, which *Zoom to fit* frames the nodes in.
+    canvas: Vec2,
     pub selected: BTreeSet<u64>,
     drag: Drag,
     search: Option<Search>,
@@ -113,6 +115,7 @@ impl Default for GraphEditor {
             report: None,
             pan: vec2(40.0, 40.0),
             zoom: 1.0,
+            canvas: vec2(800.0, 300.0),
             selected: BTreeSet::new(),
             drag: Drag::None,
             search: None,
@@ -524,7 +527,7 @@ fn toolbar(ui: &mut Ui, state: &mut AppState) {
             g.redo();
         }
         if ui.button(t!("action-zoom-fit")).clicked() {
-            fit(g, ui.available_rect_before_wrap().size());
+            fit(g, g.canvas);
         }
         ui.separator();
         let run_button =
@@ -557,22 +560,30 @@ fn toolbar(ui: &mut Ui, state: &mut AppState) {
     });
 }
 
-/// Frame every node in a canvas of `size`.
+/// Frame every node in the middle of a canvas of `size`, no larger than
+/// [`FIT_MAX_ZOOM`]. (Issue #339: the size used to be what was left of the
+/// toolbar's row, some 30 points high, so the nodes became unreadably small.)
 fn fit(g: &mut GraphEditor, size: Vec2) {
     let mut bounds = Rect::NOTHING;
     for n in &g.graph.nodes {
         bounds = bounds.union(g.node_rect(n));
     }
-    if !bounds.is_positive() {
+    let size = if size.is_finite() { size.max(vec2(100.0, 100.0)) } else { vec2(800.0, 300.0) };
+    if !bounds.is_positive() || !bounds.is_finite() {
         g.pan = vec2(40.0, 40.0);
         g.zoom = 1.0;
         return;
     }
-    let bounds = bounds.expand(40.0);
-    let zoom = (size.x / bounds.width()).min((size.y.max(100.0) - 20.0) / bounds.height()).clamp(0.25, 1.5);
+    let bounds = bounds.expand(FIT_MARGIN);
+    let zoom = (size.x / bounds.width()).min(size.y / bounds.height()).clamp(0.25, FIT_MAX_ZOOM);
     g.zoom = zoom;
-    g.pan = -bounds.min.to_vec2();
+    g.pan = (size / zoom - bounds.size()) / 2.0 - bounds.min.to_vec2();
 }
+
+/// Room left around the nodes by *Zoom to fit* (graph units).
+const FIT_MARGIN: f32 = 40.0;
+/// *Zoom to fit* does not magnify past this: a few nodes stay near their natural size.
+const FIT_MAX_ZOOM: f32 = 1.5;
 
 fn confirm(ctx: &egui::Context, state: &mut AppState) {
     let Some(pending) = state.graph.confirm.clone() else { return };
@@ -666,6 +677,7 @@ fn wire_shape(a: Pos2, b: Pos2, zoom: f32, stroke: Stroke) -> egui::Shape {
 
 fn canvas(ui: &mut Ui, state: &mut AppState) {
     let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
+    state.graph.canvas = rect.size();
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, PALETTE.canvas);
     let pointer = ui.input(|i| i.pointer.hover_pos());
@@ -1475,5 +1487,19 @@ impl GraphEditor {
     pub fn set_view_for_test(&mut self, zoom: f32, pan: Vec2) {
         self.zoom = zoom;
         self.pan = pan;
+    }
+
+    /// The zoom, and where the nodes' box stands on a canvas whose corner is the origin.
+    pub fn view_for_test(&self) -> (f32, Rect) {
+        let mut bounds = Rect::NOTHING;
+        for n in &self.graph.nodes {
+            bounds = bounds.union(self.node_rect(n));
+        }
+        let view = View { origin: Pos2::ZERO, pan: self.pan, zoom: self.zoom };
+        (self.zoom, Rect::from_min_max(view.screen(bounds.min), view.screen(bounds.max)))
+    }
+
+    pub fn canvas_for_test(&self) -> Vec2 {
+        self.canvas
     }
 }

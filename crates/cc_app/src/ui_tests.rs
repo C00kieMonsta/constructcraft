@@ -3731,6 +3731,45 @@ fn zooming_the_graph_keeps_its_panel_size() {
     assert!((zoomed - empty).abs() < 0.5, "the toolbar moved from {empty} to {zoomed}");
 }
 
+/// Issue #339: *Zoom to fit* frames the nodes in the canvas, not in what is
+/// left of the toolbar's row: a few nodes stay readable and in the middle.
+#[test]
+fn zoom_to_fit_frames_the_graph_in_its_canvas() {
+    let mut state = sample_state();
+    state.graph.graph = cc_engine::graph::Graph::from_value(serde_json::json!({
+        "uid": "00000000000000000000000000000abe",
+        "nodes": [
+            {"id": 1, "kind": {"builtin": "number"}, "values": {"value": 8}, "pos": [900, 700]},
+            {"id": 2, "kind": {"builtin": "number"}, "values": {"value": 1}, "pos": [1200, 760]}
+        ],
+        "wires": []
+    }))
+    .unwrap()
+    .0;
+    state.graph.set_view_for_test(0.3, egui::vec2(-2000.0, 50.0));
+    state.graph.open = true;
+    let mut harness = themed_harness(state, egui::vec2(1200.0, 800.0), egui::Theme::Light, |ui, state| {
+        egui::Panel::bottom("graph")
+            .resizable(true)
+            .default_size(400.0)
+            .size_range(160.0..=900.0)
+            .show(ui, |ui| crate::graph_ui::show(ui, state));
+    });
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, &t!("action-zoom-fit")).click();
+    for _ in 0..3 {
+        harness.run();
+    }
+    let graph = &harness.state().graph;
+    let (zoom, nodes) = graph.view_for_test();
+    let canvas = egui::Rect::from_min_size(egui::Pos2::ZERO, graph.canvas_for_test());
+    assert!(canvas.height() > 200.0, "the canvas, not the toolbar: {canvas:?}");
+    // Two nodes are small beside the canvas: they are not shrunk.
+    assert!(zoom >= 1.0, "zoom {zoom}");
+    assert!(canvas.contains_rect(nodes), "{nodes:?} in {canvas:?}");
+    assert!((nodes.center() - canvas.center()).length() < 1.0, "{nodes:?} in the middle of {canvas:?}");
+}
+
 /// A schedule lays out only the rows in sight, under its header, and a click on a row selects its element.
 #[test]
 fn schedule_shows_visible_rows_and_selects() {
