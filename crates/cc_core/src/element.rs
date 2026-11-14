@@ -775,7 +775,8 @@ pub struct Room {
     pub height: f64,
 }
 
-/// A named grid line (datum), shown in every plan.
+/// A named grid line (datum), shown in every plan, and in the elevations
+/// and sections it runs square to.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Grid {
     pub start: DVec2,
