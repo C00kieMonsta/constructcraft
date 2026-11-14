@@ -6,10 +6,11 @@
 [![IFC4](https://img.shields.io/badge/IFC-exporta_IFC4_%C2%B7_importa_IFC2X3%2FIFC4-0a7bbb.svg)](https://technical.buildingsmart.org/standards/ifc/)
 [![Platforms](https://img.shields.io/badge/plataformas-Windows_%C2%B7_macOS_%C2%B7_Linux-lightgrey.svg)](#executar)
 [![DCO](https://img.shields.io/badge/DCO-commits_assinados-brightgreen.svg)](CONTRIBUTING.md)
+[![Discord](https://img.shields.io/badge/Discord-entrar-5865F2.svg?logo=discord&logoColor=white)](https://discord.gg/y8ySJZjpK)
 
 Software livre de **Modelagem de Informações da Construção (BIM)**, escrito em Rust e independente de qualquer fornecedor comercial.
 
-[English](README.md) · [Como contribuir](CONTRIBUTING.md) · [Código de conduta](CODE_OF_CONDUCT.md) · [Segurança](SECURITY.md)
+[English](README.md) · [Discord](https://discord.gg/y8ySJZjpK) · [Como contribuir](CONTRIBUTING.md) · [Código de conduta](CODE_OF_CONDUCT.md) · [Segurança](SECURITY.md)
 
 Um único modelo paramétrico é a fonte da verdade. Plantas, forros, cortes, elevações, vistas 3D, legendas, tabelas e folhas são *consultas* sobre esse modelo e se atualizam automaticamente a cada alteração.
 
