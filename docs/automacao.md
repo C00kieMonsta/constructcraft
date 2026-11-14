@@ -406,6 +406,20 @@ Cada barra de armadura tem uma posição que identifica sua forma (mesmo diâmet
 {"command": "bar_length_check", "args": {"max_length": 12}}
 ```
 
+### Renderização fotorrealista
+
+Uma vista 3D guarda suas configurações de renderização em `render` (`view_get`), mudadas por `view_set` com um patch de mesclagem: amostras por pixel (`samples`), reflexões da luz (`max_depth`), largura e altura da imagem em pixels (`width`, `height`), `fov_deg`, exposição em stops (`exposure`), mapeamento de tons (`tone_map`: `Filmic` ou `Standard`), o limite contra pontos brilhantes (`clamp`), `clay` (toda superfície opaca num mesmo branco fosco, o vidro mantido, sob o mesmo céu e sol) e o ambiente (`environment`: `sky_strength`, `sun_strength`, `ground_color`, `ground_plane`); `null` as remove. O sol é o da vista (`sun`). `view_render` faz o path tracing da vista no processador e grava a imagem (`.png`, `.jpg`, ou `.exr`/`.hdr` em luz linear) com a câmera da vista, como a vista 3D a mostra; `settings` altera as configurações da vista só para essa renderização, e `region` (`[x, y, largura, altura]` em pixels) renderiza só uma parte da imagem. Retorna o tamanho, as amostras, os segundos e os triângulos, e não muda nada no modelo.
+
+```text
+{"command": "view_set", "args": {"view": "{3D}", "render": {"samples": 256, "width": 1920, "height": 1080}}}
+{"command": "view_render", "args": {"view": "{3D}", "path": "casa.png"}}
+{"command": "view_render", "args": {"view": "{3D}", "path": "maquete.jpg", "settings": {"clay": true, "samples": 64}}}
+```
+
+```sh
+cargo run -p cc_cli -- -p examples/casa_simples.ccad run view_render view="{3D}" path=saida.png 'settings={"samples":16,"width":320,"height":200}'
+```
+
 ## Scripts Lua
 
 `ccad lua <arquivo>` executa um script em [Lua 5.4](https://www.lua.org/manual/5.4/) sobre a sessão. O script chama comandos com `ccad.run`, guarda os resultados em variáveis e faz laços, então o id criado num passo pode ser usado no seguinte. Os argumentos (nas mesmas formas do `run`: pares `chave=valor`, um objeto JSON, `@arquivo.json`) ficam em `ccad.args`; o que ele imprime vai para a saída padrão e o que ele retorna é impresso como JSON.

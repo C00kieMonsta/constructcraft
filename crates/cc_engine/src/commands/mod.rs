@@ -49,6 +49,7 @@ pub mod query;
 pub mod ramp;
 pub mod rebar;
 pub mod region;
+pub mod render;
 pub mod roofing;
 pub mod schedule;
 pub mod shaft;

@@ -14,6 +14,7 @@ cc_geom.workspace = true
 cc_script.workspace = true
 mlua.workspace = true
 cc_views.workspace = true
+cc_raytracing.workspace = true
 cc_ifc.workspace = true
 cc_cad.workspace = true
 cc_skp.workspace = true

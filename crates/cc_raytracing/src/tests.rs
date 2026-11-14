@@ -176,7 +176,12 @@ fn the_camera_frames_what_the_viewport_frames() {
 
 /// A box of `material` filling the view, lit by a high sun.
 fn wall_of(p: &Project, material: &str, clay: bool) -> [f32; 3] {
-    let view = sunny(p, 180.0, 60.0);
+    wall_in_sun(p, material, clay, 180.0)
+}
+
+/// The face of a box of `material` filling the view, with a high sun at `azimuth`.
+fn wall_in_sun(p: &Project, material: &str, clay: bool, azimuth: f64) -> [f32; 3] {
+    let view = sunny(p, azimuth, 60.0);
     let geom = geometry(vec![cuboid(1, DVec3::new(-5.0, 0.0, 0.0), DVec3::new(5.0, 1.0, 6.0), Some(material), [9; 3])]);
     let camera = looking(DVec3::new(0.0, -4.0, 3.0), DVec3::new(0.0, 0.0, 3.0));
     let image = render(p, &geom, &view, &camera, &RenderSettings { clay, ..settings(16, 16, 4) });
@@ -191,7 +196,29 @@ fn materials_show_their_appearance_and_clay_is_gray() {
     let red = wall_of(&p, &name, false);
     assert!(red[0] > red[1] * 2.0 && red[0] > red[2] * 2.0, "{red:?}");
     let clay = wall_of(&p, &name, true);
-    assert!((clay[0] - clay[1]).abs() < 0.05 * clay[0] && clay[0] > 0.2, "{clay:?}");
+    assert!(neutral(clay) && clay[0] > 0.2, "{clay:?}");
+}
+
+/// Whether a color is a gray: no channel more than 15 % off their mean (the
+/// sky tints faces in the shade a little blue).
+fn neutral(c: [f32; 3]) -> bool {
+    let m = (c[0] + c[1] + c[2]) / 3.0;
+    m > 0.0 && c.iter().all(|v| (v - m).abs() < 0.15 * m)
+}
+
+#[test]
+fn clay_is_lit_by_the_sun() {
+    let mut p = Project::from_template();
+    let name = p.materials[0].name.clone();
+    p.materials[0].appearance.color = [200, 30, 30];
+    // The same face with the sun in front of it and behind the box: the
+    // sun and the shadow show, which ambient occlusion alone would not.
+    let (a, b) = (wall_in_sun(&p, &name, true, 180.0), wall_in_sun(&p, &name, true, 0.0));
+    let (lit, shaded) = if luminance(a) > luminance(b) { (a, b) } else { (b, a) };
+    assert!(luminance(lit) > luminance(shaded) * 1.5, "lit {lit:?}, shaded {shaded:?}");
+    // The material's red is gone: the sunlit face is gray, the shaded one
+    // takes the blue of the sky.
+    assert!(neutral(lit) && shaded[0] <= shaded[1] && shaded[1] <= shaded[2], "lit {lit:?}, shaded {shaded:?}");
 }
 
 #[test]

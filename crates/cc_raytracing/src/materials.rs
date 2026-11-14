@@ -31,8 +31,9 @@ pub const GLASS_TINT: f32 = 0.25;
 pub const MAX_TEXTURES: usize = 64;
 /// The longest side of a decoded texture, pixels (larger images are reduced).
 pub const MAX_TEXTURE_SIDE: u32 = 2048;
-/// The base color of clay renders (sRGB): a light, not quite white, gray.
-pub const CLAY_COLOR: [u8; 3] = [228, 228, 224];
+/// The base color of clay renders (sRGB): a white matte of about 0.8 in
+/// linear light, lit by the sky and the sun like any other surface.
+pub const CLAY_COLOR: [u8; 3] = [231, 231, 231];
 /// Coverage steps of a [`Surface`]'s opacity (1000 is opaque).
 const OPACITY_STEPS: f64 = 1000.0;
 

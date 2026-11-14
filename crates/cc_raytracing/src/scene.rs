@@ -2,7 +2,7 @@
 //! view, owned so a worker thread can render it.
 
 use crate::environment::{self, GROUND_NUDGE, GROUND_RADII, MIN_GROUND_HALF_SIDE};
-use crate::materials::{CLAY_COLOR, Style, Surface, SurfaceInput, Textures, texture_uv};
+use crate::materials::{Style, Surface, SurfaceInput, Textures, texture_uv};
 use crate::space::{self, Space};
 use crate::{RenderError, guarded};
 use cc_core::material::MaterialTexture;
@@ -21,11 +21,6 @@ pub const MAX_TRIANGLES: usize = 5_000_000;
 const MAX_VERTICES: usize = 3 * MAX_TRIANGLES;
 /// Twice the area below which a triangle is dropped, square meters.
 const MIN_DOUBLE_AREA: f64 = 1e-12;
-/// The reach of ambient occlusion in clay renders, as a share of the
-/// model's diagonal, and its bounds in meters.
-const AO_SHARE: f64 = 0.1;
-const AO_MIN: f64 = 0.3;
-const AO_MAX: f64 = 5.0;
 /// How much glossy surfaces are blurred after a rough bounce (the path
 /// tracer's default: it tames caustics into soft light).
 const FILTER_GLOSSY: f32 = 0.5;
@@ -147,14 +142,8 @@ impl RenderScene {
             [(-half, -half), (half, -half), (half, half), (-half, half)]
                 .map(|(dx, dy)| space.point(DVec3::new(c.x + dx, c.y + dy, z)))
         });
-        let ground_color = if settings.clay { CLAY_COLOR } else { env.ground_color };
-        let lights = if settings.clay { Vec::new() } else { environment::lights(&sun, env) };
-        let integrator = if settings.clay {
-            let reach = bounds.map_or(1.0, |(lo, hi)| (hi - lo).length() * AO_SHARE).clamp(AO_MIN, AO_MAX);
-            Integrator::AmbientOcclusion { max_distance: reach as f32 }
-        } else {
-            Integrator::PathTracing
-        };
+        // Clay renders are lit like any other: only the surfaces change.
+        let lights = environment::lights(&sun, env);
         let (triangles, texture_count) = (meshes.triangles, textures.len());
         let scene = guarded("building the scene", move || {
             let mut builder = SceneBuilder::new();
@@ -163,7 +152,7 @@ impl RenderScene {
                 builder.add_mesh(&mesh.positions, Some(&mesh.normals), Some(&mesh.uvs), None, &mesh.indices, material);
             }
             if let Some(quad) = ground {
-                let material = builder.add_material(Surface::matte(ground_color).material(&textures));
+                let material = builder.add_material(Surface::matte(env.ground_color).material(&textures));
                 builder.add_quad(quad, material);
             }
             for light in lights {
@@ -178,7 +167,7 @@ impl RenderScene {
             clamp: (settings.clamp > 0.0).then_some(settings.clamp as f32),
             filter_glossy: FILTER_GLOSSY,
             seed: 0,
-            integrator,
+            integrator: Integrator::PathTracing,
         };
         Ok(Self {
             scene,

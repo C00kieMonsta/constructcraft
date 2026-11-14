@@ -152,7 +152,8 @@ pub struct RenderSettings {
     pub tone_map: ToneMap,
     /// Largest radiance of a sample (removes fireflies); 0 turns it off.
     pub clamp: f64,
-    /// Render every surface in plain white, lit by ambient occlusion only.
+    /// Render every opaque surface in one white matte (glass stays clear
+    /// glass), lit by the same sky, sun and ground as a normal render.
     pub clay: bool,
     /// Sky, sun and ground.
     pub environment: RenderEnvironment,

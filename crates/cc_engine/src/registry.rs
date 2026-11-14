@@ -177,6 +177,7 @@ registry![
         io::IfcExport,
         io::SheetExport,
         io::ViewExport,
+        render::ViewRender,
         io::ScheduleExportCsv,
         io::ComponentLoad,
         io::ComponentLibraryList,
