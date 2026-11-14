@@ -6,10 +6,11 @@
 [![IFC4](https://img.shields.io/badge/IFC-IFC4_export_%C2%B7_IFC2X3%2FIFC4_import-0a7bbb.svg)](https://technical.buildingsmart.org/standards/ifc/)
 [![Platforms](https://img.shields.io/badge/platforms-Windows_%C2%B7_macOS_%C2%B7_Linux-lightgrey.svg)](#running)
 [![DCO](https://img.shields.io/badge/DCO-signed--off-brightgreen.svg)](CONTRIBUTING.md)
+[![Discord](https://img.shields.io/badge/Discord-join-5865F2.svg?logo=discord&logoColor=white)](https://discord.gg/y8ySJZjpK)
 
 Free and open source **Building Information Modeling (BIM)** software, written in Rust and independent of any commercial vendor.
 
-[Português (Brasil)](README.pt-BR.md) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [Security](SECURITY.md)
+[Português (Brasil)](README.pt-BR.md) · [Discord](https://discord.gg/y8ySJZjpK) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [Security](SECURITY.md)
 
 A single parametric model is the source of truth. Floor plans, ceiling plans, sections, elevations, 3D views, legends, schedules and sheets are *queries* over that model and update automatically after every change.
 
