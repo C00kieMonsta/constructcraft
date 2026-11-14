@@ -69,6 +69,7 @@ mod side_panels;
 mod site_ui;
 mod sketch_mode;
 mod snap_geom;
+mod snaps;
 mod stair_ui;
 mod state;
 mod steel_building_ui;

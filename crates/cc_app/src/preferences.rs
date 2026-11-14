@@ -50,6 +50,8 @@ const TRACKPAD_KEY: &str = "trackpad_pans";
 const SHORTCUTS_KEY: &str = "shortcut_keys";
 /// eframe storage key of the CAD blocks preference ("1" when blocks become detail components).
 const CAD_BLOCKS_KEY: &str = "cad_blocks";
+/// eframe storage key of the object snaps (`snaps::SnapSettings::to_text`).
+const SNAPS_KEY: &str = "object_snaps";
 /// eframe storage key of the macros folder.
 const MACRO_FOLDER_KEY: &str = "macro_folder";
 /// eframe storage key of the default projects folder.
@@ -118,6 +120,8 @@ pub struct Preferences {
     /// Import CAD brings a drawing's blocks in as detail components instead
     /// of exploding them into the imported drawing.
     pub cad_blocks: bool,
+    /// Which points the tools snap to.
+    pub snaps: crate::snaps::SnapSettings,
     /// Custom two-letter keys by command id (`UiCommand::id`); empty keys
     /// take a command's keys away.
     pub shortcut_keys: BTreeMap<String, String>,
@@ -159,6 +163,7 @@ impl Default for Preferences {
             select_drag_3d: false,
             trackpad_pans: true,
             cad_blocks: false,
+            snaps: Default::default(),
             shortcut_keys: BTreeMap::new(),
             library_folders: Vec::new(),
             macro_folder: None,
@@ -261,6 +266,7 @@ impl Preferences {
             select_drag_3d: on(SELECT_3D_KEY, d.select_drag_3d),
             trackpad_pans: on(TRACKPAD_KEY, d.trackpad_pans),
             cad_blocks: on(CAD_BLOCKS_KEY, d.cad_blocks),
+            snaps: get(SNAPS_KEY).map_or(d.snaps, |v| crate::snaps::SnapSettings::from_text(&v)),
             shortcut_keys: get(SHORTCUTS_KEY).map(|v| shortcut_lines(&v)).unwrap_or_default(),
             library_folders: get(LIBRARY_KEY).map(|v| path_lines(&v, MAX_LIBRARY_FOLDERS)).unwrap_or_default(),
             macro_folder: folder(get(MACRO_FOLDER_KEY)),
@@ -292,6 +298,7 @@ impl Preferences {
         set(SELECT_3D_KEY, flag(self.select_drag_3d));
         set(TRACKPAD_KEY, flag(self.trackpad_pans));
         set(CAD_BLOCKS_KEY, flag(self.cad_blocks));
+        set(SNAPS_KEY, self.snaps.to_text());
         let keys = self.shortcut_keys.iter().map(|(id, keys)| format!("{id}={keys}")).collect::<Vec<_>>();
         set(SHORTCUTS_KEY, keys.join("\n"));
         set(LIBRARY_KEY, join_paths(&self.library_folders));
@@ -536,6 +543,7 @@ fn restore_page(state: &mut AppState, section: Section) {
             p.theme = d.theme;
             p.check_updates = d.check_updates;
             p.cad_blocks = d.cad_blocks;
+            p.snaps = d.snaps;
         }
         Section::Interface => {
             p.ui_scale = d.ui_scale;
@@ -726,6 +734,21 @@ fn general(ui: &mut Ui, state: &mut AppState) {
     check_row(ui, &t!("update-auto"), &mut state.prefs.check_updates, Some(t!("update-auto-hint")));
     group(ui, t!("group-import"), false);
     check_row(ui, &t!("label-cad-blocks"), &mut state.prefs.cad_blocks, Some(t!("hint-cad-blocks")));
+    snaps(ui, &mut state.prefs.snaps);
+}
+
+/// Object snaps: the master switch, every element of the view, and each
+/// kind of snap point (issue #317).
+fn snaps(ui: &mut Ui, snaps: &mut crate::snaps::SnapSettings) {
+    group(ui, t!("pref-group-snaps"), false);
+    check_row(ui, &t!("pref-snap-enabled"), &mut snaps.enabled, Some(t!("pref-snap-enabled-hint")));
+    let enabled = snaps.enabled;
+    ui.add_enabled_ui(enabled, |ui| {
+        check_row(ui, &t!("pref-snap-elements"), &mut snaps.elements, Some(t!("pref-snap-elements-hint")));
+        for option in crate::snaps::SnapOption::KINDS {
+            check_row(ui, &crate::i18n::tr(option.key()), snaps.get_mut(option), None);
+        }
+    });
 }
 
 fn interface(ui: &mut Ui, state: &mut AppState) {
@@ -1105,6 +1128,7 @@ mod tests {
             select_drag_3d: true,
             trackpad_pans: false,
             cad_blocks: true,
+            snaps: crate::snaps::SnapSettings { midpoint: false, elements: false, ..Default::default() },
             shortcut_keys: BTreeMap::from([("Move".to_string(), "MO".to_string()), ("Pin".to_string(), String::new())]),
             library_folders: vec![PathBuf::from("/lib/a"), PathBuf::from("C:\\lib b")],
             macro_folder: Some(PathBuf::from("/macros")),

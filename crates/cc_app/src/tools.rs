@@ -768,7 +768,7 @@ pub struct DimChain {
 enum SnapKind {
     Endpoint,
     Midpoint,
-    /// The center of an arc or circle (imported drawings).
+    /// The center of an arc or circle (imported drawings), a column, a pile or a pad footing.
     Center,
     Nearest,
     /// On a guide from an acquired point.
@@ -813,6 +813,9 @@ impl Snap {
 
 /// Points acquired for alignment, most recent first.
 const MAX_TRACKED: usize = 6;
+/// A footing outline with more sides than this is a curve in chords: its
+/// corners and sides are not snap points.
+const MAX_OUTLINE_SIDES: usize = 64;
 
 /// Snap through [`snap`] with the interaction's acquired points, and
 /// acquire the point when it is a model point.
@@ -826,9 +829,16 @@ pub(crate) fn snap_at(
     scale: f64,
     ortho: bool,
 ) -> Snap {
-    let cad = cad_snap(state, raw, SNAP_PX / scale * 1.5);
+    let on = state.prefs.snaps.effective();
+    let mut cad = cad_snap(state, raw, SNAP_PX / scale * 1.5);
+    // Every element the view draws, by its lines (issue #317).
+    if on.elements
+        && let Some(drawing) = state.active_view.and_then(|v| state.drawing(v))
+    {
+        crate::snaps::drawing_snap(&drawing, raw, SNAP_PX / scale * 1.5, &mut cad);
+    }
     let model = model_snaps_cached(state, level);
-    let s = snap_with(&model, raw, anchor, extra, &state.interaction.tracked, scale, ortho, &cad);
+    let s = snap_with(&model, raw, anchor, extra, &state.interaction.tracked, scale, ortho, &cad, &on);
     if matches!(s.kind, SnapKind::Endpoint | SnapKind::Midpoint | SnapKind::Center) {
         let tracked = &mut state.interaction.tracked;
         tracked.retain(|p| p.distance(s.point) > 1e-9);
@@ -976,7 +986,8 @@ fn snap(
     ortho: bool,
 ) -> Snap {
     let cad = cc_core::cad::CadSnap::default();
-    snap_with(&model_snaps(project, geom, level), raw, anchor, extra, tracked, scale, ortho, &cad)
+    let on = crate::snaps::SnapSettings::default();
+    snap_with(&model_snaps(project, geom, level), raw, anchor, extra, tracked, scale, ortho, &cad, &on)
 }
 
 /// The model's snap candidates on a level: element ends, midpoints, lines and arcs, outlines,
@@ -986,6 +997,8 @@ fn snap(
 pub(crate) struct ModelSnaps {
     ends: Vec<DVec2>,
     mids: Vec<DVec2>,
+    /// Centers: columns, piles and pad footings.
+    centers: Vec<DVec2>,
     lines: Vec<(DVec2, DVec2)>,
     arcs: Vec<cc_core::arc::Arc>,
 }
@@ -1009,6 +1022,7 @@ fn model_snaps_cached(state: &mut AppState, level: Option<LevelId>) -> std::sync
 fn model_snaps(project: &Project, geom: &ModelGeometry, level: Option<LevelId>) -> ModelSnaps {
     let mut ends: Vec<DVec2> = Vec::new();
     let mut mids = Vec::new();
+    let mut centers = Vec::new();
     let mut lines = Vec::new();
     let mut arcs: Vec<cc_core::arc::Arc> = Vec::new();
     for e in project.elements.values().filter(|e| Some(e.level) == level) {
@@ -1026,6 +1040,33 @@ fn model_snaps(project: &Project, geom: &ModelGeometry, level: Option<LevelId>) 
             ends.extend([b.start, b.end]);
             mids.push(a.point(a.length() * 0.5));
             arcs.push(a);
+        } else if let ElementKind::Beam(b) = &e.kind {
+            // A straight beam's location line (issue #317); its faces come with the outlines.
+            ends.extend([b.start, b.end]);
+            mids.push((b.start + b.end) * 0.5);
+            lines.push((b.start, b.end));
+        } else if let ElementKind::Foundation(f) = &e.kind {
+            match &f.shape {
+                cc_core::FoundationShape::Pad { position, .. } => centers.push(*position),
+                cc_core::FoundationShape::Strip { start, end, .. } => {
+                    ends.extend([*start, *end]);
+                    match f.shape.arc() {
+                        Some(a) => {
+                            mids.push(a.point(a.length() * 0.5));
+                            arcs.push(a);
+                        }
+                        None => {
+                            mids.push((*start + *end) * 0.5);
+                            lines.push((*start, *end));
+                        }
+                    }
+                }
+                cc_core::FoundationShape::Slab { .. } => {}
+            }
+        } else if let ElementKind::Column(c) = &e.kind {
+            centers.push(c.position);
+        } else if let ElementKind::Pile(pile) = &e.kind {
+            centers.push(pile.position);
         } else if let Some(s) = e.as_segment() {
             // Pipe and conduit ends, and runs to branch from.
             ends.extend([s.start, s.end]);
@@ -1067,12 +1108,26 @@ fn model_snaps(project: &Project, geom: &ModelGeometry, level: Option<LevelId>) 
             (ElementKind::Ramp(r), _) => {
                 cc_geom::ramp_geom(project, e, r).map(|g| g.pieces.into_iter().map(|p| p.outline).collect())
             }
+            // The faces of a straight beam, and of a footing that is not curved,
+            // with the middles of their sides.
+            (ElementKind::Beam(_), _) => {
+                geom.beams.get(&e.id).filter(|b| b.arc.is_none()).map(|b| vec![b.footprint().to_vec()])
+            }
+            (ElementKind::Foundation(_), _) => geom
+                .foundations
+                .get(&e.id)
+                .filter(|f| f.arc.is_none() && f.drawn_area.is_none() && f.footprint.len() <= MAX_OUTLINE_SIDES)
+                .map(|f| std::iter::once(f.footprint.clone()).chain(f.holes.iter().cloned()).collect()),
             _ => None,
         }
         .unwrap_or_default();
+        let sides = matches!(e.kind, ElementKind::Beam(_) | ElementKind::Foundation(_));
         for o in outlines {
             ends.extend_from_slice(&o);
             lines.extend(closed_edges(&o));
+            if sides {
+                mids.extend(closed_edges(&o).map(|(a, b)| (a + b) * 0.5));
+            }
         }
     }
     // Grid lines show on every level; their crossings are endpoints.
@@ -1087,7 +1142,7 @@ fn model_snaps(project: &Project, geom: &ModelGeometry, level: Option<LevelId>) 
         let risers = project.segments_at(level).filter(|(e, _)| e.level != level);
         ends.extend(risers.map(|(_, s)| s.start));
     }
-    ModelSnaps { ends, mids, lines, arcs }
+    ModelSnaps { ends, mids, centers, lines, arcs }
 }
 
 /// [`snap`] over the model's candidates `model` with the snap features of imported drawings too
@@ -1102,11 +1157,15 @@ fn snap_with(
     scale: f64,
     ortho: bool,
     cad: &cc_core::cad::CadSnap,
+    on: &crate::snaps::SnapSettings,
 ) -> Snap {
     let r = SNAP_PX / scale;
-    // In the order they always had: the extra points, the drawings', then the model's.
-    let ends: Vec<DVec2> = extra.iter().chain(&cad.ends).chain(&model.ends).copied().collect();
+    // In the order they always had: the extra points (the tool's own, always
+    // on), the drawings', then the model's.
+    let found = cad.ends.iter().chain(&model.ends).filter(|_| on.endpoint);
+    let ends: Vec<DVec2> = extra.iter().chain(found).copied().collect();
     let mids: Vec<DVec2> = cad.mids.iter().chain(&model.mids).copied().collect();
+    let centers: Vec<DVec2> = cad.centers.iter().chain(&model.centers).copied().collect();
     let lines: Vec<(DVec2, DVec2)> = cad.lines.iter().chain(&model.lines).copied().collect();
     let arcs: Vec<cc_core::arc::Arc> = cad.arcs.iter().chain(&model.arcs).cloned().collect();
     let nearest = |pts: &[DVec2]| {
@@ -1115,21 +1174,31 @@ fn snap_with(
     if let Some((p, _)) = nearest(&ends) {
         return Snap::at(p, SnapKind::Endpoint);
     }
-    if let Some((p, _)) = nearest(&cad.centers) {
+    if on.center
+        && let Some((p, _)) = nearest(&centers)
+    {
         return Snap::at(p, SnapKind::Center);
     }
-    if let Some((p, _)) = nearest(&mids) {
+    if on.midpoint
+        && let Some((p, _)) = nearest(&mids)
+    {
         return Snap::at(p, SnapKind::Midpoint);
     }
     // Where two lines or arcs cross; the perpendicular and tangent from the anchor (issue #159).
-    if let Some(p) = crate::snap_geom::crossing(&lines, &arcs, raw, r) {
+    if on.intersection
+        && let Some(p) = crate::snap_geom::crossing(&lines, &arcs, raw, r)
+    {
         return Snap::at(p, SnapKind::Intersection);
     }
     if let Some(a) = anchor {
-        if let Some(p) = crate::snap_geom::perpendicular(a, &lines, &arcs, raw, r) {
+        if on.perpendicular
+            && let Some(p) = crate::snap_geom::perpendicular(a, &lines, &arcs, raw, r)
+        {
             return Snap { point: p, kind: SnapKind::Perpendicular, guides: [Some((a, p)), None] };
         }
-        if let Some(p) = crate::snap_geom::tangent(a, &arcs, raw, r) {
+        if on.tangent
+            && let Some(p) = crate::snap_geom::tangent(a, &arcs, raw, r)
+        {
             return Snap { point: p, kind: SnapKind::Tangent, guides: [Some((a, p)), None] };
         }
     }
@@ -1151,7 +1220,9 @@ fn snap_with(
         }
     }
     let off = |g: &(DVec2, DVec2), q: DVec2| (q - g.0).perp_dot(g.1).abs();
-    guides.retain(|g| off(g, raw) <= r && g.0.distance(raw) > r);
+    guides.retain(|g| on.alignment && off(g, raw) <= r && g.0.distance(raw) > r);
+    // The nearest point of a line or an arc.
+    let (lines, arcs) = if on.nearest { (lines, arcs) } else { Default::default() };
     // Two guides crossing near the pointer.
     let mut best: Option<(Snap, f64)> = None;
     for (i, g) in guides.iter().enumerate() {
@@ -4745,6 +4816,133 @@ mod tests {
         let s = snap(&p, &geom, Some(level), face - w.normal * 0.01, None, &[], &[], SCALE, false);
         assert_eq!(s.kind, SnapKind::Nearest);
         assert!(s.point.distance(face) < 1e-6, "{} vs {face}", s.point);
+    }
+
+    /// Issue #317: beams and footings have snap points like columns do:
+    /// the ends and middle of a beam's line, the corners and the middles of
+    /// the sides of both, a pad's center.
+    #[test]
+    fn beams_and_footings_snap() {
+        let mut state = AppState::new(cc_core::Document::new(crate::actions::new_project()));
+        let level = state.project().levels.first().map(|l| l.id).unwrap();
+        let mut make = |name: &str, args: serde_json::Value| {
+            ElementId(state.session.execute(name, args).unwrap()["id"].as_u64().unwrap())
+        };
+        let beam = make("beam_create", serde_json::json!({"level": level.0, "start": [0, 0], "end": [4, 0]}));
+        let pad = make("footing_create", serde_json::json!({"level": level.0, "position": [10, 10], "rotation": 30}));
+        let strip =
+            make("strip_footing_create", serde_json::json!({"level": level.0, "start": [0, 20], "end": [6, 20]}));
+        let (project, geom) = state.session.project_and_geometry();
+        let near = DVec2::new(0.004, 0.003);
+        let at = |p: DVec2| snap(project, geom, Some(level), p + near, None, &[], &[], SCALE, false);
+        let hits = |p: DVec2, kind: SnapKind| {
+            let s = at(p);
+            assert_eq!(s.kind, kind, "at {p}");
+            assert!(s.point.distance(p) < 1e-9, "{} vs {p}", s.point);
+        };
+
+        // The beam's location line, and the faces of its body.
+        hits(DVec2::new(4.0, 0.0), SnapKind::Endpoint);
+        hits(DVec2::new(2.0, 0.0), SnapKind::Midpoint);
+        let body = geom.beams[&beam].footprint();
+        assert!(body[0].distance(body[1]) > 0.05, "a beam with some width");
+        hits(body[0], SnapKind::Endpoint);
+        hits((body[0] + body[1]) * 0.5, SnapKind::Midpoint);
+        let on_face = body[0].lerp(body[1], 0.3);
+        assert_eq!(at(on_face).kind, SnapKind::Nearest);
+
+        // The pad: its center, its corners and the middles of its sides.
+        hits(DVec2::new(10.0, 10.0), SnapKind::Center);
+        let outline = geom.foundations[&pad].footprint.clone();
+        assert_eq!(outline.len(), 4);
+        hits(outline[2], SnapKind::Endpoint);
+        hits((outline[0] + outline[1]) * 0.5, SnapKind::Midpoint);
+
+        // The strip: the ends and middle of its line, and its corners.
+        hits(DVec2::new(6.0, 20.0), SnapKind::Endpoint);
+        hits(DVec2::new(3.0, 20.0), SnapKind::Midpoint);
+        hits(geom.foundations[&strip].footprint[0], SnapKind::Endpoint);
+
+        // On another level they are not there.
+        let s = snap(project, geom, None, DVec2::new(2.0, 0.0) + near, None, &[], &[], SCALE, false);
+        assert_eq!(s.kind, SnapKind::Free);
+    }
+
+    /// The snap settings turn each kind off; the tool's own points stay.
+    #[test]
+    fn snap_settings_choose_the_kinds() {
+        use crate::snaps::{SnapOption, SnapSettings};
+        let model = ModelSnaps {
+            ends: vec![DVec2::ZERO, DVec2::new(4.0, 0.0)],
+            mids: vec![DVec2::new(2.0, 0.0)],
+            centers: vec![DVec2::new(8.0, 8.0)],
+            lines: vec![(DVec2::ZERO, DVec2::new(4.0, 0.0)), (DVec2::new(1.0, -1.0), DVec2::new(1.0, 1.0))],
+            arcs: Vec::new(),
+        };
+        let cad = cc_core::cad::CadSnap::default();
+        let kind = |on: &SnapSettings, p: DVec2, extra: &[DVec2]| {
+            snap_with(&model, p + DVec2::new(0.003, 0.004), None, extra, &[], SCALE, false, &cad, on).kind
+        };
+        let all = SnapSettings::default();
+        let without = |o: SnapOption| {
+            let mut s = all;
+            *s.get_mut(o) = false;
+            s.effective()
+        };
+        let cases = [
+            (DVec2::new(4.0, 0.0), SnapOption::Endpoint, SnapKind::Endpoint),
+            (DVec2::new(2.0, 0.0), SnapOption::Midpoint, SnapKind::Midpoint),
+            (DVec2::new(8.0, 8.0), SnapOption::Center, SnapKind::Center),
+            (DVec2::new(1.0, 0.0), SnapOption::Intersection, SnapKind::Intersection),
+            (DVec2::new(3.0, 0.0), SnapOption::Nearest, SnapKind::Nearest),
+        ];
+        for (p, option, expected) in cases {
+            assert_eq!(kind(&all, p, &[]), expected, "{option:?} on");
+            assert_ne!(kind(&without(option), p, &[]), expected, "{option:?} off");
+            assert_eq!(kind(&without(SnapOption::Enabled), p, &[]), SnapKind::Free, "all off at {p}");
+        }
+        // Guides from an acquired point.
+        let guided = |on: &SnapSettings| {
+            snap_with(&model, DVec2::new(20.0, 30.004), None, &[], &[DVec2::new(15.0, 30.0)], SCALE, false, &cad, on)
+                .kind
+        };
+        assert_eq!(guided(&all), SnapKind::Alignment);
+        assert_eq!(guided(&without(SnapOption::Alignment)), SnapKind::Free);
+        // The points a tool passes itself (the start of a chain) always snap.
+        let own = [DVec2::new(30.0, 30.0)];
+        assert_eq!(kind(&without(SnapOption::Enabled), own[0], &own), SnapKind::Endpoint);
+    }
+
+    /// With *every element* on, the tools snap to what the view draws.
+    #[test]
+    fn the_view_s_elements_are_snapped_to() {
+        let mut state = AppState::new(cc_core::Document::new(crate::actions::new_project()));
+        let level = state.project().levels.first().map(|l| l.id).unwrap();
+        let plan = state.project().views.values().find(|v| v.level() == Some(level)).map(|v| v.id).unwrap();
+        state.active_view = Some(plan);
+        let pile = state.session.execute("pile_create", serde_json::json!({"level": level.0, "position": [3, 3]}));
+        let pile = ElementId(pile.unwrap()["id"].as_u64().unwrap());
+        let drawing = state.drawing(plan).unwrap();
+        // Any line the plan draws for the pile, away from its center.
+        let (a, b) = drawing
+            .prims
+            .iter()
+            .find_map(|p| match p {
+                cc_views::Prim::Line { a, b, element: Some(e), style, .. }
+                    if *e == pile && *style != cc_views::LineStyle::Annotation && a.distance(*b) > 0.01 =>
+                {
+                    Some((*a, *b))
+                }
+                _ => None,
+            })
+            .unwrap();
+        let p = a.lerp(b, 0.3);
+        let s = snap_at(&mut state, Some(level), p, None, &[], 2000.0, false);
+        assert!(!s.is_free(), "{:?} on the pile's line {a} {b}", s.kind);
+        state.prefs.snaps.elements = false;
+        state.interaction.tracked.clear();
+        let s = snap_at(&mut state, Some(level), p, None, &[], 2000.0, false);
+        assert!(s.is_free(), "{:?} without the view's elements", s.kind);
     }
 
     /// A window tool clicked on a wall in a 3D view places the window there.
