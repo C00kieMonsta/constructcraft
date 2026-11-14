@@ -64,7 +64,8 @@ pub fn styled_button(ui: &mut Ui, label: &str, style: Style) -> egui::Response {
 #[derive(Default)]
 pub struct Footer {
     actions: Vec<(String, Style)>,
-    extras: Vec<String>,
+    /// Auxiliary buttons and whether each shows as pressed (see [`Footer::toggle`]).
+    extras: Vec<(String, bool)>,
     /// Actions shown greyed out (see [`Footer::disable`]).
     disabled: Vec<usize>,
 }
@@ -83,15 +84,22 @@ impl Footer {
         self.push(label, Style::Danger)
     }
 
-    /// Grey out the action `index` (as returned by [`Footer::primary`] and
-    /// the others): it cannot be clicked and Enter does not press it.
+    /// Grey out the button `index` (as returned by [`Footer::primary`] and
+    /// the others, auxiliary buttons too): it cannot be clicked and Enter
+    /// does not press it.
     pub fn disable(&mut self, index: usize) {
         self.disabled.push(index);
     }
 
     /// An auxiliary button on the left side. Its index follows the actions'.
     pub fn extra(&mut self, label: impl Into<String>) -> usize {
-        self.extras.push(label.into());
+        self.toggle(label, false)
+    }
+
+    /// An auxiliary button that stays pressed while `on` (a mode of the
+    /// dialog the button turns on and off). Its index follows the actions'.
+    pub fn toggle(&mut self, label: impl Into<String>, on: bool) -> usize {
+        self.extras.push((label.into(), on));
         1000 + self.extras.len() - 1
     }
 
@@ -103,7 +111,7 @@ impl Footer {
     /// Width the buttons take side by side, with the footer's spacing.
     fn width(&self, ui: &Ui) -> f32 {
         let padding = 2.0 * ui.spacing().button_padding.x;
-        let labels = self.extras.iter().chain(self.actions.iter().map(|(label, _)| label));
+        let labels = self.extras.iter().map(|(label, _)| label).chain(self.actions.iter().map(|(label, _)| label));
         let (mut total, mut count) = (0.0, 0usize);
         for label in labels {
             let text = egui::WidgetText::from(label.as_str()).into_galley(
@@ -330,8 +338,18 @@ impl Dialog {
                     ui.set_width(content_width);
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = FOOTER_SPACING;
-                        for (i, label) in buttons.extras.iter().enumerate() {
-                            if styled_button(ui, label, Style::Secondary).clicked() {
+                        for (i, (label, on)) in buttons.extras.iter().enumerate() {
+                            let enabled = !buttons.disabled.contains(&(1000 + i));
+                            let r = ui
+                                .add_enabled_ui(enabled, |ui| {
+                                    if *on {
+                                        ui.add(egui::Button::new(label.as_str()).selected(true).min_size(BUTTON_SIZE))
+                                    } else {
+                                        styled_button(ui, label, Style::Secondary)
+                                    }
+                                })
+                                .inner;
+                            if r.clicked() {
                                 clicked = Some(1000 + i);
                             }
                         }

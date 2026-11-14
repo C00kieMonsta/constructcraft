@@ -3066,6 +3066,12 @@ fn every_dialog_keeps_its_body_inside() {
         ("view templates".into(), Box::new(crate::graphics_dialog::open_templates)),
         ("new project".into(), Box::new(crate::new_project_dialog::open)),
         ("new component".into(), Box::new(crate::new_component_dialog::open)),
+        (
+            "render".into(),
+            Box::new(|s| {
+                open_render_window(s, None);
+            }),
+        ),
     ];
     for section in [Section::General, Section::Interface, Section::FileLocations, Section::Saving, Section::Shortcuts] {
         opens.push((format!("preferences {section:?}"), Box::new(move |s| crate::preferences::open(s, section))));
@@ -4845,4 +4851,172 @@ fn view_properties_show_the_sun() {
     harness.get_by_label(&still).click();
     harness.run();
     assert!(harness.state().dialogs.sun.is_some());
+}
+
+// ---------------------------------------------------------------- render window
+
+/// Make the sample's 3D view active, give it `render` settings (a JSON patch,
+/// when given) and open the render window on it.
+fn open_render_window(state: &mut AppState, render: Option<serde_json::Value>) -> cc_core::ViewId {
+    let view = sample_view(state, |v| matches!(v.kind, cc_core::ViewKind::ThreeD { .. }));
+    state.active_view = Some(view);
+    if let Some(render) = render {
+        state.session.execute("view_set", serde_json::json!({ "view": view.0, "render": render })).unwrap();
+    }
+    crate::render_ui::open(state);
+    assert!(state.dialogs.render.is_some());
+    view
+}
+
+fn render_harness(state: AppState) -> Harness<'static, AppState> {
+    themed_harness(state, egui::vec2(1400.0, 1000.0), egui::Theme::Light, |ui, state| {
+        crate::dialogs::show(ui.ctx(), state)
+    })
+}
+
+/// *View → Render* is on the View tab, unavailable (with its reason) outside
+/// 3D views, and names the engine command that renders without the window.
+#[test]
+fn render_needs_a_3d_view() {
+    use crate::commands::UiCommand;
+    let mut state = sample_state();
+    let plan = sample_view(&state, cc_core::View::is_plan);
+    let three_d = sample_view(&state, |v| matches!(v.kind, cc_core::ViewKind::ThreeD { .. }));
+    state.active_view = Some(plan);
+    state.ribbon_tab = RibbonTab::View;
+    assert_eq!(UiCommand::Render.unavailable(&state), Some(t!("why-render-view")));
+    assert_eq!(UiCommand::Render.engine(), Some("view_render"));
+    let label = t!("action-render");
+    let harness = ribbon_harness(state, 1600.0);
+    let disabled = harness.get_by_role_and_label(Role::Button, &label).accesskit_node().is_disabled();
+    assert!(disabled, "disabled on a plan");
+    let mut state = harness.into_state();
+    state.active_view = Some(three_d);
+    assert_eq!(UiCommand::Render.unavailable(&state), None);
+    let harness = ribbon_harness(state, 1600.0);
+    let disabled = harness.get_by_role_and_label(Role::Button, &label).accesskit_node().is_disabled();
+    assert!(!disabled, "enabled on a 3D view");
+}
+
+/// The window shows its three sections; a change writes the view's render
+/// settings, and everything changed in the window is one undo step.
+#[test]
+fn the_render_window_edits_the_view_in_one_step() {
+    let mut state = sample_state();
+    let view = open_render_window(&mut state, None);
+    assert!(state.project().view(view).unwrap().render.is_none());
+    let depth = state.session.doc.undo_depth();
+    let mut harness = render_harness(state);
+    for section in [t!("render-quality"), t!("render-output"), t!("render-environment")] {
+        assert!(harness.query_by_label(&section).is_some(), "{section}");
+    }
+    // The preset list (the defaults are the medium preset): Draft.
+    let medium = t!("render-preset-medium");
+    let combo = harness.query_all_by_role(Role::ComboBox).find(|n| n.value().as_deref() == Some(medium.as_str()));
+    combo.expect("the preset list shows the medium preset").click();
+    harness.run();
+    harness.get_by_label(&t!("render-preset-draft")).click();
+    harness.run();
+    let render = |h: &Harness<'static, AppState>| h.state().project().view(view).unwrap().render.clone();
+    let r = render(&harness).expect("the view has render settings");
+    assert_eq!((r.samples, r.max_depth), (32, 4));
+    harness.get_by_label(&t!("render-clay")).click();
+    harness.run();
+    assert!(render(&harness).unwrap().clay);
+    assert_eq!(harness.state().session.doc.undo_depth(), depth + 1, "one undo step");
+    // Close keeps the changes; one undo takes them all back.
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(harness.state().dialogs.render.is_none());
+    assert!(render(&harness).is_some());
+    harness.state_mut().session.doc.undo();
+    assert!(render(&harness).is_none());
+}
+
+/// A tiny render runs to the end and gives an image of the output's size; a
+/// region renders over it.
+#[test]
+fn a_tiny_render_completes() {
+    let mut state = sample_state();
+    let tiny = serde_json::json!({ "width": 16, "height": 16, "samples": 2, "max_depth": 2 });
+    open_render_window(&mut state, Some(tiny));
+    let mut harness = render_harness(state);
+    harness.get_by_label(&t!("action-render")).click();
+    harness.step();
+    crate::render_ui::wait(harness.state_mut());
+    harness.run();
+    let w = harness.state().dialogs.render.as_ref().unwrap();
+    assert!(!w.is_rendering());
+    assert_eq!(w.phase_done(), Some((2, false)));
+    let image = w.image().unwrap();
+    assert_eq!((image.width, image.height), (16, 16));
+    assert!(image.is_valid());
+    assert!(image.pixels.iter().any(|p| p.iter().any(|c| *c > 0.0)), "something is lit");
+
+    // A region keeps the rest of the image.
+    let before = image.clone();
+    let region = cc_raytracing::Region { x: 0, y: 0, width: 8, height: 8 };
+    harness.state_mut().dialogs.render.as_mut().unwrap().set_region(region, [16, 16]);
+    harness.get_by_label(&t!("action-render")).click();
+    harness.step();
+    crate::render_ui::wait(harness.state_mut());
+    harness.run();
+    let w = harness.state().dialogs.render.as_ref().unwrap();
+    assert_eq!(w.phase_done(), Some((2, false)));
+    let image = w.image().unwrap();
+    assert_eq!((image.width, image.height), (16, 16));
+    assert_eq!(image.pixels[16 * 15 + 15], before.pixels[16 * 15 + 15], "outside the region: the image before");
+}
+
+/// Closing the window while it renders closes it at once (the render stops by itself).
+#[test]
+fn closing_a_running_render_does_not_wait() {
+    let mut state = sample_state();
+    open_render_window(&mut state, Some(serde_json::json!({ "width": 400, "height": 300, "samples": 16384 })));
+    let mut harness = render_harness(state);
+    harness.get_by_label(&t!("action-render")).click();
+    harness.step();
+    assert!(harness.state().dialogs.render.as_ref().unwrap().is_rendering());
+    let start = std::time::Instant::now();
+    harness.key_press(egui::Key::Escape);
+    harness.step();
+    harness.step();
+    assert!(harness.state().dialogs.render.is_none());
+    assert!(start.elapsed() < std::time::Duration::from_secs(10));
+}
+
+/// *Sun Settings…* hides the window behind Sun Settings, which opens it
+/// again when it closes, Cancel too.
+#[test]
+fn sun_settings_from_the_render_window_come_back_to_it() {
+    let mut state = sample_state();
+    let view = open_render_window(&mut state, None);
+    let mut harness = render_harness(state);
+    harness.get_by_label(&t!("render-sun-settings")).click();
+    harness.run();
+    assert!(harness.state().dialogs.render.is_none());
+    assert!(harness.state().dialogs.sun.is_some());
+    harness.get_by_label(&t!("action-cancel")).click();
+    harness.run();
+    assert!(harness.state().dialogs.sun.is_none());
+    assert!(harness.state().dialogs.render.is_some(), "the render window is back");
+    assert!(harness.state().project().view(view).unwrap().sun.is_none(), "Cancel took the sun away");
+}
+
+/// `RENDER_WINDOW_PNG=path cargo nextest run -p cc_app render_window_picture --run-ignored all`
+/// writes the window after a small render, for review.
+#[test]
+#[ignore]
+fn render_window_picture() {
+    let Ok(path) = std::env::var("RENDER_WINDOW_PNG") else { return };
+    let mut state = sample_state();
+    open_render_window(&mut state, Some(serde_json::json!({ "width": 320, "height": 180, "samples": 16 })));
+    let mut harness = render_harness(state);
+    harness.get_by_label(&t!("action-render")).click();
+    harness.step();
+    crate::render_ui::wait(harness.state_mut());
+    for _ in 0..4 {
+        harness.step();
+    }
+    harness.render().unwrap().save(path).unwrap();
 }

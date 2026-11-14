@@ -37,6 +37,8 @@ pub struct View3DState {
     pub(crate) picks: crate::modify3d::PickCache,
     /// The view's sun: the light and the sun path drawn over the image.
     sun: crate::sun_overlay::SunView,
+    /// Size of the viewport in pixels when last drawn (the render window's *View size*).
+    pub(crate) pixel_size: Option<[u32; 2]>,
 }
 
 /// Cameras kept for "previous" and "next".
@@ -76,7 +78,14 @@ impl View3DState {
             select_start: None,
             picks: Default::default(),
             sun: Default::default(),
+            pixel_size: None,
         }
+    }
+
+    /// Whether the camera is still the one fitted to the model (never moved
+    /// since: a resized view fits it again).
+    pub(crate) fn auto_fitted(&self) -> bool {
+        self.auto_fit.is_some_and(|(camera, _)| camera == self.camera)
     }
 
     /// Remember the camera before changing it.
@@ -582,6 +591,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState, view_id: ViewId, render_state: Op
     renderer.set_light(light);
     let ppp = ui.ctx().pixels_per_point();
     let size = [(rect.width() * ppp).round() as u32, (rect.height() * ppp).round() as u32];
+    v3.pixel_size = Some(size);
     let Some((texture_view, recreated)) = renderer.render(&rs.device, &rs.queue, size, &v3.camera) else { return };
     {
         let mut egui_renderer = rs.renderer.write();
