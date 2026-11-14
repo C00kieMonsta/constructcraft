@@ -69,6 +69,9 @@ pub struct ZoomNav {
     pub sheet_size: bool,
 }
 
+/// Screen points per drawing unit of a view before anything is fitted.
+const EMPTY_PPM: f64 = 40.0;
+
 /// Pan/zoom state of a 2D view.
 #[derive(Debug, Clone)]
 pub struct View2DState {
@@ -95,7 +98,7 @@ impl Default for View2DState {
     fn default() -> Self {
         Self {
             center: DVec2::ZERO,
-            ppm: 40.0,
+            ppm: EMPTY_PPM,
             fitted: false,
             auto_fit: None,
             back: Vec::new(),
@@ -166,6 +169,20 @@ impl View2DState {
             self.remember();
         }
         self.fitted = false;
+    }
+
+    /// Where a view with nothing to fit starts. A view of the model shows
+    /// the first meters of a building; a drafting view, drawn at its own
+    /// scale, shows as much paper as a 1:100 plan does at that zoom, so what
+    /// is annotated in it can be read (issue #318: at the zoom of a building
+    /// the text of a 1:10 detail is a pixel tall).
+    pub fn start_empty(&mut self, scale: u32, drafting: bool) {
+        let paper = if drafting { f64::from(scale.max(1)) / 100.0 } else { 1.0 };
+        self.center = DVec2::new(5.0, 4.0) * paper;
+        if drafting {
+            self.ppm = (EMPTY_PPM / paper).clamp(1e-3, 1e6);
+        }
+        self.fitted = true;
     }
 
     pub fn fit(&mut self, (lo, hi): (DVec2, DVec2), rect: Rect) {
@@ -295,10 +312,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState, view_id: ViewId) {
     if st.needs_fit(rect) {
         match drawing.fit_bounds() {
             Some(b) if b.1.distance(b.0) > 0.5 => st.fit(b, rect),
-            _ => {
-                st.center = DVec2::new(5.0, 4.0);
-                st.fitted = true;
-            }
+            _ => st.start_empty(view.scale, view.is_drafting()),
         }
     }
     st.navigate(ui, &resp, rect);
@@ -468,6 +482,31 @@ mod tests {
         // Once zoomed by hand, resizing keeps the zoom.
         st.apply(ZoomCommand::OutTwo, 10.0);
         assert!(!st.needs_fit(rect));
+    }
+
+    /// Issue #318: an empty drafting view opens at a zoom where the text of
+    /// its dimensions is drawn, as it is in an empty plan.
+    #[test]
+    fn an_empty_drafting_view_starts_where_its_text_is_readable() {
+        let clip = Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+        let shown = |scale: u32, drafting: bool| {
+            let mut st = View2DState::default();
+            st.start_empty(scale, drafting);
+            assert!(st.fitted);
+            // A 2.5 mm dimension text at the middle of the view.
+            let px = (2.5 * st.ppm * f64::from(scale) / 1000.0) as f32;
+            (!crate::paint::text_culled("2.00", px, clip.center(), clip), st)
+        };
+        assert!(shown(100, false).0, "a plan at 1:100");
+        for scale in [1, 5, 10, 20, 50] {
+            let (readable, st) = shown(scale, true);
+            assert!(readable, "a drafting view at 1:{scale}");
+            // The same paper as the plan: 4 px per paper millimeter.
+            assert!((st.ppm * f64::from(scale) / 1000.0 - 4.0).abs() < 1e-9);
+        }
+        // Views of the model start as before.
+        let (_, plan) = shown(50, false);
+        assert_eq!((plan.center, plan.ppm), (DVec2::new(5.0, 4.0), 40.0));
     }
 
     #[test]
