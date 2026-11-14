@@ -320,6 +320,12 @@ pub struct SketchArgs {
     /// (exterior faces; interior faces for ceilings).
     #[serde(default)]
     pub from_walls: bool,
+    /// With `from_walls`: the face of each wall the outline follows, `FinishExterior`, `FinishInterior`,
+    /// `CoreExterior`, `CoreInterior`, `CoreCenter` or `Centerline`, where exterior is the side outside the
+    /// loop of walls and the core is a wall's structure layers. Each side goes to that face of its own wall.
+    /// Without it the outline is the walls' boundary moved out (in, for ceilings) by half the thickest wall.
+    #[serde(default)]
+    pub wall_face: Option<String>,
     /// Level id or name (default: the lowest level).
     #[serde(default)]
     pub level: Option<Ref>,
@@ -365,7 +371,15 @@ pub(crate) fn sketch(s: &Session, a: &SketchArgs, category: Category) -> Result<
         (Some(b), _) => points(b)?,
         (None, true) => {
             let outward = if category == Category::Ceiling { -1.0 } else { 1.0 };
-            walls_loop(p, level, outward).ok_or_else(|| EngineError::rejected("the walls of the level form no loop"))?
+            let found = match &a.wall_face {
+                Some(name) => {
+                    let face = serde_json::from_value::<LocationLine>(Value::String(name.clone()))
+                        .map_err(|_| EngineError::invalid(format!("unknown wall face '{name}'")))?;
+                    crate::defaults::walls_loop_at(p, level, face)
+                }
+                None => walls_loop(p, level, outward),
+            };
+            found.ok_or_else(|| EngineError::rejected("the walls of the level form no loop"))?
         }
         (None, false) => return Err(EngineError::invalid("give a boundary or from_walls")),
     };

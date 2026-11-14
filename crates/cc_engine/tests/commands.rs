@@ -827,6 +827,73 @@ fn outlines_from_walls_follow_the_outer_boundary() {
     assert!(shrunk < on_lines - 40.0 * half && shrunk > on_lines - 50.0 * half, "{shrunk} vs {on_lines}");
 }
 
+/// Issue #311: an outline from walls may follow the core faces, so a slab
+/// stops at the structure inside the plaster. Each side goes to that face of
+/// its own wall, whichever way the wall was drawn and wherever its location
+/// line is; exterior is the side outside the loop.
+#[test]
+fn outlines_from_walls_follow_the_face_asked_for() {
+    let mut s = Session::default();
+    // 25 cm: 4 cm of finish on the type's exterior (left) side, a 20 cm core, 1 cm inside.
+    let layers = json!([
+        {"function": "Finish", "material": "Reboco", "thickness": 0.04},
+        {"function": "Structure", "material": "Alvenaria", "thickness": 0.2},
+        {"function": "Finish", "material": "Reboco", "thickness": 0.01}
+    ]);
+    run(&mut s, "type_set", json!({"type": 4, "params": {"layers": layers}}));
+    let walls = [
+        // Along the counter-clockwise loop: the type's exterior side is inside the room.
+        json!({"start": [0, 0], "end": [6, 0], "type": 4}),
+        // Drawn on its (inner) finish face: the body lies outside the line.
+        json!({"start": [6, 0], "end": [6, 4], "type": 4, "location_line": "FinishExterior"}),
+        // Against the loop: the type's exterior side is outside.
+        json!({"start": [0, 4], "end": [6, 4], "type": 4}),
+        json!({"start": [0, 4], "end": [0, 0], "type": 4}),
+    ];
+    for wall in walls {
+        run(&mut s, "wall_create", wall);
+    }
+    // The box of a floor made on a face: (min x, min y, max x, max y).
+    let mut on = |face: &str| {
+        let floor = run(&mut s, "floor_create", json!({"from_walls": true, "wall_face": face}));
+        let pts: Vec<(f64, f64)> = floor["params"]["boundary"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| (p[0].as_f64().unwrap(), p[1].as_f64().unwrap()))
+            .collect();
+        assert_eq!(pts.len(), 4, "{face}: {pts:?}");
+        let fold =
+            |f: fn(f64, f64) -> f64, start: f64, pick: fn(&(f64, f64)) -> f64| pts.iter().map(pick).fold(start, f);
+        [
+            fold(f64::min, f64::INFINITY, |p| p.0),
+            fold(f64::min, f64::INFINITY, |p| p.1),
+            fold(f64::max, f64::NEG_INFINITY, |p| p.0),
+            fold(f64::max, f64::NEG_INFINITY, |p| p.1),
+        ]
+    };
+    let mut check = |face: &str, expected: [f64; 4]| {
+        let got = on(face);
+        for (g, e) in got.iter().zip(expected) {
+            assert!((g - e).abs() < 1e-9, "{face}: {got:?} vs {expected:?}");
+        }
+    };
+    check("FinishExterior", [-0.125, -0.125, 6.25, 4.125]);
+    check("FinishInterior", [0.125, 0.125, 6.0, 3.875]);
+    // Inside the plaster: 1 cm in on three sides, 4 cm on the wall drawn the other way.
+    check("CoreExterior", [-0.115, -0.115, 6.24, 4.085]);
+    check("CoreInterior", [0.085, 0.085, 6.04, 3.885]);
+    check("Centerline", [0.0, 0.0, 6.125, 4.0]);
+    check("CoreCenter", [-0.015, -0.015, 6.14, 3.985]);
+    assert_eq!(
+        fails(&mut s, "floor_create", json!({"from_walls": true, "wall_face": "Outside"})),
+        ErrorCode::InvalidArguments
+    );
+    // Ceilings and roofs take it too; a wall with no finish layers has its core faces on its faces.
+    let ceiling = run(&mut s, "ceiling_create", json!({"from_walls": true, "wall_face": "CoreInterior"}));
+    assert_eq!(ceiling["params"]["boundary"].as_array().unwrap().len(), 4);
+}
+
 /// The showcase macro (the project of the README screenshots) keeps working,
 /// and the ids its later steps name still point at what they expect.
 #[test]

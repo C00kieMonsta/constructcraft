@@ -1603,6 +1603,45 @@ fn sketches_take_typed_lengths() {
     assert!(sketch(&harness).typed.is_empty());
 }
 
+/// Issue #311: *From Walls* follows the face of the walls chosen in the
+/// sketch's options bar, the core faces among them.
+#[test]
+fn from_walls_follows_the_chosen_wall_face() {
+    let mut state = sample_state();
+    // The plan of a level with walls.
+    let level = state.project().walls().map(|(e, _)| e.level).next().unwrap();
+    let plan = state.project().views_of(cc_core::ViewCategory::FloorPlan).find(|v| v.level() == Some(level));
+    state.active_view = plan.map(|v| v.id);
+    assert_eq!(state.active_level(), Some(level));
+    let floor = state.project().default_type(cc_core::Category::Floor).unwrap();
+    state.set_tool(crate::tools::Tool::Sketch { category: cc_core::Category::Floor, type_id: floor });
+    let picked = |state: &mut AppState, face: Option<cc_core::LocationLine>| {
+        state.modify.wall_face = face;
+        state.sketch.as_mut().unwrap().curves.clear();
+        crate::sketch_mode::pick_walls(state);
+        let sketch = cc_core::sketch::Sketch { curves: state.sketch.as_ref().unwrap().curves.clone() };
+        sketch.profile().expect("a closed outline").outline
+    };
+    let area = |pts: &[glam::DVec2]| cc_geom::polygon::area(pts);
+    // By default the outside finish faces; the core faces are inside the plaster.
+    let finish = picked(&mut state, None);
+    let expected = cc_engine::walls_loop_at(state.project(), level, cc_core::LocationLine::FinishExterior).unwrap();
+    assert!((area(&finish) - area(&expected)).abs() < 1e-9);
+    let core = picked(&mut state, Some(cc_core::LocationLine::CoreExterior));
+    let expected = cc_engine::walls_loop_at(state.project(), level, cc_core::LocationLine::CoreExterior).unwrap();
+    assert!((area(&core) - area(&expected)).abs() < 1e-9);
+    assert!(area(&core) < area(&finish) - 0.1, "{} inside {}", area(&core), area(&finish));
+    let inside = picked(&mut state, Some(cc_core::LocationLine::CoreInterior));
+    assert!(area(&inside) < area(&core) - 0.1);
+
+    // The options bar offers the faces.
+    let harness = themed_harness(state, egui::vec2(1600.0, 60.0), egui::Theme::Light, |ui, state| {
+        ui.horizontal(|ui| crate::sketch_mode::options(ui, state));
+    });
+    assert!(harness.query_all_by_label(&t!("sketch-wall-face")).next().is_some(), "the wall face option");
+    assert!(harness.query_all_by_role(Role::ComboBox).next().is_some(), "the list of faces");
+}
+
 /// A piece of the component environment is sketched in the same sketch as
 /// outlines in plans: its ribbon, options, picked curve and Finish.
 #[test]

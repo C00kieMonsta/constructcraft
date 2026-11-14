@@ -2245,6 +2245,7 @@ group-mode = 模式
 group-sketch = 草图
 sketch-chain = 链
 sketch-sides = 边数
+sketch-wall-face = 墙面
 hint-sketch-select = 单击曲线选择（Ctrl 添加）· 双击选择其链 · 拖动窗口（向左：接触的）· 拖动夹点修改 · Delete 删除
 hint-sketch-line = 单击直线起点
 hint-sketch-line-next = 单击直线终点 · 输入长度后按 Enter · Esc 结束连续绘制

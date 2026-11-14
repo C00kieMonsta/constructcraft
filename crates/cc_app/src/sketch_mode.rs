@@ -767,23 +767,30 @@ pub fn set_draw(state: &mut AppState, draw: Draw) {
     s.typed.clear();
 }
 
-/// Add lines along the loop of the level's walls (their exterior faces;
-/// interior faces for ceilings).
+/// The category of the element sketched in a plan, whose outline may follow the walls.
+fn walls_category(state: &AppState) -> Option<Category> {
+    match state.sketch.as_ref().map(|s| s.target)? {
+        Target::New { category, .. } => Some(category),
+        Target::Edit { id } => Some(state.project().element(id).map_or(Category::Floor, |e| e.category())),
+        Target::Piece | Target::Profile { .. } | Target::Section { .. } | Target::Sheet | Target::Detail => None,
+    }
+}
+
+/// The face of the walls *From Walls* follows: the one chosen in the options
+/// bar, else the outside finish faces (the inside ones for ceilings).
+fn wall_face(state: &AppState, category: Category) -> cc_core::LocationLine {
+    state.modify.wall_face.unwrap_or_else(|| cc_engine::default_wall_face(category))
+}
+
+/// Add lines along the loop of the level's walls, on the face of each wall
+/// chosen in the options bar (issue #311).
 pub fn pick_walls(state: &mut AppState) {
     let Some(level) = state.active_level() else {
         state.message = t!("msg-open-plan");
         return;
     };
-    let category = match state.sketch.as_ref().map(|s| s.target) {
-        Some(Target::New { category, .. }) => category,
-        Some(Target::Edit { id }) => state.project().element(id).map_or(Category::Floor, |e| e.category()),
-        Some(Target::Piece | Target::Profile { .. } | Target::Section { .. } | Target::Sheet | Target::Detail)
-        | None => {
-            return;
-        }
-    };
-    let outward = if category == Category::Ceiling { -1.0 } else { 1.0 };
-    match crate::tools::walls_loop(state.project(), level, outward) {
+    let Some(category) = walls_category(state) else { return };
+    match cc_engine::walls_loop_at(state.project(), level, wall_face(state, category)) {
         Some(pts) => {
             let lines = Sketch::from_polygons(&pts, &[]).curves;
             if let Some(s) = state.sketch.as_mut() {
@@ -1464,6 +1471,20 @@ pub fn ribbon(ui: &mut Ui, state: &mut AppState) {
 /// The options bar: chaining, polygon sides, the modify tools' options and the hint.
 pub fn options(ui: &mut Ui, state: &mut AppState) {
     crate::component_sketch::options(ui, state);
+    // Which face of the walls *From Walls* follows, in plans.
+    if let Some(category) = walls_category(state).filter(|_| state.active_level().is_some()) {
+        let mut face = wall_face(state, category);
+        ui.label(t!("sketch-wall-face"));
+        egui::ComboBox::from_id_salt("sketch-wall-face").selected_text(crate::i18n::tr(face.key())).show_ui(ui, |ui| {
+            for option in cc_core::LocationLine::ALL {
+                ui.selectable_value(&mut face, option, crate::i18n::tr(option.key()));
+            }
+        });
+        if face != wall_face(state, category) {
+            state.modify.wall_face = Some(face);
+        }
+        ui.separator();
+    }
     let opts = &mut state.modify;
     let Some(s) = state.sketch.as_mut() else { return };
     // A new pad's elevation, whatever is being drawn.

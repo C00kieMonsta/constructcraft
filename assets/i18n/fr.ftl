@@ -2245,6 +2245,7 @@ group-mode = Mode
 group-sketch = Esquisse
 sketch-chain = Chaîner
 sketch-sides = Côtés
+sketch-wall-face = Face du mur
 hint-sketch-select = Cliquez sur une courbe pour la sélectionner (Ctrl ajoute) · double-clic choisit sa chaîne · faites glisser une fenêtre (vers la gauche : celles qu'elle touche) · faites glisser les poignées pour la modifier · Suppr la supprime
 hint-sketch-line = Cliquez le début de la ligne
 hint-sketch-line-next = Cliquez la fin de la ligne · saisissez une longueur + Entrée · Échap arrête la chaîne

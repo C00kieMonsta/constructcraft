@@ -2245,6 +2245,7 @@ group-mode = Modus
 group-sketch = Skizze
 sketch-chain = Kette
 sketch-sides = Seiten
+sketch-wall-face = Wandfläche
 hint-sketch-select = Klicken Sie auf eine Kurve, um sie zu wählen (Strg fügt hinzu) · Doppelklick wählt ihre Kette · ziehen Sie ein Fenster (nach links: berührte) · ziehen Sie die Griffe, um sie zu ändern · Entf löscht sie
 hint-sketch-line = Anfang der Linie anklicken
 hint-sketch-line-next = Ende der Linie anklicken · Länge eingeben + Enter · Esc beendet die Kette

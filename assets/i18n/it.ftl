@@ -2245,6 +2245,7 @@ group-mode = Modalità
 group-sketch = Schizzo
 sketch-chain = Concatena
 sketch-sides = Lati
+sketch-wall-face = Faccia del muro
 hint-sketch-select = Fare clic su una curva per selezionarla (Ctrl aggiunge) · doppio clic sceglie la sua catena · trascinare una finestra (verso sinistra: quelle toccate) · trascinare i grip per modificarla · Canc la elimina
 hint-sketch-line = Fai clic sull'inizio della linea
 hint-sketch-line-next = Fai clic sulla fine della linea · digita una lunghezza + Enter · Esc interrompe la catena
