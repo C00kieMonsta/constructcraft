@@ -227,6 +227,7 @@ impl ScheduleField {
             ],
             Category::Door => &[F::Width, F::Height, F::Sill, F::Host, F::ComponentName],
             Category::Window => &[F::Width, F::Height, F::Sill, F::Host, F::ComponentName],
+            Category::Niche => &[F::Width, F::Height, F::Sill, F::Host, F::ComponentName, F::Volume],
             Category::Floor | Category::Ceiling => &[F::Thickness, F::Area, F::Perimeter, F::Volume],
             Category::Roof => &[
                 F::Thickness,
@@ -333,6 +334,7 @@ impl ScheduleField {
             Category::Wall => vec![F::Mark, F::Type, F::Level, F::Length, F::Height, F::Thickness, F::Area, F::Volume],
             Category::Door => vec![F::Mark, F::Type, F::Width, F::Height, F::Level, F::Host, F::Comments],
             Category::Window => vec![F::Mark, F::Type, F::Width, F::Height, F::Sill, F::Level, F::Host, F::Comments],
+            Category::Niche => vec![F::Mark, F::Type, F::Width, F::Height, F::Sill, F::Volume, F::Level, F::Host],
             Category::Floor | Category::Ceiling | Category::Roof => {
                 vec![F::Mark, F::Type, F::Level, F::Area, F::Perimeter, F::Volume]
             }

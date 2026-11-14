@@ -94,7 +94,7 @@ impl Element {
                     w.curtain.reverse(length);
                 }
             }
-            ElementKind::Door(h) | ElementKind::Window(h) => {
+            ElementKind::Door(h) | ElementKind::Window(h) | ElementKind::Niche(h) => {
                 if t.mirror {
                     h.flip_hand = !h.flip_hand;
                 }
@@ -462,7 +462,7 @@ impl crate::Project {
     fn accepts(&self, e: &Element, set: &[Element]) -> bool {
         let type_ok = self.element_type(e.type_id).is_some_and(|t| t.category() == e.category());
         let other_ok = match &e.kind {
-            ElementKind::Door(h) | ElementKind::Window(h) => set
+            ElementKind::Door(h) | ElementKind::Window(h) | ElementKind::Niche(h) => set
                 .iter()
                 .find(|w| w.id == h.host)
                 .or_else(|| self.element(h.host))

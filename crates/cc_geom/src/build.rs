@@ -1131,22 +1131,27 @@ impl ModelGeometry {
                 }
                 // Curtain walls host no doors or windows: their panels are the openings.
                 let hosted = hosted_by.get(&e.id).into_iter().flatten().copied().filter(|_| curtains[i].is_none());
-                let mut openings: Vec<Opening> = hosted
-                    .filter_map(|h| {
-                        let host = h.as_hosted()?;
-                        let (width, height) = project.element_type(h.type_id)?.opening_size()?;
-                        let z0 = base_z + host.sill_height;
-                        Some(Opening {
-                            element: h.id,
-                            u0: host.offset - width * 0.5,
-                            u1: host.offset + width * 0.5,
-                            z0,
-                            z1: z0 + height,
-                        })
-                    })
-                    .collect();
+                // Doors and windows open the wall through; niches recess one face.
+                let mut openings: Vec<Opening> = Vec::new();
+                let mut recesses: Vec<crate::wall::Recess> = Vec::new();
+                for h in hosted {
+                    let (Some(host), Some(ty)) = (h.as_hosted(), project.element_type(h.type_id)) else { continue };
+                    let Some((width, height)) = ty.opening_size() else { continue };
+                    let z0 = base_z + host.sill_height;
+                    let (u0, u1, z1) = (host.offset - width * 0.5, host.offset + width * 0.5, z0 + height);
+                    match (&h.kind, ty.opening_depth()) {
+                        (ElementKind::Niche(_), Some(depth)) => {
+                            let side = if host.flip_facing { -1.0 } else { 1.0 };
+                            recesses.push(crate::wall::Recess { element: h.id, u0, u1, z0, z1, side, depth });
+                        }
+                        // A niche with no depth cuts nothing.
+                        (ElementKind::Niche(_), None) => {}
+                        _ => openings.push(Opening { element: h.id, u0, u1, z0, z1 }),
+                    }
+                }
                 openings.extend(embedded.iter().filter(|(j, _)| *j == i).map(|(_, o)| o.clone()));
                 g.set_openings(openings);
+                g.set_recesses(recesses);
                 if let Some(system) = curtains[i] {
                     let c = crate::curtain::build(project, e, &g, system);
                     self.solids.extend(crate::curtain::solids(project, e, &c));
@@ -1220,6 +1225,18 @@ impl ModelGeometry {
                     placed.push(p);
                 }
                 fills.insert(e.id, placed);
+            }
+            // A niche is picked in elevations by the outline of its recess, just off its face.
+            for r in &wall.recesses {
+                let (origin, dir, normal) = wall.frame_at((r.u0 + r.u1) * 0.5);
+                let v = r.side * (wall.half + SYMBOL_OFFSET);
+                let at = |u: f64, z: f64| (origin + dir * u + normal * v).extend(z);
+                symbols.push(OpeningSymbol {
+                    element: r.element,
+                    outline: [at(r.u0, r.z0), at(r.u1, r.z0), at(r.u1, r.z1), at(r.u0, r.z1)],
+                    normal: (normal * r.side).extend(0.0),
+                    lines: Vec::new(),
+                });
             }
         }
         self.opening_fills = fills;
@@ -1408,6 +1425,10 @@ impl ModelGeometry {
         }
         if let Some(t) = self.topographies.get(&id) {
             return t.volume;
+        }
+        // A niche: what its recess takes out of its wall.
+        if let Some(v) = self.walls.values().find_map(|w| w.recess_of(id).map(|r| w.recess_volume(r))) {
+            return v;
         }
         // Exact for arc strips, slabs drawn with curves and curved floors
         // (their solids mesh the arcs with chords).

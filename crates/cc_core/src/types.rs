@@ -70,13 +70,16 @@ pub enum Category {
     LightningConductor,
     /// Steel and timber connections: plates and bolts at member ends.
     Connection,
+    /// Niches: recesses in one face of a wall, hosted like doors and windows.
+    Niche,
 }
 
 impl Category {
-    pub const ALL: [Category; 41] = [
+    pub const ALL: [Category; 42] = [
         Category::Wall,
         Category::Door,
         Category::Window,
+        Category::Niche,
         Category::Floor,
         Category::Ceiling,
         Category::Roof,
@@ -130,10 +133,11 @@ impl Category {
     };
 
     /// Categories with physical elements (shown in legends and 3D).
-    pub const MODEL: [Category; 23] = [
+    pub const MODEL: [Category; 24] = [
         Category::Wall,
         Category::Door,
         Category::Window,
+        Category::Niche,
         Category::Floor,
         Category::Ceiling,
         Category::Roof,
@@ -157,10 +161,11 @@ impl Category {
     ];
 
     /// Categories that can be listed in a schedule.
-    pub const SCHEDULABLE: [Category; 26] = [
+    pub const SCHEDULABLE: [Category; 27] = [
         Category::Wall,
         Category::Door,
         Category::Window,
+        Category::Niche,
         Category::Floor,
         Category::Ceiling,
         Category::Roof,
@@ -196,6 +201,7 @@ impl Category {
             Category::Wall => "category-wall",
             Category::Door => "category-door",
             Category::Window => "category-window",
+            Category::Niche => "category-niche",
             Category::Floor => "category-floor",
             Category::Ceiling => "category-ceiling",
             Category::Roof => "category-roof",
@@ -1105,6 +1111,15 @@ impl ElementType {
         match &self.data {
             TypeData::Door { width, height, .. } | TypeData::Window { width, height, .. } => Some((*width, *height)),
             TypeData::Component { def, .. } => def.opening_size(),
+            _ => None,
+        }
+    }
+
+    /// The depth of a niche type's recess; `None` for types that open their
+    /// wall through (doors, windows) and for anything else.
+    pub fn opening_depth(&self) -> Option<f64> {
+        match &self.data {
+            TypeData::Component { def, .. } if def.kind == crate::ComponentKind::Niche => def.opening_depth(),
             _ => None,
         }
     }

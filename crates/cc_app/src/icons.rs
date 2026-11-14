@@ -21,6 +21,7 @@ pub enum Icon {
     Wall,
     Door,
     Window,
+    Niche,
     Floor,
     Ceiling,
     Roof,
@@ -200,7 +201,7 @@ pub enum Icon {
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 185] = [
+    pub const ALL: [Icon; 186] = [
         Icon::New,
         Icon::Open,
         Icon::Save,
@@ -211,6 +212,7 @@ impl Icon {
         Icon::Wall,
         Icon::Door,
         Icon::Window,
+        Icon::Niche,
         Icon::Floor,
         Icon::Ceiling,
         Icon::Roof,
@@ -401,6 +403,7 @@ impl Icon {
             Icon::Wall => include_str!("../../../assets/icons/ui/wall.svg"),
             Icon::Door => include_str!("../../../assets/icons/ui/door.svg"),
             Icon::Window => include_str!("../../../assets/icons/ui/window.svg"),
+            Icon::Niche => include_str!("../../../assets/icons/ui/niche.svg"),
             Icon::Floor => include_str!("../../../assets/icons/ui/floor.svg"),
             Icon::Ceiling => include_str!("../../../assets/icons/ui/ceiling.svg"),
             Icon::Roof => include_str!("../../../assets/icons/ui/roof.svg"),

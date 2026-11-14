@@ -156,7 +156,7 @@ pub fn place(state: &mut AppState, type_id: ElementTypeId) {
     let Some(ty) = state.project().element_type(type_id) else { return };
     let (category, name) = (ty.category(), ty.name.clone());
     state.set_tool(match category {
-        Category::Door | Category::Window => crate::tools::Tool::Hosted { category, type_id },
+        Category::Door | Category::Window | Category::Niche => crate::tools::Tool::Hosted { category, type_id },
         _ => crate::tools::Tool::Component { type_id },
     });
     state.message = t!("msg-component-created", "name" => name);

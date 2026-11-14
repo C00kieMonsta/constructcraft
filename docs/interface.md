@@ -219,6 +219,17 @@ Curtain walls are walls of a curtain type (a project without one gets one from t
 - **Side and host**: a hosted railing's properties show its host and its *Side* (walking up), which can be switched. *Detach from Host* makes it an ordinary railing that keeps the path it has in plan.
 - From the command line or MCP: `stair_railings_add` (with `near` for the side nearest a point) and `railing_host_set` (put an existing railing on a stair or ramp, on the side its path runs along unless `side` is given; change its side or inset; or `detach` it).
 
+## Niches
+
+*Architecture → Build → Niche* places a niche: a recess in one face of a wall, hosted like a door or a window but not opening the wall through. Click a wall in a plan (or in a 3D view) and the niche goes in the face on the side clicked; the first niche of a project brings a default type, 60 × 60 cm and 10 cm deep with its bottom 90 cm above the wall's base (2'-0" × 2'-0" × 4" at 3'-0" in imperial projects).
+
+- A niche type is a component with *Width*, *Height*, *Depth* and *Sill* parameters, edited in its **Type Properties**; `niche_type_create` makes one with given sizes. In a wall thinner than the depth plus 1 cm the niche stops 1 cm short of the other face: an opening through a wall is a door or a window.
+- The properties palette has the niche's distance along the wall and its sill; *Turn* (or `flip_facing`) moves it to the wall's other face. It follows its wall when the wall moves and goes with it when the wall is deleted.
+- The wall keeps standing behind the niche: it is not split, and rooms, joins and wall framing ignore it. Plans show a niche the cut passes through as an open face with its sides and back, and dash one wholly below or above the cut; elevations, sections and 3D views show the recess, which also picks the niche.
+- The wall's volume is less the niche's. A schedule of the *Niches* category lists each one with its size, sill, host and the volume it takes out.
+- IFC export writes a niche as an `IfcOpeningElement` of predefined type `RECESS`, as deep as the niche, voiding its wall (`IfcRelVoidsElement`), with its sizes in the `ConstructCAD_Niche` property set. Import does not read niches back yet.
+- A niche that would overlap a door, a window or another niche of its wall cuts nothing. Niches are rectangular; arched tops, and pieces of their own (a shelf, a lining), are not available yet.
+
 ## Shafts
 
 *Architecture → Floors & Roofs → Shaft* (`SF`) sketches the outline of a vertical opening (a duct chase, a lift or stair shaft, a light well) in a plan, like a floor's outline; it rises from its level to the highest level above (or a level or height set in its properties). A project without a shaft type gets one the first time.

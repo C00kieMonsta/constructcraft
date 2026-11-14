@@ -155,7 +155,7 @@ impl Project {
             }
             ElementKind::Column(c) => local(c.position, c.rotation_deg, p),
             ElementKind::Component(c) => local(c.position, c.rotation_deg, p),
-            ElementKind::Door(h) | ElementKind::Window(h) => {
+            ElementKind::Door(h) | ElementKind::Window(h) | ElementKind::Niche(h) => {
                 let (center, u) = self.opening_frame(h)?;
                 RefAnchor::Hosted { along: (p - center).dot(u), across: (p - center).dot(u.perp()) }
             }
@@ -207,7 +207,10 @@ impl Project {
             }
             (RefAnchor::Local { x, y }, ElementKind::Column(c)) => from_local(c.position, c.rotation_deg, x, y),
             (RefAnchor::Local { x, y }, ElementKind::Component(c)) => from_local(c.position, c.rotation_deg, x, y),
-            (RefAnchor::Hosted { along, across }, ElementKind::Door(h) | ElementKind::Window(h)) => {
+            (
+                RefAnchor::Hosted { along, across },
+                ElementKind::Door(h) | ElementKind::Window(h) | ElementKind::Niche(h),
+            ) => {
                 let (center, u) = self.opening_frame(h)?;
                 center + u * along + u.perp() * across
             }
@@ -243,7 +246,9 @@ impl Project {
             }
             ElementKind::Column(c) => Some(c.position),
             ElementKind::Component(c) => Some(c.position),
-            ElementKind::Door(h) | ElementKind::Window(h) => self.opening_frame(h).map(|(center, _)| center),
+            ElementKind::Door(h) | ElementKind::Window(h) | ElementKind::Niche(h) => {
+                self.opening_frame(h).map(|(center, _)| center)
+            }
             _ => None,
         }
     }
@@ -272,7 +277,7 @@ impl Project {
             ElementKind::Column(c) => level + c.base_offset,
             ElementKind::Component(c) => level + c.base_offset,
             ElementKind::Beam(b) => self.beam_z(e, b).1,
-            ElementKind::Door(h) | ElementKind::Window(h) => {
+            ElementKind::Door(h) | ElementKind::Window(h) | ElementKind::Niche(h) => {
                 let host = self.element(h.host);
                 let wall_base = host.and_then(|x| x.as_wall().map(|w| self.wall_base_z(x, w))).unwrap_or(level);
                 wall_base + h.sill_height

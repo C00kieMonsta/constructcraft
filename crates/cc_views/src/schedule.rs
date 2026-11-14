@@ -245,6 +245,8 @@ fn wall_area(project: &Project, e: &Element, w: &cc_core::Wall, cache: &mut Memo
         .into_iter()
         .flatten()
         .filter_map(|h| project.element(*h))
+        // Niches do not open the wall.
+        .filter(|h| !matches!(h.kind, ElementKind::Niche(_)))
         .filter_map(|h| project.element_type(h.type_id)?.opening_size())
         .map(|(w, h)| w * h)
         .sum();
@@ -406,7 +408,7 @@ fn value_cached(project: &Project, geom: &ModelGeometry, e: &Element, field: Sch
                 let (base, top) = project.shaft_span(e, s);
                 Value::Length(top - base)
             }
-            (ElementKind::Door(_) | ElementKind::Window(_), _) => {
+            (ElementKind::Door(_) | ElementKind::Window(_) | ElementKind::Niche(_), _) => {
                 ty.and_then(|t| t.opening_size()).map_or(Value::Missing, |(_, h)| Value::Length(h))
             }
             (_, Some(TypeData::Railing { height, .. })) => Value::Length(*height),
@@ -417,7 +419,7 @@ fn value_cached(project: &Project, geom: &ModelGeometry, e: &Element, field: Sch
             _ => Value::Missing,
         },
         F::Width => match ty.map(|t| &t.data) {
-            _ if matches!(e.kind, ElementKind::Door(_) | ElementKind::Window(_)) => {
+            _ if matches!(e.kind, ElementKind::Door(_) | ElementKind::Window(_) | ElementKind::Niche(_)) => {
                 ty.and_then(|t| t.opening_size()).map_or(Value::Missing, |(w, _)| Value::Length(w))
             }
             Some(TypeData::Stair { width, .. } | TypeData::Ramp { width, .. }) => Value::Length(*width),

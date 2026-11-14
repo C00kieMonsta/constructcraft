@@ -61,6 +61,6 @@ pub use stair::{
     railing_path, railing_pieces, stair_geom,
 };
 pub use strip::StripArc;
-pub use wall::{Column, LayerGap, Opening, WallGeom};
+pub use wall::{Column, LayerGap, Opening, RECESS_MIN_BACK, Recess, WallGeom};
 
 pub use glam::{DVec2, DVec3};

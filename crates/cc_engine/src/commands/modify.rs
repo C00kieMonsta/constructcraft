@@ -849,6 +849,7 @@ impl Command for ElementsTurn {
                             | ElementKind::Column(_)
                             | ElementKind::Door(_)
                             | ElementKind::Window(_)
+                            | ElementKind::Niche(_)
                     )
                 )
             })
@@ -859,7 +860,9 @@ impl Command for ElementsTurn {
                 match &mut el.kind {
                     ElementKind::Component(c) => c.rotation_deg = (c.rotation_deg + 90.0).rem_euclid(360.0),
                     ElementKind::Column(c) => c.rotation_deg = (c.rotation_deg + 90.0).rem_euclid(360.0),
-                    ElementKind::Door(h) | ElementKind::Window(h) => h.flip_facing = !h.flip_facing,
+                    ElementKind::Door(h) | ElementKind::Window(h) | ElementKind::Niche(h) => {
+                        h.flip_facing = !h.flip_facing
+                    }
                     _ => {}
                 }
             }

@@ -214,6 +214,20 @@ pub struct HostedArgs {
 fn place_hosted(s: &mut Session, a: HostedArgs, category: Category) -> Result<Value> {
     let p = s.project();
     let type_id = refs::type_of(p, category, a.type_ref.as_ref())?;
+    let ty = p.element_type(type_id).ok_or_else(|| EngineError::not_found("type"))?;
+    let (hosted, level) = hosted_at(p, &a, ty)?;
+    let (kind, tx) = if category == Category::Door {
+        (ElementKind::Door(hosted), t!("tx-create-door"))
+    } else {
+        (ElementKind::Window(hosted), t!("tx-create-window"))
+    };
+    let id = edit(s, tx, |e| Ok(super::add_element(e, level, type_id, kind)))?;
+    Ok(created(s, id))
+}
+
+/// Where an element of type `ty` (a door, a window, a niche) goes in the
+/// wall the arguments name, and that wall's level.
+pub(crate) fn hosted_at(p: &Project, a: &HostedArgs, ty: &cc_core::ElementType) -> Result<(Hosted, LevelId)> {
     let host = match (a.wall, a.point) {
         (Some(w), _) => refs::element(p, w)?,
         (None, Some(q)) => nearest_wall(p, point(q)?)?,
@@ -221,8 +235,7 @@ fn place_hosted(s: &mut Session, a: HostedArgs, category: Category) -> Result<Va
     };
     let host_el = p.element(host).ok_or_else(|| EngineError::not_found("wall"))?;
     let wall = host_el.as_wall().ok_or_else(|| EngineError::invalid(format!("element {} is not a wall", host.0)))?;
-    let ty = p.element_type(type_id).ok_or_else(|| EngineError::not_found("type"))?;
-    let (width, _) = ty.opening_size().ok_or_else(|| EngineError::invalid("not a door or window type"))?;
+    let (width, _) = ty.opening_size().ok_or_else(|| EngineError::invalid("the type has no opening"))?;
     let default_sill = ty.default_sill();
     // Openings are placed along the body centerline (an arc for arc walls).
     let (start, end) = p.wall_axis(host_el, wall);
@@ -244,14 +257,7 @@ fn place_hosted(s: &mut Session, a: HostedArgs, category: Category) -> Result<Va
         flip_facing: a.flip_facing.unwrap_or(side < 0.0),
         flip_hand: a.flip_hand.unwrap_or(false),
     };
-    let level = host_el.level;
-    let (kind, tx) = if category == Category::Door {
-        (ElementKind::Door(hosted), t!("tx-create-door"))
-    } else {
-        (ElementKind::Window(hosted), t!("tx-create-window"))
-    };
-    let id = edit(s, tx, |e| Ok(super::add_element(e, level, type_id, kind)))?;
-    Ok(created(s, id))
+    Ok((hosted, host_el.level))
 }
 
 /// The wall whose axis passes nearest `q` (within half its thickness plus 0.5 m).

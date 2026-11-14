@@ -297,7 +297,12 @@ impl WallFraming {
             return None;
         }
         let mut hosted: Vec<(&crate::Element, &crate::Hosted)> =
-            project.hosted_by(self.wall).filter_map(|o| o.as_hosted().map(|h| (o, h))).collect();
+            // Niches do not open the wall through: the framing passes behind them.
+            project
+                .hosted_by(self.wall)
+                .filter(|o| !matches!(o.kind, ElementKind::Niche(_)))
+                .filter_map(|o| o.as_hosted().map(|h| (o, h)))
+                .collect();
         hosted.sort_by(|x, y| x.1.offset.total_cmp(&y.1.offset).then(x.0.id.cmp(&y.0.id)));
         let mut openings = Vec::new();
         for (j, (o, h)) in hosted.into_iter().enumerate() {

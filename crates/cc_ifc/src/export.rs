@@ -14,6 +14,10 @@ use std::collections::{BTreeMap, HashMap};
 /// Openings extend this far beyond each wall face so the boolean cut is clean.
 const OPENING_CLEARANCE: f64 = 0.05;
 
+/// Property set of a niche's opening element: its sizes, the face of the
+/// wall it is in and the volume it takes out.
+pub const NICHE_PSET: &str = "ConstructCAD_Niche";
+
 /// Names of a connection's parts (and of their types).
 const PLATE: &str = "Plate";
 const BOLT: &str = "Bolt";
@@ -2395,6 +2399,9 @@ impl<'a> Exporter<'a> {
         for o in g.openings.clone() {
             self.write_opening(g, placement, product, &o);
         }
+        for r in g.recesses.clone() {
+            self.write_recess(g, placement, product, &r);
+        }
     }
 
     /// A curtain wall: an `IfcCurtainWall` (its axis only) aggregating an
@@ -2556,6 +2563,56 @@ impl<'a> Exporter<'a> {
         if !parts.is_empty() {
             self.aggregate(&format!("agg-curtain-{}", e.id), product, parts);
         }
+    }
+
+    /// A niche: an `IfcOpeningElement` `RECESS` voiding its wall from the
+    /// face it is in to its depth (not through the wall), with its sizes in
+    /// [`NICHE_PSET`]. It has no filling.
+    fn write_recess(&mut self, g: &WallGeom, wall_placement: Id, wall: Id, r: &cc_geom::Recess) {
+        let project = self.project;
+        let Some(e) = project.element(r.element) else { return };
+        let (width, height) = (r.u1 - r.u0, r.z1 - r.z0);
+        let (face, back) = r.across(g.half);
+        // Past the face it opens, so the cut is clean; exactly to its back.
+        let out = face + r.side * OPENING_CLEARANCE;
+        let (placement, body) = match g.arc {
+            Some(arc) => {
+                let at = Frame::at(DVec3::new(0.0, 0.0, r.z0 - g.base_z));
+                let placement = self.local_placement(Some(wall_placement), at);
+                // The center is to the left of an arc turning counter-clockwise: stop short of it.
+                let toward_center = if arc.sweep >= 0.0 { 1.0 } else { -1.0 };
+                let out = if r.side == toward_center { r.side * out.abs().min(arc.radius - 1e-3) } else { out };
+                let vs = (out.max(back), out.min(back));
+                let profile = self.wall_outline_profile(g, (r.u0, r.u1), (r.u0, r.u1), vs);
+                (placement, self.w.add("IFCEXTRUDEDAREASOLID", args![profile, self.identity, self.dir_z, height]))
+            }
+            None => {
+                let at = Frame::at(DVec3::new(r.u0, 0.0, r.z0 - g.base_z));
+                let placement = self.local_placement(Some(wall_placement), at);
+                let (lo, hi) = (out.min(back), out.max(back));
+                (placement, self.extrude_box(DVec3::new(0.0, lo, 0.0), DVec3::new(width, hi, height)))
+            }
+        };
+        let shape = self.shape(vec![body], None);
+        let gid = self.guid(&format!("recess-{}", e.id));
+        let n = Value::Null;
+        let name = project.type_name(e.type_id);
+        let opening = self.w.add(
+            "IFCOPENINGELEMENT",
+            args![gid, n.clone(), name, n.clone(), n.clone(), placement, shape, n, Value::Enum("RECESS")],
+        );
+        let gid = self.guid(&format!("voids-{}", e.id));
+        self.w.add("IFCRELVOIDSELEMENT", args![gid, Value::Null, Value::Null, Value::Null, wall, opening]);
+        let length = |v: f64| Value::Typed("IFCLENGTHMEASURE", Box::new(Value::Real(v)));
+        let props = vec![
+            ("Width", length(width)),
+            ("Height", length(height)),
+            ("Depth", length(r.depth)),
+            ("Sill", length(r.z0 - g.base_z)),
+            ("Face", Value::Typed("IFCLABEL", Box::new(if r.side > 0.0 { "LEFT" } else { "RIGHT" }.into()))),
+            ("Volume", Value::Typed("IFCVOLUMEMEASURE", Box::new(Value::Real(g.recess_volume(r))))),
+        ];
+        self.property_set(&format!("niche-{}", e.id), NICHE_PSET, vec![opening], props);
     }
 
     fn write_opening(&mut self, g: &WallGeom, wall_placement: Id, wall: Id, o: &cc_geom::Opening) {
@@ -3392,9 +3449,11 @@ fn component_entity(def: &cc_core::ComponentDef) -> (&'static str, &'static str,
         cc_core::ComponentKind::Plumbing => ("IFCSANITARYTERMINAL", "NOTDEFINED"),
         cc_core::ComponentKind::Lighting => ("IFCLIGHTFIXTURE", "NOTDEFINED"),
         cc_core::ComponentKind::Electrical => ("IFCBUILDINGELEMENTPROXY", "NOTDEFINED"),
-        cc_core::ComponentKind::Generic | cc_core::ComponentKind::TitleBlock | cc_core::ComponentKind::Detail => {
-            ("IFCBUILDINGELEMENTPROXY", "NOTDEFINED")
-        }
+        // A niche is written as its wall's opening, never as a product of its own.
+        cc_core::ComponentKind::Generic
+        | cc_core::ComponentKind::TitleBlock
+        | cc_core::ComponentKind::Detail
+        | cc_core::ComponentKind::Niche => ("IFCBUILDINGELEMENTPROXY", "NOTDEFINED"),
         cc_core::ComponentKind::Door => ("IFCDOOR", "DOOR"),
         cc_core::ComponentKind::Window => ("IFCWINDOW", "WINDOW"),
     };

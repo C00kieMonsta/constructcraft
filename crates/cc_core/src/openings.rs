@@ -31,6 +31,10 @@ pub struct OpeningNames {
     pub french_door: String,
     pub french_door_double: String,
     pub window: String,
+    /// The component of niches (see [`niche_def`]).
+    pub niche: String,
+    /// The depth of a niche.
+    pub depth: String,
     /// The components of windows that open (see [`Self::window_for`]).
     pub casement: String,
     pub double_casement: String,
@@ -75,6 +79,8 @@ impl OpeningNames {
             french_door: n("tpl-comp-french-door"),
             french_door_double: n("tpl-comp-french-door-double"),
             window: n("tpl-comp-window"),
+            niche: n("tpl-comp-niche"),
+            depth: param("tpl-param-depth"),
             casement: n("tpl-comp-window-casement"),
             double_casement: n("tpl-comp-window-double"),
             top_hung: n("tpl-comp-window-top-hung"),
@@ -164,6 +170,7 @@ pub fn door_def(names: &OpeningNames, width: f64, height: f64, material: &str) -
             own_symbol: false,
             operation: WindowOperation::Fixed,
             door_operation: DoorOperation::SingleSwingLeft,
+            depth: String::new(),
         })),
         ..Default::default()
     }
@@ -274,10 +281,38 @@ pub fn window_def(names: &OpeningNames, width: f64, height: f64, sill: f64, mate
             own_symbol: false,
             operation: WindowOperation::Fixed,
             door_operation: DoorOperation::SingleSwingLeft,
+            depth: String::new(),
         })),
         ..Default::default()
     }
 }
+
+/// A niche: a recess `width` wide, `height` tall and `depth` deep in one
+/// face of its wall, its bottom `sill` above the wall's base. It has no
+/// pieces: the wall shows inside it (pieces of a niche component are not
+/// placed yet).
+pub fn niche_def(names: &OpeningNames, (width, height, depth, sill): (f64, f64, f64, f64)) -> ComponentDef {
+    let (w, h, d) = (&names.width, &names.height, &names.depth);
+    ComponentDef {
+        kind: ComponentKind::Niche,
+        params: vec![length(w, width), length(h, height), length(d, depth), length(&names.sill, sill)],
+        items: Vec::new(),
+        opening: Some(Box::new(HostOpening {
+            width: w.clone(),
+            height: h.clone(),
+            sill: names.sill.clone(),
+            own_symbol: false,
+            operation: WindowOperation::Fixed,
+            door_operation: DoorOperation::SingleSwingLeft,
+            depth: d.clone(),
+        })),
+        ..Default::default()
+    }
+}
+
+/// The least a niche leaves of its wall behind it, meters: a deeper one
+/// stops there (an opening through the wall is a door or a window).
+pub const NICHE_MIN_BACK: f64 = 0.01;
 
 /// A window whose panels open as `operation` says: [`window_def`] with,
 /// for two side-hung panels, a stile where they meet and a pane in each,
