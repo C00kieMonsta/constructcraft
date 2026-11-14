@@ -233,6 +233,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and project rules.
 - Run a macro as a single undo step; parameters in macros.
 - Material textures.
 
+## Support the project
+
+ConstructCraft is free and developed in spare time. If it is useful to you, a coffee helps keep the work going:
+
+<a href="https://www.buymeacoffee.com/francisreboucas"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy me a coffee" height="48"></a>
+
 ## Independence
 
 ConstructCraft is independent. Behaviour is designed from public documentation, general CAD conventions and user feedback. Reference tests use analytic values and open-source tools. ConstructCraft is not affiliated with, sponsored by or endorsed by Autodesk. Autodesk and Revit are trademarks of Autodesk, Inc.
