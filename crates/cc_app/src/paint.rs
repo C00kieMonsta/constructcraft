@@ -414,12 +414,26 @@ pub(crate) fn prim_shapes(
             image_shapes(ctx, image, *faded, corners, hl, out);
             Drawn::Shapes
         }
-        Prim::Text { pos, text, size, element, .. } => {
+        Prim::Text { pos, text, size, element, anchor, angle } => {
             if opts.only.is_some() {
                 return Drawn::Nothing;
             }
             let px = (size * opts.px_per_mm) as f32;
             let at = xf.to_screen(*pos);
+            // Too small to read: a thin line where the text is, so it is
+            // seen to be there (issue #318).
+            if (GREEK_PX..MIN_TEXT_PX).contains(&px) {
+                let (a, b) = greek(text, px, at, *anchor, *angle as f32);
+                if !egui::Rect::from_two_pos(a, b).intersects(clip) {
+                    return Drawn::Nothing;
+                }
+                let background = element.is_some_and(|e| d.background.contains(&e));
+                if !gate.take(LINE_VERTICES, background) {
+                    return Drawn::Nothing;
+                }
+                out.push(Shape::line_segment([a, b], Stroke::new((px * 0.5).max(0.6), Color32::from_gray(150))));
+                return Drawn::Shapes;
+            }
             // Far outside the view a text cannot reach into it.
             if text_culled(text, px, at, clip) {
                 return Drawn::Nothing;
@@ -437,7 +451,27 @@ pub(crate) fn prim_shapes(
 /// Whether a text of `px` points at `at` is too small to read or too far
 /// outside `clip` to reach into it.
 pub(crate) fn text_culled(text: &str, px: f32, at: Pos2, clip: egui::Rect) -> bool {
-    px < 3.5 || !clip.expand(px * text.chars().count() as f32).contains(at)
+    px < MIN_TEXT_PX || !clip.expand(px * text.chars().count() as f32).contains(at)
+}
+
+/// Texts smaller than this on screen (points) are not laid out.
+const MIN_TEXT_PX: f32 = 3.5;
+/// Down to this size they draw as a line; smaller ones are left out.
+const GREEK_PX: f32 = 1.0;
+
+/// The line standing for a text of `px` points too small to read: through
+/// the middle of its height, about as long as the text.
+fn greek(text: &str, px: f32, at: Pos2, anchor: cc_views::Anchor, angle: f32) -> (Pos2, Pos2) {
+    let width = text.chars().count() as f32 * 0.5 * px;
+    let (x, y) = match anchor {
+        cc_views::Anchor::LeftBottom => (0.0, -px / 2.0),
+        cc_views::Anchor::CenterBottom => (-width / 2.0, -px / 2.0),
+        cc_views::Anchor::RightBottom => (-width, -px / 2.0),
+        cc_views::Anchor::Center => (-width / 2.0, 0.0),
+    };
+    // Screen Y points down, so drawing rotations are negated.
+    let rot = egui::emath::Rot2::from_angle(-angle);
+    (at + rot * egui::vec2(x, y), at + rot * egui::vec2(x + width, y))
 }
 
 /// Longest side of a picture's texture, pixels (larger pictures are reduced).
@@ -550,6 +584,37 @@ mod tests {
         let mut output = ctx.end_pass();
         output.textures_delta.clear();
         vertices(&ctx.tessellate(output.shapes, output.pixels_per_point))
+    }
+
+    /// Issue #318: a text too small to read still shows, as a line where
+    /// it is; one smaller than a pixel does not.
+    #[test]
+    fn small_texts_draw_as_lines() {
+        let ctx = egui::Context::default();
+        let none = BTreeSet::new();
+        let mut d = Drawing2D::default();
+        d.tag_text(DVec2::new(1.0, 1.0), "2.00", 2.5, cc_views::Anchor::CenterBottom, 0.0, None);
+        let clip = egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 800.0));
+        let xf = Xf { screen: Pos2::new(0.0, 800.0), origin: DVec2::ZERO, scale: 100.0 };
+        let drawn = |px_per_mm: f64| {
+            let opts = PaintOptions { highlight: &none, px_per_mm, mono: None, only: None };
+            let mut budget = Budget::with_left(1000);
+            let mut out = Vec::new();
+            let r = prim_shapes(&ctx, &d, &d.prims[0], &xf, &opts, clip, &mut Gate::Budget(&mut budget), &mut out);
+            (r, out)
+        };
+        assert!(matches!(drawn(4.0).0, Drawn::Text { .. }));
+        let (r, out) = drawn(0.8);
+        assert!(matches!(r, Drawn::Shapes), "2 px tall");
+        match out.as_slice() {
+            [Shape::LineSegment { points: [a, b], .. }] => {
+                // Centered on the text, half its height above its bottom.
+                assert!(((a.x + b.x) / 2.0 - 100.0).abs() < 1e-3 && (b.x - a.x - 4.0).abs() < 1e-3);
+                assert!((a.y - 699.0).abs() < 1e-3 && (b.y - 699.0).abs() < 1e-3);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(drawn(0.2).0, Drawn::Nothing), "half a pixel");
     }
 
     #[test]
