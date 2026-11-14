@@ -276,6 +276,18 @@ impl Drawing2D {
         self.prims.get(self.underlay..end).unwrap_or_default()
     }
 
+    /// The lines of the view itself that tools snap to by their ends: its
+    /// linework without the pattern lines of hatches, which are not geometry.
+    pub fn snap_lines(&self) -> Vec<(DVec2, DVec2)> {
+        self.own_prims()
+            .iter()
+            .filter_map(|p| match p {
+                Prim::Line { a, b, style, .. } if *style != LineStyle::Hatch => Some((*a, *b)),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// The overlay drawn over the view (see [`Self::overlay`]).
     pub fn overlay_prims(&self) -> &[Prim] {
         self.prims.get(self.prims.len().saturating_sub(self.overlay)..).unwrap_or_default()
@@ -656,6 +668,19 @@ mod tests {
         d.line(v(-50.0, -50.0), v(100.0, 50.0), LineStyle::Thin, Some(ElementId(5)));
         d.background.insert(ElementId(5));
         d
+    }
+
+    /// Issue #332: the pattern lines of a hatch are not snapped to; the
+    /// outline they fill, annotations and lines of no element still are.
+    #[test]
+    fn hatch_lines_are_not_snap_lines() {
+        let mut d = Drawing2D::default();
+        d.line(v(-9.0, 0.0), v(-8.0, 0.0), LineStyle::Cut, None);
+        d.underlay = 1;
+        d.line(v(0.0, 0.0), v(4.0, 0.0), LineStyle::Cut, Some(ElementId(1)));
+        d.line(v(1.0, 0.0), v(2.0, 1.0), LineStyle::Hatch, Some(ElementId(1)));
+        d.line(v(0.0, 2.0), v(4.0, 2.0), LineStyle::Annotation, None);
+        assert_eq!(d.snap_lines(), [(v(0.0, 0.0), v(4.0, 0.0)), (v(0.0, 2.0), v(4.0, 2.0))]);
     }
 
     fn ids(list: Vec<ElementId>) -> Vec<u64> {

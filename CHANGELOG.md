@@ -53,6 +53,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `skp_import` and `skp_component_load` no longer hang on a file whose definitions place each other many times over, or themselves (#303): such a file is refused as too large.
 - A deeply nested SVG picked as a title block picture no longer overflows the stack (#305).
 - Cached drawings of deleted views are dropped (#303).
+- The Dimension, Measure and Level Mark tools no longer snap to the pattern lines of hatches (#332): in a section, every line of a cut's hatch gave two snap points, which took the cursor from the outline being dimensioned.
 
 ### Security
 
