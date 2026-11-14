@@ -1422,6 +1422,7 @@ wall-side-interior = faccia interna
 msg-no-rebar-type = Il progetto non ha tipi di barra.
 msg-rebar-host = Le armature vanno in travi e pilastri.
 tx-create-rebar = Aggiungi armatura
+tx-copy-rebar = Copia armatura
 default-rebar-view-name = Armatura { $n }
 msg-member-vertical = Le estremità di un controvento non possono essere una sopra l'altra.
 tx-create-brace = Crea controvento

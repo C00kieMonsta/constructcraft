@@ -1422,6 +1422,7 @@ wall-side-interior = strona wewnętrzna
 msg-no-rebar-type = Projekt nie ma typów prętów.
 msg-rebar-host = Zbrojenie umieszcza się w belkach i słupach.
 tx-create-rebar = Dodaj zbrojenie
+tx-copy-rebar = Kopiuj zbrojenie
 default-rebar-view-name = Zbrojenie { $n }
 msg-member-vertical = Końce stężenia nie mogą leżeć jeden nad drugim.
 tx-create-brace = Utwórz stężenie

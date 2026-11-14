@@ -234,6 +234,7 @@ registry![
         bracing::BracingCreate,
         rebar::RebarCreate,
         rebar::RebarTypical,
+        rebar::RebarCopy,
         wall_rebar::WallRebarCreate,
         slab_rebar::SlabRebarCreate,
         strip_rebar::StripRebarCreate,

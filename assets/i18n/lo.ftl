@@ -1389,6 +1389,7 @@ wall-side-interior = ດ້ານໃນ
 msg-no-rebar-type = ໂຄງການນີ້ຍັງບໍ່ມີປະເພດເຫຼັກເສີມ.
 msg-rebar-host = ເຫຼັກເສີມຕ້ອງໃສ່ໃນຄານ ແລະ ເສົາ.
 tx-create-rebar = ເພີ່ມເຫຼັກເສີມ
+tx-copy-rebar = ສຳເນົາເຫຼັກເສີມ
 default-rebar-view-name = ເຫຼັກເສີມ { $n }
 msg-member-vertical = ສົ້ນທັງສອງຂອງທ່ອນຄໍ້າຢັນບໍ່ສາມາດຢູ່ກົງກັນຕາມລວງຕັ້ງໄດ້.
 tx-create-brace = ສ້າງຄໍ້າຢັນ

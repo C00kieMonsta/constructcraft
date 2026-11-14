@@ -1422,6 +1422,7 @@ wall-side-interior = cara interior
 msg-no-rebar-type = El proyecto no tiene tipos de barra.
 msg-rebar-host = La armadura se coloca en vigas y pilares.
 tx-create-rebar = Añadir armadura
+tx-copy-rebar = Copiar armadura
 default-rebar-view-name = Armadura { $n }
 msg-member-vertical = Los extremos de una riostra no pueden estar uno encima del otro.
 tx-create-brace = Crear riostra

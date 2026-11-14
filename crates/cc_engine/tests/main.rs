@@ -45,6 +45,7 @@ mod phases;
 mod piles;
 mod profiles;
 mod project_templates;
+mod rebar_copy;
 mod regions;
 mod ring_footings;
 mod schedule_def;

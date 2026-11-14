@@ -1427,6 +1427,7 @@ wall-side-interior = 内側
 msg-no-rebar-type = プロジェクトに鉄筋タイプがありません。
 msg-rebar-host = 配筋は梁や柱の中に配置します。
 tx-create-rebar = 配筋を追加
+tx-copy-rebar = 配筋をコピー
 default-rebar-view-name = 配筋 { $n }
 msg-member-vertical = ブレースの両端を同じ上下位置にすることはできません。
 tx-create-brace = ブレースを作成
