@@ -5,7 +5,7 @@
 //! of every pair of faces that overlap on screen, at a point inside their
 //! overlap; sorting by centroid depth alone fails for large faces such as roofs.
 
-use crate::shadow::{self, Shadows};
+use crate::shadow::{self, Catch, Shadows};
 use crate::{Drawing2D, LineStyle, cut::POCHE, format};
 use cc_core::{CameraState, DetailLevel, Direction, ElementId, Project, TypeData, VisualStyle};
 use cc_geom::polygon::signed_area;
@@ -123,23 +123,39 @@ impl<'a> Look<'a> {
     /// one ([`cc_core::View::sun`]), which casts shadows when it is set to
     /// ([`cc_core::sun::SunSettings::shadows`]): on the model `geom` and on
     /// the ground plane ([`Project::sun_ground_height`]), `skip` being the
-    /// elements the view's graphics leave out of them.
-    pub fn of(project: &Project, geom: &ModelGeometry, view: &cc_core::View, skip: Option<&'a shadow::Skip>) -> Self {
+    /// elements the view's graphics leave out of them. What is `indoors`
+    /// of a floor plan's or a section's faces catches none (without it,
+    /// every face catches them; see [`shadow::Catch`]).
+    pub fn of(
+        project: &Project,
+        geom: &ModelGeometry,
+        view: &cc_core::View,
+        skip: Option<&'a shadow::Skip>,
+        indoors: Option<&'a shadow::Indoors>,
+    ) -> Self {
         let light = project
             .sun_state(view)
             .filter(|_| view.kind.takes_sun())
             .map(|s| if s.above_horizon && s.direction.is_finite() { s.direction } else { DVec3::ZERO });
         let shadows = Self::casts_shadows(view).then(|| {
             let bottom = geom.bounds().map(|(lo, _)| lo.z);
-            Shadows { ground: Some(project.sun_ground_height(view, bottom)), skip }
+            let catch = match (&view.kind, indoors) {
+                (cc_core::ViewKind::FloorPlan { .. }, Some(indoors)) => Catch::Site(indoors),
+                (cc_core::ViewKind::Section { .. }, Some(indoors)) => Catch::Outdoors(indoors),
+                _ => Catch::All,
+            };
+            Shadows { ground: Some(project.sun_ground_height(view, bottom)), skip, catch }
         });
         Self { detail: view.detail, style: view.style(), spacing: crate::cut::spacing(view.scale), light, shadows }
     }
 
     /// Whether `view` is set to draw its sun's shadows: it has a sun that
-    /// casts them, in a visual style that shows them (wherever the sun stands).
+    /// casts them, in a visual style that shows them (wherever the sun
+    /// stands). Ceiling plans, which look up at what the sun does not
+    /// reach, draw none.
     pub fn casts_shadows(view: &cc_core::View) -> bool {
-        view.kind.takes_sun() && view.sun.as_ref().is_some_and(|s| s.shadows) && view.style().colored()
+        let looks_up = matches!(view.kind, cc_core::ViewKind::CeilingPlan { .. });
+        view.kind.takes_sun() && !looks_up && view.sun.as_ref().is_some_and(|s| s.shadows) && view.style().colored()
     }
 
     /// Shaded, at the medium detail level, patterns as at 1:100, the default light, no shadows.
@@ -250,12 +266,28 @@ pub fn render(
     let mut faces = Vec::new();
     let shown = |s: &&cc_geom::Solid| s.detail.shows(detail);
     let cut = cut.filter(|_| detail.shows_layers());
-    // The sun's shadows: what casts them (the model beyond the cut plane).
+    // The sun's shadows: what casts them (the model beyond the cut plane;
+    // in a floor plan the whole model, which reads the site) and, where
+    // the view has spaces indoors, what covers them from the sky. Either
+    // past a limit: no shadows.
     let sun = look.light.filter(|l| style.colored() && l.length_squared() > 0.5);
     let skip = look.shadows.and_then(|s| s.skip);
+    let (site, indoors) = match look.shadows.map_or(Catch::All, |s| s.catch) {
+        Catch::All => (false, None),
+        Catch::Site(indoors) => (true, Some(indoors)),
+        Catch::Outdoors(indoors) => (false, Some(indoors)),
+    };
+    let seen = |s: &cc_geom::Solid| s.detail.shows(detail);
+    let mut cover = None;
     let mut scene = look.shadows.zip(sun).and_then(|(_, sun)| {
-        let near = frame.near.map(|n| (frame.origin + frame.forward * n, frame.forward));
-        shadow::Scene::new(geom, sun, skip, &|s| s.detail.shows(detail), near)
+        if indoors.is_some_and(|i| i.failed) {
+            return None;
+        }
+        if indoors.is_some_and(|i| !i.is_empty()) {
+            cover = Some(shadow::Scene::covers(geom, skip, &seen, None)?);
+        }
+        let near = frame.near.filter(|_| !site).map(|n| (frame.origin + frame.forward * n, frame.forward));
+        shadow::Scene::new(geom, sun, skip, &seen, near)
     });
     for (index, solid) in geom.solids.iter().enumerate().filter(|(_, s)| shown(s)) {
         let edges = solid.feature_edges();
@@ -338,7 +370,9 @@ pub fn render(
         let ground = look.shadows.and_then(|s| s.ground).filter(|_| frame.forward.z < -1e-3);
         let mut under: Vec<Vec<DVec2>> = Vec::new();
         if let Some((z, bounds)) = ground.zip(geom.bounds()) {
-            for ring in scene.on_ground(z, bounds) {
+            // A floor plan's ground catches none where it is indoors.
+            let inside = cover.as_mut().zip(indoors).filter(|_| site);
+            for ring in scene.on_ground(z, bounds, inside) {
                 let ring = planes.iter().fold(ring, |r, &(p, n)| clip_polygon(&r, p, n));
                 if ring.len() >= 3 {
                     under.push(ring.iter().map(|p| frame.project(*p)).collect());
@@ -354,7 +388,18 @@ pub fn render(
                 if !catches {
                     return Vec::new();
                 }
-                let rings = scene.on_face(&f.verts, f.normal, (f.solid, f.face));
+                // What is indoors catches none: a section's face whole, by
+                // the point in front of it; a floor plan's by its part indoors.
+                let mut inside = cover.as_mut().zip(indoors).map(|(c, i)| (c, i, f.element));
+                if !site
+                    && let Some((cover, indoors, element)) = inside.take()
+                    && let Some(p) = shadow::point_within(&f.verts, f.normal)
+                    && indoors.holds(p + f.normal * shadow::FACE_PROBE)
+                    && cover.above(p + f.normal * shadow::FACE_PROBE, Some(element))
+                {
+                    return Vec::new();
+                }
+                let rings = scene.on_face(&f.verts, f.normal, (f.solid, f.face), inside);
                 rings.into_iter().map(|r| r.into_iter().map(|p| frame.project(p)).collect()).collect()
             })
             .collect();
@@ -947,18 +992,22 @@ mod tests {
             100,
             cc_core::ViewKind::Elevation { direction: Direction::South },
         );
-        assert_eq!(Look::of(&doc.project, &geom, &view, None).light, None);
+        assert_eq!(Look::of(&doc.project, &geom, &view, None, None).light, None);
         assert_eq!(
-            Look::of(&doc.project, &geom, &view, None),
-            Look { light: None, ..Look::of(&doc.project, &geom, &view, None) }
+            Look::of(&doc.project, &geom, &view, None, None),
+            Look { light: None, ..Look::of(&doc.project, &geom, &view, None, None) }
         );
         view.sun = Some(SunSettings::default());
         let state = doc.project.sun_state(&view).unwrap();
         assert!(state.above_horizon);
-        assert_eq!(Look::of(&doc.project, &geom, &view, None).light, Some(state.direction));
+        assert_eq!(Look::of(&doc.project, &geom, &view, None, None).light, Some(state.direction));
         view.sun =
             Some(SunSettings { mode: SunMode::Still { date: Default::default(), time: 0 }, ..Default::default() });
-        assert_eq!(Look::of(&doc.project, &geom, &view, None).light, Some(DVec3::ZERO), "midnight at the equator");
+        assert_eq!(
+            Look::of(&doc.project, &geom, &view, None, None).light,
+            Some(DVec3::ZERO),
+            "midnight at the equator"
+        );
     }
 
     #[test]

@@ -703,12 +703,12 @@ mod tests {
         for category in [ViewCategory::FloorPlan, ViewCategory::Elevation, ViewCategory::ThreeD] {
             let v = view(&project, category);
             assert!(v.sun.is_none());
-            assert_eq!(Look::of(&project, &geom, &v, None).light, None);
+            assert_eq!(Look::of(&project, &geom, &v, None, None).light, None);
             let d = generate(&project, &geom, &v).unwrap();
             assert_eq!(d.overlay, 0);
             assert_eq!(d.own_prims().len(), d.prims.len() - d.underlay);
             // The generators with the default light give the same drawing.
-            let look = Look { light: None, ..Look::of(&project, &geom, &v, None) };
+            let look = Look { light: None, ..Look::of(&project, &geom, &v, None, None) };
             let direct = match &v.kind {
                 ViewKind::Elevation { direction } => Some(crate::elevation(&project, &geom, *direction, look)),
                 ViewKind::ThreeD { camera, .. } => Some(crate::axonometric(&project, &geom, camera, look)),

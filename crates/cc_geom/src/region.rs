@@ -1,5 +1,6 @@
 //! Regions covered by polygons: the union of simple polygons in a plane,
-//! optionally kept within another polygon, as rings a painter can fill.
+//! optionally less what other polygons cover and kept within another
+//! polygon, as rings a painter can fill.
 //!
 //! The polygons' edges are first welded (`weld`): points closer than a
 //! tolerance become one, and every edge is split where another crosses it
@@ -30,6 +31,8 @@ const WELD_SIDE: usize = 256;
 /// A triangle lower than this, meters, between two parts of the region is a
 /// gap of rounding, not of the region: it is closed.
 const THIN: f64 = 1e-7;
+/// Most triangles of a gap looked at from one of them for the region on both sides.
+const MAX_GAP_ROW: usize = 64;
 /// Polygons smaller than this, square meters, cover nothing.
 const MIN_AREA: f64 = 1e-12;
 /// With more polygons than this, a grid finds those around a point.
@@ -58,34 +61,52 @@ impl HasPosition for V {
 ///
 /// `None` when the polygons have more than `max_points` points in all, a
 /// coordinate is not a finite number, the polygons cross one another too
-/// many times (`MAX_EDGES`, `MAX_WELD_WORK`) or the triangulation fails;
-/// nothing covered is `Some` of no rings.
+/// many times (`MAX_EDGES`, `MAX_WELD_WORK`), the triangulation fails or
+/// the outlines found do not make a region (one left open, a hole inside
+/// none of them): never a region that covers more than the polygons do.
+/// Nothing covered is `Some` of no rings.
 pub fn covered(polys: &[Vec<DVec2>], clip: Option<&[DVec2]>, max_points: usize) -> Option<Vec<Vec<DVec2>>> {
-    covered_within(polys, clip, max_points, MAX_EDGES)
+    covered_within(polys, &[], clip, max_points, MAX_EDGES)
 }
 
-/// [`covered`], the welding making at most `max_edges` edges.
+/// The region covered by any of `polys` and by none of `except` (simple
+/// polygons too, of either winding, which may overlap one another and the
+/// others), within `clip` when given: rings as [`covered`] gives them, and
+/// `None` in the same cases, the points of `except` counting among the
+/// `max_points`.
+pub fn covered_except(
+    polys: &[Vec<DVec2>],
+    except: &[Vec<DVec2>],
+    clip: Option<&[DVec2]>,
+    max_points: usize,
+) -> Option<Vec<Vec<DVec2>>> {
+    covered_within(polys, except, clip, max_points, MAX_EDGES)
+}
+
+/// [`covered_except`], the welding making at most `max_edges` edges.
 fn covered_within(
     polys: &[Vec<DVec2>],
+    except: &[Vec<DVec2>],
     clip: Option<&[DVec2]>,
     max_points: usize,
     max_edges: usize,
 ) -> Option<Vec<Vec<DVec2>>> {
     let finite = |p: &[DVec2]| p.iter().all(|q| q.is_finite() && q.abs().max_element() < 1e9);
     let clip = clip.filter(|c| c.len() >= 3);
-    if polys.iter().any(|p| !finite(p)) || clip.is_some_and(|c| !finite(c)) {
+    if polys.iter().chain(except).any(|p| !finite(p)) || clip.is_some_and(|c| !finite(c)) {
         return None;
     }
-    let polys: Vec<&[DVec2]> =
-        polys.iter().map(Vec::as_slice).filter(|p| p.len() >= 3 && polygon::area(p) > MIN_AREA).collect();
+    let whole = |p: &&[DVec2]| p.len() >= 3 && polygon::area(p) > MIN_AREA;
+    let polys: Vec<&[DVec2]> = polys.iter().map(Vec::as_slice).filter(whole).collect();
     if polys.is_empty() {
         return Some(Vec::new());
     }
-    let points = polys.iter().map(|p| p.len()).sum::<usize>() + clip.map_or(0, <[DVec2]>::len);
+    let except: Vec<&[DVec2]> = except.iter().map(Vec::as_slice).filter(whole).collect();
+    let points = polys.iter().chain(&except).map(|p| p.len()).sum::<usize>() + clip.map_or(0, <[DVec2]>::len);
     if points > max_points {
         return None;
     }
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cover(&polys, clip, max_edges))).ok().flatten()
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cover(&polys, &except, clip, max_edges))).ok().flatten()
 }
 
 /// Makes points closer than [`TOL`] one point: the first of them seen.
@@ -384,15 +405,16 @@ fn triangulation(segs: &[[DVec2; 2]], split: bool) -> Option<ConstrainedDelaunay
     Some(cdt)
 }
 
-fn cover(polys: &[&[DVec2]], clip: Option<&[DVec2]>, max_edges: usize) -> Option<Vec<Vec<DVec2>>> {
+fn cover(polys: &[&[DVec2]], except: &[&[DVec2]], clip: Option<&[DVec2]>, max_edges: usize) -> Option<Vec<Vec<DVec2>>> {
     // Around the middle of the polygons, for precision, their points welded.
     let all = Box2::of(&polys.iter().flat_map(|p| p.iter().copied()).collect::<Vec<_>>());
     let center = ((all.lo + all.hi) * 0.5).round();
     let mut welder = Welder::default();
     let mut moved = |ring: &[DVec2]| -> Vec<DVec2> { ring.iter().map(|q| welder.point(*q - center)).collect() };
     let polys: Vec<Vec<DVec2>> = polys.iter().map(|p| moved(p)).collect();
+    let except: Vec<Vec<DVec2>> = except.iter().map(|p| moved(p)).collect();
     let clip: Option<Vec<DVec2>> = clip.map(&mut moved);
-    let rings: Vec<&[DVec2]> = polys.iter().chain(clip.iter()).map(Vec::as_slice).collect();
+    let rings: Vec<&[DVec2]> = polys.iter().chain(&except).chain(clip.iter()).map(Vec::as_slice).collect();
     // One round of welding nearly always leaves no crossing; when the
     // triangulation meets one, the edges are welded until none is left.
     let segs = weld(edges(&rings), &mut welder, 1, max_edges)?;
@@ -405,6 +427,7 @@ fn cover(polys: &[&[DVec2]], clip: Option<&[DVec2]>, max_edges: usize) -> Option
     let position: Vec<DVec2> = cdt.vertices().map(|v| DVec2::new(v.position().x, v.position().y)).collect();
     let at = |i: usize| position.get(i).copied().unwrap_or(DVec2::ZERO);
     let index = Index::new(&polys);
+    let left_out = Index::new(&except);
     let mut inside = vec![false; cdt.num_all_faces()];
     let corners = |f: &spade::handles::FaceHandle<spade::handles::InnerTag, V, (), spade::CdtEdge<()>, ()>| {
         f.vertices().map(|v| at(v.fix().index()))
@@ -414,6 +437,7 @@ fn cover(polys: &[&[DVec2]], clip: Option<&[DVec2]>, max_edges: usize) -> Option
         let p = (a + b + c) / 3.0;
         if clip.as_ref().is_none_or(|clip| polygon::contains(clip, p))
             && index.covers(&polys, p)
+            && !left_out.covers(&except, p)
             && let Some(slot) = inside.get_mut(f.fix().index())
         {
             *slot = true;
@@ -421,27 +445,60 @@ fn cover(polys: &[&[DVec2]], clip: Option<&[DVec2]>, max_edges: usize) -> Option
     }
     // Gaps of rounding between parts of the region are closed, so they make
     // one ring (painters leave a hairline between two that only touch): a
-    // triangle with no height whose corners all touch the region. One that
-    // reaches away from it stays out (it would be a spike with no area).
-    let mut touched = vec![false; position.len()];
-    for f in cdt.inner_faces().filter(|f| inside.get(f.fix().index()) == Some(&true)) {
-        for v in f.vertices() {
-            if let Some(t) = touched.get_mut(v.fix().index()) {
-                *t = true;
+    // triangle with no height that has the region on both sides of its
+    // line, across its own sides or across the triangles with no height
+    // next to it (a gap is a row of them). One with the region on one side
+    // only is no gap: points in a line along a side of the region or of
+    // the hull, with nothing beyond; closed, a row of those would join
+    // parts of the region that only stand along the same line, and frame
+    // what lies between them.
+    let slivers: Vec<bool> = {
+        let mut slivers = vec![false; inside.len()];
+        for f in cdt.inner_faces().filter(|f| inside.get(f.fix().index()) == Some(&false)) {
+            let [a, b, c] = corners(&f);
+            let longest = a.distance(b).max(b.distance(c)).max(c.distance(a));
+            let height = (b - a).perp_dot(c - a).abs() / longest.max(1e-300);
+            if let Some(slot) = slivers.get_mut(f.fix().index()) {
+                *slot = height < THIN;
+            }
+        }
+        slivers
+    };
+    let mut closed: Vec<usize> = Vec::new();
+    let mut seen: Vec<usize> = Vec::new();
+    for f in cdt.inner_faces().filter(|f| slivers.get(f.fix().index()) == Some(&true)) {
+        // Its line: through the ends of its longest side.
+        let [a, b, c] = corners(&f);
+        let (p, q) = [(a, b), (b, c), (c, a)]
+            .into_iter()
+            .max_by(|x, y| x.0.distance_squared(x.1).total_cmp(&y.0.distance_squared(y.1)))
+            .unwrap_or((a, b));
+        let along = (q - p).normalize_or_zero();
+        let (mut left, mut right) = (false, false);
+        seen.clear();
+        seen.push(f.fix().index());
+        let mut row = vec![f];
+        while let Some(sliver) = row.pop() {
+            for edge in sliver.adjacent_edges() {
+                let Some(next) = edge.rev().face().as_inner() else { continue };
+                let i = next.fix().index();
+                if inside.get(i) == Some(&true) {
+                    // The side of the line its corner farthest from it stands on.
+                    let off = corners(&next).map(|v| along.perp_dot(v - p));
+                    let far = off.into_iter().fold(0.0f64, |m, d| if d.abs() > m.abs() { d } else { m });
+                    left |= far > THIN;
+                    right |= far < -THIN;
+                } else if slivers.get(i) == Some(&true) && seen.len() < MAX_GAP_ROW && !seen.contains(&i) {
+                    seen.push(i);
+                    row.push(next);
+                }
+            }
+            if left && right {
+                closed.push(f.fix().index());
+                break;
             }
         }
     }
-    let closed: Vec<usize> = cdt
-        .inner_faces()
-        .filter(|f| inside.get(f.fix().index()) == Some(&false))
-        .filter(|f| {
-            let [a, b, c] = corners(f);
-            let longest = a.distance(b).max(b.distance(c)).max(c.distance(a));
-            let height = (b - a).perp_dot(c - a).abs() / longest.max(1e-300);
-            height < THIN && f.vertices().iter().all(|v| touched.get(v.fix().index()) == Some(&true))
-        })
-        .map(|f| f.fix().index())
-        .collect();
     for i in closed {
         if let Some(slot) = inside.get_mut(i) {
             *slot = true;
@@ -504,20 +561,33 @@ fn cover(polys: &[&[DVec2]], clip: Option<&[DVec2]>, max_edges: usize) -> Option
         }
     }
 
-    // Pieces: each outline (counter-clockwise) with the holes (clockwise) inside it.
+    pieces(loops)
+}
+
+/// The rings of a region from the loops of its outline: each outer loop
+/// (counter-clockwise) with the holes (clockwise) inside it joined to it,
+/// or cut in triangles when they cannot be. `None` when a hole lies inside
+/// no outer loop: left out, the region would cover what it does not.
+fn pieces(loops: Vec<Vec<DVec2>>) -> Option<Vec<Vec<DVec2>>> {
     let (outers, holes): (Vec<_>, Vec<_>) =
         loops.into_iter().map(|l| (polygon::signed_area(&l), l)).partition(|(a, _)| *a > 0.0);
     let mut pieces: Vec<(f64, Vec<DVec2>, Vec<Vec<DVec2>>)> =
         outers.into_iter().filter(|(a, _)| *a > MIN_AREA).map(|(a, l)| (a, l, Vec::new())).collect();
     for (_, hole) in holes.into_iter().filter(|(a, _)| *a < -MIN_AREA) {
-        let probe = (hole[0] + hole[1]) * 0.5;
+        // A point inside the hole: the middle of its largest triangle (a
+        // point of its outline may lie on the outline around it).
+        let size = |t: &[usize; 3]| (hole[t[1]] - hole[t[0]]).perp_dot(hole[t[2]] - hole[t[0]]).abs();
+        let largest = polygon::triangulate(&hole).into_iter().max_by(|a, b| size(a).total_cmp(&size(b)));
+        let probe = match largest {
+            Some([a, b, c]) => (hole[a] + hole[b] + hole[c]) / 3.0,
+            None => (hole[0] + hole[1]) * 0.5,
+        };
         let owner = pieces
             .iter_mut()
             .filter(|(_, outer, _)| polygon::contains(outer, probe))
             .min_by(|a, b| a.0.total_cmp(&b.0));
-        if let Some((_, _, holes)) = owner {
-            holes.push(hole);
-        }
+        let (_, _, holes) = owner?;
+        holes.push(hole);
     }
     let mut rings = Vec::new();
     for (_, outer, holes) in pieces {
@@ -616,6 +686,35 @@ mod tests {
         assert_eq!(covered(&[], None, 1000), Some(Vec::new()));
     }
 
+    /// What other polygons cover is left out: a square less a strip across
+    /// it is two rings, less a square inside it one ring around a hole, less
+    /// one over all of it nothing; the left out polygons count as points.
+    #[test]
+    fn polygons_are_left_out_of_the_region() {
+        let square = [rect(0.0, 0.0, 4.0, 4.0)];
+        let rings = covered_except(&square, &[rect(-1.0, 1.0, 5.0, 2.0)], None, 1000).unwrap();
+        assert_eq!(rings.len(), 2, "{rings:?}");
+        assert!((area(&rings) - 12.0).abs() < 1e-9);
+        assert!(rings.iter().all(|r| r.len() == 4), "{rings:?}");
+        // A hole, and what lies outside the region left out too: nothing more.
+        let inside = [rect(1.0, 1.0, 2.0, 2.0), rect(10.0, 10.0, 11.0, 11.0)];
+        let rings = covered_except(&square, &inside, None, 1000).unwrap();
+        assert_eq!(rings.len(), 1, "{rings:?}");
+        assert!((area(&rings) - 15.0).abs() < 1e-9);
+        assert!(!polygon::contains(&rings[0], DVec2::new(1.5, 1.5)));
+        // Sharing a side with the region, overlapping one another, within a clip.
+        let two = [rect(0.0, 0.0, 2.0, 2.0), rect(2.0, 0.0, 4.0, 2.0)];
+        let out = [rect(1.0, -1.0, 3.0, 1.0), rect(2.0, 0.5, 5.0, 1.5)];
+        let rings = covered_except(&two, &out, Some(&rect(0.0, 0.0, 4.0, 1.75)), 1000).unwrap();
+        // 4 x 1.75, less 2 x 1 and the strip's 2 x 1, which share 1 x 0.5.
+        assert!((area(&rings) - 3.5).abs() < 1e-9, "{rings:?}");
+        assert_eq!(covered_except(&square, &[rect(-1.0, -1.0, 5.0, 5.0)], None, 1000), Some(Vec::new()));
+        assert_eq!(covered_except(&square, &[], None, 1000), covered(&square, None, 1000));
+        assert_eq!(covered_except(&square, &[rect(1.0, 1.0, 2.0, 2.0)], None, 7), None);
+        let bad = vec![DVec2::ZERO, DVec2::X, DVec2::new(f64::INFINITY, 1.0)];
+        assert_eq!(covered_except(&square, &[bad], None, 1000), None);
+    }
+
     /// Four bars around a square leave it as a hole: one ring, its area the
     /// bars', and a point of the hole outside it.
     #[test]
@@ -627,6 +726,80 @@ mod tests {
         assert!((area(&rings) - 8.0).abs() < 1e-9, "{}", area(&rings));
         assert!(!polygon::contains(&rings[0], DVec2::new(1.5, 1.5)));
         assert!(polygon::contains(&rings[0], DVec2::new(0.5, 1.5)));
+    }
+
+    /// Shadows cast on a triangular face, cut to it, as a view made them:
+    /// four pieces apart from one another, whose points along the face's
+    /// sides stand in a line to within a rounding error. The triangles of
+    /// no height between those points, along the sides, are no gaps between
+    /// parts of the region (nothing lies beyond them): closed, they framed
+    /// the face, and the lit middle, a hole no outline held, was filled.
+    #[test]
+    fn points_in_a_line_along_the_hull_close_nothing() {
+        let polys: Vec<Vec<DVec2>> = [
+            vec![
+                (-0.8962693548787477, -0.7170154839029981),
+                (-1.3590920585351973, 1.1102230246251565e-16),
+                (-5.0, 1.7384954415228017e-17),
+                (-4.901361488574789, -2.0253774345976927),
+                (-1.0662213527404827, -0.8529770821923861),
+            ],
+            vec![
+                (-4.880846246389449, -2.4466237408033518),
+                (-3.058279676004191, -2.4466237408033518),
+                (-2.82772257003142, -2.262178056025135),
+                (-4.889828990777998, -2.262178056025135),
+            ],
+            vec![
+                (-4.9487577519516845, -1.0521741599254357),
+                (-4.212017473662425, 0.0),
+                (-4.332017473662423, 4.440892098500626e-16),
+                (-4.956561313020961, -0.8919410393029626),
+            ],
+            vec![
+                (-4.815595709322152, -3.7864347685852215),
+                (-4.730817409049434, -3.784653927239546),
+                (-4.727504156926133, -3.782003325540905),
+                (-4.815631657454811, -3.785696633594619),
+            ],
+            vec![
+                (-4.812502039673509, -3.849958118704018),
+                (-4.812447648380024, -3.849958118704018),
+                (-4.745049414154074, -3.796039531323258),
+                (-4.815414614210567, -3.790153254876421),
+            ],
+        ]
+        .into_iter()
+        .map(|p| p.into_iter().map(|(x, y)| DVec2::new(x, y)).collect())
+        .collect();
+        let rings = covered(&polys, None, 1000).unwrap();
+        // The first holds the third; the others lie apart.
+        let apart: f64 = [0, 1, 3, 4].iter().map(|i| polygon::area(&polys[*i])).sum();
+        assert!((area(&rings) - apart).abs() < 1e-9, "{} against {apart}", area(&rings));
+        assert!((apart - 5.947_317_305_852_886).abs() < 1e-9);
+        assert_eq!(rings.len(), 4, "{rings:?}");
+        for i in 0..100 {
+            for j in 0..100 {
+                let p = DVec2::new(-5.0 + (i as f64 + 0.37) * 0.05, -3.85 + (j as f64 + 0.61) * 0.0385);
+                let inside = polys.iter().any(|t| polygon::contains(t, p));
+                assert_eq!(rings.iter().filter(|r| polygon::contains(r, p)).count(), usize::from(inside), "{p}");
+            }
+        }
+    }
+
+    /// A hole belongs to the smallest outline around it; one that no
+    /// outline holds makes no region (rather than one without the hole).
+    #[test]
+    fn a_hole_inside_no_outline_is_a_failure() {
+        let mut hole = rect(1.0, 1.0, 2.0, 2.0);
+        hole.reverse();
+        let rings = pieces(vec![rect(0.0, 0.0, 4.0, 4.0), hole.clone(), rect(10.0, 0.0, 11.0, 1.0)]).unwrap();
+        assert_eq!(rings.len(), 2);
+        assert!((area(&rings) - 16.0).abs() < 1e-9, "{}", area(&rings));
+        let mut away = rect(6.0, 1.0, 7.0, 2.0);
+        away.reverse();
+        assert_eq!(pieces(vec![rect(0.0, 0.0, 4.0, 4.0), hole, away]), None);
+        assert_eq!(pieces(Vec::new()), Some(Vec::new()));
     }
 
     /// Too many points, and numbers that are not finite, are refused; a
@@ -652,8 +825,8 @@ mod tests {
             polys.push(rect(at, 0.0, at + 0.2, 10.0));
         }
         // 24 bars cross at 576 points, making some 1500 edges.
-        assert_eq!(covered_within(&polys, None, 1000, 500), None);
-        let rings = covered_within(&polys, None, 1000, 5000).unwrap();
+        assert_eq!(covered_within(&polys, &[], None, 1000, 500), None);
+        let rings = covered_within(&polys, &[], None, 1000, 5000).unwrap();
         let bars = 24.0 * 10.0 * 0.2 - 144.0 * 0.2 * 0.2;
         assert!((area(&rings) - bars).abs() < 1e-6, "{} against {bars}", area(&rings));
         assert_eq!(rings.len(), 1, "one ring, its 121 holes joined to it");

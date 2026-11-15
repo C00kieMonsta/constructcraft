@@ -1069,13 +1069,27 @@ fn draw_shafts(d: &mut Drawing2D, project: &Project, level: LevelId, cut_z: f64)
 /// cut in floor plans, above it in ceiling plans (the shaded, consistent
 /// colors and textures styles). Only fills and surface patterns: the plan
 /// draws its own edges and cuts.
+///
+/// The sun's shadows of a floor plan read the site
+/// ([`crate::shadow::Catch::Site`]): the whole model casts them, what
+/// stands above the cut plane too, on the faces and on the ground, but for
+/// what is indoors of them (the spaces the look's shadows carry; none
+/// when it carries none). A ceiling plan draws none.
 pub fn style_underlay(
     geom: &ModelGeometry,
     cut_z: f64,
     ceiling: bool,
-    look: crate::Look<'_>,
+    mut look: crate::Look<'_>,
     patterns: &cc_core::fill_pattern::FillPatterns,
 ) -> Vec<crate::Prim> {
+    look.shadows = look.shadows.filter(|_| !ceiling);
+    if let Some(shadows) = look.shadows.as_mut() {
+        use crate::shadow::{Catch, OPEN_AIR};
+        shadows.catch = match shadows.catch {
+            Catch::Site(indoors) | Catch::Outdoors(indoors) => Catch::Site(indoors),
+            Catch::All => Catch::Site(&OPEN_AIR),
+        };
+    }
     let forward = if ceiling { glam::DVec3::Z } else { -glam::DVec3::Z };
     let mut frame = crate::projected::Frame::looking(glam::DVec3::new(0.0, 0.0, cut_z), forward);
     frame.near = Some(0.0);

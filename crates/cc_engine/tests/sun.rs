@@ -434,3 +434,108 @@ fn shadows_are_cast_in_plans_and_elevations() {
     assert!(svg.contains(r#"fill="rgb(0,0,0)" fill-opacity="#), "no veil in the SVG");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The elements the sun's shadows of a view's drawing lie on: a veil comes
+/// right after the fill of its face (`None`: on the ground, before any face).
+fn shadowed(s: &mut Session, view: u64) -> Vec<Option<u64>> {
+    let d = s.drawing(cc_core::ViewId(view)).unwrap();
+    let mut on = None;
+    let mut out = Vec::new();
+    for p in &d.prims {
+        match p {
+            cc_views::Prim::Fill { color: [0, 0, 0, a], element: None, .. } if *a > 0 => out.push(on),
+            cc_views::Prim::Fill { element: Some(e), .. } => on = Some(e.0),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Each view casts its shadows as it is read. A house with eaves, an open
+/// terrace beside it and an annex behind, inside a garden wall: the plan
+/// casts on the ground and on the terrace, not on the floor indoors; the
+/// section through the house leaves its room alone and casts the annex's
+/// eave on the annex's front, though the garden wall closes the garden
+/// around both; the elevation casts the house's eave on its front; the
+/// ceiling plan casts nothing.
+#[test]
+fn shadows_follow_how_each_view_is_read() {
+    let mut s = Session::default();
+    let id = |v: Value| v["id"].as_u64().unwrap();
+    let loop_of = |s: &mut Session, (x0, y0, x1, y1): (f64, f64, f64, f64)| -> Vec<u64> {
+        let corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+        (0..4).map(|i| id(run(s, "wall_create", json!({"start": corners[i], "end": corners[(i + 1) % 4]})))).collect()
+    };
+    let house = loop_of(&mut s, (0.0, 0.0, 6.0, 4.0));
+    let annex = loop_of(&mut s, (12.0, 6.0, 16.0, 9.0));
+    let garden = loop_of(&mut s, (-4.0, -4.0, 20.0, 13.0));
+    let rect = |x0: f64, y0: f64, x1: f64, y1: f64| json!([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
+    let floor = id(run(&mut s, "floor_create", json!({"boundary": rect(0.0, 0.0, 6.0, 4.0)})));
+    let terrace = id(run(&mut s, "floor_create", json!({"boundary": rect(6.0, 0.0, 9.0, 4.0)})));
+    run(&mut s, "roof_create", json!({"boundary": rect(0.0, 0.0, 6.0, 4.0), "overhang": 0.6}));
+    run(&mut s, "roof_create", json!({"boundary": rect(12.0, 6.0, 16.0, 9.0), "overhang": 0.6}));
+
+    // What is indoors: the rooms under their roofs; not the garden, under an eave or not.
+    let (project, geom) = s.project_and_geometry();
+    let indoors = cc_views::Indoors::of(project, geom, None, cc_core::DetailLevel::Medium);
+    assert!(!indoors.failed);
+    let at = |x: f64, y: f64| glam::DVec3::new(x, y, 1.0);
+    assert!(indoors.holds(at(3.0, 2.0)) && indoors.holds(at(14.0, 7.5)), "the rooms");
+    assert!(!indoors.holds(at(3.0, -0.4)) && !indoors.holds(at(14.0, 5.6)), "under the eaves");
+    assert!(!indoors.holds(at(-2.0, 2.0)) && !indoors.holds(at(7.5, 2.0)), "the garden, the terrace");
+    assert!(!indoors.holds(at(30.0, 2.0)), "outside the garden wall");
+
+    let first = |s: &mut Session, category: &str| {
+        run(s, "views_list", json!({"category": category}))[0]["id"].as_u64().unwrap()
+    };
+    let plan = first(&mut s, "floor_plan");
+    let elevation = id(run(&mut s, "view_create", json!({"kind": "elevation", "direction": "south"})));
+    // Looking north from a line through the house's room.
+    let section =
+        id(run(&mut s, "view_create", json!({"kind": "section", "start": [22, 2], "end": [-6, 2], "depth": 14})));
+    let ceiling = id(run(&mut s, "view_create", json!({"kind": "ceiling_plan"})));
+    // The sun in the south-south-west, low.
+    let sun = json!({"mode": "lighting", "azimuth": 200, "altitude": 25, "relative_to_view": false,
+        "shadows": true, "show_path": false});
+    for view in [plan, elevation, section, ceiling] {
+        run(&mut s, "view_set", json!({"view": view, "visual_style": "shaded", "sun": sun}));
+    }
+    let count = |on: &[Option<u64>], ids: &[u64]| on.iter().filter(|e| e.is_some_and(|e| ids.contains(&e))).count();
+
+    let on = shadowed(&mut s, plan);
+    assert!(on.contains(&None), "on the ground");
+    assert!(count(&on, &[terrace]) > 0, "the house's shadow on the terrace: {on:?}");
+    assert_eq!(count(&on, &[floor]), 0, "none indoors: {on:?}");
+
+    let on = shadowed(&mut s, section);
+    assert_eq!(count(&on, &house), 0, "the room cut keeps its plain shading: {on:?}");
+    assert!(count(&on, &annex) > 0, "the annex's eave on its front: {on:?}");
+    assert!(count(&on, &garden) > 0, "the house's shadow on the garden wall: {on:?}");
+
+    let on = shadowed(&mut s, elevation);
+    assert!(count(&on, &house) > 0, "the eave on the house's front: {on:?}");
+    assert!(count(&on, &annex) > 0);
+
+    assert!(shadowed(&mut s, ceiling).is_empty(), "a ceiling plan draws none");
+    // The ground under the house's eave is no room: in the plan it keeps
+    // the shadow, right up to the wall on the side away from the sun.
+    let d = s.drawing(cc_core::ViewId(plan)).unwrap();
+    let shaded = |x: f64, y: f64| {
+        d.prims.iter().any(|p| {
+            matches!(p, cc_views::Prim::Fill { pts, color: [0, 0, 0, a], element: None, .. }
+                if *a > 0 && cc_geom::polygon::contains(pts, glam::DVec2::new(x, y)))
+        })
+    };
+    assert!(shaded(3.0, 4.3) && !shaded(3.0, 2.0), "behind the house, not in it");
+    // With the roofs hidden in the section, nothing covers the rooms:
+    // they are no longer indoors and the sun gets in.
+    let roofs: Vec<u64> = run(&mut s, "elements_list", json!({"category": "roof"}))
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["id"].as_u64().unwrap())
+        .collect();
+    run(&mut s, "element_hide_in_view", json!({"view": section, "ids": roofs}));
+    let on = shadowed(&mut s, section);
+    assert!(count(&on, &house) > 0, "{on:?}");
+}

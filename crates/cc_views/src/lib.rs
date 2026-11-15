@@ -47,7 +47,7 @@ pub use legend::legend;
 pub use plan::{is_structural, plan, plan_of, section_pieces};
 pub use projected::{Frame, Look, axonometric, elevation, section, view_frame};
 pub use schedule::{Cell, Row, Table, field_value, schedule, schedule_where, to_csv, totaled_by_default};
-pub use shadow::{Shadows, Skip as ShadowSkip};
+pub use shadow::{Catch as ShadowCatch, Indoors, Shadows, Skip as ShadowSkip, Storey};
 pub use sheet::{MARGIN, PlacedViewport, Sheet, SheetEnv, compose as compose_sheet, title_block_drawing};
 pub use sun_path::{SunDiagram, SunLabel, SunLabelKind, SunLine, SunLineKind, SunText, diagram as sun_diagram};
 
@@ -83,7 +83,12 @@ pub fn generate_temporary(
     let mut resolver = graphics::Resolver::new(project, geom, view, temporary);
     // What the view's graphics keep out of its sun's shadows.
     let skip = Look::casts_shadows(view).then(|| shadow_skip(geom, &mut resolver));
-    let look = Look::of(project, geom, view, skip.as_ref());
+    // What is indoors of a floor plan's or a section's faces catches none of them.
+    let indoors = skip
+        .as_ref()
+        .filter(|_| matches!(view.kind, ViewKind::FloorPlan { .. } | ViewKind::Section { .. }))
+        .map(|skip| Indoors::of(project, geom, Some(skip), view.detail));
+    let look = Look::of(project, geom, view, skip.as_ref(), indoors.as_ref());
     let mut d = match &view.kind {
         ViewKind::FloorPlan { level, cut_height, .. } | ViewKind::CeilingPlan { level, cut_height, .. } => {
             let ceiling = matches!(view.kind, ViewKind::CeilingPlan { .. });
@@ -307,9 +312,10 @@ mod tests {
     }
 
     /// A view whose sun casts shadows draws them in the shaded style: on
-    /// the faces of elevations and 3D views, and in plans on the floors and
-    /// on the ground around the model. No shadows with them off, in hidden
-    /// line or with the sun below the horizon; hidden elements cast none.
+    /// the faces of elevations and 3D views, and in plans on what is not
+    /// indoors and on the ground around the model. No shadows
+    /// with them off, in hidden line or with the sun below the horizon;
+    /// hidden elements cast none.
     #[test]
     fn the_sun_casts_shadows_in_2d_views() {
         use cc_core::sun::{SunMode, SunSettings};
@@ -365,6 +371,61 @@ mod tests {
                 assert!(shadow_veils(&draw(&open)).len() < veils.len());
             }
         }
+    }
+
+    /// A section through the sample house sees only its rooms beyond its
+    /// line: no shadows, where catching them as an elevation does it would
+    /// draw the roof's and the walls' on the far wall. In the floor plan
+    /// no shadow lies indoors, though the whole house casts on the ground.
+    /// A ceiling plan draws none.
+    #[test]
+    fn rooms_and_ceilings_get_no_shadows() {
+        use cc_core::sun::{SunMode, SunSettings};
+        let (project, geom) = sample();
+        let lit = |category: ViewCategory| {
+            let mut v = project.views_of(category).next().unwrap().clone();
+            v.visual_style = Some(cc_core::VisualStyle::Shaded);
+            v.sun = Some(SunSettings {
+                mode: SunMode::Lighting { azimuth: 235.0, altitude: 35.0, relative_to_view: false },
+                shadows: true,
+                show_path: false,
+                ..Default::default()
+            });
+            v
+        };
+        let v = lit(ViewCategory::Section);
+        assert!(Look::casts_shadows(&v));
+        assert!(shadow_veils(&generate(&project, &geom, &v).unwrap()).is_empty());
+        // The rooms are indoors, whether or not a room was placed in them; the garden is not.
+        let indoors = Indoors::of(&project, &geom, None, v.detail);
+        assert!(!indoors.failed);
+        for room in &project.elements_of(Category::Room).collect::<Vec<_>>() {
+            let cc_core::ElementKind::Room(r) = &room.kind else { panic!() };
+            let z = project.level_elevation(room.level) + 1.5;
+            assert!(indoors.holds(r.position.extend(z)), "{:?}", r.position);
+        }
+        assert!(project.elements_of(Category::Room).count() > 0);
+        let (lo, hi) = geom.bounds().unwrap();
+        assert!(!indoors.holds(DVec2::new(lo.x - 1.0, lo.y - 1.0).extend(1.5)));
+        assert!(!indoors.holds(DVec2::new(hi.x + 1.0, (lo.y + hi.y) / 2.0).extend(1.5)));
+        // The same section catching shadows on every face.
+        let ViewKind::Section { start, end, depth, .. } = v.kind else { panic!() };
+        let all = section(&project, &geom, (start, end), depth, v.scale, Look::of(&project, &geom, &v, None, None));
+        assert!(!shadow_veils(&all).is_empty());
+        // The floor plan: no shadow holds a room's point.
+        let plan = generate(&project, &geom, &lit(ViewCategory::FloorPlan)).unwrap();
+        assert!(!shadow_veils(&plan).is_empty());
+        for room in project.elements_of(Category::Room) {
+            let cc_core::ElementKind::Room(r) = &room.kind else { panic!() };
+            let over = plan.prims.iter().any(|p| {
+                matches!(p, Prim::Fill { pts, color: [0, 0, 0, a], element: None, .. }
+                    if *a > 0 && cc_geom::polygon::contains(pts, r.position))
+            });
+            assert!(!over, "a shadow in the room at {:?}", r.position);
+        }
+        let c = lit(ViewCategory::CeilingPlan);
+        assert!(!Look::casts_shadows(&c));
+        assert!(shadow_veils(&generate(&project, &geom, &c).unwrap()).is_empty());
     }
 
     /// The names of the grids `d` draws, with where each line stands (x) when vertical.
