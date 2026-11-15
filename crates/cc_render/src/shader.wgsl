@@ -2,10 +2,12 @@ struct Uniforms {
     view_proj: mat4x4<f32>,
     light_dir: vec4<f32>,
     /// x: 1 to leave faces unlit (hidden line, consistent colors); y: 1 to
-    /// shade them grey (shaded).
+    /// shade them grey (shaded); z: what the unlit styles keep of a color
+    /// in a cast shadow.
     style: vec4<f32>,
     /// The shaded style's greys, as displayed: x where no light reaches,
-    /// y what a face square to the light adds, z a cast shadow's.
+    /// y what a face square to the light adds, z a cast shadow's (never
+    /// lighter than the face); w the opacity of the ground's shadows.
     shading: vec4<f32>,
 };
 

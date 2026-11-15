@@ -27,10 +27,6 @@ struct Sun {
 // gap between a caster and its shadow).
 const OFFSET_TEXELS: f32 = 0.5;
 const OFFSET_SLOPE_TEXELS: f32 = 2.0;
-// What the unlit styles keep of a color where the sun does not reach.
-const UNLIT_SHADOW: f32 = 0.7;
-// How dark the ground's shadows are (black at this opacity).
-const GROUND_SHADOW: f32 = 0.35;
 
 struct SunOut {
     @builtin(position) clip: vec4<f32>,
@@ -110,7 +106,7 @@ fn fs_sun_face(i: SunOut) -> @location(0) vec4<f32> {
     if u.style.y > 0.5 {
         var grey = shaded_grey(facing);
         if sun.shadow.x > 0.5 {
-            grey = mix(grey, u.shading.z, (1.0 - reach) * smoothstep(0.0, 0.05, facing));
+            grey = mix(grey, min(grey, u.shading.z), (1.0 - reach) * smoothstep(0.0, 0.05, facing));
         }
         return greyed(base, grey, i.color.a);
     }
@@ -121,7 +117,7 @@ fn fs_sun_face(i: SunOut) -> @location(0) vec4<f32> {
     // The unlit styles darken what the sun does not reach, when it casts shadows.
     var shade = 1.0;
     if sun.shadow.x > 0.5 {
-        shade = mix(UNLIT_SHADOW, 1.0, reach * smoothstep(0.0, 0.05, facing));
+        shade = mix(u.style.z, 1.0, reach * smoothstep(0.0, 0.05, facing));
     }
     let k = select(lit, shade, u.style.x > 0.5);
     return vec4<f32>(gamma_from_linear(base * k), i.color.a);
@@ -147,5 +143,5 @@ fn vs_ground(@builtin(vertex_index) index: u32) -> GroundOut {
 @fragment
 fn fs_ground(i: GroundOut) -> @location(0) vec4<f32> {
     let shadow = 1.0 - sunlit(i.world, vec3<f32>(0.0, 0.0, 1.0), sun.dir.z);
-    return vec4<f32>(0.0, 0.0, 0.0, GROUND_SHADOW * shadow);
+    return vec4<f32>(0.0, 0.0, 0.0, u.shading.w * shadow);
 }

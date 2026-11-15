@@ -32,7 +32,7 @@
 //! gets no shadows at all.
 
 use crate::projected::Frame;
-use cc_core::{Category, DetailLevel, ElementId, Project, VisualStyle};
+use cc_core::{Category, DetailLevel, ElementId, Project, ShadingSettings, VisualStyle};
 use cc_geom::{ModelGeometry, RoomArrangement, Solid, clip_polygon, face_plane_segments, polygon, region};
 use glam::{DVec2, DVec3};
 use std::borrow::Cow;
@@ -96,10 +96,9 @@ const UNLIT_SHADOW: f64 = 0.85;
 const MIN_GROUND_ALTITUDE_DEG: f64 = 5.0;
 /// Farthest the ground's shadows reach past the model, meters.
 const MAX_GROUND_REACH: f64 = 5000.0;
-/// The light a face of the textures style keeps turned away from the sun,
-/// and what a face square to it adds.
+/// The light a face of the textures style keeps turned away from the sun
+/// at the default shading (a face square to it is fully lit).
 pub(crate) const TEXTURES_AMBIENT: f64 = 0.62;
-pub(crate) const TEXTURES_DIFFUSE: f64 = 0.38;
 
 /// The elements a view's graphics keep out of its shadows.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -285,33 +284,62 @@ pub(crate) fn point_within(verts: &[DVec3], normal: DVec3) -> Option<DVec3> {
     Some(largest.iter().filter_map(|i| verts.get(*i)).sum::<DVec3>() / 3.0)
 }
 
+/// The light of a face of the textures style at `facing` (the cosine of
+/// its angle to the light): [`TEXTURES_AMBIENT`] turned away and full
+/// square to it at the default shading; a view's ambient light moves the
+/// first as it moves the shaded style's grey (up to full light at 1).
+pub(crate) fn textures_light(shading: &ShadingSettings, facing: f64) -> f64 {
+    let ambient = textures_ambient(shading);
+    let cos = if facing.is_nan() { 0.0 } else { facing.clamp(0.0, 1.0) };
+    ambient + (1.0 - ambient) * cos
+}
+
+/// The textures style's light of a face turned away (see [`textures_light`]).
+fn textures_ambient(shading: &ShadingSettings) -> f64 {
+    let a = shading.clamped().ambient;
+    let k = (1.0 - TEXTURES_AMBIENT) / (1.0 - VisualStyle::SHADED_AMBIENT);
+    (TEXTURES_AMBIENT + (a - VisualStyle::SHADED_AMBIENT) * k).clamp(0.0, 1.0)
+}
+
 /// The opacity (0 to 255) of the black veil that a cast shadow lays on a
 /// face of `style` at `facing` (the cosine of its angle to the sun), so
 /// that 2D views match the 3D view: in the shaded style the face shows
-/// [`VisualStyle::SHADED_SHADOW`] under it, in the textures style it loses
-/// the sun's light and as much again as the shaded style's shadow is darker
-/// than its shade, in consistent colors it darkens as the 3D view's unlit
-/// faces do. The shadow fades out where the face turns edge-on to the sun,
-/// as in the 3D view. No shadows in the other styles.
-pub fn veil(style: VisualStyle, facing: f64) -> u8 {
+/// the shadow's grey ([`ShadingSettings::shadow_grey`]) under it, in the
+/// textures style it loses the sun's light and darkens as much as the
+/// shaded style's shadow does from its ambient light, in consistent colors
+/// it darkens as the 3D view's unlit faces do. The shadow fades out where
+/// the face turns edge-on to the sun, as in the 3D view. No shadows in the
+/// other styles.
+pub fn veil(style: VisualStyle, facing: f64, shading: &ShadingSettings) -> u8 {
     let cos = if facing.is_nan() { 0.0 } else { facing.clamp(0.0, 1.0) };
     let (lit, dark) = match style {
-        VisualStyle::Shaded => (VisualStyle::shaded_grey(cos), VisualStyle::SHADED_SHADOW),
-        VisualStyle::Textures => (
-            TEXTURES_AMBIENT + TEXTURES_DIFFUSE * cos,
-            TEXTURES_AMBIENT * VisualStyle::SHADED_SHADOW / VisualStyle::SHADED_AMBIENT,
-        ),
-        VisualStyle::ConsistentColors => (1.0, UNLIT_SHADOW),
+        VisualStyle::Shaded => {
+            let lit = shading.grey(cos);
+            (lit, shading.shadow_grey(lit))
+        }
+        VisualStyle::Textures => {
+            let lit = textures_light(shading, cos);
+            // The shaded style's shadow grey over its default ambient grey,
+            // as a share of the textures style's default ambient light.
+            let dark = (1.0 - shading.clamped().shadow) * TEXTURES_AMBIENT / VisualStyle::SHADED_AMBIENT;
+            (lit, dark.min(lit))
+        }
+        VisualStyle::ConsistentColors => (1.0, 1.0 - shading.darkening(1.0 - UNLIT_SHADOW)),
         VisualStyle::Wireframe | VisualStyle::HiddenLine => return 0,
     };
+    if lit <= 0.0 {
+        return 0;
+    }
     let t = (cos / 0.05).clamp(0.0, 1.0);
     let fade = t * t * (3.0 - 2.0 * t);
     ((1.0 - dark / lit) * fade * 255.0).round().clamp(0.0, 255.0) as u8
 }
 
-/// The opacity (0 to 255) of the black veil of a shadow on the ground.
-pub fn ground_veil() -> u8 {
-    (GROUND_SHADOW * 255.0).round() as u8
+/// The opacity (0 to 255) of the black veil of a shadow on the ground:
+/// [`GROUND_SHADOW`] at the default shading, none to black with the view's
+/// shadow intensity.
+pub fn ground_veil(shading: &ShadingSettings) -> u8 {
+    (shading.darkening(GROUND_SHADOW) * 255.0).round().clamp(0.0, 255.0) as u8
 }
 
 /// A face that casts: its outline (what the view's cut leaves of it).
@@ -1197,7 +1225,7 @@ mod tests {
         let shadows = veils(&prims);
         assert_eq!(shadows.len(), 1, "{shadows:?}");
         let (ring, alpha) = &shadows[0];
-        assert_eq!(*alpha, ground_veil());
+        assert_eq!(*alpha, ground_veil(&ShadingSettings::default()));
         assert_eq!(ring.len(), 4, "{ring:?}");
         let (lo, hi) = bounds(ring);
         assert!(lo.distance(DVec2::new(LIFT, 0.0)) < 1e-6 && hi.distance(DVec2::new(3.0, 1.0)) < 1e-6, "{lo} {hi}");
@@ -1300,8 +1328,8 @@ mod tests {
         }
         let geom = model(solids.clone());
         let sun = DVec3::new(0.0, -1.0, 1.0).normalize();
-        let on_face = veil(VisualStyle::Shaded, sun.z);
-        assert_ne!(on_face, ground_veil());
+        let on_face = veil(VisualStyle::Shaded, sun.z, &ShadingSettings::default());
+        assert_ne!(on_face, ground_veil(&ShadingSettings::default()));
         fn site<'a>(sun: DVec3, indoors: &'a Indoors, skip: Option<&'a Skip>) -> Look<'a> {
             let shadows = Some(Shadows { ground: Some(-0.2), skip, catch: Catch::Site(indoors) });
             Look { shadows, ..look(sun, None) }
@@ -1311,7 +1339,7 @@ mod tests {
         let prims = plan(&geom, 1.2, site(sun, house, None));
         // The ground: 6 x 7 m north of the house, the eaves' 0.6 x 5.4 m
         // either side of it, and the terrace's own 4 x 4.2 m.
-        let (ground, area) = veils_of(&prims, ground_veil());
+        let (ground, area) = veils_of(&prims, ground_veil(&ShadingSettings::default()));
         assert!((area - 65.28).abs() < 1e-2, "{area}: {ground:?}");
         let all: Vec<DVec2> = ground.iter().flatten().copied().collect();
         let (lo, hi) = bounds(&all);
@@ -1329,7 +1357,10 @@ mod tests {
         // With no space indoors the south wall's shadow lies on the floor of the room.
         let open = plan(&geom, 1.2, look(sun, Some(-0.2)));
         assert!(holds(&veils_of(&open, on_face).0, 3.0, 1.0));
-        assert!(holds(&veils_of(&open, ground_veil()).0, 3.0, 2.0), "and on the ground under it");
+        assert!(
+            holds(&veils_of(&open, ground_veil(&ShadingSettings::default())).0, 3.0, 2.0),
+            "and on the ground under it"
+        );
         assert!(!holds(&rings, 3.0, 1.0));
         // A roof over the terrace, which no walls close: a porch. It catches
         // the roof's shadow, from the first beam's to its far side.
@@ -1338,12 +1369,12 @@ mod tests {
         let prims = plan(&roofed, 1.2, site(sun, house, None));
         let (rings, area) = veils_of(&prims, on_face);
         assert!(rings.len() == 1 && spans(&rings, (6.0, 2.4), (10.0, 4.0)) && (area - 6.4).abs() < 1e-6, "{rings:?}");
-        assert!((veils_of(&prims, ground_veil()).1 - 74.96).abs() < 1e-2);
+        assert!((veils_of(&prims, ground_veil(&ShadingSettings::default())).1 - 74.96).abs() < 1e-2);
         // The terrace a space indoors under that roof: no shadow on it, nor on the ground under it.
         let rooms = &indoors(vec![rect(0.0, 0.0, 6.0, 4.0), rect(6.0, 0.0, 10.0, 4.0)]);
         let prims = plan(&roofed, 1.2, site(sun, rooms, None));
         assert!(veils_of(&prims, on_face).0.is_empty());
-        let (ground, area) = veils_of(&prims, ground_veil());
+        let (ground, area) = veils_of(&prims, ground_veil(&ShadingSettings::default()));
         assert!((area - 58.96).abs() < 1e-2 && !holds(&ground, 8.0, 2.0), "{area}");
         // Its roof hidden, the space is open to the sky (but for the 0.6 m
         // under the house's eave): the beams' shadows again.
@@ -1352,7 +1383,7 @@ mod tests {
         let (rings, area) = veils_of(&prims, on_face);
         assert!(spans(&rings, (6.6, 2.4), (10.0, 2.7)) && spans(&rings, (6.6, 3.4), (10.0, 3.7)), "{rings:?}");
         assert!(rings.len() == 2 && (area - 2.04).abs() < 1e-6, "{area}");
-        assert!((veils_of(&prims, ground_veil()).1 - 49.28).abs() < 1e-2);
+        assert!((veils_of(&prims, ground_veil(&ShadingSettings::default())).1 - 49.28).abs() < 1e-2);
         // A ceiling plan draws no shadows.
         let up = crate::plan::style_underlay(&geom, 1.2, true, site(sun, house, None), &Default::default());
         assert!(!up.is_empty() && veils(&up).is_empty());
@@ -1405,7 +1436,7 @@ mod tests {
         assert!(indoors.holds(DVec3::new(3.0, 3.75, 1.5)) && !indoors.holds(DVec3::new(11.0, 11.95, 1.5)));
         assert!(!indoors.holds(DVec3::new(3.0, 3.75, -0.5)), "below the storey");
         let catching = |catch| Look { shadows: Some(Shadows { ground: None, skip: None, catch }), ..look(sun, None) };
-        let alpha = veil(VisualStyle::Shaded, sun.dot(-DVec3::Y));
+        let alpha = veil(VisualStyle::Shaded, sun.dot(-DVec3::Y), &ShadingSettings::default());
         let prims = section(&geom, 2.0, catching(Catch::Outdoors(&indoors)));
         let (rings, area) = veils_of(&prims, alpha);
         assert_eq!(rings.len(), 1, "{rings:?}");
@@ -1514,8 +1545,10 @@ mod tests {
         let lit = face_at(&prims, 1, DVec2::new(-3.0, -3.0));
         let grey = (VisualStyle::shaded_grey(sun.z) * 255.0).round();
         assert_eq!(lit, [grey as u8, grey as u8, grey as u8, 255]);
-        let on_slab: Vec<_> =
-            veils(&prims).into_iter().filter(|(_, a)| *a == veil(VisualStyle::Shaded, sun.z)).collect();
+        let on_slab: Vec<_> = veils(&prims)
+            .into_iter()
+            .filter(|(_, a)| *a == veil(VisualStyle::Shaded, sun.z, &ShadingSettings::default()))
+            .collect();
         assert_eq!(on_slab.len(), 1, "{:?}", veils(&prims));
         let (lo, hi) = bounds(&on_slab[0].0);
         assert!(lo.distance(DVec2::new(LIFT, 0.0)) < 1e-6 && hi.distance(DVec2::new(3.0, 1.0)) < 1e-6, "{lo} {hi}");
@@ -1536,8 +1569,12 @@ mod tests {
         ] {
             let found = veils(&plan(&geom, 10.0, Look { style, ..look(sun, Some(-0.2)) }));
             assert_eq!(!found.is_empty(), some, "{style:?}");
-            assert!(found.iter().all(|(_, a)| *a == veil(style, sun.z) || *a == ground_veil()), "{style:?}");
-            assert_eq!(veil(style, sun.z) > 0, some);
+            assert!(
+                found.iter().all(|(_, a)| *a == veil(style, sun.z, &ShadingSettings::default())
+                    || *a == ground_veil(&ShadingSettings::default())),
+                "{style:?}"
+            );
+            assert_eq!(veil(style, sun.z, &ShadingSettings::default()) > 0, some);
         }
     }
 
@@ -1554,7 +1591,7 @@ mod tests {
         let shadows = veils(&prims);
         assert_eq!(shadows.len(), 1, "{shadows:?}");
         let (ring, alpha) = &shadows[0];
-        assert_eq!(*alpha, veil(VisualStyle::Shaded, sun.dot(-DVec3::Y)));
+        assert_eq!(*alpha, veil(VisualStyle::Shaded, sun.dot(-DVec3::Y), &ShadingSettings::default()));
         assert_eq!(ring.len(), 5, "{ring:?}");
         assert!((polygon::area(ring) - 3.5).abs() < 1e-3, "{}", polygon::area(ring));
         for corner in [(5.0, 0.0), (7.0, 0.0), (7.0, 1.0), (6.0, 2.0), (5.0, 2.0)] {
@@ -1564,6 +1601,84 @@ mod tests {
         // The veil belongs to no element: the wall is picked through it.
         let d = crate::Drawing2D { prims, ..Default::default() };
         assert_eq!(d.hit_test(DVec2::new(6.5, 0.5), 0.01), Some(ElementId(1)));
+    }
+
+    /// The conventional sun of façades in the south elevation (looking
+    /// north): a box standing 1 to 2 m in front of a wall casts its shadow
+    /// on the wall down and to the right of itself, each corner as far
+    /// across and as far down as it stands in front of the wall.
+    #[test]
+    fn the_conventional_sun_drops_a_shadow_as_deep_as_the_caster_stands_out() {
+        use cc_core::sun::{SunMode, SunSettings, SunSite};
+        let wall = solid(1, DVec3::new(0.0, 1.0, 0.0), DVec3::new(10.0, 1.2, 5.0));
+        let geom = model(vec![wall, solid(2, DVec3::new(4.0, -1.0, 0.0), DVec3::new(5.0, 0.0, 3.0))]);
+        let settings = SunSettings { mode: SunMode::conventional(), shadows: true, ..Default::default() };
+        let sun = settings.state(&SunSite::default(), Some(DVec2::Y)).direction;
+        let shadows = veils(&south(&geom, look(sun, Some(0.0))));
+        assert_eq!(shadows.len(), 1, "{shadows:?}");
+        let ring = &shadows[0].0;
+        // The top right corners: 2 m out at (5, 3) falls at (7, 1), 1 m out at (6, 2).
+        for corner in [(5.0, 0.0), (7.0, 0.0), (7.0, 1.0), (6.0, 2.0), (5.0, 2.0)] {
+            let c = DVec2::new(corner.0, corner.1);
+            assert!(ring.iter().any(|p| p.distance(c) < 1e-3), "{c} in {ring:?}");
+        }
+        assert_eq!(ring.len(), 5, "{ring:?}");
+    }
+
+    /// A view's shading: its ambient light greys the faces turned away,
+    /// its shadow intensity makes shadows from none to black.
+    #[test]
+    fn the_view_shading_sets_the_greys_and_the_shadows() {
+        let wall = solid(1, DVec3::new(0.0, 1.0, 0.0), DVec3::new(10.0, 1.2, 5.0));
+        let geom = model(vec![wall, solid(2, DVec3::new(4.0, -1.0, 0.0), DVec3::new(5.0, 0.0, 3.0))]);
+        let away = |ambient: f64| {
+            let shading = ShadingSettings { ambient, ..Default::default() };
+            face_at(&south(&geom, Look { shading, ..look(DVec3::new(1.0, 1.0, 1.0), Some(0.0)) }), 1, DVec2::ONE)[0]
+        };
+        assert_eq!(away(0.6), 153);
+        assert_eq!(away(0.8), 204);
+        assert_eq!(away(1.0), 255);
+        let sun = DVec3::new(-1.0, -1.0, 1.0).normalize();
+        let lit = ShadingSettings::default().grey(sun.dot(-DVec3::Y));
+        for style in [VisualStyle::Shaded, VisualStyle::Textures, VisualStyle::ConsistentColors] {
+            let alpha = |shadow: f64| {
+                let shading = ShadingSettings { shadow, ..Default::default() };
+                let found = veils(&south(&geom, Look { style, shading, ..look(sun, Some(0.0)) }));
+                found.iter().map(|(_, a)| *a).max().unwrap_or(0)
+            };
+            assert_eq!(alpha(0.0), 0, "{style:?}: no shadow");
+            assert!(alpha(0.3) < alpha(ShadingSettings::DEFAULT_SHADOW), "{style:?}");
+            assert!(alpha(ShadingSettings::DEFAULT_SHADOW) < alpha(1.0), "{style:?}");
+            assert_eq!(alpha(1.0), 255, "{style:?}: black");
+        }
+        // The shaded style's shadow shows `1 - shadow` over a lit face.
+        let shading = ShadingSettings { shadow: 0.3, ..Default::default() };
+        let shown = lit * (1.0 - f64::from(veil(VisualStyle::Shaded, sun.dot(-DVec3::Y), &shading)) / 255.0);
+        assert!((shown - 0.7).abs() < 0.01, "{shown}");
+        assert_eq!(ground_veil(&ShadingSettings { shadow: 0.0, ..Default::default() }), 0);
+        assert_eq!(ground_veil(&ShadingSettings { shadow: 1.0, ..Default::default() }), 255);
+    }
+
+    /// In the textures style a shadow lies over the face's color and under
+    /// its surface pattern, whose lines stay drawn over it.
+    #[test]
+    fn surface_patterns_show_over_shadows() {
+        let mut wall = solid(1, DVec3::new(0.0, 1.0, 0.0), DVec3::new(10.0, 1.2, 5.0));
+        wall.surface.foreground = cc_core::Pattern::Diagonal;
+        let geom = model(vec![wall, solid(2, DVec3::new(4.0, -1.0, 0.0), DVec3::new(5.0, 0.0, 3.0))]);
+        let sun = DVec3::new(-1.0, -1.0, 1.0).normalize();
+        let prims = south(&geom, Look { style: VisualStyle::Textures, ..look(sun, Some(0.0)) });
+        let shadow = veils(&prims);
+        assert_eq!(shadow.len(), 1);
+        let veil_at =
+            prims.iter().position(|p| matches!(p, Prim::Fill { pts, element: None, .. } if *pts == shadow[0].0));
+        let veil_at = veil_at.unwrap();
+        let fill_at = prims.iter().position(|p| matches!(p, Prim::Fill { element: Some(e), .. } if e.0 == 1)).unwrap();
+        let pattern: Vec<usize> = (0..prims.len())
+            .filter(|i| matches!(&prims[*i], Prim::Line { element: Some(e), pen: Some(_), .. } if e.0 == 1))
+            .collect();
+        assert!(!pattern.is_empty());
+        assert!(fill_at < veil_at && pattern.iter().all(|i| *i > veil_at), "{fill_at} {veil_at} {pattern:?}");
     }
 
     /// Faces turned away from the sun keep their shade and get no shadow;
@@ -1587,9 +1702,9 @@ mod tests {
             assert!(veils(&south(&geom, case)).is_empty(), "{case:?}");
             assert!(veils(&plan(&geom, 10.0, case)).is_empty(), "{case:?}");
         }
-        assert_eq!(veil(VisualStyle::Shaded, 0.0), 0);
-        assert_eq!(veil(VisualStyle::Shaded, -0.5), 0);
-        assert_eq!(veil(VisualStyle::Shaded, f64::NAN), 0);
+        assert_eq!(veil(VisualStyle::Shaded, 0.0, &ShadingSettings::default()), 0);
+        assert_eq!(veil(VisualStyle::Shaded, -0.5, &ShadingSettings::default()), 0);
+        assert_eq!(veil(VisualStyle::Shaded, f64::NAN, &ShadingSettings::default()), 0);
     }
 
     /// What the view hides neither casts nor catches; what it makes

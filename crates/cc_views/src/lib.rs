@@ -326,7 +326,7 @@ mod tests {
             show_path: false,
             ..Default::default()
         };
-        let ground = shadow::ground_veil();
+        let ground = shadow::ground_veil(&cc_core::ShadingSettings::default());
         for category in [ViewCategory::Elevation, ViewCategory::FloorPlan, ViewCategory::ThreeD] {
             let mut v = project.views_of(category).next().unwrap().clone();
             if category == ViewCategory::Elevation {

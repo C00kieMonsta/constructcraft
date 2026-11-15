@@ -8,7 +8,8 @@ use crate::registry::{Command, CommandKind};
 use crate::session::Session;
 use crate::t;
 use cc_core::{
-    CameraState, Direction, Project, RenderSettings, SheetSize, View, ViewCategory, ViewId, ViewKind, Viewport,
+    CameraState, Direction, Project, RenderSettings, ShadingSettings, SheetSize, View, ViewCategory, ViewId, ViewKind,
+    Viewport,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -245,7 +246,7 @@ fn capitalized(s: &str) -> String {
 /// Change a view: name, scale, phase and phase filter, and its `params` as
 /// `view_get` shows them (merged: cut height, section depth, legend types,
 /// schedule fields, sort, filter and totals, sheet number and size,
-/// viewport positions…), the crop, the sun and the render settings.
+/// viewport positions…), the crop, the sun, the render settings and the shading.
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ViewSet {
@@ -306,6 +307,16 @@ pub struct ViewSet {
     /// starts from the defaults. `null` removes them.
     #[serde(default, deserialize_with = "refs::nullable", skip_serializing_if = "Option::is_none")]
     pub render: Option<Option<Value>>,
+    /// How the view shades faces and casts shadows in the shaded,
+    /// consistent colors and textures styles (plans, ceiling plans, 3D
+    /// views, elevations and sections; not photorealistic renders): the
+    /// fields to change, shaped like `shading` in `view_get`: `ambient`,
+    /// the light of a face turned away from the light, 0.3 (dark grey) to
+    /// 1 (no shading; default 0.6), and `shadow`, how dark cast shadows
+    /// are, 0 (none) to 1 (black; default 0.55, a shaded shadow's grey
+    /// being `1 - shadow`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shading: Option<Value>,
 }
 
 /// The render settings `patch` makes of `current` (the defaults when none):
@@ -322,6 +333,20 @@ pub(crate) fn apply_render(current: Option<&RenderSettings>, patch: &Value) -> R
         return Err(EngineError::invalid(t!("msg-render-range")));
     }
     Ok(settings)
+}
+
+/// The shading `patch` makes of `current`: a merge patch over its serde
+/// form, refused when it names an unknown field or leaves a value out of range.
+pub(crate) fn apply_shading(current: &ShadingSettings, patch: &Value) -> Result<ShadingSettings> {
+    let mut value = serde_json::to_value(current).map_err(|e| EngineError::invalid(e.to_string()))?;
+    known_fields(&value, patch, "shading")?;
+    merge(&mut value, patch);
+    let shading: ShadingSettings =
+        serde_json::from_value(value).map_err(|e| EngineError::invalid(format!("shading: {e}")))?;
+    if !shading.is_valid() {
+        return Err(EngineError::invalid(t!("msg-shading-range")));
+    }
+    Ok(shading)
 }
 
 /// Every key of `patch` is a field of `form` (objects, recursively).
@@ -407,6 +432,11 @@ impl Command for ViewSet {
             Some(None) => Some(None),
             None => None,
         };
+        let shading = match &self.shading {
+            Some(_) if !view.kind.takes_sun() => return Err(EngineError::invalid(t!("msg-shading-view"))),
+            Some(patch) => Some(apply_shading(&view.shading, patch)?),
+            None => None,
+        };
         // Properties the view's template controls stay as the template has them.
         if let Some(t) = view.template.and_then(|t| p.template(t)) {
             let mut new = view.clone();
@@ -466,6 +496,9 @@ impl Command for ViewSet {
             }
             if let Some(render) = render {
                 v.render = render;
+            }
+            if let Some(shading) = shading {
+                v.shading = shading;
             }
             Ok(())
         })?;

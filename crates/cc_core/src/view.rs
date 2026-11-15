@@ -428,6 +428,102 @@ pub struct View {
     /// [`crate::render_settings`]); only views that [take them](ViewKind::takes_render).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<crate::render_settings::RenderSettings>,
+    /// How light and dark the shaded, consistent colors and textures
+    /// styles shade faces and cast shadows (see [`ShadingSettings`]); used
+    /// by the views that [take a sun](ViewKind::takes_sun), kept at the
+    /// defaults on the others.
+    #[serde(default, skip_serializing_if = "ShadingSettings::is_default")]
+    pub shading: ShadingSettings,
+}
+
+/// How a view shades faces and casts shadows in the styles that show more
+/// than white faces (shaded, consistent colors, textures), in 2D and in
+/// the 3D view (not in photorealistic renders). The defaults are the
+/// look of [`VisualStyle::shaded_grey`] and [`VisualStyle::SHADED_SHADOW`].
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ShadingSettings {
+    /// The light of a face turned away from the light, as displayed:
+    /// [`ShadingSettings::MIN_AMBIENT`] (dark grey) to 1 (as bright as a
+    /// face square to the light: no shading).
+    pub ambient: f64,
+    /// How dark cast shadows are: 0 (no visible shadow) to 1 (black).
+    /// In the shaded style a shadow's grey is `1 - shadow` (never lighter
+    /// than the face it falls on); the ground's and the other styles'
+    /// shadows grow from none to black with it, their defaults at the default.
+    pub shadow: f64,
+}
+
+impl Default for ShadingSettings {
+    fn default() -> Self {
+        ShadingSettings { ambient: Self::DEFAULT_AMBIENT, shadow: Self::DEFAULT_SHADOW }
+    }
+}
+
+impl ShadingSettings {
+    pub const MIN_AMBIENT: f64 = 0.3;
+    pub const MAX_AMBIENT: f64 = 1.0;
+    pub const DEFAULT_AMBIENT: f64 = VisualStyle::SHADED_AMBIENT;
+    pub const MIN_SHADOW: f64 = 0.0;
+    pub const MAX_SHADOW: f64 = 1.0;
+    /// The intensity whose shaded shadow is [`VisualStyle::SHADED_SHADOW`].
+    pub const DEFAULT_SHADOW: f64 = 1.0 - VisualStyle::SHADED_SHADOW;
+
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Both values are numbers within their ranges.
+    pub fn is_valid(&self) -> bool {
+        (Self::MIN_AMBIENT..=Self::MAX_AMBIENT).contains(&self.ambient)
+            && (Self::MIN_SHADOW..=Self::MAX_SHADOW).contains(&self.shadow)
+    }
+
+    /// Bring the values into range (the defaults when not numbers);
+    /// returns how many it fixed.
+    pub fn repair(&mut self) -> usize {
+        fn fix(v: &mut f64, lo: f64, hi: f64, default: f64) -> usize {
+            let fixed = if v.is_finite() { v.clamp(lo, hi) } else { default };
+            usize::from(std::mem::replace(v, fixed) != fixed)
+        }
+        fix(&mut self.ambient, Self::MIN_AMBIENT, Self::MAX_AMBIENT, Self::DEFAULT_AMBIENT)
+            + fix(&mut self.shadow, Self::MIN_SHADOW, Self::MAX_SHADOW, Self::DEFAULT_SHADOW)
+    }
+
+    /// The values brought into range (see [`Self::repair`]).
+    pub fn clamped(mut self) -> Self {
+        self.repair();
+        self
+    }
+
+    /// The shaded style's grey, as displayed (0 black, 1 white), of a face
+    /// whose unit normal has the cosine `cos` with the direction towards the
+    /// light: white square to it, [`Self::ambient`] edge-on or turned away;
+    /// not a number reads as turned away.
+    pub fn grey(&self, cos: f64) -> f64 {
+        let ambient = self.clamped().ambient;
+        let cos = if cos.is_nan() { 0.0 } else { cos.clamp(0.0, 1.0) };
+        ambient + (1.0 - ambient) * cos
+    }
+
+    /// The grey of a cast shadow in the shaded style on a face whose grey
+    /// is `lit`: `1 - shadow`, never lighter than the face.
+    pub fn shadow_grey(&self, lit: f64) -> f64 {
+        lit.min(1.0 - self.clamped().shadow)
+    }
+
+    /// A shadow's darkening (0 none, 1 black) that grows with
+    /// [`Self::shadow`] from none to black and is `at_default` at the
+    /// default intensity (`at_default` between 0 and 1, exclusive): for
+    /// the shadows whose darkness is not the shaded style's grey (the
+    /// ground's, the unlit styles').
+    pub fn darkening(&self, at_default: f64) -> f64 {
+        let s = self.clamped().shadow;
+        if s <= 0.0 || !(at_default > 0.0 && at_default < 1.0) {
+            return if s <= 0.0 { 0.0 } else { at_default.clamp(0.0, 1.0) };
+        }
+        s.powf(at_default.ln() / Self::DEFAULT_SHADOW.ln()).clamp(0.0, 1.0)
+    }
 }
 
 /// How a view shows the model's surfaces.
@@ -508,9 +604,9 @@ impl VisualStyle {
     /// whose unit normal has the cosine `cos` with the direction towards the
     /// light: white square to it, [`Self::SHADED_AMBIENT`] (a mid grey, never
     /// black) edge-on or turned away; not a number reads as turned away.
+    /// The [default shading](ShadingSettings::grey)'s; a view's own is [`View::shading`].
     pub fn shaded_grey(cos: f64) -> f64 {
-        let cos = if cos.is_nan() { 0.0 } else { cos.clamp(0.0, 1.0) };
-        Self::SHADED_AMBIENT + Self::SHADED_DIFFUSE * cos
+        ShadingSettings::default().grey(cos)
     }
 }
 
@@ -725,6 +821,7 @@ impl View {
             callout: None,
             sun: None,
             render: None,
+            shading: ShadingSettings::default(),
         }
     }
 
@@ -974,5 +1071,36 @@ mod paper_tests {
         let kind: ViewKind = ron::from_str(ron).unwrap();
         let ViewKind::Sheet { portrait, title_block, fields, issue_date, .. } = kind else { panic!() };
         assert!(!portrait && title_block.is_none() && fields.is_empty() && issue_date.is_empty());
+    }
+
+    /// The default shading is the shaded style's look; values out of range
+    /// are brought in, and a view without its own shading writes none.
+    #[test]
+    fn shading_settings() {
+        let d = ShadingSettings::default();
+        for cos in [-1.0, 0.0, 0.3, 1.0, f64::NAN] {
+            assert_eq!(d.grey(cos), VisualStyle::shaded_grey(cos));
+        }
+        assert_eq!(d.grey(0.0), VisualStyle::SHADED_AMBIENT);
+        assert!((d.shadow_grey(1.0) - VisualStyle::SHADED_SHADOW).abs() < 1e-12);
+        assert!((d.darkening(0.35) - 0.35).abs() < 1e-12);
+        let none = ShadingSettings { shadow: 0.0, ..d };
+        assert_eq!((none.shadow_grey(0.8), none.darkening(0.35)), (0.8, 0.0));
+        let black = ShadingSettings { shadow: 1.0, ..d };
+        assert_eq!((black.shadow_grey(0.8), black.darkening(0.35)), (0.0, 1.0));
+        let flat = ShadingSettings { ambient: 1.0, ..d };
+        assert_eq!((flat.grey(0.0), flat.grey(1.0)), (1.0, 1.0));
+        let mut bad = ShadingSettings { ambient: 0.1, shadow: f64::NAN };
+        assert!(!bad.is_valid());
+        assert_eq!(bad.repair(), 2);
+        assert_eq!(
+            bad,
+            ShadingSettings { ambient: ShadingSettings::MIN_AMBIENT, shadow: ShadingSettings::DEFAULT_SHADOW }
+        );
+        assert!(bad.is_valid());
+        let view = View::new(ViewId(1), "v", 100, ViewKind::Drafting {});
+        assert!(!ron::to_string(&view).unwrap().contains("shading"));
+        let back: View = ron::from_str(&ron::to_string(&view).unwrap()).unwrap();
+        assert_eq!(back.shading, d);
     }
 }

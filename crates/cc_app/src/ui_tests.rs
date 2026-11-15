@@ -4857,6 +4857,42 @@ fn view_properties_show_the_sun() {
     assert!(harness.state().dialogs.sun.is_some());
 }
 
+/// An elevation given a sun in Sun Settings starts with the conventional
+/// sun casting shadows; *Conventional (45°)* brings it back from another
+/// mode; the dialog and the view's properties show the shading rows.
+#[test]
+fn elevations_start_with_the_conventional_sun() {
+    use crate::commands::UiCommand;
+    use crate::i18n::tr;
+    use cc_core::sun::SunMode;
+    let mut state = sample_state();
+    let elevation = sample_view(&state, |v| matches!(v.kind, cc_core::ViewKind::Elevation { .. }));
+    state.active_view = Some(elevation);
+    assert!(state.project().view(elevation).unwrap().sun.is_none());
+    crate::commands::run(&mut state, &egui::Context::default(), UiCommand::SunSettings);
+    let sun = |s: &AppState| s.project().view(elevation).unwrap().sun.clone().unwrap();
+    assert_eq!(sun(&state).mode, SunMode::conventional());
+    assert!(sun(&state).shadows);
+    let mut harness = sun_harness(state);
+    assert!(harness.query_by_label(&t!("prop-ambient-light")).is_some());
+    assert!(harness.query_by_label(&t!("prop-shadow-intensity")).is_some());
+    harness.get_by_label(&tr(SunMode::from_name("still").unwrap().key())).click();
+    harness.run();
+    assert!(matches!(sun(harness.state()).mode, SunMode::Still { .. }));
+    harness.get_by_label(&t!("sun-conventional")).click();
+    harness.run();
+    assert_eq!(sun(harness.state()).mode, SunMode::conventional());
+    harness.get_by_label(&t!("action-ok")).click();
+    harness.run();
+    // The properties name the conventional sun and show the shading rows.
+    let state = harness.into_state();
+    let draw: fn(&mut egui::Ui, &mut AppState) = |ui, state| crate::properties::show(ui, state);
+    let harness = themed_harness(state, egui::vec2(360.0, 1600.0), egui::Theme::Light, draw);
+    assert!(harness.query_by_label(&t!("sun-conventional")).is_some());
+    assert!(harness.query_by_label(&t!("prop-ambient-light")).is_some());
+    assert!(harness.query_by_label(&t!("prop-shadow-intensity")).is_some());
+}
+
 // ---------------------------------------------------------------- render window
 
 /// Make the sample's 3D view active, give it `render` settings (a JSON patch,

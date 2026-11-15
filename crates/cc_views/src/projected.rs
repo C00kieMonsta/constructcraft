@@ -7,7 +7,7 @@
 
 use crate::shadow::{self, Catch, Shadows};
 use crate::{Drawing2D, LineStyle, cut::POCHE, format};
-use cc_core::{CameraState, DetailLevel, Direction, ElementId, Project, TypeData, VisualStyle};
+use cc_core::{CameraState, DetailLevel, Direction, ElementId, Project, ShadingSettings, TypeData, VisualStyle};
 use cc_geom::polygon::signed_area;
 use cc_geom::{ModelGeometry, clip_polygon, face_plane_segments};
 use glam::{DVec2, DVec3};
@@ -86,15 +86,15 @@ fn facing(normal: DVec3, frame: &Frame, sun: Option<DVec3>) -> f64 {
 }
 
 /// A face's fill in the shaded style: white, greyed by the light (see
-/// [`VisualStyle::shaded_grey`]).
-fn grey(normal: DVec3, frame: &Frame, sun: Option<DVec3>) -> [u8; 4] {
-    let g = (VisualStyle::shaded_grey(facing(normal, frame, sun)) * 255.0).round().clamp(0.0, 255.0) as u8;
+/// [`ShadingSettings::grey`]).
+fn grey(normal: DVec3, frame: &Frame, sun: Option<DVec3>, shading: &ShadingSettings) -> [u8; 4] {
+    let g = (shading.grey(facing(normal, frame, sun)) * 255.0).round().clamp(0.0, 255.0) as u8;
     [g, g, g, 255]
 }
 
 /// A face's fill in `color` shaded by the light (the textures style).
-fn shade(color: [u8; 3], normal: DVec3, frame: &Frame, sun: Option<DVec3>) -> [u8; 4] {
-    let k = shadow::TEXTURES_AMBIENT + shadow::TEXTURES_DIFFUSE * facing(normal, frame, sun).max(0.0);
+fn shade(color: [u8; 3], normal: DVec3, frame: &Frame, sun: Option<DVec3>, shading: &ShadingSettings) -> [u8; 4] {
+    let k = shadow::textures_light(shading, facing(normal, frame, sun));
     // Wash colors towards white so linework stays legible.
     let c = |v: u8| ((v as f64 * 0.55 + 255.0 * 0.45) * k).min(255.0) as u8;
     [c(color[0]), c(color[1]), c(color[2]), 255]
@@ -116,6 +116,9 @@ pub struct Look<'a> {
     /// The shadows the sun casts while it is above the horizon, in the
     /// styles that fill faces with more than white (see `shadow`); `None`: none.
     pub shadows: Option<Shadows<'a>>,
+    /// How light faces turned away from the light are and how dark shadows
+    /// are ([`cc_core::View::shading`]).
+    pub shading: ShadingSettings,
 }
 
 impl<'a> Look<'a> {
@@ -146,7 +149,15 @@ impl<'a> Look<'a> {
             };
             Shadows { ground: Some(project.sun_ground_height(view, bottom)), skip, catch }
         });
-        Self { detail: view.detail, style: view.style(), spacing: crate::cut::spacing(view.scale), light, shadows }
+        let shading = if view.kind.takes_sun() { view.shading.clamped() } else { ShadingSettings::default() };
+        Self {
+            detail: view.detail,
+            style: view.style(),
+            spacing: crate::cut::spacing(view.scale),
+            light,
+            shadows,
+            shading,
+        }
     }
 
     /// Whether `view` is set to draw its sun's shadows: it has a sun that
@@ -166,6 +177,7 @@ impl<'a> Look<'a> {
             spacing: crate::cut::spacing(100),
             light: None,
             shadows: None,
+            shading: ShadingSettings::default(),
         }
     }
 }
@@ -180,9 +192,9 @@ fn face_color(solid: &cc_geom::Solid, face: usize, normal: DVec3, frame: &Frame,
     let mut c = match look.style {
         VisualStyle::Wireframe => return None,
         VisualStyle::HiddenLine => [255, 255, 255, 255],
-        VisualStyle::Shaded => grey(normal, frame, look.light),
+        VisualStyle::Shaded => grey(normal, frame, look.light, &look.shading),
         VisualStyle::ConsistentColors => [color[0], color[1], color[2], 255],
-        VisualStyle::Textures => shade(appearance, normal, frame, look.light),
+        VisualStyle::Textures => shade(appearance, normal, frame, look.light, &look.shading),
     };
     // Transparent materials let what is behind show through (never fully: alpha 0 means "no hit").
     c[3] = ((1.0 - transparency.clamp(0.0, 1.0)) * 255.0).round().clamp(40.0, 255.0) as u8;
@@ -407,7 +419,7 @@ pub fn render(
             shadows.clear();
         } else {
             for ring in under {
-                d.fill(ring, [0, 0, 0, shadow::ground_veil()], None);
+                d.fill(ring, [0, 0, 0, shadow::ground_veil(&look.shading)], None);
             }
         }
     }
@@ -418,7 +430,7 @@ pub fn render(
             if let Some(color) = f.color {
                 // A shadow is a veil over the face's fill, under its lines; it
                 // belongs to no element (it is neither picked nor overridden).
-                let veil = sun.map_or(0, |sun| shadow::veil(style, f.normal.dot(sun)));
+                let veil = sun.map_or(0, |sun| shadow::veil(style, f.normal.dot(sun), &look.shading));
                 let cast = shadows.get_mut(i).map(std::mem::take).unwrap_or_default();
                 let veils = |d: &mut Drawing2D| {
                     for ring in cast.iter().filter(|_| veil > 0) {

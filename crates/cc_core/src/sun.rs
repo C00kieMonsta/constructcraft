@@ -57,6 +57,16 @@ const DEFAULT_TIME: u16 = 600;
 const DEFAULT_LIGHT_AZIMUTH: f64 = 135.0;
 const DEFAULT_LIGHT_ALTITUDE: f64 = 35.0;
 
+/// The [conventional sun](SunMode::conventional)'s azimuth relative to the
+/// view: behind the viewer, to the left (clockwise from the look direction).
+pub const CONVENTIONAL_AZIMUTH: f64 = 225.0;
+
+/// The [conventional sun](SunMode::conventional)'s altitude, degrees: that of
+/// a cube's diagonal, `atan(1 / √2)` (about 35.26°).
+pub fn conventional_altitude() -> f64 {
+    std::f64::consts::FRAC_1_SQRT_2.atan().to_degrees()
+}
+
 // ---------------------------------------------------------------- dates
 
 /// A calendar date (proleptic Gregorian), local to the site.
@@ -670,6 +680,27 @@ impl SunMode {
         })
     }
 
+    /// The conventional sun of façade drawings: a light relative to the
+    /// view whose rays run along the diagonal of a cube, coming from in
+    /// front of the view, over the viewer's left shoulder ([`CONVENTIONAL_AZIMUTH`]
+    /// from the look direction, [`conventional_altitude`] high), so a
+    /// shadow falls down and to the right of what casts it, as far down
+    /// and as far across as its depth in front of the face that catches it.
+    pub fn conventional() -> SunMode {
+        SunMode::Lighting { azimuth: CONVENTIONAL_AZIMUTH, altitude: conventional_altitude(), relative_to_view: true }
+    }
+
+    /// Whether this is the [conventional](Self::conventional) sun (within
+    /// a thousandth of a degree).
+    pub fn is_conventional(&self) -> bool {
+        match self {
+            SunMode::Lighting { azimuth, altitude, relative_to_view: true } => {
+                (azimuth - CONVENTIONAL_AZIMUTH).abs() < 1e-3 && (altitude - conventional_altitude()).abs() < 1e-3
+            }
+            _ => false,
+        }
+    }
+
     /// The step of a study (`None` for a still sun or lighting).
     pub fn interval(&self) -> Option<SunInterval> {
         match self {
@@ -787,6 +818,21 @@ impl Default for SunSettings {
     /// A still sun on June 21, 2026 at 10:00, its path shown, no shadows.
     fn default() -> Self {
         SunSettings { mode: SunMode::default(), frame: 0, show_path: true, shadows: false, ground: None }
+    }
+}
+
+impl SunSettings {
+    /// The sun a view of `kind` starts with when it is given one: the
+    /// [conventional sun](SunMode::conventional) casting shadows for
+    /// elevations and sections (the façade drawing's convention), the
+    /// [default](Self::default) for the others.
+    pub fn default_for(kind: &ViewKind) -> SunSettings {
+        match kind {
+            ViewKind::Elevation { .. } | ViewKind::Section { .. } => {
+                SunSettings { mode: SunMode::conventional(), shadows: true, ..Default::default() }
+            }
+            _ => SunSettings::default(),
+        }
     }
 }
 
@@ -1526,6 +1572,31 @@ mod tests {
         assert_eq!(p.sun_presets[1].name, "Day");
         assert_eq!(p.sun_presets[1].mode.interval(), Some(SunInterval::Hour));
         assert!(p.sun_preset("Day").is_some());
+    }
+
+    /// The conventional sun's rays run along a cube's diagonal in the
+    /// view's frame: as far into the view, to the right and down, whatever
+    /// way the view looks.
+    #[test]
+    fn the_conventional_sun_runs_along_the_cube_diagonal() {
+        let sun = SunSettings { mode: SunMode::conventional(), ..Default::default() };
+        assert!(sun.mode.is_conventional() && sun.is_valid());
+        assert!((conventional_altitude() - 35.264_389_682_754_654).abs() < 1e-9);
+        let site = SunSite { north: DVec2::new(0.3, 0.9), ..Default::default() };
+        for look in [DVec2::Y, DVec2::X, DVec2::NEG_Y, DVec2::new(1.0, -2.0).normalize()] {
+            let ray = -sun.state(&site, Some(look)).direction;
+            let right = DVec2::new(look.y, -look.x);
+            let third = 1.0 / 3f64.sqrt();
+            let (forward, across, down) = (ray.truncate().dot(look), ray.truncate().dot(right), -ray.z);
+            assert!(near(forward, third, 1e-9) && near(across, third, 1e-9) && near(down, third, 1e-9), "{look}");
+        }
+        assert!(!SunMode::default().is_conventional());
+        assert!(!SunMode::Lighting { azimuth: 225.0, altitude: 35.0, relative_to_view: true }.is_conventional());
+        let elevation = ViewKind::Elevation { direction: crate::Direction::South };
+        assert_eq!(SunSettings::default_for(&elevation).mode, SunMode::conventional());
+        assert!(SunSettings::default_for(&elevation).shadows);
+        let plan = ViewKind::CeilingPlan { level: LevelId(1), cut_height: 2.0, underlay: Default::default() };
+        assert_eq!(SunSettings::default_for(&plan), SunSettings::default());
     }
 
     #[test]

@@ -20,17 +20,32 @@ const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 7] = wgpu::vertex_attr_array![0
 pub(crate) struct Uniforms {
     pub view_proj: [[f32; 4]; 4],
     pub light_dir: [f32; 4],
-    /// x: 1 for unlit faces; y: 1 for faces shaded grey (the shaded style).
+    /// x: 1 for unlit faces; y: 1 for faces shaded grey (the shaded style);
+    /// z: what the unlit styles keep of a color in a cast shadow (linear light).
     pub style: [f32; 4],
     /// The shaded style's greys, as displayed: x ambient, y diffuse, z a
-    /// cast shadow's (see [`cc_core::VisualStyle::shaded_grey`]).
+    /// cast shadow's (never lighter than the face; see
+    /// [`cc_core::ShadingSettings`]); w the opacity of the ground's shadows.
     pub shading: [f32; 4],
 }
 
-/// The shaded style's greys, as [`Uniforms::shading`] holds them.
-pub(crate) fn shading() -> [f32; 4] {
-    use cc_core::VisualStyle as V;
-    [V::SHADED_AMBIENT as f32, V::SHADED_DIFFUSE as f32, V::SHADED_SHADOW as f32, 0.0]
+/// What the unlit styles keep of a color in a cast shadow at the default
+/// shading (linear light).
+const UNLIT_SHADOW: f64 = 0.7;
+/// How dark the ground's shadows are at the default shading (black at this opacity).
+const GROUND_SHADOW: f64 = 0.35;
+
+/// The greys of `shading`, as [`Uniforms::shading`] holds them.
+pub(crate) fn shading(shading: &cc_core::ShadingSettings) -> [f32; 4] {
+    let ambient = shading.grey(0.0);
+    let ground = shading.darkening(GROUND_SHADOW);
+    [ambient as f32, (1.0 - ambient) as f32, shading.shadow_grey(1.0) as f32, ground as f32]
+}
+
+/// What the unlit styles keep of a color in a cast shadow under `shading`
+/// ([`Uniforms::style`]'s z).
+pub(crate) fn unlit_shadow(shading: &cc_core::ShadingSettings) -> f32 {
+    (1.0 - shading.darkening(1.0 - UNLIT_SHADOW)) as f32
 }
 
 /// What sets a pipeline drawing into the frame's targets apart.
@@ -155,6 +170,8 @@ pub struct Renderer3D {
     grey: bool,
     /// The sun, usable (see [`Light::usable`]); `None` lights from the camera.
     light: Option<Light>,
+    /// How light the faces turned away are and how dark the shadows (the view's).
+    shading: cc_core::ShadingSettings,
     /// The box around the uploaded mesh's vertices.
     bounds: Option<Bounds>,
     /// The sun's pipelines and shadow map, made for the first frame it lights.
@@ -251,6 +268,7 @@ impl Renderer3D {
             unlit: false,
             grey: false,
             light: None,
+            shading: Default::default(),
             bounds: None,
             sun: None,
             sun_failed: false,
@@ -266,6 +284,17 @@ impl Renderer3D {
         if sun::replace(&mut self.light, light) {
             self.drawn = None;
             self.shadows_current = false;
+        }
+    }
+
+    /// Shade the faces and cast the shadows as `shading` says (a view's
+    /// [`cc_core::View::shading`]; the defaults until set). The frame is
+    /// drawn again only when it changes.
+    pub fn set_shading(&mut self, shading: cc_core::ShadingSettings) {
+        let shading = shading.clamped();
+        if shading != self.shading {
+            self.shading = shading;
+            self.drawn = None;
         }
     }
 
@@ -497,8 +526,8 @@ impl Renderer3D {
         let u = Uniforms {
             view_proj: view_proj(camera, aspect).to_cols_array_2d(),
             light_dir: [light.x, light.y, light.z, 0.0],
-            style: [f32::from(u8::from(self.unlit)), f32::from(u8::from(self.grey)), 0.0, 0.0],
-            shading: shading(),
+            style: [f32::from(u8::from(self.unlit)), f32::from(u8::from(self.grey)), unlit_shadow(&self.shading), 0.0],
+            shading: shading(&self.shading),
         };
         queue.write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&u));
         if self.light.is_some() && self.sun.is_none() && !self.sun_failed {
@@ -884,6 +913,18 @@ mod gpu_tests {
         let frame = r.render_to_rgba(&device, &queue, SIZE, &camera).unwrap();
         let c = pixel(&frame, &camera, Vec3::new(3.5, 3.5, 0.0));
         near(f64::from(c[0]), V::shaded_grey(up), "no shadows");
+        // A view's own shading: brighter shade, lighter shadows.
+        let shading = cc_core::ShadingSettings { ambient: 0.8, shadow: 0.3 };
+        r.set_light(Some(sun));
+        r.set_shading(shading);
+        let frame = r.render_to_rgba(&device, &queue, SIZE, &camera).unwrap();
+        let grey = |p: Vec3| f64::from(pixel(&frame, &camera, p)[0]);
+        near(grey(Vec3::new(1.0, 2.0, 2.0)), 0.8, "the face turned away, brighter");
+        near(grey(Vec3::new(3.5, 3.5, 0.0)), 0.7, "a lighter shadow");
+        r.set_shading(cc_core::ShadingSettings { shadow: 0.0, ..shading });
+        let frame = r.render_to_rgba(&device, &queue, SIZE, &camera).unwrap();
+        near(f64::from(pixel(&frame, &camera, Vec3::new(3.5, 3.5, 0.0))[0]), shading.grey(up), "no visible shadow");
+        r.set_shading(Default::default());
         // The camera's light.
         r.set_light(None);
         let frame = r.render_to_rgba(&device, &queue, SIZE, &camera).unwrap();

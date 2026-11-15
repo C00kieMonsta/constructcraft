@@ -589,6 +589,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState, view_id: ViewId, render_state: Op
         None => None,
     };
     renderer.set_light(light);
+    let shading = state.session.doc.project.view(view_id).map(|v| v.shading).unwrap_or_default();
+    renderer.set_shading(shading);
     let ppp = ui.ctx().pixels_per_point();
     let size = [(rect.width() * ppp).round() as u32, (rect.height() * ppp).round() as u32];
     v3.pixel_size = Some(size);

@@ -398,7 +398,7 @@ No parameters.
 
 ### `view_get`
 
-*query* — A view with all its parameters (`params`, editable with `view_set`), its `scale` denominator and `scale_text`, the scale as the project writes it (`1:50`, or `1/4" = 1'-0"` in imperial projects), and its `sun`: null, or the settings `view_set` takes plus `derived` (azimuth and altitude, `above_horizon`, the current frame's `date` and `time`, `sunrise` and `sunset`, the number of `frames` and `site_known`).
+*query* — A view with all its parameters (`params`, editable with `view_set`), its `scale` denominator and `scale_text`, the scale as the project writes it (`1:50`, or `1/4" = 1'-0"` in imperial projects), and its `sun`: null, or the settings `view_set` takes plus `derived` (azimuth and altitude, `above_horizon`, the current frame's `date` and `time`, `sunrise` and `sunset`, the number of `frames`, `site_known` and whether it is the `conventional` sun), and its `shading` (`ambient` and `shadow`, null for views that take no sun).
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -3042,7 +3042,7 @@ No parameters.
 
 ### `view_set`
 
-*edit* — Change a view: name, scale, phase and phase filter, and its `params` as `view_get` shows them (merged: cut height, section depth, legend types, schedule fields, sort, filter and totals, sheet number and size, viewport positions…), the crop, the sun and the render settings.
+*edit* — Change a view: name, scale, phase and phase filter, and its `params` as `view_get` shows them (merged: cut height, section depth, legend types, schedule fields, sort, filter and totals, sheet number and size, viewport positions…), the crop, the sun, the render settings and the shading.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -3055,6 +3055,7 @@ No parameters.
 | `phase_filter` | id or name | optional | Phase filter (id or name), or `null` for none (every status by category). |
 | `render` | JSON | optional | The view's photorealistic render settings (3D views only): the fields to change, shaped like `render` in `view_get` (`samples` 1 to 16384, `max_depth` 1 to 64, `width`/`height` 16 to 8192 pixels and at most 7680x4320 in all, `fov_deg` 10 to 120, `exposure` -10 to 10 stops, `tone_map` `Filmic` or `Standard` (or lowercase), `clamp` 0 (off) to 1000, `clay`, and `environment` with `sky_strength` and `sun_strength` 0 to 100, `ground_color` [r, g, b] and `ground_plane`); a view without settings starts from the defaults. `null` removes them. |
 | `scale` | integer or string | optional | Scale: the denominator (e.g. 100 for 1:100), or text such as `"1:100"` or an imperial label like `"1/8\" = 1'-0\""` (96). |
+| `shading` | JSON | optional | How the view shades faces and casts shadows in the shaded, consistent colors and textures styles (plans, ceiling plans, 3D views, elevations and sections; not photorealistic renders): the fields to change, shaped like `shading` in `view_get`: `ambient`, the light of a face turned away from the light, 0.3 (dark grey) to 1 (no shading; default 0.6), and `shadow`, how dark cast shadows are, 0 (none) to 1 (black; default 0.55, a shaded shadow's grey being `1 - shadow`). |
 | `sun` | object | optional | The view's sun (plans, ceiling plans, 3D views, elevations and sections): the fields to change, shaped like `sun` in `view_get` (a view without a sun starts from a still sun on 2026-06-21 at 10:00), `{"preset": name}` to take a preset, or `null` to remove it. With `shadows`, the sun casts shadows in 3D views and, in the shaded, consistent colors and textures styles, in plans, elevations and sections (a floor plan from the whole model, a section from what lies beyond its line, neither onto what is indoors; ceiling plans draw none). |
 | `visual_style` | string | optional | Visual style: `wireframe` (every edge, no faces), `hidden_line` (white faces), `shaded` (white faces greyed by the light, with the sun's shadows), `consistent_colors` (material colors, unlit), `textures` (appearance colors and surface patterns), or `default` (plans hidden line, other views shaded). |
 
