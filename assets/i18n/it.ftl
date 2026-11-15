@@ -3596,7 +3596,6 @@ sun-altitude = Altezza
 sun-relative-to-view = Relativo alla vista
 sun-show-path = Mostra percorso solare
 sun-shadows = Ombre
-sun-shadows-3d = Le ombre sono proiettate solo nelle viste 3D.
 sun-ground = Piano del terreno al livello
 sun-status = Sole: azimut { $azimuth } · altezza { $altitude }
 sun-status-daylight = alba { $sunrise } · tramonto { $sunset }

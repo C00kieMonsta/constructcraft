@@ -364,3 +364,73 @@ fn sun_arg_inverts_the_settings() {
     run(&mut s, "view_set", json!({"view": b, "sun": serde_json::to_value(&arg).unwrap()}));
     assert_eq!(s.project().views[&cc_core::ViewId(b)].sun.clone().unwrap(), settings);
 }
+
+/// The sun's shadows in a view's drawing: black veils that belong to no element.
+fn shadows(s: &mut Session, view: u64) -> usize {
+    let d = s.drawing(cc_core::ViewId(view)).unwrap();
+    let veil =
+        |p: &&cc_views::Prim| matches!(p, cc_views::Prim::Fill { color: [0, 0, 0, a], element: None, .. } if *a > 0);
+    d.prims.iter().filter(veil).count()
+}
+
+/// A sun set to cast shadows casts them in plans and elevations drawn in
+/// the shaded style, not in hidden line; what the view hides, for good or
+/// for now, casts none; exports carry them.
+#[test]
+fn shadows_are_cast_in_plans_and_elevations() {
+    let mut s = Session::default();
+    // A house of four walls on a floor, and a screen wall 2 m off each side.
+    for (a, b) in [([0, 0], [6, 0]), ([6, 0], [6, 4]), ([6, 4], [0, 4]), ([0, 4], [0, 0])] {
+        run(&mut s, "wall_create", json!({"start": a, "end": b}));
+    }
+    run(&mut s, "floor_create", json!({"boundary": [[0, 0], [6, 0], [6, 4], [0, 4]]}));
+    for (a, b) in [([2, -2], [4, -2]), ([8, 1], [8, 3]), ([4, 6], [2, 6]), ([-2, 3], [-2, 1])] {
+        run(&mut s, "wall_create", json!({"start": a, "end": b}));
+    }
+    let first = |s: &mut Session, category: &str| {
+        run(s, "views_list", json!({"category": category}))[0]["id"].as_u64().unwrap()
+    };
+    let (plan, elevation) = (first(&mut s, "floor_plan"), first(&mut s, "elevation"));
+    // A light from behind the viewer's left shoulder (in the plan, from the south-west).
+    let sun = json!({"mode": "lighting", "azimuth": 200, "altitude": 40, "relative_to_view": true, "show_path": false});
+    for view in [plan, elevation] {
+        run(&mut s, "view_set", json!({"view": view, "visual_style": "shaded", "sun": sun}));
+        assert_eq!(shadows(&mut s, view), 0, "shadows are off by default");
+        let set = set_sun(&mut s, view, json!({"shadows": true}));
+        assert_eq!(set["shadows"], true);
+        let cast = shadows(&mut s, view);
+        assert!(cast > 0, "view {view}");
+        // Hidden line draws none; back in the shaded style they return.
+        run(&mut s, "view_set", json!({"view": view, "visual_style": "hidden_line"}));
+        assert_eq!(shadows(&mut s, view), 0);
+        run(&mut s, "view_set", json!({"view": view, "visual_style": "shaded"}));
+        assert_eq!(shadows(&mut s, view), cast);
+        // The walls hidden for now, then for good: nothing casts (the floor lies on the ground).
+        run(&mut s, "view_temporary", json!({"view": view, "action": "hide_category", "categories": ["wall"]}));
+        assert_eq!(shadows(&mut s, view), 0, "walls hidden for now");
+        run(&mut s, "view_temporary", json!({"view": view, "action": "reset"}));
+        assert_eq!(shadows(&mut s, view), cast);
+        let walls: Vec<u64> = run(&mut s, "elements_list", json!({"category": "wall"}))
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["id"].as_u64().unwrap())
+            .collect();
+        run(&mut s, "element_hide_in_view", json!({"view": view, "ids": walls}));
+        assert_eq!(shadows(&mut s, view), 0, "walls hidden");
+        run(&mut s, "element_hide_in_view", json!({"view": view, "ids": walls, "hidden": false}));
+        assert_eq!(shadows(&mut s, view), cast);
+        // A sun at the horizon casts none.
+        set_sun(&mut s, view, json!({"altitude": 0}));
+        assert_eq!(shadows(&mut s, view), 0);
+        set_sun(&mut s, view, json!({"altitude": 40}));
+    }
+    // The exported drawing carries them: black fills that let the faces show through.
+    let dir = std::env::temp_dir().join(format!("cc_shadows_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("plan.svg");
+    run(&mut s, "view_export", json!({"view": plan, "path": path.to_str().unwrap()}));
+    let svg = std::fs::read_to_string(&path).unwrap();
+    assert!(svg.contains(r#"fill="rgb(0,0,0)" fill-opacity="#), "no veil in the SVG");
+    let _ = std::fs::remove_dir_all(&dir);
+}

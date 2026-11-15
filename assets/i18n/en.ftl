@@ -3596,7 +3596,6 @@ sun-altitude = Altitude
 sun-relative-to-view = Relative to view
 sun-show-path = Show sun path
 sun-shadows = Shadows
-sun-shadows-3d = Shadows are cast only in 3D views.
 sun-ground = Ground plane at level
 sun-status = Sun: azimuth { $azimuth } · altitude { $altitude }
 sun-status-daylight = sunrise { $sunrise } · sunset { $sunset }

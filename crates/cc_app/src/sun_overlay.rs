@@ -56,16 +56,26 @@ pub struct SunView {
     follows_view: bool,
 }
 
-/// The light of `sun` at `project`'s site seen through `camera`: shadows
-/// only while the sun is up, onto the ground level's plane when one is set.
-fn light(project: &Project, sun: &SunSettings, camera: &CameraState) -> (cc_render::Light, DVec3, bool) {
+/// The light of `view`'s `sun` at `project`'s site seen through `camera`:
+/// shadows only while the sun is up, caught on the model and on the ground
+/// plane the rendered image stands the model on (the sun's ground level,
+/// else the lowest level, else the bottom of the model `geom`; see
+/// [`cc_raytracing::environment::ground_height`]), so the shadows cast
+/// around the model show as they do in the rendered image.
+fn light(
+    project: &Project,
+    geom: &ModelGeometry,
+    view: &View,
+    sun: &SunSettings,
+    camera: &CameraState,
+) -> (cc_render::Light, DVec3, bool) {
     let state = sun.state(&project.sun_site(), cc_core::sun::camera_forward(camera));
     let shadows = sun.shadows && state.above_horizon;
-    let ground = sun
-        .ground
-        .filter(|_| shadows)
-        .and_then(|l| project.level(l))
-        .map(|l| l.elevation as f32)
+    let ground = shadows
+        .then(|| {
+            let bottom = geom.bounds().map(|(lo, _)| lo.z);
+            cc_raytracing::environment::ground_height(project, view, bottom) as f32
+        })
         .filter(|z| z.is_finite());
     let light = cc_render::Light { direction: state.direction.as_vec3(), shadows, ground };
     (light, state.direction, state.above_horizon)
@@ -90,7 +100,7 @@ impl SunView {
             self.follows_view = follows;
             match &view.sun {
                 Some(sun) => {
-                    let (light, direction, up) = light(project, sun, camera);
+                    let (light, direction, up) = light(project, geom, view, sun, camera);
                     (self.light, self.direction, self.up) = (Some(light), Some(direction), up);
                 }
                 None => (self.light, self.direction, self.up) = (None, None, false),
@@ -326,11 +336,22 @@ mod tests {
         view.sun.as_mut().unwrap().shadows = false;
         let off = s.update(&project, &geom, &view, 2, &camera).unwrap();
         assert!(!off.shadows && off.ground.is_none());
+        // With no ground level chosen the shadows still fall on a ground: the
+        // lowest level's plane, where the rendered image stands the model.
+        let lowest = project.levels.iter().map(|l| l.elevation).fold(f64::INFINITY, f64::min);
+        let sun = view.sun.as_mut().unwrap();
+        (sun.shadows, sun.ground) = (true, None);
+        let auto = s.update(&project, &geom, &view, 3, &camera).unwrap();
+        assert!(auto.shadows && auto.ground == Some(lowest as f32), "{auto:?}");
+        let upper = project.levels.iter().max_by(|a, b| a.elevation.total_cmp(&b.elevation)).unwrap();
+        view.sun.as_mut().unwrap().ground = Some(upper.id);
+        let chosen = s.update(&project, &geom, &view, 4, &camera).unwrap();
+        assert_eq!(chosen.ground, Some(upper.elevation as f32));
 
         view.sun = Some(SunSettings { mode: SunMode::from_name("lighting").unwrap(), ..SunSettings::default() });
         let mut s = SunView::default();
-        let a = s.update(&project, &geom, &view, 3, &camera).unwrap();
-        let b = s.update(&project, &geom, &view, 3, &turned).unwrap();
+        let a = s.update(&project, &geom, &view, 5, &camera).unwrap();
+        let b = s.update(&project, &geom, &view, 5, &turned).unwrap();
         assert!(a.direction.distance(b.direction) > 0.5, "{a:?} {b:?}");
         // Turned a quarter: the light's plan direction turns a quarter too.
         let (pa, pb) = (a.direction.truncate().normalize(), b.direction.truncate().normalize());

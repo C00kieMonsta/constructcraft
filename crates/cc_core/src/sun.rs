@@ -773,10 +773,12 @@ pub struct SunSettings {
     /// Draw the sun path diagram.
     #[serde(default = "yes")]
     pub show_path: bool,
-    /// Cast shadows (3D views).
+    /// Cast shadows: in 3D views, and in plans, elevations and sections
+    /// drawn in the shaded, consistent colors or textures style.
     #[serde(default)]
     pub shadows: bool,
-    /// The level whose plane receives the shadows (`None`: no ground plane).
+    /// The level whose plane receives the shadows (`None`: the lowest level,
+    /// as the rendered image stands the model on it).
     #[serde(default)]
     pub ground: Option<LevelId>,
 }
@@ -1056,6 +1058,16 @@ impl Project {
     pub fn sun_state(&self, view: &View) -> Option<SunState> {
         let sun = view.sun.as_ref()?;
         Some(sun.state(&self.sun_site(), view_forward(view)))
+    }
+
+    /// The height of the ground plane that catches `view`'s sun's shadows
+    /// (and that the rendered image stands the model on): the sun's ground
+    /// level, else the lowest level, else the bottom of the model
+    /// (`bottom`), else 0.
+    pub fn sun_ground_height(&self, view: &View, bottom: Option<f64>) -> f64 {
+        let sun_ground = view.sun.as_ref().and_then(|s| s.ground).and_then(|l| self.level(l)).map(|l| l.elevation);
+        let lowest = self.levels.iter().map(|l| l.elevation).filter(|z| z.is_finite()).min_by(f64::total_cmp);
+        sun_ground.filter(|z| z.is_finite()).or(lowest).or(bottom.filter(|z| z.is_finite())).unwrap_or(0.0)
     }
 
     /// The preset called `name`.

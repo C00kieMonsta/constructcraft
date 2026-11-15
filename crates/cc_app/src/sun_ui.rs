@@ -20,7 +20,7 @@ use cc_core::sun::{
     Daylight, MAX_MINUTE, MAX_YEAR, MIN_YEAR, SunDate, SunInterval, SunMode, SunSettings, SunSite, UTC_OFFSET_RANGE,
     days_in_month, view_forward,
 };
-use cc_core::{LevelId, ViewId, ViewKind};
+use cc_core::{LevelId, ViewId};
 use cc_engine::Ref;
 use cc_engine::commands::site::SiteSet;
 use cc_engine::commands::sun::{SunArg, SunPresetDelete, SunPresetRename, SunPresetSave};
@@ -467,7 +467,7 @@ fn right(ui: &mut Ui, state: &mut AppState, id: ViewId) {
             }
         }
         ui.add_space(6.0);
-        common_rows(ui, state, id, &sun, matches!(view.kind, ViewKind::ThreeD { .. }));
+        common_rows(ui, state, id, &sun);
     });
 }
 
@@ -853,8 +853,10 @@ fn lighting_rows(ui: &mut Ui, state: &mut AppState, id: ViewId, azimuth: f64, al
     }
 }
 
-/// What every kind of sun has: the sun path, shadows and the ground plane.
-fn common_rows(ui: &mut Ui, state: &mut AppState, id: ViewId, sun: &SunSettings, three_d: bool) {
+/// What every kind of sun has: the sun path, shadows (cast in 3D views and,
+/// in the styles that fill faces with more than white, in plans, elevations
+/// and sections) and the ground plane.
+fn common_rows(ui: &mut Ui, state: &mut AppState, id: ViewId, sun: &SunSettings) {
     let label = t!("sun-show-path");
     let mut path = sun.show_path;
     if row(ui, &label, |ui| check(ui, &mut path, &label)).changed() {
@@ -862,12 +864,7 @@ fn common_rows(ui: &mut Ui, state: &mut AppState, id: ViewId, sun: &SunSettings,
     }
     let label = t!("sun-shadows");
     let mut shadows = sun.shadows;
-    let r = row(ui, &label, |ui| {
-        ui.add_enabled_ui(three_d, |ui| check(ui, &mut shadows, &label))
-            .inner
-            .on_disabled_hover_text(t!("sun-shadows-3d"))
-    });
-    if r.changed() {
+    if row(ui, &label, |ui| check(ui, &mut shadows, &label)).changed() {
         edit_sun(state, id, None, |s| s.shadows = shadows);
     }
     let levels: Vec<(LevelId, String, f64)> =
@@ -940,12 +937,10 @@ pub fn view_rows(ui: &mut Ui, state: &mut AppState, id: ViewId) {
     if row(ui, &label, |ui| check(ui, &mut path, &label)).changed() {
         edit_sun(state, id, None, |s| s.show_path = path);
     }
-    if matches!(view.kind, ViewKind::ThreeD { .. }) {
-        let label = t!("sun-shadows");
-        let mut shadows = sun.shadows;
-        if row(ui, &label, |ui| check(ui, &mut shadows, &label)).changed() {
-            edit_sun(state, id, None, |s| s.shadows = shadows);
-        }
+    let label = t!("sun-shadows");
+    let mut shadows = sun.shadows;
+    if row(ui, &label, |ui| check(ui, &mut shadows, &label)).changed() {
+        edit_sun(state, id, None, |s| s.shadows = shadows);
     }
 }
 

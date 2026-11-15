@@ -269,7 +269,8 @@ pub struct ViewSet {
     #[serde(default)]
     pub detail: Option<String>,
     /// Visual style: `wireframe` (every edge, no faces), `hidden_line` (white
-    /// faces), `shaded`, `consistent_colors` (material colors, unlit),
+    /// faces), `shaded` (white faces greyed by the light, with the sun's
+    /// shadows), `consistent_colors` (material colors, unlit),
     /// `textures` (appearance colors and surface patterns), or `default`
     /// (plans hidden line, other views shaded).
     #[serde(default)]
@@ -288,6 +289,9 @@ pub struct ViewSet {
     /// sections): the fields to change, shaped like `sun` in `view_get`
     /// (a view without a sun starts from a still sun on 2026-06-21 at
     /// 10:00), `{"preset": name}` to take a preset, or `null` to remove it.
+    /// With `shadows`, the sun casts shadows in 3D views and, in the
+    /// shaded, consistent colors and textures styles, in plans, elevations
+    /// and sections (a plan from the model below its cut plane).
     #[serde(default, deserialize_with = "refs::nullable", skip_serializing_if = "Option::is_none")]
     pub sun: Option<Option<super::sun::SunArg>>,
     /// The view's photorealistic render settings (3D views only): the fields

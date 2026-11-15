@@ -3596,7 +3596,6 @@ sun-altitude = Höhe
 sun-relative-to-view = Relativ zur Ansicht
 sun-show-path = Sonnenbahn anzeigen
 sun-shadows = Schatten
-sun-shadows-3d = Schatten werden nur in 3D-Ansichten geworfen.
 sun-ground = Bodenebene auf Ebene
 sun-status = Sonne: Azimut { $azimuth } · Höhe { $altitude }
 sun-status-daylight = Aufgang { $sunrise } · Untergang { $sunset }

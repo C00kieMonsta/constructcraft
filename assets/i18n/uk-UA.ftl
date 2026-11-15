@@ -3597,7 +3597,6 @@ sun-altitude = Висота
 sun-relative-to-view = Відносно виду
 sun-show-path = Показати сонячну карту
 sun-shadows = Тіні
-sun-shadows-3d = Тіні відкидаються лише у 3D-видах.
 sun-ground = Площина ґрунту на рівні
 sun-status = Сонце: азимут { $azimuth } · висота { $altitude }
 sun-status-daylight = схід { $sunrise } · захід { $sunset }

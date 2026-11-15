@@ -3598,7 +3598,6 @@ sun-altitude = ມຸມສູງ
 sun-relative-to-view = ຕາມມຸມມອງ
 sun-show-path = ສະແດງເສັ້ນທາງດວງອາທິດ
 sun-shadows = ເງົາ
-sun-shadows-3d = ເງົາຈະທອດໃນມຸມມອງ 3D ເທົ່ານັ້ນ.
 sun-ground = ພື້ນດິນທີ່ລະດັບ
 sun-status = ດວງອາທິດ: ມຸມທິດ { $azimuth } · ມຸມສູງ { $altitude }
 sun-status-daylight = ຂຶ້ນ { $sunrise } · ຕົກ { $sunset }

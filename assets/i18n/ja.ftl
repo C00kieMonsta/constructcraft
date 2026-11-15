@@ -3596,7 +3596,6 @@ sun-altitude = 高度
 sun-relative-to-view = ビュー基準
 sun-show-path = 太陽の軌跡を表示
 sun-shadows = 影
-sun-shadows-3d = 影は 3D ビューでのみ落ちます。
 sun-ground = レベルの地面
 sun-status = 太陽: 方位角 { $azimuth } · 高度 { $altitude }
 sun-status-daylight = 日の出 { $sunrise } · 日没 { $sunset }

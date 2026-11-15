@@ -1073,7 +1073,7 @@ pub fn style_underlay(
     geom: &ModelGeometry,
     cut_z: f64,
     ceiling: bool,
-    look: crate::Look,
+    look: crate::Look<'_>,
     patterns: &cc_core::fill_pattern::FillPatterns,
 ) -> Vec<crate::Prim> {
     let forward = if ceiling { glam::DVec3::Z } else { -glam::DVec3::Z };

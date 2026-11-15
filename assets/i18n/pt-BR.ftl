@@ -3596,7 +3596,6 @@ sun-altitude = Altura
 sun-relative-to-view = Relativo à vista
 sun-show-path = Mostrar carta solar
 sun-shadows = Sombras
-sun-shadows-3d = Sombras são projetadas apenas em vistas 3D.
 sun-ground = Plano de chão no nível
 sun-status = Sol: azimute { $azimuth } · altura { $altitude }
 sun-status-daylight = nascer { $sunrise } · pôr { $sunset }

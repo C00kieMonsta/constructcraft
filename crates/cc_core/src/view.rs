@@ -437,7 +437,10 @@ pub enum VisualStyle {
     Wireframe,
     /// Faces in the paper's color hide what is behind them; only edges show.
     HiddenLine,
-    /// Faces in their material's color, lit by a light from the viewer's side.
+    /// White faces with the hidden line's edges, shaded grey by the light
+    /// (the view's sun, else a light from the viewer's side; see
+    /// [`VisualStyle::shaded_grey`]) and, where the view's sun casts
+    /// shadows, a darker grey in them; no material colors.
     #[default]
     Shaded,
     /// Faces in their material's color, the same on every side (no light).
@@ -486,9 +489,28 @@ impl VisualStyle {
         self != VisualStyle::Wireframe
     }
 
-    /// Faces carry their material's color (shaded, consistent colors, textures).
+    /// Faces show more than the paper's white: grey shading (shaded), their
+    /// material's color (consistent colors) or appearance (textures).
     pub fn colored(self) -> bool {
         matches!(self, VisualStyle::Shaded | VisualStyle::ConsistentColors | VisualStyle::Textures)
+    }
+
+    /// The grey of a face lit in the shaded style where nothing casts a
+    /// shadow on it, as displayed (0 black, 1 white).
+    pub const SHADED_AMBIENT: f64 = 0.6;
+    /// How much a face square to the light adds to [`Self::SHADED_AMBIENT`]: it is white.
+    pub const SHADED_DIFFUSE: f64 = 0.4;
+    /// The grey of a cast shadow in the shaded style: darker than a face
+    /// turned away from the light, so shadows read apart from shade.
+    pub const SHADED_SHADOW: f64 = 0.45;
+
+    /// The shaded style's grey, as displayed (0 black, 1 white), of a face
+    /// whose unit normal has the cosine `cos` with the direction towards the
+    /// light: white square to it, [`Self::SHADED_AMBIENT`] (a mid grey, never
+    /// black) edge-on or turned away; not a number reads as turned away.
+    pub fn shaded_grey(cos: f64) -> f64 {
+        let cos = if cos.is_nan() { 0.0 } else { cos.clamp(0.0, 1.0) };
+        Self::SHADED_AMBIENT + Self::SHADED_DIFFUSE * cos
     }
 }
 

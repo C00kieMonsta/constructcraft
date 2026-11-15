@@ -3076,7 +3076,7 @@ fn every_dialog_keeps_its_body_inside() {
     for section in [Section::General, Section::Interface, Section::FileLocations, Section::Saving, Section::Shortcuts] {
         opens.push((format!("preferences {section:?}"), Box::new(move |s| crate::preferences::open(s, section))));
     }
-    // Sun Settings in each kind of sun, and in a 3D view (shadows enabled).
+    // Sun Settings in each kind of sun, and in a 3D view.
     for (mode, three_d) in
         [("still", false), ("single_day", false), ("multi_day", false), ("lighting", false), ("multi_day", true)]
     {
@@ -4844,10 +4844,14 @@ fn view_properties_show_the_sun() {
     let mut harness = themed_harness(state, egui::vec2(360.0, 1600.0), egui::Theme::Light, draw);
     let still = tr(cc_core::sun::SunMode::default().key());
     assert!(harness.query_by_label(&still).is_some());
-    assert!(harness.query_by_label(&t!("sun-shadows")).is_none(), "shadows only in 3D views");
     harness.get_by_label(&t!("prop-sun-path")).click();
     harness.run();
     assert!(!harness.state().project().view(plan).unwrap().sun.as_ref().unwrap().show_path);
+    // Shadows are cast in plans, elevations and sections too: the row is there and sets them.
+    assert!(!harness.state().project().view(plan).unwrap().sun.as_ref().unwrap().shadows);
+    harness.get_by_label(&t!("sun-shadows")).click();
+    harness.run();
+    assert!(harness.state().project().view(plan).unwrap().sun.as_ref().unwrap().shadows);
     harness.get_by_label(&still).click();
     harness.run();
     assert!(harness.state().dialogs.sun.is_some());

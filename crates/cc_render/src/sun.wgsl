@@ -104,6 +104,16 @@ fn fs_sun_face(i: SunOut) -> @location(0) vec4<f32> {
             reach = sunlit(i.world, n, facing);
         }
     }
+    // The shaded style: the grey of the sun's light, a cast shadow's grey
+    // where it is blocked (fading out where the face turns edge-on to it,
+    // which the turned-away faces' grey continues).
+    if u.style.y > 0.5 {
+        var grey = shaded_grey(facing);
+        if sun.shadow.x > 0.5 {
+            grey = mix(grey, u.shading.z, (1.0 - reach) * smoothstep(0.0, 0.05, facing));
+        }
+        return greyed(base, grey, i.color.a);
+    }
     // The camera light's terms (`fs_face`), the sun in its place.
     let diffuse = max(facing, 0.0) * reach;
     let sky = 0.5 + 0.5 * n.z;

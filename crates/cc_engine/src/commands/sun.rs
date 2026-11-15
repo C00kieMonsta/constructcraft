@@ -85,10 +85,11 @@ pub struct SunArg {
     /// Draw the sun path diagram.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_path: Option<bool>,
-    /// Cast shadows (3D views).
+    /// Cast shadows: in 3D views, and in plans, elevations and sections
+    /// drawn in the shaded, consistent colors or textures style.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shadows: Option<bool>,
-    /// The level whose plane receives the shadows (id or name), or `null` for no ground plane.
+    /// The level whose plane receives the shadows (id or name), or `null` for the lowest level.
     #[serde(default, deserialize_with = "refs::nullable", skip_serializing_if = "Option::is_none")]
     pub ground: Option<Option<Ref>>,
 }

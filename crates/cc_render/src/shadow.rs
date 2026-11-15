@@ -248,7 +248,12 @@ impl SunPass {
         queue.write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&setup.uniforms));
         self.draws_ground = setup.ground;
         let Some(view_proj) = setup.shadow else { return };
-        let camera = Uniforms { view_proj: view_proj.to_cols_array_2d(), light_dir: [0.0; 4], style: [0.0; 4] };
+        let camera = Uniforms {
+            view_proj: view_proj.to_cols_array_2d(),
+            light_dir: [0.0; 4],
+            style: [0.0; 4],
+            shading: [0.0; 4],
+        };
         queue.write_buffer(&self.light_uniforms, 0, bytemuck::bytes_of(&camera));
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("cc_render shadow pass"),

@@ -234,11 +234,11 @@ pub fn lights(sun: &SunState, environment: &RenderEnvironment) -> Vec<Light> {
 }
 
 /// The height of the ground plane: the view's sun's ground level, else the
-/// lowest level, else the bottom of the model (`bottom`), else 0.
+/// lowest level, else the bottom of the model (`bottom`), else 0 (the rule
+/// the 3D view and the 2D views' shadows share,
+/// [`Project::sun_ground_height`]).
 pub fn ground_height(project: &Project, view: &View, bottom: Option<f64>) -> f64 {
-    let sun_ground = view.sun.as_ref().and_then(|s| s.ground).and_then(|l| project.level(l)).map(|l| l.elevation);
-    let lowest = project.levels.iter().map(|l| l.elevation).filter(|z| z.is_finite()).min_by(f64::total_cmp);
-    sun_ground.filter(|z| z.is_finite()).or(lowest).or(bottom.filter(|z| z.is_finite())).unwrap_or(0.0)
+    project.sun_ground_height(view, bottom)
 }
 
 #[cfg(test)]

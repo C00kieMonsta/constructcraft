@@ -29,6 +29,7 @@ pub mod polygon;
 pub mod profile_sweep;
 pub mod ramp;
 pub mod rebar;
+pub mod region;
 pub mod roof_framing;
 pub mod roofs;
 mod rooms;

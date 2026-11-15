@@ -3596,7 +3596,6 @@ sun-altitude = 高度角
 sun-relative-to-view = 相对于视图
 sun-show-path = 显示日照轨迹
 sun-shadows = 阴影
-sun-shadows-3d = 阴影只在 3D 视图中投射。
 sun-ground = 标高处的地面
 sun-status = 太阳：方位角 { $azimuth } · 高度角 { $altitude }
 sun-status-daylight = 日出 { $sunrise } · 日落 { $sunset }

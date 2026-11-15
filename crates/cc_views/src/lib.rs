@@ -33,6 +33,7 @@ mod projected;
 pub mod raster;
 pub mod region;
 mod schedule;
+mod shadow;
 mod sheet;
 pub mod sheet_fields;
 pub mod sun_path;
@@ -46,6 +47,7 @@ pub use legend::legend;
 pub use plan::{is_structural, plan, plan_of, section_pieces};
 pub use projected::{Frame, Look, axonometric, elevation, section, view_frame};
 pub use schedule::{Cell, Row, Table, field_value, schedule, schedule_where, to_csv, totaled_by_default};
+pub use shadow::{Shadows, Skip as ShadowSkip};
 pub use sheet::{MARGIN, PlacedViewport, Sheet, SheetEnv, compose as compose_sheet, title_block_drawing};
 pub use sun_path::{SunDiagram, SunLabel, SunLabelKind, SunLine, SunLineKind, SunText, diagram as sun_diagram};
 
@@ -78,6 +80,10 @@ pub fn generate_temporary(
     label: &dyn Fn(&str) -> String,
     temporary: Option<&cc_core::TemporaryVisibility>,
 ) -> Option<Drawing2D> {
+    let mut resolver = graphics::Resolver::new(project, geom, view, temporary);
+    // What the view's graphics keep out of its sun's shadows.
+    let skip = Look::casts_shadows(view).then(|| shadow_skip(geom, &mut resolver));
+    let look = Look::of(project, geom, view, skip.as_ref());
     let mut d = match &view.kind {
         ViewKind::FloorPlan { level, cut_height, .. } | ViewKind::CeilingPlan { level, cut_height, .. } => {
             let ceiling = matches!(view.kind, ViewKind::CeilingPlan { .. });
@@ -94,7 +100,7 @@ pub fn generate_temporary(
                 plan::strip_fills(&mut d);
             } else if style.colored() {
                 let cut_z = project.level_elevation(*level) + cut_height;
-                let under = plan::style_underlay(geom, cut_z, ceiling, Look::of(project, view), &project.fill_patterns);
+                let under = plan::style_underlay(geom, cut_z, ceiling, look, &project.fill_patterns);
                 d.prims.splice(0..0, under);
             }
             if let Some(discipline) = services {
@@ -115,14 +121,14 @@ pub fn generate_temporary(
             d
         }
         ViewKind::Elevation { direction } => {
-            let mut d = elevation(project, geom, *direction, Look::of(project, view));
+            let mut d = elevation(project, geom, *direction, look);
             if let Some(frame) = projected::view_frame(view) {
                 annotate::projected_grids(&mut d, project, &frame, view.scale);
             }
             d
         }
         ViewKind::Section { start, end, depth, .. } => {
-            let mut d = section(project, geom, (*start, *end), *depth, view.scale, Look::of(project, view));
+            let mut d = section(project, geom, (*start, *end), *depth, view.scale, look);
             joins::merge(project, &mut d);
             if let Some(frame) = projected::view_frame(view) {
                 annotate::projected_grids(&mut d, project, &frame, view.scale);
@@ -131,7 +137,7 @@ pub fn generate_temporary(
         }
         ViewKind::ThreeD { camera, analytical: true, .. } => projected::analytical(project, geom, camera),
         ViewKind::ThreeD { camera, rebar: true, .. } => projected::rebar(geom, camera),
-        ViewKind::ThreeD { camera, .. } => axonometric(project, geom, camera, Look::of(project, view)),
+        ViewKind::ThreeD { camera, .. } => axonometric(project, geom, camera, look),
         ViewKind::Legend { types } => legend(project, types, view.scale),
         // No model geometry: only what the view owns, added below.
         ViewKind::Drafting { .. } => Drawing2D::default(),
@@ -163,7 +169,7 @@ pub fn generate_temporary(
     level_marks::level_marks(&mut d, project, view);
     bar_tags::bar_tags(&mut d, project, geom, view);
     callout::marks(&mut d, project, view);
-    graphics::apply(&mut d, &mut graphics::Resolver::new(project, geom, view, temporary), view.scale);
+    graphics::apply(&mut d, &mut resolver, view.scale);
     underlay(&mut d, project, geom, view);
     if let Some(rect) = view.crop.filter(|r| r.is_valid() && view.kind.croppable()) {
         callout::crop(&mut d, project, view.id, rect);
@@ -171,6 +177,34 @@ pub fn generate_temporary(
     // The sun path last, over everything: neither cropped nor overridden.
     sun_path::draw(&mut d, project, geom, view, label);
     Some(d)
+}
+
+/// The elements of `geom` that the view's graphics keep out of its sun's
+/// shadows: those it hides cast and catch none, those it makes see-through
+/// cast none (as in the 3D view, where hidden solids leave the scene and
+/// see-through ones the shadow map).
+fn shadow_skip(geom: &ModelGeometry, resolver: &mut graphics::Resolver) -> shadow::Skip {
+    let mut skip = shadow::Skip::default();
+    if resolver.is_trivial() {
+        return skip;
+    }
+    let mut last = None;
+    for id in geom.solids.iter().map(|s| s.element) {
+        // An element's solids follow one another.
+        if last.replace(id) == Some(id) {
+            continue;
+        }
+        match resolver.style(id) {
+            None => {
+                skip.hidden.insert(id);
+            }
+            Some(g) if g.transparency.is_some_and(|t| t > 0.001) => {
+                skip.clear.insert(id);
+            }
+            Some(_) => {}
+        }
+    }
+    skip
 }
 
 /// The plans of the levels a floor or ceiling plan shows under itself
@@ -259,6 +293,78 @@ mod tests {
         let project = cc_core::from_ron(include_str!("../../../examples/casa_simples.ccad")).unwrap();
         let geom = ModelGeometry::build(&project);
         (project, geom)
+    }
+
+    /// The sun's shadows of a drawing: black veils that belong to no element, by opacity.
+    fn shadow_veils(d: &Drawing2D) -> Vec<u8> {
+        d.prims
+            .iter()
+            .filter_map(|p| match p {
+                Prim::Fill { color: [0, 0, 0, a], element: None, .. } => Some(*a),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A view whose sun casts shadows draws them in the shaded style: on
+    /// the faces of elevations and 3D views, and in plans on the floors and
+    /// on the ground around the model. No shadows with them off, in hidden
+    /// line or with the sun below the horizon; hidden elements cast none.
+    #[test]
+    fn the_sun_casts_shadows_in_2d_views() {
+        use cc_core::sun::{SunMode, SunSettings};
+        let (project, geom) = sample();
+        let sun = |altitude: f64, shadows: bool| SunSettings {
+            mode: SunMode::Lighting { azimuth: 235.0, altitude, relative_to_view: false },
+            shadows,
+            show_path: false,
+            ..Default::default()
+        };
+        let ground = shadow::ground_veil();
+        for category in [ViewCategory::Elevation, ViewCategory::FloorPlan, ViewCategory::ThreeD] {
+            let mut v = project.views_of(category).next().unwrap().clone();
+            if category == ViewCategory::Elevation {
+                v = project.views.values().find(|v| v.name == "Sul").unwrap().clone();
+            }
+            v.visual_style = Some(cc_core::VisualStyle::Shaded);
+            let draw = |v: &View| generate(&project, &geom, v).unwrap();
+            v.sun = Some(sun(35.0, false));
+            let plain = draw(&v);
+            assert!(shadow_veils(&plain).is_empty(), "{category:?}: shadows off");
+            v.sun = Some(sun(35.0, true));
+            let cast = draw(&v);
+            let veils = shadow_veils(&cast);
+            assert!(veils.iter().any(|a| *a != ground), "{category:?}: shadows on faces");
+            let on_ground = veils.iter().filter(|a| **a == ground).count();
+            assert_eq!(on_ground > 0, category != ViewCategory::Elevation, "{category:?}: {on_ground} on the ground");
+            // Everything else is drawn as without them, in the same order.
+            let rest: Vec<&Prim> = cast
+                .prims
+                .iter()
+                .filter(|p| !matches!(p, Prim::Fill { color: [0, 0, 0, _], element: None, .. }))
+                .collect();
+            assert_eq!(rest.len(), plain.prims.len(), "{category:?}");
+            for (i, (a, b)) in rest.iter().zip(&plain.prims).enumerate() {
+                assert_eq!(*a, b, "{category:?}: primitive {i}");
+            }
+            // Hidden line shows none; neither does a sun at the horizon.
+            let hidden = View { visual_style: Some(cc_core::VisualStyle::HiddenLine), ..v.clone() };
+            assert!(shadow_veils(&draw(&hidden)).is_empty(), "{category:?}: hidden line");
+            let night = View { sun: Some(sun(0.0, true)), ..v.clone() };
+            assert!(shadow_veils(&draw(&night)).is_empty(), "{category:?}: no sun");
+            // With every category that stands hidden, nothing is left to cast or to catch.
+            let mut bare = v.clone();
+            for e in project.elements.values().filter(|e| geom.solids.iter().any(|s| s.element == e.id)) {
+                bare.graphics.hidden.insert(e.id);
+            }
+            assert!(shadow_veils(&draw(&bare)).is_empty(), "{category:?}: everything hidden");
+            // The roof alone hidden: fewer shadows in the elevation (its eaves cast none).
+            if category == ViewCategory::Elevation {
+                let mut open = v.clone();
+                open.graphics.hidden.extend(project.elements_of(Category::Roof).map(|e| e.id));
+                assert!(shadow_veils(&draw(&open)).len() < veils.len());
+            }
+        }
     }
 
     /// The names of the grids `d` draws, with where each line stands (x) when vertical.
