@@ -431,7 +431,7 @@ pub fn depth_end(start: &str, depth: &str) -> String {
     format!("({start}) + ({depth})")
 }
 
-/// Remove a piece of a component (a component keeps at least one).
+/// Remove a piece of a component (a component keeps at least one, but a niche may have none).
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ComponentPieceDelete {

@@ -184,3 +184,28 @@ fn plans_schedules_and_ifc_show_the_niche() {
     let geom = cc_geom::ModelGeometry::build(&back);
     assert_eq!(geom.walls[&ElementId(w)].recesses.len(), 1);
 }
+
+/// A niche component made with `component_create` (the New Component
+/// dialog's path) has no pieces, as its recess is its shape: it was refused
+/// as "the component has no pieces", and a niche saved to a `.ccomp` file
+/// did not load back.
+#[test]
+fn a_new_niche_component_needs_no_pieces() {
+    let mut s = Session::default();
+    let w = wall(&mut s);
+    let made = run(&mut s, "component_create", json!({"name": "Nicho X", "kind": "Niche"}));
+    let ty = id(&made);
+    let niche = id(&run(&mut s, "niche_create", json!({"wall": w, "offset": 1.0, "type": ty})));
+    let d = run(&mut s, "element_get", json!({"id": niche}))["derived"].clone();
+    assert!((d["volume"].as_f64().unwrap() - 0.036).abs() < 1e-9, "{d}");
+
+    // It saves to a component file and loads into another project.
+    let dir = std::env::temp_dir().join(format!("ccad-niche-comp-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("nicho.ccomp");
+    run(&mut s, "component_save", json!({"component": "Nicho X", "path": path}));
+    let mut other = Session::default();
+    run(&mut other, "component_load", json!({"path": path}));
+    let types = run(&mut other, "types_list", json!({"category": "niche"}));
+    assert!(types.as_array().unwrap().iter().any(|t| t["name"] == "Nicho X"), "{types}");
+}
