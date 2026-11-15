@@ -27,7 +27,9 @@ pub(crate) fn validate(def: &ComponentDef) -> Result<()> {
     let title_block = def.kind == cc_core::ComponentKind::TitleBlock;
     let two_d = def.kind.is_2d();
     let detail = def.kind == cc_core::ComponentKind::Detail;
-    if (def.items.is_empty() && !two_d) || (detail && def.sheet.is_empty()) {
+    // A niche's recess is its shape: its pieces (a shelf, a frame) are optional.
+    let niche = def.kind == cc_core::ComponentKind::Niche;
+    if (def.items.is_empty() && !two_d && !niche) || (detail && def.sheet.is_empty()) {
         return Err(EngineError::invalid("the component has no pieces"));
     }
     if two_d && !def.items.is_empty() {

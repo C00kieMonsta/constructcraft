@@ -150,10 +150,12 @@ fn validate(file: &ComponentFile) -> Result<(), ComponentFileError> {
         return bad("too many parameters, pieces or types");
     }
     // A title block or a detail component holds only 2D pieces (a title
-    // block possibly none), within their limits.
+    // block possibly none), within their limits; a niche's recess is its
+    // shape, so it may have no pieces.
     let two_d = def.kind.is_2d();
     let empty = if def.kind == crate::ComponentKind::Detail { def.sheet.is_empty() } else { def.items.is_empty() };
-    if (empty && def.kind != crate::ComponentKind::TitleBlock) || file.types.is_empty() {
+    let may_be_empty = matches!(def.kind, crate::ComponentKind::TitleBlock | crate::ComponentKind::Niche);
+    if (empty && !may_be_empty) || file.types.is_empty() {
         return bad("no pieces or no types");
     }
     if two_d && crate::title_block::repair_def(&mut def.clone()) > 0 {
