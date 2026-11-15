@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ConstructCraft — open source BIM</title>
-<meta name="description" content="Free and open source Building Information Modeling (BIM) software, written in Rust. Plans, sections, 3D, sheets, structure, MEP and IFC from one parametric model.">
+<meta name="description" content="Free and open source Building Information Modeling (BIM) software, written in Rust. Plans, sections, 3D, renders, sheets, structure, reinforcement, MEP, terrain and IFC from one parametric model.">
 <meta property="og:title" content="ConstructCraft — open source BIM">
 <meta property="og:description" content="Free and open source BIM software, written in Rust and independent of any commercial vendor.">
 <meta property="og:type" content="website">
@@ -19,7 +19,7 @@
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
   "name": "ConstructCraft",
-  "description": "Free and open source Building Information Modeling (BIM) software, written in Rust.",
+  "description": "Free and open source Building Information Modeling (BIM) software, written in Rust: architecture, structure, reinforcement, MEP, terrain, sheets, rendering and IFC from one parametric model.",
   "applicationCategory": "DesignApplication",
   "operatingSystem": "Windows, macOS, Linux",
   "license": "https://www.gnu.org/licenses/gpl-3.0.html",
@@ -167,6 +167,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 28px; justify-content: 
       <a href="#automation"><span lang="en">Automation</span><span lang="pt-BR">Automação</span></a>
       <a href="#download">Download</a>
       <a href="https://github.com/francisreboucas/constructcraft">GitHub</a>
+      <a href="https://discord.gg/y8ySJZjpK">Discord</a>
     </nav>
     <div class="lang-switch" role="group" aria-label="Language">
       <button type="button" data-set-lang="en" aria-pressed="true">EN</button>
@@ -196,8 +197,8 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 28px; justify-content: 
       </a>
     </div>
     <p class="meta">
-      <span lang="en">Windows · macOS · Linux — GPL-3.0-or-later — IFC4 export, IFC2X3/IFC4 import</span>
-      <span lang="pt-BR">Windows · macOS · Linux — GPL-3.0-or-later — exportação IFC4, importação IFC2X3/IFC4</span>
+      <span lang="en">Windows · macOS · Linux — GPL-3.0-or-later — metric or imperial — IFC4 export, IFC2X3/IFC4 import</span>
+      <span lang="pt-BR">Windows · macOS · Linux — GPL-3.0-or-later — métrico ou imperial — exportação IFC4, importação IFC2X3/IFC4</span>
     </p>
     <div class="shot">
       <img lang="en" src="screenshots/en/hero.png" width="2290" height="1207" alt="The ConstructCraft window: ribbon, project browser and properties, the ground floor plan and a 3D view of the house with its hip roof">
@@ -220,8 +221,8 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 28px; justify-content: 
           <span lang="pt-BR">Barra de acesso rápido no canto superior esquerdo, ribbon com abas, propriedades e navegador de projeto na lateral, atalhos de teclado padrão e de duas letras. Cada dica mostra o atalho, o que o botão faz, por que está indisponível e o comando do motor por trás dele. <strong>Ctrl+Shift+P</strong> abre uma paleta que encontra qualquer comando ou vista pelo nome.</span>
         </p>
         <p>
-          <span lang="en">Available in English, Portuguese (Brazil), Spanish, French, German, Italian, Lao, Polish, Ukrainian, Traditional Chinese and Simplified Chinese.</span>
-          <span lang="pt-BR">Disponível em inglês, português (Brasil), espanhol, francês, alemão, italiano, laosiano, polonês, ucraniano, chinês tradicional e chinês simplificado.</span>
+          <span lang="en">Available in English, Portuguese (Brazil), Spanish, French, German, Italian, Lao, Polish, Ukrainian, Traditional Chinese and Simplified Chinese and Japanese.</span>
+          <span lang="pt-BR">Disponível em inglês, português (Brasil), espanhol, francês, alemão, italiano, laosiano, polonês, ucraniano, chinês tradicional, chinês simplificado e japonês.</span>
         </p>
       </div>
     </div>
@@ -237,31 +238,55 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 28px; justify-content: 
       <div class="grid">
         <div class="card">
           <h3><span lang="en">Modeling</span><span lang="pt-BR">Modelagem</span></h3>
-          <p><span lang="en">Layered walls (straight or arc) with automatic joins, doors and windows, floors, ceilings, rooms with live area, and pitched roofs computed by a straight skeleton.</span><span lang="pt-BR">Paredes em camadas (retas ou em arco) com junções automáticas, portas e janelas, pisos, forros, ambientes com área viva e telhados calculados por esqueleto reto.</span></p>
+          <p><span lang="en">Layered walls, straight or arc, with automatic joins; curtain walls with grids, panels and mullions; doors and windows with their operation; wall niches, floors, ceilings, shafts, rooms with live area, sweeps, and pitched roofs computed by a straight skeleton, with tile coverings and their framing.</span><span lang="pt-BR">Paredes em camadas, retas ou em arco, com junções automáticas; fachadas-cortina com grades, painéis e montantes; portas e janelas com seu tipo de abertura; nichos, pisos, forros, shafts, ambientes com área viva, perfis de varredura e telhados calculados por esqueleto reto, com telhas e sua estrutura de madeira ou aço.</span></p>
+        </div>
+        <div class="card">
+          <h3><span lang="en">Massing and site</span><span lang="pt-BR">Massa e terreno</span></h3>
+          <p><span lang="en">Conceptual masses with mass floors, turned into walls, floors and a roof. Terrain from surveyed points with contours, building pads graded with exact cut and fill, and the site located on an OpenStreetMap map with its surroundings.</span><span lang="pt-BR">Massas conceituais com pavimentos, convertidas em paredes, pisos e cobertura. Terreno a partir de pontos levantados com curvas de nível, platôs com corte e aterro exatos, e o local da obra marcado em um mapa do OpenStreetMap com o entorno.</span></p>
         </div>
         <div class="card">
           <h3><span lang="en">Structure</span><span lang="pt-BR">Estrutura</span></h3>
-          <p><span lang="en">Columns, beams, steel and hollow sections, footings and rafts, reinforcement with a steel schedule, an analytical model, stairs and railings.</span><span lang="pt-BR">Pilares, vigas, perfis metálicos e tubulares, sapatas e radiers, armaduras com quadro de aço, modelo analítico, escadas e guarda-corpos.</span></p>
+          <p><span lang="en">Columns and beams, straight or arc, with steel, cold-formed, timber and concrete profiles from built-in catalogs; footings, strip footings, curved rafts, piles and pile caps; stairs, railings and an analytical model.</span><span lang="pt-BR">Pilares e vigas, retos ou em arco, com perfis de aço, formados a frio, madeira e concreto de catálogos embutidos; sapatas, sapatas corridas, radiers curvos, estacas e blocos; escadas, guarda-corpos e modelo analítico.</span></p>
+        </div>
+        <div class="card">
+          <h3><span lang="en">Steel and timber framing</span><span lang="pt-BR">Estruturas de aço e madeira</span></h3>
+          <p><span lang="en">Parametric steel buildings, trusses and bracing that keep their members in step, light steel and wood wall framing around openings, and base plates, end plates, fin plates and bolted timber joints.</span><span lang="pt-BR">Galpões metálicos, treliças e contraventamentos paramétricos que mantêm suas barras atualizadas, light steel frame e wood frame em volta das aberturas, e placas de base, chapas de topo, chapas de alma e ligações parafusadas em madeira.</span></p>
+        </div>
+        <div class="card">
+          <h3><span lang="en">Reinforcement</span><span lang="pt-BR">Armaduras</span></h3>
+          <p><span lang="en">Bars for beams, columns, walls, slabs and footings, following arcs and lapped at splices; bar marks, bending schedules with bar sketches, bar tags and a steel schedule.</span><span lang="pt-BR">Barras para vigas, pilares, paredes, lajes e fundações, acompanhando arcos e com traspasse nas emendas; posições (N1, N2…), tabela de dobramento com croquis, etiquetas de barras e quadro de aço.</span></p>
         </div>
         <div class="card">
           <h3><span lang="en">Building services</span><span lang="pt-BR">Instalações</span></h3>
-          <p><span lang="en">Pipe and conduit networks with derived fittings, sizing of drains, water pipes and circuits, panel diagrams and load schedules.</span><span lang="pt-BR">Redes de tubos e eletrodutos com conexões derivadas, dimensionamento de esgoto, água e circuitos, diagramas unifilares e quadros de carga.</span></p>
+          <p><span lang="en">Pipe, conduit and cable tray networks with derived fittings and valves, sizing of drains, water pipes and circuits, panel diagrams and load schedules, lightning protection with a rolling sphere check, and structured cabling.</span><span lang="pt-BR">Redes de tubos, eletrodutos e eletrocalhas com conexões derivadas e registros, dimensionamento de esgoto, água e circuitos, diagramas unifilares e quadros de carga, SPDA com verificação pela esfera rolante e cabeamento estruturado.</span></p>
         </div>
         <div class="card">
           <h3><span lang="en">Views and sheets</span><span lang="pt-BR">Vistas e folhas</span></h3>
-          <p><span lang="en">Plans, sections and elevations with hidden lines and cut hatching, schedules with CSV export, A0–A4 sheets exported to vector PDF, SVG and PNG.</span><span lang="pt-BR">Plantas, cortes e elevações com linhas ocultas e hachuras de corte, tabelas com exportação CSV, folhas A0–A4 em PDF vetorial, SVG e PNG.</span></p>
+          <p><span lang="en">Plans, sections and elevations with hidden lines and cut hatching, callouts and drafting views, schedules with filters, grouping and totals, editable title blocks, and A0–A4, ANSI and ARCH sheets exported to vector PDF, SVG, PNG and DXF.</span><span lang="pt-BR">Plantas, cortes e elevações com linhas ocultas e hachuras de corte, chamadas de detalhe e vistas de desenho, tabelas com filtros, agrupamento e totais, carimbos editáveis e folhas A0–A4, ANSI e ARCH exportadas em PDF vetorial, SVG, PNG e DXF.</span></p>
+        </div>
+        <div class="card">
+          <h3><span lang="en">Detailing</span><span lang="pt-BR">Detalhamento</span></h3>
+          <p><span lang="en">Detail lines, line styles, filled and masking regions, custom fill patterns with <code>.pat</code> import, reusable detail components, level marks and dimension styles.</span><span lang="pt-BR">Linhas de detalhe, estilos de linha, regiões preenchidas e de máscara, padrões de hachura próprios com importação de <code>.pat</code>, componentes de detalhe reutilizáveis, marcas de nível e estilos de cota.</span></p>
+        </div>
+        <div class="card">
+          <h3><span lang="en">Rendering and sun</span><span lang="pt-BR">Renderização e sol</span></h3>
+          <p><span lang="en">Shaded and textured views with material textures and painted faces, sun studies with shadows and the sun's path, and photorealistic path traced renders saved as PNG, JPEG, EXR or HDR.</span><span lang="pt-BR">Vistas sombreadas e com texturas de materiais e faces pintadas, estudos de insolação com sombras e a trajetória do sol, e renderizações fotorrealistas por path tracing salvas em PNG, JPEG, EXR ou HDR.</span></p>
         </div>
         <div class="card">
           <h3><span lang="en">Parametric components</span><span lang="pt-BR">Componentes paramétricos</span></h3>
-          <p><span lang="en">Furniture, fixtures, doors and windows made of extruded and revolved pieces whose sizes are expressions over named parameters, shared as <code>.ccomp</code> files.</span><span lang="pt-BR">Mobiliário, louças, portas e janelas feitos de peças extrudadas e revolucionadas cujas medidas são expressões sobre parâmetros, compartilhados em arquivos <code>.ccomp</code>.</span></p>
+          <p><span lang="en">Furniture, fixtures, doors and windows modeled in their own environment (sketch, extrude, revolve, sweep, blend) or written as Lua scripts, with sizes as expressions over named parameters, shared as <code>.ccomp</code> files.</span><span lang="pt-BR">Mobiliário, louças, portas e janelas modelados em ambiente próprio (esboço, extrusão, revolução, varredura, transição) ou escritos em Lua, com medidas como expressões sobre parâmetros, compartilhados em arquivos <code>.ccomp</code>.</span></p>
         </div>
         <div class="card">
-          <h3><span lang="en">Open IFC</span><span lang="pt-BR">IFC aberto</span></h3>
-          <p><span lang="en">IFC4 export and IFC2X3/IFC4 import with an in-house STEP reader, writer and geometry engine. No class is dropped on import.</span><span lang="pt-BR">Exportação IFC4 e importação IFC2X3/IFC4 com leitor, escritor STEP e motor de geometria próprios. Nenhuma classe é descartada na importação.</span></p>
+          <h3><span lang="en">Open IFC and imports</span><span lang="pt-BR">IFC aberto e importações</span></h3>
+          <p><span lang="en">IFC4 export and IFC2X3/IFC4 import with an in-house STEP reader, writer and geometry engine; no class is dropped on import. DWG, DXF, SVG and pictures as underlays, and SketchUp, OBJ and glTF models with their textures.</span><span lang="pt-BR">Exportação IFC4 e importação IFC2X3/IFC4 com leitor, escritor STEP e motor de geometria próprios; nenhuma classe é descartada na importação. DWG, DXF, SVG e imagens como referência, e modelos SketchUp, OBJ e glTF com suas texturas.</span></p>
         </div>
         <div class="card">
-          <h3><span lang="en">Phases and graphics</span><span lang="pt-BR">Fases e gráficos</span></h3>
-          <p><span lang="en">Renovation phases (existing, demolished, new), per-view overrides, rule-based filters, view templates and temporary hide/isolate.</span><span lang="pt-BR">Fases de reforma (existente, demolir, novo), sobreposições por vista, filtros por regra, modelos de vista e ocultar/isolar temporário.</span></p>
+          <h3><span lang="en">Phases, options and graphics</span><span lang="pt-BR">Fases, opções e gráficos</span></h3>
+          <p><span lang="en">Renovation phases, design options, per-view overrides, rule-based filters, view templates, detail levels, visual styles, temporary hide/isolate and a project browser organized your way.</span><span lang="pt-BR">Fases de reforma, opções de projeto, sobreposições por vista, filtros por regra, modelos de vista, níveis de detalhe, estilos visuais, ocultar/isolar temporário e um navegador de projeto organizado do seu jeito.</span></p>
+        </div>
+        <div class="card">
+          <h3><span lang="en">Metric or imperial</span><span lang="pt-BR">Métrico ou imperial</span></h3>
+          <p><span lang="en">Metric and imperial project templates: meters and millimeters, or feet and inches to 1/16", with sizes, slopes, scales and sheets in the units of the project.</span><span lang="pt-BR">Modelos de projeto métrico e imperial: metros e milímetros, ou pés e polegadas até 1/16", com medidas, inclinações, escalas e folhas nas unidades do projeto.</span></p>
         </div>
         <div class="card">
           <h3><span lang="en">Readable files</span><span lang="pt-BR">Arquivos legíveis</span></h3>
@@ -291,6 +316,10 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 28px; justify-content: 
           <span lang="pt-BR">Toda operação é um comando do motor com parâmetros JSON e um JSON Schema. A ferramenta <code>ccad</code> os executa pela linha de comando, por scripts ou como servidor <a href="https://modelcontextprotocol.io/">MCP</a> para agentes de IA. O aplicativo usa os mesmos comandos, e as macros gravam o que você faz.</span>
         </p>
         <p>
+          <span lang="en">Lua scripts call the same commands and keep their results in variables; plugins add commands of their own, installed from the <em>Plugins</em> window; and a visual programming editor wires commands and functions into graphs that update the elements they made.</span>
+          <span lang="pt-BR">Scripts Lua chamam os mesmos comandos e guardam os resultados em variáveis; plugins acrescentam comandos próprios, instalados pela janela <em>Plugins</em>; e um editor de programação visual liga comandos e funções em grafos que atualizam os elementos que criaram.</span>
+        </p>
+        <p>
           <a href="automation.html" lang="en">Automation guide →</a>
           <a href="automacao.html" lang="pt-BR">Guia de automação →</a>
         </p>
@@ -301,6 +330,8 @@ ccad -p house.ccad --save run wall_create \
      start=[0,0] end=[5,0] height=2.8
 ccad -p house.ccad run elements_list category=door
 ccad -p model.ifc --save-as model.ccad run project_info
+ccad -p house.ccad run view_render view="{3D}" path=house.png
+ccad lua examples/small_house.lua width=10
 
 # MCP clients
 { "mcpServers": { "constructcraft":
@@ -336,8 +367,10 @@ ccad -p model.ifc --save-as model.ccad run project_info
       <div class="docs">
         <a href="interface.html" lang="en">Interface guide<span>Ribbon, shortcuts and command palette</span></a>
         <a href="interface.pt-BR.html" lang="pt-BR">Guia da interface<span>Ribbon, atalhos e paleta de comandos</span></a>
-        <a href="automation.html" lang="en">Automation<span>Command line, scripts, macros and MCP</span></a>
-        <a href="automacao.html" lang="pt-BR">Automação<span>Linha de comando, scripts, macros e MCP</span></a>
+        <a href="component-modeling.html" lang="en">Component modeling<span>Parameters, sketches and pieces of components</span></a>
+        <a href="modelagem-de-componentes.html" lang="pt-BR">Modelagem de componentes<span>Parâmetros, esboços e peças de componentes</span></a>
+        <a href="automation.html" lang="en">Automation<span>Command line, scripts, Lua, plugins, macros and MCP</span></a>
+        <a href="automacao.html" lang="pt-BR">Automação<span>Linha de comando, scripts, Lua, plugins, macros e MCP</span></a>
         <a href="commands.html"><span lang="en" style="all:unset">Command reference</span><span lang="pt-BR" style="all:unset">Referência de comandos</span><span><span lang="en">Every engine command and parameter</span><span lang="pt-BR">Todos os comandos e parâmetros do motor</span></span></a>
         <a href="https://github.com/francisreboucas/constructcraft/blob/main/CONTRIBUTING.md"><span lang="en" style="all:unset">Contributing</span><span lang="pt-BR" style="all:unset">Como contribuir</span><span><span lang="en">Build, test and send changes</span><span lang="pt-BR">Compilar, testar e enviar mudanças</span></span></a>
       </div>
@@ -348,6 +381,7 @@ ccad -p model.ifc --save-as model.ccad run project_info
 <footer>
   <div class="wrap">
     <span>ConstructCraft — <span lang="en">free software under</span><span lang="pt-BR">software livre sob a</span> <a href="https://github.com/francisreboucas/constructcraft/blob/main/LICENSE">GPL-3.0-or-later</a></span>
+    <span><a href="https://discord.gg/y8ySJZjpK">Discord</a> · <a href="https://www.buymeacoffee.com/francisreboucas"><span lang="en">Buy me a coffee</span><span lang="pt-BR">Pague um café</span></a></span>
     <span><span lang="en">Independent of any commercial vendor.</span><span lang="pt-BR">Independente de qualquer fornecedor comercial.</span></span>
   </div>
 </footer>
