@@ -172,7 +172,7 @@ fn circle_circle(c0: DVec2, r0: f64, c1: DVec2, r1: f64) -> Vec<DVec2> {
 /// location line of a wall or beam (an arc for arc walls and arc beams) or grid.
 pub fn curve_of(e: &Element) -> Option<SketchCurve> {
     match &e.kind {
-        ElementKind::DetailLine(l) => Some(l.curve),
+        ElementKind::DetailLine(l) => Some(l.curve.clone()),
         ElementKind::Wall(w) if w.bulge != 0.0 => Some(SketchCurve::Arc { a: w.start, b: w.end, bulge: w.bulge }),
         ElementKind::Beam(b) if b.bulge != 0.0 => Some(SketchCurve::Arc { a: b.start, b: b.end, bulge: b.bulge }),
         _ => line_of(e).map(|(a, b)| SketchCurve::Line { a, b }),
@@ -182,7 +182,7 @@ pub fn curve_of(e: &Element) -> Option<SketchCurve> {
 /// The curve of a detail line.
 fn detail_curve(project: &Project, id: ElementId) -> Option<SketchCurve> {
     match project.element(id).map(|e| &e.kind) {
-        Some(ElementKind::DetailLine(l)) => Some(l.curve),
+        Some(ElementKind::DetailLine(l)) => Some(l.curve.clone()),
         _ => None,
     }
 }

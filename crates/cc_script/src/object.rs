@@ -467,6 +467,7 @@ fn profile_points(
                 v: expr(p.get("v"), "a point's v", piece)?,
                 radius,
                 ellipse: None,
+                bezier: None,
             })
         })
         .collect()

@@ -12,6 +12,7 @@
 //! other are errors, with the point where they happen.
 
 use crate::arc::{ARC_STEP, Arc, segments};
+use crate::spline;
 use crate::transform::PlanTransform;
 use glam::DVec2;
 use serde::{Deserialize, Serialize};
@@ -27,7 +28,7 @@ pub const MAX_CURVES: usize = 2000;
 pub const MAX_POINTS: usize = 8192;
 
 /// A curve of a sketch, in plan coordinates (meters).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SketchCurve {
     Line {
         a: DVec2,
@@ -56,6 +57,12 @@ pub enum SketchCurve {
         #[serde(default = "full_turn")]
         sweep_deg: f64,
     },
+    /// A chain of cubic Bézier segments through its control points
+    /// (`3n + 1` of them, see [`crate::spline`]); closed when it ends where
+    /// it starts.
+    Spline {
+        points: Vec<DVec2>,
+    },
 }
 
 fn full_turn() -> f64 {
@@ -71,6 +78,7 @@ impl SketchCurve {
     /// Finite numbers and a size: lines and arcs with distinct ends, positive radii.
     pub fn is_valid(&self) -> bool {
         match *self {
+            SketchCurve::Spline { ref points } => spline::is_valid(points),
             SketchCurve::Line { a, b } => a.is_finite() && b.is_finite() && a.distance(b) > JOIN_TOL,
             SketchCurve::Arc { a, b, bulge } => {
                 a.is_finite() && b.is_finite() && bulge.is_finite() && a.distance(b) > JOIN_TOL
@@ -93,6 +101,7 @@ impl SketchCurve {
         match *self {
             SketchCurve::Circle { .. } => true,
             SketchCurve::Ellipse { sweep_deg, .. } => sweep_deg.abs() >= 360.0 - 1e-9,
+            SketchCurve::Spline { ref points } => spline::is_closed(points),
             _ => false,
         }
     }
@@ -108,6 +117,7 @@ impl SketchCurve {
                 self.ellipse_point(start_deg.to_radians()),
                 self.ellipse_point((start_deg + sweep_deg).to_radians()),
             )),
+            SketchCurve::Spline { ref points } => points.first().copied().zip(points.last().copied()),
             SketchCurve::Circle { .. } => None,
         }
     }
@@ -153,6 +163,7 @@ impl SketchCurve {
                 let t0 = start_deg.to_radians();
                 (0..=n).map(|i| self.ellipse_point(t0 + sweep * i as f64 / n as f64)).collect()
             }
+            SketchCurve::Spline { ref points } => spline::flatten(points),
         }
     }
 
@@ -182,6 +193,7 @@ impl SketchCurve {
                 start_deg.to_radians(),
                 sweep_deg.clamp(-360.0, 360.0).to_radians(),
             ),
+            SketchCurve::Spline { ref points } => spline::swept_area(points),
         }
     }
 
@@ -193,6 +205,7 @@ impl SketchCurve {
     /// The same curve run the other way.
     pub fn reversed(&self) -> Self {
         match *self {
+            SketchCurve::Spline { ref points } => SketchCurve::Spline { points: spline::reversed(points) },
             SketchCurve::Line { a, b } => SketchCurve::Line { a: b, b: a },
             SketchCurve::Arc { a, b, bulge } => SketchCurve::Arc { a: b, b: a, bulge: -bulge },
             SketchCurve::Ellipse { center, radii, rotation_deg, start_deg, sweep_deg } => SketchCurve::Ellipse {
@@ -202,7 +215,7 @@ impl SketchCurve {
                 start_deg: start_deg + sweep_deg,
                 sweep_deg: -sweep_deg,
             },
-            c @ SketchCurve::Circle { .. } => c,
+            ref c @ SketchCurve::Circle { .. } => c.clone(),
         }
     }
 
@@ -231,6 +244,7 @@ impl SketchCurve {
                     *sweep_deg = -*sweep_deg;
                 }
             }
+            SketchCurve::Spline { points } => points.iter_mut().for_each(|p| *p = t.apply(*p)),
         }
     }
 }
@@ -399,7 +413,7 @@ impl Sketch {
         }
         // Open curves meet at nodes: ends within the tolerance.
         let open: Vec<(SketchCurve, DVec2, DVec2)> =
-            self.curves.iter().filter_map(|c| c.ends().map(|(a, b)| (*c, a, b))).collect();
+            self.curves.iter().filter_map(|c| c.ends().map(|(a, b)| (c.clone(), a, b))).collect();
         let mut nodes: Vec<DVec2> = Vec::new();
         let node_of = |p: DVec2, nodes: &mut Vec<DVec2>| match nodes.iter().position(|q| q.distance(p) <= JOIN_TOL) {
             Some(i) => i,
@@ -435,9 +449,9 @@ impl Sketch {
             // Every curve is used once: the walk is bounded by their count.
             for _ in 0..open.len() {
                 used[curve] = true;
-                let (c, _, _) = open[curve];
+                let Some((c, _, _)) = open.get(curve) else { break };
                 let (s, e) = ends[curve];
-                let (c, next) = if s == from { (c, e) } else { (c.reversed(), s) };
+                let (c, next) = if s == from { (c.clone(), e) } else { (c.reversed(), s) };
                 loop_area += c.swept_area();
                 let mut cp = c.points();
                 // The joint is written once: the next curve starts there.

@@ -136,7 +136,7 @@ fn loop_points(vertices: &[(DVec2, Segment)], old: &[(ProfilePoint, DVec2, Segme
                     let r = (radius.abs() * 1e6).ceil() / 1e6;
                     ProfilePoint::arc(um(p.x), um(p.y), um(r * radius.signum()))
                 }
-                Segment::Ellipse { .. } => {
+                Segment::Ellipse { .. } | Segment::Bezier { .. } => {
                     profile::written(&[(p, s)]).pop().unwrap_or_else(|| ProfilePoint::new(um(p.x), um(p.y)))
                 }
             }
@@ -164,7 +164,7 @@ fn section_points(
         for (k, _) in links {
             if let (Some(u), Some(c)) = (used.get_mut(k), curves.get(k)) {
                 *u = true;
-                group.push(*c);
+                group.push(c.clone());
             }
         }
         loops.push(group);

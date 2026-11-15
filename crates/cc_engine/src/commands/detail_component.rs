@@ -140,7 +140,7 @@ fn pieces_of(p: &Project, view: ViewId, ids: &[ElementId], origin: DVec2) -> Res
         let name = |what: &str| format!("{what} {}", id.0);
         match &e.kind {
             ElementKind::DetailLine(l) => {
-                let mut curve = l.curve;
+                let mut curve = l.curve.clone();
                 curve.transform(&PlanTransform::translate(-origin));
                 let (w, color, pattern) = l.style.pen(&p.line_styles);
                 if let Some(s) = stroke_of(&curve) {

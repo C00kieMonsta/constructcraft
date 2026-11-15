@@ -137,6 +137,7 @@ pub enum Icon {
     DrawPolygonOut,
     DrawCircle,
     DrawEllipse,
+    DrawSpline,
     DrawArc3,
     DrawArcCenter,
     DrawArcTangent,
@@ -202,7 +203,7 @@ pub enum Icon {
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 187] = [
+    pub const ALL: [Icon; 188] = [
         Icon::New,
         Icon::Open,
         Icon::Save,
@@ -329,6 +330,7 @@ impl Icon {
         Icon::DrawPolygonOut,
         Icon::DrawCircle,
         Icon::DrawEllipse,
+        Icon::DrawSpline,
         Icon::DrawArc3,
         Icon::DrawArcCenter,
         Icon::DrawArcTangent,
@@ -521,6 +523,7 @@ impl Icon {
             Icon::DrawPolygonOut => include_str!("../../../assets/icons/ui/draw-polygon-out.svg"),
             Icon::DrawCircle => include_str!("../../../assets/icons/ui/draw-circle.svg"),
             Icon::DrawEllipse => include_str!("../../../assets/icons/ui/draw-ellipse.svg"),
+            Icon::DrawSpline => include_str!("../../../assets/icons/ui/draw-spline.svg"),
             Icon::DrawArc3 => include_str!("../../../assets/icons/ui/draw-arc3.svg"),
             Icon::DrawArcCenter => include_str!("../../../assets/icons/ui/draw-arc-center.svg"),
             Icon::DrawArcTangent => include_str!("../../../assets/icons/ui/draw-arc-tangent.svg"),

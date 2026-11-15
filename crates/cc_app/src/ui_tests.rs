@@ -1466,23 +1466,23 @@ fn sketch_mode_creates_and_edits_outlines() {
     crate::actions::activate_category_tool(&mut state, cc_core::Category::Mass);
     assert!(matches!(state.sketch.as_ref().map(|s| s.target), Some(Target::New { .. })));
     let circle = SketchCurve::Circle { center: glam::DVec2::new(30.0, 30.0), radius: 3.0 };
-    state.sketch.as_mut().unwrap().add(vec![circle]);
+    state.sketch.as_mut().unwrap().add(vec![circle.clone()]);
     crate::commands::run(&mut state, &egui::Context::default(), UiCommand::SketchFinish);
     assert!(state.sketch.is_none(), "{}", state.message);
     let mass = *state.selection.iter().next().unwrap();
     let drawn = state.project().element(mass).and_then(|e| e.drawn_sketch()).cloned().unwrap();
-    assert_eq!(drawn.curves, vec![circle]);
+    assert_eq!(drawn.curves, vec![circle.clone()]);
 
     // Edit Boundary opens the curves; a bigger circle draws the outline again.
     assert_eq!(UiCommand::EditBoundary.unavailable(&state), None);
     crate::commands::run(&mut state, &egui::Context::default(), UiCommand::EditBoundary);
     let s = state.sketch.as_mut().unwrap();
-    assert_eq!((s.target, s.draw, s.curves.clone()), (Target::Edit { id: mass }, Draw::Select, vec![circle]));
+    assert_eq!((s.target, s.draw, s.curves.clone()), (Target::Edit { id: mass }, Draw::Select, vec![circle.clone()]));
     let bigger = SketchCurve::Circle { center: glam::DVec2::new(30.0, 30.0), radius: 4.0 };
-    s.set_curve(0, bigger);
+    s.set_curve(0, bigger.clone());
     crate::commands::run(&mut state, &egui::Context::default(), UiCommand::SketchFinish);
     let e = state.project().element(mass).unwrap();
-    assert_eq!(e.drawn_sketch().unwrap().curves, vec![bigger]);
+    assert_eq!(e.drawn_sketch().unwrap().curves, vec![bigger.clone()]);
 
     // Inside a sketch, undo undoes the sketch's own changes; an open sketch does not finish.
     crate::commands::run(&mut state, &egui::Context::default(), UiCommand::EditBoundary);
@@ -1491,7 +1491,7 @@ fn sketch_mode_creates_and_edits_outlines() {
     crate::commands::run(&mut state, &egui::Context::default(), UiCommand::Delete);
     assert!(state.sketch.as_ref().unwrap().curves.is_empty());
     crate::commands::run(&mut state, &egui::Context::default(), UiCommand::Undo);
-    assert_eq!(state.sketch.as_ref().unwrap().curves, vec![bigger]);
+    assert_eq!(state.sketch.as_ref().unwrap().curves, vec![bigger.clone()]);
     state
         .sketch
         .as_mut()
@@ -1589,7 +1589,7 @@ fn sketches_take_typed_lengths() {
     harness.key_press(egui::Key::Enter);
     harness.run();
     let s = sketch(&harness);
-    let Some(SketchCurve::Line { a, b }) = s.curves.last().copied() else { panic!("{:?}", s.curves) };
+    let Some(SketchCurve::Line { a, b }) = s.curves.last().cloned() else { panic!("{:?}", s.curves) };
     assert!((a.distance(b) - 3.0).abs() < 1e-9 && (b - a).x > 0.0, "{a} {b}");
     assert_eq!(s.picks, vec![b], "the line goes on from its end");
     // Escape drops the typed value first, then the chain.
@@ -3346,7 +3346,7 @@ fn detail_lines_take_typed_lengths() {
             .elements
             .values()
             .filter_map(|e| match &e.kind {
-                cc_core::ElementKind::DetailLine(l) if l.view == view => Some(l.curve),
+                cc_core::ElementKind::DetailLine(l) if l.view == view => Some(l.curve.clone()),
                 _ => None,
             })
             .collect()

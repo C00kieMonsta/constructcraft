@@ -80,6 +80,9 @@ pub enum Draw {
     ArcTangent,
     /// The center, the end of an axis, then the other axis's half length.
     Ellipse,
+    /// Points a smooth curve passes through: a click on the last point
+    /// (a double click) or Enter ends it, a click on the first closes it.
+    Spline,
     /// Move the picked curves: base point, then target.
     Move,
     /// Copies of the picked curves: base point, then targets.
@@ -354,9 +357,9 @@ impl Session {
             return;
         }
         self.remember();
-        for &(i, c) in changes {
-            if let Some(slot) = self.curves.get_mut(i) {
-                *slot = c;
+        for (i, c) in changes {
+            if let Some(slot) = self.curves.get_mut(*i) {
+                *slot = c.clone();
             }
         }
         self.curves.extend_from_slice(added);
@@ -369,7 +372,7 @@ impl Session {
             .selected
             .iter()
             .filter_map(|&i| {
-                let mut c = *self.curves.get(i)?;
+                let mut c = self.curves.get(i)?.clone();
                 c.transform(t);
                 Some((i, c))
             })
@@ -379,7 +382,7 @@ impl Session {
         }
         let start = self.curves.len();
         if copy {
-            let added: Vec<SketchCurve> = moved.iter().map(|(_, c)| *c).collect();
+            let added: Vec<SketchCurve> = moved.iter().map(|(_, c)| c.clone()).collect();
             self.change(&[], &added);
             (start..self.curves.len()).collect()
         } else {
@@ -403,6 +406,8 @@ impl Session {
                     }
                 }
                 SketchCurve::Circle { center, .. } | SketchCurve::Ellipse { center, .. } => out.push(center),
+                // The points it passes through.
+                SketchCurve::Spline { ref points } => out.extend(points.iter().step_by(3).copied()),
             }
         }
         out
@@ -458,12 +463,99 @@ fn grips(c: &SketchCurve, curve: usize) -> Vec<(Grip, DVec2)> {
             }
             out
         }
+        // Its ends (0, 1, so joined ends move together), then every other
+        // control point: the points it passes through and their handles.
+        SketchCurve::Spline { ref points } => {
+            let last = points.len().saturating_sub(1);
+            let mut out: Vec<(Grip, DVec2)> = Vec::with_capacity(points.len());
+            if let Some((a, b)) = c.ends() {
+                out.push((g(0), a));
+                if !c.is_closed() {
+                    out.push((g(1), b));
+                }
+            }
+            for (k, p) in points.iter().enumerate().skip(1).take(last.saturating_sub(1)) {
+                if let Ok(which) = u8::try_from(SPLINE_GRIP + k) {
+                    out.push((g(which), *p));
+                }
+            }
+            out
+        }
     }
+}
+
+fn spline_closed(points: &[DVec2]) -> bool {
+    cc_core::spline::is_closed(points)
+}
+
+/// The grip number of a spline's control point 0 (see [`grips`]).
+const SPLINE_GRIP: usize = 10;
+
+/// A spline with its control point `k` moved to `p`: a point it passes
+/// through takes its handles along; a handle keeps the curve smooth there,
+/// turning the other handle of its point to stay in line.
+fn spline_moved(points: &[DVec2], closed: bool, k: usize, p: DVec2) -> Vec<DVec2> {
+    let mut out = points.to_vec();
+    let last = out.len().saturating_sub(1);
+    let Some(&old) = out.get(k) else { return out };
+    let shift = p - old;
+    match k % 3 {
+        0 => {
+            let mut moving = vec![k];
+            if closed && (k == 0 || k == last) {
+                moving = vec![0, last];
+            }
+            for &i in &moving {
+                if let Some(q) = out.get_mut(i) {
+                    *q += shift;
+                }
+            }
+            // Its handles: next to it, and across the closing point.
+            let mut handles = vec![k.wrapping_sub(1), k + 1];
+            if closed && (k == 0 || k == last) {
+                handles = vec![1, last.wrapping_sub(1)];
+            }
+            for i in handles {
+                if let Some(q) = out.get_mut(i) {
+                    *q += shift;
+                }
+            }
+        }
+        r => {
+            if let Some(q) = out.get_mut(k) {
+                *q = p;
+            }
+            // Its point, and the handle on the other side of it.
+            let (knot, other) = if r == 1 { (k - 1, k.wrapping_sub(2)) } else { (k + 1, k + 2) };
+            let (knot, other) = match (closed, knot, other) {
+                (true, 0, _) => (0, last.wrapping_sub(1)),
+                (true, kn, _) if kn == last => (last, 1),
+                _ => (knot, other),
+            };
+            if let (Some(&center), Some(&o)) = (out.get(knot), out.get(other)) {
+                let length = o.distance(center);
+                if let Some(dir) = (center - p).try_normalize()
+                    && let Some(q) = out.get_mut(other)
+                {
+                    *q = center + dir * length;
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Curve `c` with its grip `which` moved to `p`.
 pub(crate) fn moved(c: &SketchCurve, which: u8, p: DVec2) -> SketchCurve {
-    match (*c, which) {
+    if let SketchCurve::Spline { points } = c {
+        let k = match which {
+            0 => 0,
+            1 => points.len().saturating_sub(1),
+            w => (w as usize).saturating_sub(SPLINE_GRIP),
+        };
+        return SketchCurve::Spline { points: spline_moved(points, c.is_closed(), k, p) };
+    }
+    match (c.clone(), which) {
         (SketchCurve::Line { b, .. }, 0) => SketchCurve::Line { a: p, b },
         (SketchCurve::Line { a, .. }, 1) => SketchCurve::Line { a, b: p },
         (SketchCurve::Arc { b, bulge, .. }, 0) => SketchCurve::Arc { a: p, b, bulge },
@@ -496,7 +588,7 @@ pub(crate) fn moved(c: &SketchCurve, which: u8, p: DVec2) -> SketchCurve {
                 sweep_deg,
             }
         }
-        _ => *c,
+        _ => c.clone(),
     }
 }
 
@@ -850,6 +942,10 @@ pub fn interact(
         s.typed.clear();
     }
     let enter = !s.typed.is_empty() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    // Enter ends a spline where it is.
+    if s.draw == Draw::Spline && s.typed.is_empty() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+        finish_spline(s, false);
+    }
     let click = resp.clicked() || enter;
     let had_typed = !s.typed.is_empty();
     if s.draw == Draw::Select {
@@ -1018,7 +1114,7 @@ fn select(
                 // Every curve end at the grip's point follows it.
                 for (k, other) in before.iter().enumerate() {
                     if let Some((a, b)) = other.ends() {
-                        let mut c2 = *other;
+                        let mut c2 = other.clone();
                         if a.distance(at) <= JOIN_TOL {
                             c2 = moved(&c2, 0, p);
                         }
@@ -1104,6 +1200,10 @@ pub(crate) fn draw(click: bool, painter: &Painter, s: &mut Session, p: DVec2, xf
             painter.add(egui::Shape::line(pts, Stroke::new(1.2, PREVIEW)));
         }
     };
+    if s.draw == Draw::Spline {
+        draw_spline(click, painter, s, p, xf, tol);
+        return;
+    }
     let picks = s.picks.clone();
     let shape = next_curves(s, &picks, p, tol);
     match (&shape, picks.last()) {
@@ -1148,6 +1248,47 @@ pub(crate) fn draw(click: bool, painter: &Painter, s: &mut Session, p: DVec2, xf
     if matches!(s.draw, Draw::Line | Draw::ArcTangent) && s.chain && !closed(s) {
         s.picks.push(p);
     }
+}
+
+/// The spline tool: the curve through the picks and the cursor; a click
+/// adds a point, ends the curve on the last one or closes it on the first.
+fn draw_spline(click: bool, painter: &Painter, s: &mut Session, p: DVec2, xf: &Xf, tol: f64) {
+    let picks = s.picks.clone();
+    let on_first = picks.len() >= 3 && picks.first().is_some_and(|f| f.distance(p) <= tol);
+    let on_last = picks.len() >= 2 && picks.last().is_some_and(|l| l.distance(p) <= tol);
+    let mut through = picks.clone();
+    if !on_last && !on_first {
+        through.push(p);
+    }
+    let points = cc_core::spline::interpolate(&through, on_first);
+    let curve = SketchCurve::Spline { points };
+    if curve.is_valid() {
+        paint_curve(painter, xf, &curve, 1.2, PREVIEW);
+    }
+    for q in &picks {
+        painter.circle_stroke(xf.to_screen(*q), 3.0, Stroke::new(1.2, PREVIEW));
+    }
+    if !click {
+        return;
+    }
+    if on_first {
+        finish_spline(s, true);
+    } else if on_last {
+        finish_spline(s, false);
+    } else if picks.len() < cc_core::spline::MAX_SEGMENTS && picks.last().is_none_or(|l| l.distance(p) > JOIN_TOL) {
+        s.picks.push(p);
+    }
+}
+
+/// Add the spline through the picks (closed back to the first when
+/// `closed`) and start a new one.
+pub(crate) fn finish_spline(s: &mut Session, closed: bool) {
+    let points = cc_core::spline::interpolate(&s.picks, closed);
+    let curve = SketchCurve::Spline { points };
+    if curve.is_valid() {
+        s.add(vec![curve]);
+    }
+    s.picks.clear();
 }
 
 /// The curves the picks and the point `p` make with the active tool.
@@ -1287,7 +1428,7 @@ fn modify(
         };
         if let Some(t) = &t {
             for c in s.selected.iter().filter_map(|&i| s.curves.get(i)) {
-                let mut c = *c;
+                let mut c = c.clone();
                 c.transform(t);
                 paint_curve(painter, xf, &c, 1.2, PREVIEW);
             }
@@ -1356,7 +1497,7 @@ fn modify(
                 paint_curve(painter, xf, c, 2.4, HIGHLIGHT);
             }
             let j = hit.filter(|j| *j != first)?;
-            let (c1, c2) = (*s.curves.get(first)?, *s.curves.get(j)?);
+            let (c1, c2) = (s.curves.get(first)?.clone(), s.curves.get(j)?.clone());
             hover(painter, Some(j));
             let changes = if s.draw == Draw::TrimCorner {
                 sketch_edit::trim_corner(&c1, at, &c2, raw).map(|(a, b)| vec![(first, a), (j, b)])
@@ -1385,7 +1526,7 @@ fn modify(
         Draw::Split => {
             hover(painter, hit);
             let i = hit?;
-            let c = *s.curves.get(i)?;
+            let c = s.curves.get(i)?.clone();
             let Some((a, b)) = sketch_edit::split(&c, p) else {
                 return click.then(|| t!("sketch-no-split"));
             };
@@ -1447,6 +1588,7 @@ pub fn ribbon(ui: &mut Ui, state: &mut AppState) {
                 &[SketchLine, SketchRect, SketchPolygon],
                 &[SketchPolygonOut, SketchCircle, SketchEllipse],
                 &[SketchArc3, SketchArcCenter, SketchArcTangent],
+                &[SketchSpline],
             ],
         );
         crate::ribbon::env_stacks(
@@ -1565,6 +1707,8 @@ pub fn options(ui: &mut Ui, state: &mut AppState) {
         (Draw::ArcTangent, 0) => t!("hint-sketch-arc-tangent"),
         (Draw::ArcTangent, _) => t!("hint-sketch-arc-end"),
         (Draw::Ellipse, 1) => t!("hint-sketch-axis"),
+        (Draw::Spline, 0) => t!("hint-sketch-spline"),
+        (Draw::Spline, _) => t!("hint-sketch-spline-next"),
         (Draw::Ellipse, _) => t!("hint-sketch-other-axis"),
         (Draw::Move | Draw::Copy, 0) => t!("hint-base-point"),
         (Draw::Move | Draw::Copy, _) => t!("hint-sketch-move-target"),
@@ -1608,8 +1752,8 @@ pub fn properties(ui: &mut Ui, state: &mut AppState) {
         });
         return;
     };
-    let Some(mut c) = s.curves.get(i).copied() else { return };
-    let before = c;
+    let Some(mut c) = s.curves.get(i).cloned() else { return };
+    let before = c.clone();
     let point = |ui: &mut Ui, label: &str, p: &mut DVec2| {
         row(ui, label, |ui| {
             // X and Y share the value column.
@@ -1624,6 +1768,7 @@ pub fn properties(ui: &mut Ui, state: &mut AppState) {
         SketchCurve::Arc { .. } => t!("sketch-arc"),
         SketchCurve::Circle { .. } => t!("sketch-circle"),
         SketchCurve::Ellipse { .. } => t!("sketch-ellipse"),
+        SketchCurve::Spline { .. } => t!("sketch-spline"),
     };
     section(ui, "sketch-curve", title, |ui| match &mut c {
         SketchCurve::Line { a, b } => {
@@ -1654,6 +1799,11 @@ pub fn properties(ui: &mut Ui, state: &mut AppState) {
             row(ui, &t!("sketch-radius-x"), |ui| ui.add(length_drag(&mut radii.x)));
             row(ui, &t!("sketch-radius-y"), |ui| ui.add(length_drag(&mut radii.y)));
             row(ui, &t!("prop-rotation"), |ui| ui.add(egui::DragValue::new(rotation_deg).speed(1.0).suffix("°")));
+        }
+        SketchCurve::Spline { points } => {
+            let count = points.len() / 3 + usize::from(!spline_closed(points));
+            readonly_row(ui, &t!("sketch-spline-points"), count.to_string());
+            readonly_row(ui, &t!("prop-length"), cc_views::format::length(cc_core::spline::length(points)));
         }
     });
     if c != before {
@@ -1690,6 +1840,49 @@ mod tests {
         let e = next_curves(&s, &[p(0.0, 0.0), p(0.0, 3.0)], p(2.0, 1.0), 0.1).unwrap();
         assert!(matches!(e[0], SketchCurve::Ellipse { radii, rotation_deg, .. }
             if (radii - p(3.0, 2.0)).length() < 1e-9 && (rotation_deg - 90.0).abs() < 1e-9));
+    }
+
+    /// The spline tool: clicks add points the curve passes through; a click
+    /// on the last point ends it, on the first closes it, Enter ends it.
+    #[test]
+    fn the_spline_tool_draws_through_its_points() {
+        let ctx = egui::Context::default();
+        let painter = egui::Painter::new(ctx, egui::LayerId::background(), egui::Rect::EVERYTHING);
+        let xf = Xf { screen: egui::Pos2::new(0.0, 800.0), origin: DVec2::ZERO, scale: 100.0 };
+        let p = |x: f64, y: f64| DVec2::new(x, y);
+        let mut s = session(Draw::Spline);
+        for q in [p(0.0, 0.0), p(1.0, 1.0), p(2.0, 0.0)] {
+            draw(true, &painter, &mut s, q, &xf, 0.05);
+        }
+        assert_eq!(s.picks.len(), 3);
+        // The last point again: an open spline through the three.
+        draw(true, &painter, &mut s, p(2.0, 0.0), &xf, 0.05);
+        assert!(s.picks.is_empty());
+        let Some(SketchCurve::Spline { points }) = s.curves.first() else { panic!("{:?}", s.curves) };
+        assert_eq!(cc_core::spline::segment_count(points), Some(2));
+        assert!(cc_core::spline::point_at(points, 1.0).unwrap().distance(p(1.0, 1.0)) < 1e-12);
+        // Back on the first point: closed.
+        for q in [p(0.0, 3.0), p(1.0, 4.0), p(2.0, 3.0), p(0.0, 3.0)] {
+            draw(true, &painter, &mut s, q, &xf, 0.05);
+        }
+        assert!(s.curves.get(1).is_some_and(|c| c.is_closed()), "{:?}", s.curves);
+        assert!((Sketch { curves: vec![s.curves[1].clone()] }).outline().is_ok());
+        // Enter ends it where it is; one point makes nothing.
+        draw(true, &painter, &mut s, p(5.0, 5.0), &xf, 0.05);
+        draw(true, &painter, &mut s, p(6.0, 5.0), &xf, 0.05);
+        finish_spline(&mut s, false);
+        assert_eq!(s.curves.len(), 3);
+        draw(true, &painter, &mut s, p(9.0, 9.0), &xf, 0.05);
+        finish_spline(&mut s, false);
+        assert_eq!(s.curves.len(), 3);
+        // Its grips: a point it passes through takes its handles along.
+        let spline = s.curves[0].clone();
+        let SketchCurve::Spline { points } = &spline else { panic!() };
+        let moved = moved(&spline, (SPLINE_GRIP + 3) as u8, p(1.0, 2.0));
+        let SketchCurve::Spline { points: after } = &moved else { panic!() };
+        assert_eq!(after[3], p(1.0, 2.0));
+        assert!((after[2] - points[2] - p(0.0, 1.0)).length() < 1e-12);
+        assert!((after[4] - points[4] - p(0.0, 1.0)).length() < 1e-12);
     }
 
     #[test]

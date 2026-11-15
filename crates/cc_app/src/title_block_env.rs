@@ -1397,6 +1397,7 @@ fn scaled(c: &SketchCurve, k: f64) -> SketchCurve {
         SketchCurve::Ellipse { center, radii, rotation_deg, start_deg, sweep_deg } => {
             SketchCurve::Ellipse { center: center * k, radii: radii * k, rotation_deg, start_deg, sweep_deg }
         }
+        SketchCurve::Spline { ref points } => SketchCurve::Spline { points: points.iter().map(|p| *p * k).collect() },
     }
 }
 
@@ -1416,7 +1417,7 @@ pub fn chains(curves: &[SketchCurve]) -> Vec<(Vec<SketchCurve>, bool)> {
             match (used.get_mut(k), curves.get(k)) {
                 (Some(u), Some(c)) if !*u => {
                     *u = true;
-                    chain.push(*c);
+                    chain.push(c.clone());
                 }
                 _ => whole = false,
             }
@@ -1424,7 +1425,7 @@ pub fn chains(curves: &[SketchCurve]) -> Vec<(Vec<SketchCurve>, bool)> {
         if chain.is_empty() {
             if let (Some(u), Some(c)) = (used.get_mut(i), curves.get(i)) {
                 *u = true;
-                chain.push(*c);
+                chain.push(c.clone());
             }
             whole = false;
         }
@@ -1453,6 +1454,12 @@ fn point_of(a: &SketchPointArg) -> ProfilePoint {
             ry: expr_text(&e.ry),
             rotation: e.rotation.as_ref().map(expr_text).unwrap_or_default(),
             clockwise: e.clockwise,
+        }),
+        bezier: a.bezier.as_ref().map(|b| cc_core::profile::ProfileBezier {
+            u1: expr_text(&b.u1),
+            v1: expr_text(&b.v1),
+            u2: expr_text(&b.u2),
+            v2: expr_text(&b.v2),
         }),
     }
 }

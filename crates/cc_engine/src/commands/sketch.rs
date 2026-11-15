@@ -93,6 +93,21 @@ pub enum CurveArg {
         #[serde(default)]
         rotation: f64,
     },
+    /// A smooth curve: `through` the points given (at least 2), or by the
+    /// `control` points of its cubic Bézier segments (`p0, c1, c2, p1, c1,
+    /// c2, p2…`, 3n + 1 of them, as `sketch_get` gives it); closed back to
+    /// its first point with `closed` (through points only).
+    Spline {
+        /// Points the curve passes through, in order.
+        #[serde(default)]
+        through: Option<Vec<Point>>,
+        /// The control points of its Bézier segments.
+        #[serde(default)]
+        control: Option<Vec<Point>>,
+        /// Closed back to the first point (default false).
+        #[serde(default)]
+        closed: bool,
+    },
 }
 
 fn yes() -> bool {
@@ -103,6 +118,25 @@ impl CurveArg {
     /// The sketch curves this argument draws.
     pub fn curves(&self) -> Result<Vec<SketchCurve>> {
         let curves = match *self {
+            CurveArg::Spline { ref through, ref control, closed } => {
+                let pts = |list: &[Point]| list.iter().map(|p| point(*p)).collect::<Result<Vec<DVec2>>>();
+                let points = match (through, control) {
+                    (Some(t), None) => cc_core::spline::interpolate(&pts(t)?, closed),
+                    (None, Some(c)) if !closed => pts(c)?,
+                    _ => {
+                        return Err(EngineError::invalid(
+                            "give a spline's `through` points (optionally `closed`) or its `control` points",
+                        ));
+                    }
+                };
+                if !cc_core::spline::is_valid(&points) {
+                    return Err(EngineError::invalid(format!(
+                        "a spline needs 2 or more distinct points through, or 3n + 1 control points, at most {} segments",
+                        cc_core::spline::MAX_SEGMENTS
+                    )));
+                }
+                vec![SketchCurve::Spline { points }]
+            }
             CurveArg::Line { start, end } => vec![SketchCurve::Line { a: point(start)?, b: point(end)? }],
             CurveArg::Arc { start, end, bulge, through } => {
                 let (a, b) = (point(start)?, point(end)?);
@@ -154,6 +188,9 @@ impl CurveArg {
     pub fn of(curve: &SketchCurve) -> Self {
         let p = |v: DVec2| v.to_array();
         match *curve {
+            SketchCurve::Spline { ref points } => {
+                CurveArg::Spline { through: None, control: Some(points.iter().map(|v| p(*v)).collect()), closed: false }
+            }
             SketchCurve::Line { a, b } => CurveArg::Line { start: p(a), end: p(b) },
             SketchCurve::Arc { a, b, bulge } => {
                 CurveArg::Arc { start: p(a), end: p(b), bulge: Some(bulge), through: None }
