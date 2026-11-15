@@ -937,6 +937,7 @@ group-model = Model
 hint-component = Kliknij, aby umieścić; Spacja obraca o 90°.
 hint-param-reset = Przywróć wartość z typu
 msg-component-created = Utworzono komponent „{ $name }”; kliknij na rzucie, aby go umieścić.
+msg-component-empty = Komponent „{ $name }” zapisano bez elementów: narysuj jeden w środowisku komponentów (Edytuj komponent), aby móc go umieścić.
 section-component = Komponent
 section-instance-params = Parametry egzemplarza
 section-type-params = Parametry typu · wspólne

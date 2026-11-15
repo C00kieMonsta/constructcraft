@@ -937,6 +937,7 @@ group-model = Modèle
 hint-component = Cliquez pour placer ; Espace pivote de 90°.
 hint-param-reset = Rétablir la valeur du type
 msg-component-created = Composant « { $name } » créé ; cliquez dans un plan pour le placer.
+msg-component-empty = Composant « { $name } » enregistré sans pièce : dessinez-en une dans l’environnement de composants (Modifier le composant) pour pouvoir le placer.
 section-component = Composant
 section-instance-params = Paramètres d'occurrence
 section-type-params = Paramètres du type · partagés

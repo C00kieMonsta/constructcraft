@@ -204,7 +204,17 @@ mod tests {
     #[test]
     fn finishing_a_new_component_picks_its_tool() {
         let mut state = state();
-        create(&mut state, "Bancada", ComponentKind::Generic);
+        // A generic component starts empty: finished so, it is kept but not placed.
+        create(&mut state, "Peça", ComponentKind::Generic);
+        let made = state.component_env.as_ref().unwrap().type_id;
+        let Some(TypeData::Component { def, .. }) = state.project().element_type(made).map(|t| &t.data) else {
+            panic!("a component type")
+        };
+        assert!(def.items.is_empty(), "no starting box to delete");
+        crate::component_env::finish(&mut state);
+        assert!(state.project().element_type(made).is_some());
+        assert!(!matches!(state.tool, crate::tools::Tool::Component { .. }), "nothing to place yet");
+        create(&mut state, "Bancada", ComponentKind::Casework);
         let made = state.component_env.as_ref().unwrap().type_id;
         crate::component_env::finish(&mut state);
         assert!(matches!(state.tool, crate::tools::Tool::Component { type_id } if type_id == made));

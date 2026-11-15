@@ -245,7 +245,7 @@ fn sketched_pieces_extrude_revolve_and_change() {
     // Moving the post plane moves the turned foot.
     run(&mut s, "component_ref_plane_set", json!({"type": ty, "name": "Post", "at": "0.55"}));
     // Refused: bad kinds, too few points, unknown names, a revolution without an axis,
-    // axis on an extrusion, a box given a sketch, deleting the last piece.
+    // axis on an extrusion, a box given a sketch, a piece that is not there.
     let depth = s.doc.undo_depth();
     for (cmd, args) in [
         (
@@ -270,8 +270,10 @@ fn sketched_pieces_extrude_revolve_and_change() {
     }
     run(&mut s, "component_piece_delete", json!({"type": ty, "index": 2}));
     run(&mut s, "component_piece_delete", json!({"type": ty, "index": 1}));
-    assert_eq!(fails(&mut s, "component_piece_delete", json!({"type": ty, "index": 0})), ErrorCode::InvalidArguments);
-    assert_eq!(s.doc.undo_depth(), depth + 2);
+    // The last piece too: a component may be empty while it is shaped.
+    run(&mut s, "component_piece_delete", json!({"type": ty, "index": 0}));
+    assert_eq!(fails(&mut s, "component_piece_delete", json!({"type": ty, "index": 0})), ErrorCode::NotFound);
+    assert_eq!(s.doc.undo_depth(), depth + 3);
 }
 
 #[test]
@@ -488,4 +490,24 @@ fn connectors_are_added_locked_to_planes_and_removed() {
     run(&mut s, "undo", json!({}));
     let c = run(&mut s, "component_get", json!({"type": ty}));
     assert_eq!(c["connectors"].as_array().map(Vec::len), Some(2));
+}
+
+/// A generic component starts with no pieces (users kept trying to delete
+/// the starting box and could not): it is not placed until it has one, and
+/// its last piece may be deleted again.
+#[test]
+fn a_generic_component_starts_empty() {
+    let mut s = Session::default();
+    let ty = s.execute("component_create", json!({"name": "Peça", "kind": "Generic"})).unwrap()["id"].as_u64().unwrap();
+    let got = s.execute("component_get", json!({"type": ty})).unwrap();
+    assert!(got["def"]["items"].as_array().is_none_or(Vec::is_empty), "{}", got["def"]);
+    let place = json!({"type": ty, "position": [1.0, 1.0]});
+    assert_eq!(s.execute("component_place", place.clone()).unwrap_err().code, ErrorCode::InvalidArguments);
+
+    let square = json!([{"u": 0, "v": 0}, {"u": 0.5, "v": 0}, {"u": 0.5, "v": 0.5}, {"u": 0, "v": 0.5}]);
+    s.execute("component_piece_add", json!({"type": ty, "plane": "plan", "points": square, "end": 0.4})).unwrap();
+    s.execute("component_place", place).unwrap();
+    s.execute("component_piece_delete", json!({"type": ty, "index": 0})).unwrap();
+    let got = s.execute("component_get", json!({"type": ty})).unwrap();
+    assert!(got["def"]["items"].as_array().is_none_or(Vec::is_empty));
 }

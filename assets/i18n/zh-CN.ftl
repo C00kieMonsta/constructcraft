@@ -942,6 +942,7 @@ group-model = 模型
 hint-component = 单击放置；空格键旋转 90°。
 hint-param-reset = 重置为类型值
 msg-component-created = 已创建构件“{ $name }”；在平面图中单击以放置。
+msg-component-empty = 构件“{ $name }”已保存但没有部件：请在构件环境（编辑构件）中绘制一个部件后再放置。
 section-component = 构件
 section-instance-params = 实例参数
 section-type-params = 类型参数 · 共享

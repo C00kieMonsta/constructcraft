@@ -13,8 +13,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 /// Parameter names valid and unique, sound reference planes, lines and
-/// dimensions, at least one piece (a title block: sheet pieces only, within
-/// their limits), every piece resolves.
+/// dimensions, the right kind of pieces (a title block: sheet pieces only,
+/// within their limits; a detail component at least one), every piece
+/// resolves. A component may have no pieces while it is shaped: it starts
+/// empty, and `component_place` refuses it until it has one.
 pub(crate) fn validate(def: &ComponentDef) -> Result<()> {
     for (i, p) in def.params.iter().enumerate() {
         if !expr::is_valid_name(&p.name) {
@@ -27,9 +29,7 @@ pub(crate) fn validate(def: &ComponentDef) -> Result<()> {
     let title_block = def.kind == cc_core::ComponentKind::TitleBlock;
     let two_d = def.kind.is_2d();
     let detail = def.kind == cc_core::ComponentKind::Detail;
-    // A niche's recess is its shape: its pieces (a shelf, a frame) are optional.
-    let niche = def.kind == cc_core::ComponentKind::Niche;
-    if (def.items.is_empty() && !two_d && !niche) || (detail && def.sheet.is_empty()) {
+    if detail && def.sheet.is_empty() {
         return Err(EngineError::invalid("the component has no pieces"));
     }
     if two_d && !def.items.is_empty() {
@@ -452,9 +452,8 @@ pub fn starter_def(kind: ComponentKind) -> Option<ComponentDef> {
                 ..Default::default()
             }
         }
-        ComponentKind::Generic => {
-            ComponentDef { kind, items: vec![item(boxed(["1", "1", "1"]))], ..Default::default() }
-        }
+        // Empty: its pieces are the user's to draw.
+        ComponentKind::Generic => ComponentDef { kind, ..Default::default() },
         ComponentKind::Door => cc_core::openings::door_def(&names(), 0.8, 2.1, ""),
         ComponentKind::Window => cc_core::openings::window_def(&names(), 1.2, 1.2, 1.0, ""),
         ComponentKind::Niche => cc_core::openings::niche_def(&names(), (0.6, 0.6, 0.1, 0.9)),

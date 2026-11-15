@@ -937,6 +937,7 @@ group-model = 模型
 hint-component = 按一下以放置；按空白鍵旋轉 90°。
 hint-param-reset = 重設為類型值
 msg-component-created = 已建立元件「{ $name }」；請在樓層平面圖上按一下以放置。
+msg-component-empty = 元件「{ $name }」已儲存但沒有零件：請在元件環境（編輯元件）中繪製一個零件後再放置。
 section-component = 元件
 section-instance-params = 實例參數
 section-type-params = 類型參數 · 共用
