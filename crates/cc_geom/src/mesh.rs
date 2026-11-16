@@ -2,22 +2,24 @@
 //! the edges seen from above and the section at the cut plane.
 
 use crate::cut::face_plane_segments;
-use crate::solid::Face;
+use crate::solid::{Face, Solid};
+use cc_core::{Category, ElementId};
 use glam::{DVec2, DVec3};
 use std::collections::HashMap;
 
 /// Creases between up-facing faces sharper than this are drawn (cos 20°).
 const CREASE_COS: f64 = 0.94;
 /// Faces with a normal Z component above this face upwards.
-const UP: f64 = 1e-3;
+pub(crate) const UP: f64 = 1e-3;
 
 /// What a mesh shows in a plan cut at `cut_z`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MeshPlan {
     /// Section of the mesh by the cut plane.
     pub cut: Vec<(DVec2, DVec2)>,
-    /// Visible edges at or below the cut plane.
-    pub below: Vec<(DVec2, DVec2)>,
+    /// Edges seen from above at or below the cut plane, in the model (their
+    /// heights tell what hides them, see [`crate::PlanCover`]).
+    pub below: Vec<(DVec3, DVec3)>,
     /// Edges above the cut plane.
     pub above: Vec<(DVec2, DVec2)>,
 }
@@ -142,19 +144,63 @@ fn hide_t_junctions(edges: Vec<(DVec3, DVec3, Vec<usize>)>, normals: &[DVec3]) -
     out
 }
 
-/// Plan of a mesh cut at `cut_z`.
-pub fn mesh_plan(faces: &[Vec<DVec3>], cut_z: f64) -> MeshPlan {
+/// Edges of the closed piece `faces` seen from above, as views draw a
+/// solid: the outlines of its faces turned up where they meet a face in
+/// another plane, and between the facets of a curved surface only the
+/// silhouette, where a facet turned up meets one turned away (the edges
+/// between facets that both face up are never drawn, nor the pieces of
+/// facets a boolean split). `smooth` flags the facets of curved surfaces,
+/// one per face (see [`crate::Solid::smooth_curved`]); with any other
+/// length they are found here. Each edge comes once, in a stable order.
+pub fn top_edges(faces: &[Vec<DVec3>], smooth: &[bool]) -> Vec<(DVec3, DVec3)> {
+    let mut solid = Solid::new(ElementId(0), Category::Component, [0; 3]);
+    if smooth.len() == faces.len() {
+        for (verts, smooth) in faces.iter().zip(smooth) {
+            if let Some(mut face) = Face::of_polygon(verts.clone()) {
+                face.smooth = *smooth;
+                solid.faces.push(face);
+            }
+        }
+    } else {
+        solid.add_polygons(faces.iter().cloned());
+        solid.smooth_curved(0);
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for ((face, edges), seams) in solid.faces.iter().zip(solid.feature_edges()).zip(solid.smooth_edges()) {
+        if face.normal.z <= UP {
+            continue;
+        }
+        let silhouettes = seams.into_iter().filter(|(_, _, n)| n.z <= UP).map(|(a, b, _)| (a, b));
+        for (a, b) in edges.into_iter().chain(silhouettes) {
+            // An upright edge is a point in plan.
+            if (a.truncate() - b.truncate()).length_squared() < 1e-12 || !a.is_finite() || !b.is_finite() {
+                continue;
+            }
+            let (ka, kb) = (key(a), key(b));
+            if seen.insert(if ka < kb { (ka, kb) } else { (kb, ka) }) {
+                out.push((a, b));
+            }
+        }
+    }
+    out.sort_by(|x, y| key(x.0).cmp(&key(y.0)).then(key(x.1).cmp(&key(y.1))));
+    out
+}
+
+/// Plan of a mesh cut at `cut_z`, its edges as [`top_edges`] finds them
+/// (`smooth`: its curved surfaces' facets, or empty).
+pub fn mesh_plan(faces: &[Vec<DVec3>], smooth: &[bool], cut_z: f64) -> MeshPlan {
     let mut plan = MeshPlan::default();
     let flat = |(a, b): (DVec3, DVec3)| (a.truncate(), b.truncate());
-    for (a, b) in plan_edges(faces) {
+    for (a, b) in top_edges(faces, smooth) {
         let (lo, hi) = if a.z <= b.z { (a, b) } else { (b, a) };
         if hi.z <= cut_z {
-            plan.below.push(flat((a, b)));
+            plan.below.push((a, b));
         } else if lo.z >= cut_z {
             plan.above.push(flat((a, b)));
         } else {
             let mid = lo.lerp(hi, (cut_z - lo.z) / (hi.z - lo.z));
-            plan.below.push(flat((lo, mid)));
+            plan.below.push((lo, mid));
             plan.above.push(flat((mid, hi)));
         }
     }
@@ -181,12 +227,12 @@ mod tests {
     #[test]
     fn box_shows_its_top_outline_and_cut() {
         let faces = cube_faces();
-        let plan = mesh_plan(&faces, 1.0);
+        let plan = mesh_plan(&faces, &[], 1.0);
         assert_eq!(plan.cut.len(), 4);
         // Top outline (4 edges) above the cut; vertical edges project to points.
         assert_eq!(plan.above.len(), 4);
         assert!(plan.below.is_empty());
-        let below = mesh_plan(&faces, 5.0);
+        let below = mesh_plan(&faces, &[], 5.0);
         assert_eq!(below.below.len(), 4);
         assert!(below.cut.is_empty());
     }
