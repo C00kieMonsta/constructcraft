@@ -538,6 +538,7 @@ just-bottom = Inferiore
 prop-unconnected-height = Altezza non collegata
 prop-room-bounding = Delimita locali
 prop-structural = Strutturale
+type-structural-hint = I nuovi muri di questo tipo sono creati strutturali; ogni muro può cambiarlo in seguito.
 section-strip-beam = Trave sulla fondazione
 prop-strip-beam = Sezione a T rovescia
 prop-strip-edge = Spessore al bordo

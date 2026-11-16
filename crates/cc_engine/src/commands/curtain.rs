@@ -88,7 +88,12 @@ impl Command for CurtainTypeCreate {
         check_system(p, &system)?;
         let id = edit(s, t!("tx-new-curtain-type"), |e| {
             let id = ElementTypeId(e.alloc_id());
-            let data = TypeData::Wall { layers: Vec::new(), function: WallFunction::Exterior, curtain: Some(system) };
+            let data = TypeData::Wall {
+                layers: Vec::new(),
+                function: WallFunction::Exterior,
+                curtain: Some(system),
+                structural: false,
+            };
             Ok(e.add_type(ElementType { id, name, data, info: Default::default(), uid: Default::default() }))
         })?;
         Ok(super::query::type_json(s, id).unwrap_or_else(|| json!({ "id": id.0 })))

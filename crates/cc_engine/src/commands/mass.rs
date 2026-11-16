@@ -368,6 +368,7 @@ impl Command for MassWallsCreate {
             return Err(EngineError::invalid(format!("side {bad} is not an edge (0 to {})", n - 1)));
         }
         let type_id = refs::type_of(p, Category::Wall, self.type_ref.as_ref())?;
+        let structural = p.element_type(type_id).is_some_and(|t| t.structural_wall());
         // Walls keep their exterior on the left of their line: the outline runs
         // clockwise for that, with the line on the exterior face.
         let ccw = cc_geom::polygon::signed_area(&m.outline) > 0.0;
@@ -382,6 +383,7 @@ impl Command for MassWallsCreate {
                     base_offset: m.base_offset,
                     height: m.height,
                     location_line: cc_core::LocationLine::FinishExterior,
+                    structural,
                     ..Default::default()
                 })
             })

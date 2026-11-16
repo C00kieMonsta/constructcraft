@@ -1726,7 +1726,7 @@ impl<'a> Importer<'a> {
             fallback,
             uid,
             |d| matches!(d, TypeData::Wall { layers, curtain: None, .. } if (layers.iter().map(|l| l.thickness).sum::<f64>() - thickness).abs() < TYPE_TOL),
-            || TypeData::Wall { layers, function, curtain: None },
+            || TypeData::Wall { layers, function, curtain: None, structural: false },
         );
         let wall =
             Wall { base_offset: z0 - elevation, height: z1 - z0, structural: structural.unwrap_or(false), ..wall };
@@ -1793,7 +1793,7 @@ impl<'a> Importer<'a> {
             "Curtain Wall".to_string(),
             uid,
             |d| matches!(d, TypeData::Wall { curtain: Some(c), .. } if *c == wanted),
-            || TypeData::Wall { layers: Vec::new(), function, curtain: Some(system) },
+            || TypeData::Wall { layers: Vec::new(), function, curtain: Some(system), structural: false },
         );
         let wall = Wall {
             start,

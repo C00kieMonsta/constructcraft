@@ -538,6 +538,7 @@ just-bottom = Bas
 prop-unconnected-height = Hauteur non contrainte
 prop-room-bounding = Délimitation des pièces
 prop-structural = Structurel
+type-structural-hint = Les nouveaux murs de ce type sont créés structurels ; chaque mur peut le changer ensuite.
 section-strip-beam = Poutre sur la semelle
 prop-strip-beam = Section en T inversé
 prop-strip-edge = Épaisseur au bord

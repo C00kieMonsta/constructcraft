@@ -538,6 +538,7 @@ just-bottom = 下端
 prop-unconnected-height = 未接続の高さ
 prop-room-bounding = 部屋の境界
 prop-structural = 構造
+type-structural-hint = このタイプの新しい壁は構造壁として作成されます。各壁は後で変更できます。
 section-strip-beam = 基礎上の梁
 prop-strip-beam = 逆 T 形断面
 prop-strip-edge = 端部の厚さ

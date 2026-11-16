@@ -844,8 +844,12 @@ fn curtain_project() -> Project {
         system.vertical = CurtainGrid { layout: GridLayout::FixedDistance, spacing: 1.0, ..Default::default() };
         system.horizontal = CurtainGrid { layout: GridLayout::FixedNumber, count: 2, ..Default::default() };
         let type_id = ElementTypeId(e.alloc_id());
-        let data =
-            TypeData::Wall { layers: Vec::new(), function: cc_core::WallFunction::Exterior, curtain: Some(system) };
+        let data = TypeData::Wall {
+            layers: Vec::new(),
+            function: cc_core::WallFunction::Exterior,
+            curtain: Some(system),
+            structural: false,
+        };
         e.add_type(ElementType {
             id: type_id,
             name: "Glazing".into(),

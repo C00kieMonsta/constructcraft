@@ -444,6 +444,7 @@ No parameters.
 | `major_arc` | boolean | optional | With `radius`: take the longer of the two arcs (default: the shorter). |
 | `mid` | [x, y] | optional | A point on the arc between the ends: makes an arc wall through the three points. |
 | `radius` | number | optional | Arc walls: the radius in meters, positive when the arc turns counter-clockwise from `start` to `end`, negative clockwise; at least half the distance between the ends. Ignored when `mid` or `bulge` is given. |
+| `structural` | boolean | optional | A structural wall (default: as the wall type says). |
 | `top_level` | id or name | optional | Level the top is attached to, instead of a height. |
 | `top_offset` | number | optional | Offset of the top from `top_level`, meters. |
 | `type` | id or name | optional | Wall type id or name (default: the default wall type). |

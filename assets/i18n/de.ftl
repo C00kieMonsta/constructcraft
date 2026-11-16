@@ -538,6 +538,7 @@ just-bottom = Unten
 prop-unconnected-height = Nicht verknüpfte Höhe
 prop-room-bounding = Raumbegrenzend
 prop-structural = Tragend
+type-structural-hint = Neue Wände dieses Typs werden tragend erstellt; jede Wand kann es danach ändern.
 section-strip-beam = Balken auf dem Fundament
 prop-strip-beam = Umgekehrter T-Querschnitt
 prop-strip-edge = Dicke am Rand

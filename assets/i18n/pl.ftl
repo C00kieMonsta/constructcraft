@@ -538,6 +538,7 @@ just-bottom = Dół
 prop-unconnected-height = Wysokość niepowiązana
 prop-room-bounding = Ogranicza pomieszczenie
 prop-structural = Konstrukcyjny
+type-structural-hint = Nowe ściany tego typu są tworzone jako konstrukcyjne; każda ściana może to potem zmienić.
 section-strip-beam = Belka na ławie
 prop-strip-beam = Przekrój odwróconego T
 prop-strip-edge = Grubość na krawędzi

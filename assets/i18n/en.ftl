@@ -538,6 +538,7 @@ just-bottom = Bottom
 prop-unconnected-height = Unconnected Height
 prop-room-bounding = Room Bounding
 prop-structural = Structural
+type-structural-hint = New walls of this type are created structural; each wall can still change it.
 section-strip-beam = Beam on the footing
 prop-strip-beam = Inverted-T section
 prop-strip-edge = Edge thickness
