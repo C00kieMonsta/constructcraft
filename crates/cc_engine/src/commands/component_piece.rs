@@ -37,8 +37,9 @@ impl ExprArg {
 
 /// A point of a sketch: `u`, `v` in its plane (numbers or expressions; a
 /// plane's name locks the coordinate to it), and `radius` to make the
-/// segment to the next point an arc (positive bulging outwards), or
-/// `ellipse` a part of an ellipse.
+/// segment to the next point an arc (positive bulging outwards),
+/// `ellipse` a part of an ellipse, or `bezier` a cubic Bézier curve (a
+/// spline's segment) by its two handles.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SketchPointArg {
@@ -48,13 +49,29 @@ pub struct SketchPointArg {
     pub radius: Option<ExprArg>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ellipse: Option<EllipseArg>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bezier: Option<BezierArg>,
+}
+
+/// The two handles of a cubic Bézier segment to the next point.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BezierArg {
+    /// The handle leaving the point, along the plane's U.
+    pub u1: ExprArg,
+    /// The handle leaving the point, along the plane's V.
+    pub v1: ExprArg,
+    /// The handle arriving at the next point, along U.
+    pub u2: ExprArg,
+    /// The handle arriving at the next point, along V.
+    pub v2: ExprArg,
 }
 
 impl SketchPointArg {
     /// A straight or arc point (`radius` empty: straight).
     pub fn new(u: impl Into<String>, v: impl Into<String>, radius: &str) -> Self {
         let radius = (!radius.trim().is_empty()).then(|| ExprArg::Text(radius.to_string()));
-        Self { u: ExprArg::Text(u.into()), v: ExprArg::Text(v.into()), radius, ellipse: None }
+        Self { u: ExprArg::Text(u.into()), v: ExprArg::Text(v.into()), radius, ellipse: None, bezier: None }
     }
 
     /// The argument that writes `p` back.
@@ -68,7 +85,9 @@ impl SketchPointArg {
             rotation: (!e.rotation.trim().is_empty()).then(|| text(&e.rotation)),
             clockwise: e.clockwise,
         });
-        Self { ellipse, ..Self::new(p.u.clone(), p.v.clone(), &p.radius) }
+        let bezier =
+            p.bezier.as_ref().map(|b| BezierArg { u1: text(&b.u1), v1: text(&b.v1), u2: text(&b.u2), v2: text(&b.v2) });
+        Self { ellipse, bezier, ..Self::new(p.u.clone(), p.v.clone(), &p.radius) }
     }
 }
 
@@ -111,7 +130,16 @@ pub(crate) fn profile_points(points: &[SketchPointArg]) -> Result<Vec<ProfilePoi
                 }),
                 None => None,
             };
-            Ok(ProfilePoint { u: p.u.text()?, v: p.v.text()?, radius, ellipse })
+            let bezier = match &p.bezier {
+                Some(b) => Some(cc_core::profile::ProfileBezier {
+                    u1: b.u1.text()?,
+                    v1: b.v1.text()?,
+                    u2: b.u2.text()?,
+                    v2: b.v2.text()?,
+                }),
+                None => None,
+            };
+            Ok(ProfilePoint { u: p.u.text()?, v: p.v.text()?, radius, ellipse, bezier })
         })
         .collect()
 }

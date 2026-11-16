@@ -24,7 +24,9 @@ use crate::tools::Snap;
 use cc_core::ComponentShape;
 use cc_core::profile::{self, ProfilePoint, Segment};
 use cc_core::sketch::SketchCurve;
-use cc_engine::commands::component_piece::{ComponentPieceAdd, ComponentPieceSet, EllipseArg, ExprArg, SketchPointArg};
+use cc_engine::commands::component_piece::{
+    BezierArg, ComponentPieceAdd, ComponentPieceSet, EllipseArg, ExprArg, SketchPointArg,
+};
 use cc_views::{ComponentView, ComponentViewKind};
 use egui::{Painter, Response, Stroke, Ui};
 use glam::DVec2;
@@ -88,14 +90,14 @@ pub fn section_points(w: f64, h: f64, round: bool) -> Vec<SketchPointArg> {
     if round {
         let r = w / 2.0;
         return vec![
-            SketchPointArg { u: n(-r), v: n(0.0), radius: Some(n(r)), ellipse: None },
-            SketchPointArg { u: n(r), v: n(0.0), radius: Some(n(r)), ellipse: None },
+            SketchPointArg { u: n(-r), v: n(0.0), radius: Some(n(r)), ellipse: None, bezier: None },
+            SketchPointArg { u: n(r), v: n(0.0), radius: Some(n(r)), ellipse: None, bezier: None },
         ];
     }
     let (a, b) = (w / 2.0, h / 2.0);
     [(-a, -b), (a, -b), (a, b), (-a, b)]
         .iter()
-        .map(|(u, v)| SketchPointArg { u: n(*u), v: n(*v), radius: None, ellipse: None })
+        .map(|(u, v)| SketchPointArg { u: n(*u), v: n(*v), radius: None, ellipse: None, bezier: None })
         .collect()
 }
 
@@ -226,6 +228,15 @@ impl Writer<'_> {
                 }),
                 ..SketchPointArg::new(u, v, "")
             },
+            Segment::Bezier { c1, c2 } => SketchPointArg {
+                bezier: Some(BezierArg {
+                    u1: text(coordinate(self.view, c1.x, true)),
+                    v1: text(coordinate(self.view, c1.y, false)),
+                    u2: text(coordinate(self.view, c2.x, true)),
+                    v2: text(coordinate(self.view, c2.y, false)),
+                }),
+                ..SketchPointArg::new(u, v, "")
+            },
         }
     }
 }
@@ -239,6 +250,9 @@ pub(crate) fn same(a: Segment, b: Segment) -> bool {
             Segment::Ellipse { center: c, radii: r, rotation_deg: t, clockwise: w },
             Segment::Ellipse { center: d, radii: s, rotation_deg: u, clockwise: x },
         ) => c.distance(d) < 1e-6 && (r - s).abs().max_element() < 1e-6 && (t - u).abs() < 1e-6 && w == x,
+        (Segment::Bezier { c1, c2 }, Segment::Bezier { c1: d1, c2: d2 }) => {
+            c1.distance(d1) < 1e-6 && c2.distance(d2) < 1e-6
+        }
         _ => false,
     }
 }
@@ -260,7 +274,7 @@ pub(crate) fn written(
     let old = profile::vertices(old, &lookup)
         .map(|v| old.iter().cloned().zip(v).map(|(p, (at, s))| (p, at, s)).collect())
         .unwrap_or_default();
-    let rounds = curves.iter().copied().filter(SketchCurve::is_closed).collect();
+    let rounds = curves.iter().filter(|c| c.is_closed()).cloned().collect();
     let writer = Writer { view, rounds, old };
     Ok(vertices.iter().map(|&(p, s)| writer.point(p, s)).collect())
 }

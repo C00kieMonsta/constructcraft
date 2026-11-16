@@ -209,7 +209,7 @@ ccad --save-as house.ccad script examples/small_house.ccmacro
 
 ### Outlines drawn with curves
 
-Floors, ceilings, roofs, foundation slabs and masses take their outline as `curves` instead of points: lines, arcs (by `bulge` or a point they pass `through`), circles, ellipses (whole or a part), rectangles and regular polygons (these two become lines). Loops inside the outline are openings of floors and roofs. The element keeps its curves: `sketch_get` gives them back (or lines along the outline of an element drawn with points) and `sketch_set` draws the outline again; moving, rotating and mirroring the element moves them too, and editing the outline's points directly drops them.
+Floors, ceilings, roofs, foundation slabs and masses take their outline as `curves` instead of points: lines, arcs (by `bulge` or a point they pass `through`), circles, ellipses (whole or a part), splines (`through` the points given, `closed` back to the first, or by the `control` points of their cubic Bézier segments, `p0, c1, c2, p1…`, as `sketch_get` gives them back), rectangles and regular polygons (these two become lines). Component pieces take splines too: a profile point's `bezier` (`u1`, `v1`, `u2`, `v2`) makes the segment to the next point a cubic Bézier curve with those two handles. Loops inside the outline are openings of floors and roofs. The element keeps its curves: `sketch_get` gives them back (or lines along the outline of an element drawn with points) and `sketch_set` draws the outline again; moving, rotating and mirroring the element moves them too, and editing the outline's points directly drops them.
 
 ```text
 {"command": "mass_create", "args": {"curves": [{"kind": "circle", "center": [0, 0], "radius": 5}], "height": 9}}

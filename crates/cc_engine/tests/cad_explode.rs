@@ -100,7 +100,7 @@ fn close(a: DVec2, b: DVec2) -> bool {
 fn curves(s: &Session, ids: &[u64]) -> Vec<(SketchCurve, LineStyleRef)> {
     ids.iter()
         .filter_map(|id| match &s.doc.project.element(ElementId(*id))?.kind {
-            ElementKind::DetailLine(l) => Some((l.curve, l.style)),
+            ElementKind::DetailLine(l) => Some((l.curve.clone(), l.style)),
             _ => None,
         })
         .collect()

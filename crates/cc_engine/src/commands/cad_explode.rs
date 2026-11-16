@@ -116,7 +116,7 @@ fn arc_curves(
 
 /// Add a detail line when its curve is valid in a view.
 fn push_line(out: &mut Exploded, view: ViewId, layer: Option<u32>, curve: SketchCurve) {
-    if (DetailLine { view, curve, style: LineStyleRef::default() }).is_valid() {
+    if (DetailLine { view, curve: curve.clone(), style: LineStyleRef::default() }).is_valid() {
         out.lines.push(Line { layer, curve });
     }
 }

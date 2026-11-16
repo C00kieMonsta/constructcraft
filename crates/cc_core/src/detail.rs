@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// A detail line of one view.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DetailLine {
     /// The view that owns (and alone shows) the line.
     pub view: ViewId,
@@ -52,6 +52,17 @@ impl DetailLine {
             return;
         }
         match self.curve {
+            SketchCurve::Spline { ref points } => {
+                if let Some((a, b)) = self.curve.ends() {
+                    out.ends.extend([a, b]);
+                }
+                if let Some(mid) =
+                    crate::spline::point_at(points, crate::spline::segment_count(points).unwrap_or(0) as f64 * 0.5)
+                {
+                    out.mids.push(mid);
+                }
+                out.lines.extend(self.curve.points().windows(2).map(|w| (w[0], w[1])));
+            }
             SketchCurve::Line { a, b } => {
                 out.ends.extend([a, b]);
                 out.mids.push((a + b) * 0.5);
@@ -101,6 +112,7 @@ fn within(c: &SketchCurve) -> bool {
         SketchCurve::Ellipse { center, radii, rotation_deg, start_deg, sweep_deg, .. } => {
             [center.x, center.y, radii.x, radii.y, rotation_deg, start_deg, sweep_deg].into_iter().all(ok)
         }
+        SketchCurve::Spline { ref points } => points.iter().all(|p| ok(p.x) && ok(p.y)),
     }
 }
 

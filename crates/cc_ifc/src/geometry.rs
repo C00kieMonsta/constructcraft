@@ -285,6 +285,9 @@ fn map_curves(curves: &[SketchCurve], xf: &DAffine3) -> Option<Vec<SketchCurve>>
             SketchCurve::Circle { center, radius } => {
                 Some(SketchCurve::Circle { center: t(center), radius: radius * scale })
             }
+            SketchCurve::Spline { ref points } => {
+                Some(SketchCurve::Spline { points: points.iter().map(|p| t(*p)).collect() })
+            }
             SketchCurve::Ellipse { .. } => None,
         })
         .collect()

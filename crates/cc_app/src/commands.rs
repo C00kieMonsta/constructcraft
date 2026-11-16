@@ -89,6 +89,7 @@ pub enum UiCommand {
     SketchPolygonOut,
     SketchCircle,
     SketchEllipse,
+    SketchSpline,
     SketchArc3,
     SketchArcCenter,
     SketchArcTangent,
@@ -345,6 +346,7 @@ impl UiCommand {
             SketchPolygonOut,
             SketchCircle,
             SketchEllipse,
+            SketchSpline,
             SketchArc3,
             SketchArcCenter,
             SketchArcTangent,
@@ -523,6 +525,7 @@ impl UiCommand {
             SketchPolygonOut => Icon::DrawPolygonOut,
             SketchCircle => Icon::DrawCircle,
             SketchEllipse => Icon::DrawEllipse,
+            SketchSpline => Icon::DrawSpline,
             SketchArc3 => Icon::DrawArc3,
             SketchArcCenter => Icon::DrawArcCenter,
             SketchArcTangent => Icon::DrawArcTangent,
@@ -739,6 +742,7 @@ impl UiCommand {
             SketchPolygonOut => t!("sketch-tool-polygon-out"),
             SketchCircle => t!("sketch-tool-circle"),
             SketchEllipse => t!("sketch-tool-ellipse"),
+            SketchSpline => t!("sketch-tool-spline"),
             SketchArc3 => t!("sketch-tool-arc3"),
             SketchArcCenter => t!("sketch-tool-arc-center"),
             SketchArcTangent => t!("sketch-tool-arc-tangent"),
@@ -951,6 +955,7 @@ impl UiCommand {
             SketchPolygonOut => t!("cmd-desc-sketch-tool-polygon-out"),
             SketchCircle => t!("cmd-desc-sketch-tool-circle"),
             SketchEllipse => t!("cmd-desc-sketch-tool-ellipse"),
+            SketchSpline => t!("cmd-desc-sketch-tool-spline"),
             SketchArc3 => t!("cmd-desc-sketch-tool-arc3"),
             SketchArcCenter => t!("cmd-desc-sketch-tool-arc-center"),
             SketchArcTangent => t!("cmd-desc-sketch-tool-arc-tangent"),
@@ -1419,8 +1424,9 @@ impl UiCommand {
             Undo | Redo if state.sketch.is_some() => None,
             Undo if !state.session.doc.can_undo() => Some(t!("why-nothing-undo")),
             Redo if !state.session.doc.can_redo() => Some(t!("why-nothing-redo")),
-            SketchLine | SketchRect | SketchPolygon | SketchPolygonOut | SketchCircle | SketchEllipse | SketchArc3
-            | SketchArcCenter | SketchArcTangent | SketchPoint | SketchPickWalls | SketchFinish | SketchCancel
+            SketchLine | SketchRect | SketchPolygon | SketchPolygonOut | SketchCircle | SketchEllipse
+            | SketchSpline | SketchArc3 | SketchArcCenter | SketchArcTangent | SketchPoint | SketchPickWalls
+            | SketchFinish | SketchCancel
                 if state.sketch.is_none() =>
             {
                 Some(t!("why-no-sketch"))
@@ -1615,8 +1621,8 @@ impl UiCommand {
                 .component_env
                 .as_ref()
                 .is_some_and(|e| matches!(e.tool, crate::component_env::EnvTool::SheetImage { .. })),
-            SketchLine | SketchRect | SketchPolygon | SketchPolygonOut | SketchCircle | SketchEllipse | SketchArc3
-            | SketchArcCenter | SketchArcTangent | SketchPoint => {
+            SketchLine | SketchRect | SketchPolygon | SketchPolygonOut | SketchCircle | SketchEllipse
+            | SketchSpline | SketchArc3 | SketchArcCenter | SketchArcTangent | SketchPoint => {
                 state.sketch.as_ref().is_some_and(|s| sketch_draw(self) == Some(s.draw))
             }
             Move | CopyElements | Rotate | MirrorPick | MirrorDraw | Offset | TrimCorner | TrimExtend | Split
@@ -1839,6 +1845,7 @@ fn sketch_draw(command: UiCommand) -> Option<crate::sketch_mode::Draw> {
         UiCommand::SketchPolygonOut => Draw::PolygonOut,
         UiCommand::SketchCircle => Draw::Circle,
         UiCommand::SketchEllipse => Draw::Ellipse,
+        UiCommand::SketchSpline => Draw::Spline,
         UiCommand::SketchArc3 => Draw::Arc3,
         UiCommand::SketchArcCenter => Draw::ArcCenter,
         UiCommand::SketchArcTangent => Draw::ArcTangent,
@@ -1937,8 +1944,8 @@ pub fn run(state: &mut AppState, ctx: &egui::Context, command: UiCommand) {
             crate::component_env::set_tool(state, crate::component_env::EnvTool::Select);
         }
         Select => state.set_tool(Tool::Select),
-        SketchLine | SketchRect | SketchPolygon | SketchPolygonOut | SketchCircle | SketchEllipse | SketchArc3
-        | SketchArcCenter | SketchArcTangent | SketchPoint => {
+        SketchLine | SketchRect | SketchPolygon | SketchPolygonOut | SketchCircle | SketchEllipse | SketchSpline
+        | SketchArc3 | SketchArcCenter | SketchArcTangent | SketchPoint => {
             if let Some(draw) = sketch_draw(command) {
                 crate::sketch_mode::set_draw(state, draw);
             }

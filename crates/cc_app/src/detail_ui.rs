@@ -225,7 +225,7 @@ pub fn near(line: &DetailLine, p: DVec2, r: f64) -> bool {
 /// The curve of detail line `id`.
 fn curve_of(state: &AppState, id: ElementId) -> Option<SketchCurve> {
     match state.project().element(id).map(|e| &e.kind) {
-        Some(ElementKind::DetailLine(l)) => Some(l.curve),
+        Some(ElementKind::DetailLine(l)) => Some(l.curve.clone()),
         _ => None,
     }
 }
@@ -251,8 +251,8 @@ pub fn grips(ui: &Ui, resp: &Response, painter: &Painter, state: &mut AppState, 
             draw_snap(painter, xf, s);
             sketch_mode::moved(&curve, which, s.point)
         });
-        if let Some(new) = new.filter(SketchCurve::is_valid) {
-            paint_curve(painter, xf, &new, Stroke::new(1.5, PREVIEW));
+        if let Some(new) = new.as_ref().filter(|c| c.is_valid()) {
+            paint_curve(painter, xf, new, Stroke::new(1.5, PREVIEW));
         }
         if resp.drag_stopped() {
             state.interaction.drag = None;
@@ -276,7 +276,7 @@ pub fn grips(ui: &Ui, resp: &Response, painter: &Painter, state: &mut AppState, 
         .take(50)
         .filter(|id| !state.project().is_pinned(**id))
         .filter_map(|id| match state.project().element(*id).map(|e| &e.kind) {
-            Some(ElementKind::DetailLine(l)) if Some(l.view) == view => Some((*id, l.curve)),
+            Some(ElementKind::DetailLine(l)) if Some(l.view) == view => Some((*id, l.curve.clone())),
             _ => None,
         })
         .flat_map(|(id, c)| sketch_mode::curve_grips(&c).into_iter().map(move |(w, p)| (id, w, p)))
@@ -428,7 +428,7 @@ pub fn style_picker(
 
 /// The properties of a selected detail line: its style, view and size.
 pub fn props(ui: &mut Ui, state: &mut AppState, id: ElementId, line: &DetailLine) {
-    let line = *line;
+    let line = line.clone();
     section(ui, "detail-line", t!("section-graphics"), |ui| {
         let mut style = Some(line.style);
         let styles = state.project().line_styles.clone();
@@ -451,6 +451,7 @@ pub fn props(ui: &mut Ui, state: &mut AppState, id: ElementId, line: &DetailLine
             SketchCurve::Arc { .. } => "detail-mode-arc3",
             SketchCurve::Circle { .. } => "detail-mode-circle",
             SketchCurve::Ellipse { .. } => "detail-mode-ellipse",
+            SketchCurve::Spline { .. } => "detail-mode-spline",
         };
         readonly_row(ui, &t!("prop-shape"), crate::i18n::tr(kind));
         let length: f64 = line.curve.points().windows(2).map(|w| w[0].distance(w[1])).sum();

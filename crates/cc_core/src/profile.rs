@@ -69,7 +69,8 @@ impl SketchPlane {
 /// A vertex of a profile. The segment to the next vertex is straight, an
 /// arc of `radius` when it is not empty (a positive radius bulges to the
 /// right of the direction of travel, outwards in a counter-clockwise
-/// profile; a negative one to the left), or a part of `ellipse`.
+/// profile; a negative one to the left), a part of `ellipse`, or a cubic
+/// Bézier curve by its two `bezier` handles (a spline's segment).
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ProfilePoint {
     pub u: String,
@@ -78,6 +79,18 @@ pub struct ProfilePoint {
     pub radius: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ellipse: Option<ProfileEllipse>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bezier: Option<ProfileBezier>,
+}
+
+/// The two handles of a cubic Bézier segment from a profile's vertex to the
+/// next: (`u1`, `v1`) leaving the vertex, (`u2`, `v2`) arriving at the next.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct ProfileBezier {
+    pub u1: String,
+    pub v1: String,
+    pub u2: String,
+    pub v2: String,
 }
 
 /// The ellipse a profile segment runs along, from its vertex to the next:
@@ -103,7 +116,7 @@ impl ProfilePoint {
     }
 
     pub fn arc(u: impl Into<String>, v: impl Into<String>, radius: impl Into<String>) -> Self {
-        Self { u: u.into(), v: v.into(), radius: radius.into(), ellipse: None }
+        Self { u: u.into(), v: v.into(), radius: radius.into(), ..Self::default() }
     }
 
     /// Every expression of the point, with a field label (an arc's radius
@@ -119,6 +132,9 @@ impl ProfilePoint {
                 out.push(("rotation", &e.rotation));
             }
         }
+        if let Some(b) = &self.bezier {
+            out.extend([("u1", &b.u1), ("v1", &b.v1), ("u2", &b.u2), ("v2", &b.v2)]);
+        }
         out
     }
 
@@ -126,6 +142,9 @@ impl ProfilePoint {
         let mut out = vec![&mut self.u, &mut self.v, &mut self.radius];
         if let Some(e) = &mut self.ellipse {
             out.extend([&mut e.u, &mut e.v, &mut e.rx, &mut e.ry, &mut e.rotation]);
+        }
+        if let Some(b) = &mut self.bezier {
+            out.extend([&mut b.u1, &mut b.v1, &mut b.u2, &mut b.v2]);
         }
         out
     }
@@ -145,6 +164,11 @@ pub enum Segment {
         rotation_deg: f64,
         clockwise: bool,
     },
+    /// A cubic Bézier curve with these two handles.
+    Bezier {
+        c1: DVec2,
+        c2: DVec2,
+    },
 }
 
 /// The vertices of `points` and the segments from each to the next, in numbers.
@@ -157,6 +181,10 @@ pub fn vertices(
     let mut out = Vec::with_capacity(points.len());
     for p in points {
         let segment = match (&p.ellipse, p.radius.trim().is_empty()) {
+            _ if let Some(b) = &p.bezier => Segment::Bezier {
+                c1: DVec2::new(ev("u1", &b.u1)?, ev("v1", &b.v1)?),
+                c2: DVec2::new(ev("u2", &b.u2)?, ev("v2", &b.v2)?),
+            },
             (Some(e), _) => {
                 let rotation_deg = if e.rotation.trim().is_empty() { 0.0 } else { ev("rotation", &e.rotation)? };
                 Segment::Ellipse {
@@ -179,6 +207,14 @@ pub(crate) fn segment_points(a: DVec2, b: DVec2, segment: Segment, out: &mut Vec
     match segment {
         Segment::Line => Ok(()),
         Segment::Arc { radius } => arc_points(a, b, radius, out),
+        Segment::Bezier { c1, c2 } => {
+            if !(c1.is_finite() && c2.is_finite()) {
+                return Err(ProfileError::Degenerate);
+            }
+            let steps = crate::spline::STEPS;
+            out.extend((1..steps).map(|k| crate::spline::point([a, c1, c2, b], k as f64 / steps as f64)));
+            Ok(())
+        }
         Segment::Ellipse { center, radii, rotation_deg, clockwise } => {
             let turn = DVec2::from_angle(rotation_deg.to_radians());
             if !(center.is_finite() && radii.is_finite() && turn.is_finite()) || radii.min_element() <= EPS {
@@ -397,8 +433,11 @@ pub fn from_curves(curves: &[SketchCurve], closed: bool) -> Result<Vec<(DVec2, S
     let mut out = Vec::with_capacity(curves.len() + 2);
     for &(k, rev) in &links {
         let Some(c) = curves.get(k) else { continue };
-        let c = if rev { c.reversed() } else { *c };
+        let c = if rev { c.reversed() } else { c.clone() };
         match c {
+            SketchCurve::Spline { points } => {
+                out.extend(crate::spline::segments(&points).map(|[a, c1, c2, _]| (a, Segment::Bezier { c1, c2 })));
+            }
             SketchCurve::Line { a, .. } => out.push((a, Segment::Line)),
             SketchCurve::Arc { a, b, bulge } => match Arc::from_bulge(a, b, bulge) {
                 Some(arc) => {
@@ -438,39 +477,68 @@ pub fn from_curves(curves: &[SketchCurve], closed: bool) -> Result<Vec<(DVec2, S
 pub fn to_curves(vertices: &[(DVec2, Segment)], closed: bool) -> Vec<SketchCurve> {
     let n = vertices.len();
     let segments = if closed { n } else { n.saturating_sub(1) };
-    (0..segments)
-        .filter_map(|i| {
-            let (a, segment) = *vertices.get(i)?;
-            let b = vertices.get((i + 1) % n)?.0;
-            let curve = match segment {
-                Segment::Line => SketchCurve::Line { a, b },
-                Segment::Arc { radius } => match Arc::bulge_radius(a, b, radius.abs(), radius > 0.0, false) {
-                    Some(bulge) => SketchCurve::Arc { a, b, bulge },
-                    None => SketchCurve::Line { a, b },
-                },
-                Segment::Ellipse { center, radii, rotation_deg, clockwise } => {
-                    let turn = DVec2::from_angle(rotation_deg.to_radians());
-                    let param = |p: DVec2| {
-                        let local = DVec2::new(turn.x, -turn.y).rotate(p - center) / radii;
-                        local.y.atan2(local.x)
-                    };
-                    let t0 = param(a);
-                    let mut sweep = (param(b) - t0).rem_euclid(TAU);
-                    if clockwise {
-                        sweep -= TAU;
-                    }
-                    SketchCurve::Ellipse {
-                        center,
-                        radii,
-                        rotation_deg,
-                        start_deg: t0.to_degrees(),
-                        sweep_deg: sweep.to_degrees(),
-                    }
-                }
+    let mut out: Vec<SketchCurve> = Vec::with_capacity(segments);
+    // Bézier segments in a row are one spline.
+    let mut run: Vec<DVec2> = Vec::new();
+    let flush = |run: &mut Vec<DVec2>, out: &mut Vec<SketchCurve>| {
+        let curve = SketchCurve::Spline { points: std::mem::take(run) };
+        if curve.is_valid() {
+            out.push(curve);
+        }
+    };
+    for i in 0..segments {
+        let (Some(&(a, segment)), Some(&(b, _))) = (vertices.get(i), vertices.get((i + 1) % n)) else { continue };
+        if let Segment::Bezier { c1, c2 } = segment {
+            if run.len() > crate::spline::MAX_SEGMENTS * 3 {
+                flush(&mut run, &mut out);
+            }
+            if run.is_empty() {
+                run.push(a);
+            }
+            run.extend([c1, c2, b]);
+            continue;
+        }
+        if !run.is_empty() {
+            flush(&mut run, &mut out);
+        }
+        out.extend(plain_curve(a, b, segment));
+    }
+    if !run.is_empty() {
+        flush(&mut run, &mut out);
+    }
+    out
+}
+
+/// The curve of the segment from `a` to `b`, when it is no Bézier.
+fn plain_curve(a: DVec2, b: DVec2, segment: Segment) -> Option<SketchCurve> {
+    let curve = match segment {
+        Segment::Bezier { .. } => return None,
+        Segment::Line => SketchCurve::Line { a, b },
+        Segment::Arc { radius } => match Arc::bulge_radius(a, b, radius.abs(), radius > 0.0, false) {
+            Some(bulge) => SketchCurve::Arc { a, b, bulge },
+            None => SketchCurve::Line { a, b },
+        },
+        Segment::Ellipse { center, radii, rotation_deg, clockwise } => {
+            let turn = DVec2::from_angle(rotation_deg.to_radians());
+            let param = |p: DVec2| {
+                let local = DVec2::new(turn.x, -turn.y).rotate(p - center) / radii;
+                local.y.atan2(local.x)
             };
-            curve.is_valid().then_some(curve)
-        })
-        .collect()
+            let t0 = param(a);
+            let mut sweep = (param(b) - t0).rem_euclid(TAU);
+            if clockwise {
+                sweep -= TAU;
+            }
+            SketchCurve::Ellipse {
+                center,
+                radii,
+                rotation_deg,
+                start_deg: t0.to_degrees(),
+                sweep_deg: sweep.to_degrees(),
+            }
+        }
+    };
+    curve.is_valid().then_some(curve)
 }
 
 /// Profile points that write `vertices` as plain numbers.
@@ -481,6 +549,10 @@ pub fn written(vertices: &[(DVec2, Segment)]) -> Vec<ProfilePoint> {
         .map(|(p, s)| match *s {
             Segment::Line => ProfilePoint::new(n(p.x), n(p.y)),
             Segment::Arc { radius } => ProfilePoint::arc(n(p.x), n(p.y), n(radius)),
+            Segment::Bezier { c1, c2 } => ProfilePoint {
+                bezier: Some(ProfileBezier { u1: n(c1.x), v1: n(c1.y), u2: n(c2.x), v2: n(c2.y) }),
+                ..ProfilePoint::new(n(p.x), n(p.y))
+            },
             Segment::Ellipse { center, radii, rotation_deg, clockwise } => ProfilePoint {
                 ellipse: Some(ProfileEllipse {
                     u: n(center.x),
@@ -502,6 +574,31 @@ mod tests {
 
     fn area_of(points: &[ProfilePoint]) -> f64 {
         signed_area(&outline(points, &none).unwrap())
+    }
+
+    #[test]
+    fn splines_become_bezier_points_and_back() {
+        let p = DVec2::new;
+        // A closed spline through four points, and a spline closed by a line.
+        let fit = [p(0.0, 0.0), p(2.0, 0.0), p(2.0, 1.0), p(0.0, 1.0)];
+        let closed = SketchCurve::Spline { points: crate::spline::interpolate(&fit, true) };
+        let v = from_curves(std::slice::from_ref(&closed), true).unwrap();
+        assert_eq!(v.len(), 4);
+        assert!(v.iter().all(|(_, s)| matches!(s, Segment::Bezier { .. })));
+        let exact = closed.swept_area();
+        assert!((area_of(&written(&v)) / exact - 1.0).abs() < 0.01, "{exact}");
+        // Back to one spline.
+        assert_eq!(to_curves(&v, true), vec![closed.clone()]);
+        let open =
+            SketchCurve::Spline { points: crate::spline::interpolate(&[p(0.0, 0.0), p(1.0, 0.5), p(2.0, 0.0)], false) };
+        let shut = SketchCurve::Line { a: p(2.0, 0.0), b: p(0.0, 0.0) };
+        let v = from_curves(&[open.clone(), shut.clone()], true).unwrap();
+        assert_eq!(to_curves(&v, true), vec![open, shut]);
+        // Written points keep their handles through serialization.
+        let points = written(&v);
+        assert!(points[0].bezier.is_some() && points[2].bezier.is_none());
+        let ron = ron::to_string(&points).unwrap();
+        assert_eq!(ron::from_str::<Vec<ProfilePoint>>(&ron).unwrap(), points);
     }
 
     #[test]
@@ -545,7 +642,7 @@ mod tests {
         ];
         let v = from_curves(&path, false).unwrap();
         assert_eq!(v.iter().map(|x| x.0).collect::<Vec<_>>(), vec![p(0.0, 0.0), p(1.0, 0.0), p(1.0, 1.0)]);
-        let apart = [path[0], SketchCurve::Line { a: p(5.0, 0.0), b: p(6.0, 0.0) }];
+        let apart = [path[0].clone(), SketchCurve::Line { a: p(5.0, 0.0), b: p(6.0, 0.0) }];
         assert!(matches!(from_curves(&apart, false), Err(SketchError::Apart(_))));
         // Points with an ellipse keep it through serialization, and older files load.
         let points = written(&halves);

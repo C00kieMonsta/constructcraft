@@ -64,6 +64,7 @@ pub mod shaft;
 pub mod site;
 pub mod sketch;
 pub mod sketch_edit;
+pub mod spline;
 pub mod stair;
 pub mod steel_building;
 pub mod structural_material;

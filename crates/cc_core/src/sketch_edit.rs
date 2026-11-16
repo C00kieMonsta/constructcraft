@@ -7,6 +7,7 @@
 
 use crate::arc::{Arc, MAX_BULGE};
 use crate::sketch::{JOIN_TOL, SketchCurve};
+use crate::spline;
 use glam::DVec2;
 use std::f64::consts::{PI, TAU};
 
@@ -45,6 +46,8 @@ impl Carrier {
             SketchCurve::Ellipse { center, radii, rotation_deg, .. } => {
                 Some(Carrier::Ellipse { center, radii, turn: DVec2::from_angle(rotation_deg.to_radians()) })
             }
+            // Splines are crossed along their own points (see `crossings`).
+            SketchCurve::Spline { .. } => None,
         }
     }
 
@@ -71,6 +74,9 @@ fn ellipse_at(center: DVec2, radii: DVec2, turn: DVec2, t: f64) -> DVec2 {
 /// (lines run on past their ends, arcs round their circle, partial
 /// ellipses round the whole ellipse). Tangent contacts may be missed.
 pub fn crossings(a: &SketchCurve, b: &SketchCurve) -> Vec<DVec2> {
+    if let Some(out) = spline_crossings(a, b) {
+        return dedup(out);
+    }
     let (Some(ca), Some(cb)) = (Carrier::of(a), Carrier::of(b)) else { return Vec::new() };
     let mut out: Vec<DVec2> = Vec::new();
     match (ca, cb) {
@@ -109,13 +115,82 @@ pub fn crossings(a: &SketchCurve, b: &SketchCurve) -> Vec<DVec2> {
             }
         }
     }
+    dedup(out)
+}
+
+/// Finite points, each once.
+fn dedup(points: Vec<DVec2>) -> Vec<DVec2> {
     let mut unique: Vec<DVec2> = Vec::new();
-    for p in out.into_iter().filter(|p| p.is_finite()) {
+    for p in points.into_iter().filter(|p| p.is_finite()) {
         if !unique.iter().any(|q| q.distance(p) <= JOIN_TOL) {
             unique.push(p);
         }
     }
     unique
+}
+
+/// Where a spline crosses another curve, along the spline only (it does
+/// not run on past its ends); `None` when neither curve is a spline. Two
+/// splines cross where their drawn points do.
+fn spline_crossings(a: &SketchCurve, b: &SketchCurve) -> Option<Vec<DVec2>> {
+    let (points, other) = match (a, b) {
+        (SketchCurve::Spline { points: p }, SketchCurve::Spline { points: q }) => {
+            let (p, q) = (spline::flatten(p), spline::flatten(q));
+            let mut out = Vec::new();
+            for s in p.windows(2) {
+                for t in q.windows(2) {
+                    if let Some(x) = segment_cross(s[0], s[1], t[0], t[1]) {
+                        out.push(x);
+                    }
+                }
+            }
+            return Some(out);
+        }
+        (SketchCurve::Spline { points }, other) | (other, SketchCurve::Spline { points }) => (points, other),
+        _ => return None,
+    };
+    let Some(carrier) = Carrier::of(other) else { return Some(Vec::new()) };
+    let n = spline::segment_count(points).unwrap_or(0);
+    let f = |s: f64| spline::point_at(points, s).map_or(f64::NAN, |p| carrier.level(p));
+    let mut out = Vec::new();
+    let steps = n * spline::STEPS * 2;
+    for i in 0..steps {
+        let (mut s0, mut s1) = (n as f64 * i as f64 / steps as f64, n as f64 * (i + 1) as f64 / steps as f64);
+        let (mut f0, f1) = (f(s0), f(s1));
+        if f0.abs() <= 1e-12 {
+            out.extend(spline::point_at(points, s0));
+            continue;
+        }
+        if f0.is_nan() || f1.is_nan() || f0 * f1 >= 0.0 {
+            continue;
+        }
+        for _ in 0..60 {
+            let sm = (s0 + s1) / 2.0;
+            let fm = f(sm);
+            if fm * f0 <= 0.0 {
+                s1 = sm;
+            } else {
+                (s0, f0) = (sm, fm);
+            }
+        }
+        out.extend(spline::point_at(points, (s0 + s1) / 2.0));
+    }
+    if let Some(end) = points.last().copied().filter(|p| carrier.level(*p).abs() <= 1e-12) {
+        out.push(end);
+    }
+    Some(out)
+}
+
+/// Where the segments `a b` and `c d` cross.
+fn segment_cross(a: DVec2, b: DVec2, c: DVec2, d: DVec2) -> Option<DVec2> {
+    let (r, s) = (b - a, d - c);
+    let denom = r.perp_dot(s);
+    if denom.abs() < 1e-15 {
+        return None;
+    }
+    let t = (c - a).perp_dot(s) / denom;
+    let u = (c - a).perp_dot(r) / denom;
+    ((0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u)).then(|| a + r * t)
 }
 
 /// The point of `points` nearest `to`.
@@ -152,6 +227,8 @@ pub fn param(c: &SketchCurve, p: DVec2) -> Option<f64> {
             let turn = DVec2::from_angle(rotation_deg.to_radians());
             Some(ellipse_param(center, radii, turn, start_deg.to_radians(), sweep_deg.to_radians(), p))
         }
+        // The spline's own parameter (segments), held to its ends.
+        SketchCurve::Spline { ref points } => spline::nearest(points, p).map(|(s, _, _)| s),
         SketchCurve::Circle { .. } => None,
     }
 }
@@ -167,6 +244,7 @@ pub fn span(c: &SketchCurve) -> Option<f64> {
             Some(Arc::from_bulge(a, b, bulge).map_or(a.distance(b), |arc| arc.length()))
         }
         SketchCurve::Ellipse { sweep_deg, .. } => Some(sweep_deg.to_radians().abs()),
+        SketchCurve::Spline { ref points } => spline::segment_count(points).map(|n| n as f64),
         SketchCurve::Circle { .. } => None,
     }
 }
@@ -205,6 +283,7 @@ pub fn between(c: &SketchCurve, u0: f64, u1: f64) -> Option<SketchCurve> {
                 sweep_deg: sign * (u1 - u0).to_degrees(),
             }
         }
+        SketchCurve::Spline { ref points } => SketchCurve::Spline { points: spline::between(points, u0, u1)? },
         SketchCurve::Circle { .. } => return None,
     };
     out.is_valid().then_some(out)
@@ -252,6 +331,18 @@ pub fn split(c: &SketchCurve, p: DVec2) -> Option<(SketchCurve, SketchCurve)> {
             let part = |start_deg| SketchCurve::Ellipse { center, radii, rotation_deg, start_deg, sweep_deg: half };
             (part(t), part(t + half))
         }
+        // A closed spline: from `p` around to the middle, and on back to `p`.
+        SketchCurve::Spline { ref points } if c.is_closed() => {
+            let (s, _, _) = spline::nearest(points, p)?;
+            let (before, after) = spline::split_at(points, s)?;
+            let mut open = if after.is_empty() { before.clone() } else { after };
+            if let Some(rest) = before.get(1..).filter(|_| !open.is_empty() && open != before) {
+                open.extend_from_slice(rest);
+            }
+            let m = spline::segment_count(&open)?;
+            let (a, b) = spline::split_at(&open, (m as f64 / 2.0).max(0.5))?;
+            (SketchCurve::Spline { points: a }, SketchCurve::Spline { points: b })
+        }
         _ => {
             let (u, end) = (param(c, p)?, span(c)?);
             if u <= 0.0 || u >= end {
@@ -274,6 +365,10 @@ fn side(c: &SketchCurve, p: DVec2) -> f64 {
         },
         SketchCurve::Circle { center, radius } => center.distance(p) <= radius,
         SketchCurve::Ellipse { .. } => true,
+        SketchCurve::Spline { ref points } => match spline::nearest(points, p) {
+            Some((s, q, _)) => spline::direction_at(points, s).is_none_or(|d| d.perp_dot(p - q) >= 0.0),
+            None => true,
+        },
     };
     if left { 1.0 } else { -1.0 }
 }
@@ -296,6 +391,7 @@ pub fn offset_left(c: &SketchCurve, v: f64) -> Option<SketchCurve> {
             None => return offset_left(&SketchCurve::Line { a, b }, v),
         },
         SketchCurve::Circle { center, radius } => SketchCurve::Circle { center, radius: radius - v },
+        SketchCurve::Spline { ref points } => SketchCurve::Spline { points: spline::offset(points, v) },
         SketchCurve::Ellipse { .. } => return None,
     };
     out.is_valid().then_some(out)
@@ -371,7 +467,7 @@ pub fn offset_chain(curves: &[SketchCurve], i: usize, distance: f64, toward: DVe
     let (links, closed) = chain(curves, i);
     let oriented: Vec<SketchCurve> = links
         .iter()
-        .map(|&(k, rev)| curves.get(k).map(|c| if rev { c.reversed() } else { *c }))
+        .map(|&(k, rev)| curves.get(k).map(|c| if rev { c.reversed() } else { c.clone() }))
         .collect::<Option<_>>()?;
     let at = links.iter().position(|&(k, _)| k == i)?;
     let v = distance.abs() * side(oriented.get(at)?, toward);
