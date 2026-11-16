@@ -3627,3 +3627,14 @@ sun-east = Сх
 sun-south = Пд
 sun-west = Зх
 sun-date-pattern = { $day }.{ $month }.{ $year }
+
+## Editable tags
+category-tag = Позначки
+tx-set-tag = Налаштувати позначку
+tx-create-tag-type = Створити тип позначки
+tpl-tag-door = Позначка дверей
+tpl-tag-window = Позначка вікна
+tpl-tag-room = Позначка приміщення
+tpl-tag-column = Позначка колони
+tpl-tag-beam = Позначка балки
+tpl-tag-foundation = Позначка фундаменту

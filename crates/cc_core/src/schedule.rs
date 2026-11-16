@@ -116,6 +116,13 @@ pub enum ScheduleField {
 }
 
 impl ScheduleField {
+    /// The field named `name` as written in files (`Width`, `FireRating`).
+    pub fn from_name(name: &str) -> Option<ScheduleField> {
+        use serde::de::IntoDeserializer;
+        let de: serde::de::value::StrDeserializer<'_, serde::de::value::Error> = name.into_deserializer();
+        ScheduleField::deserialize(de).ok()
+    }
+
     /// Translation key of the column header.
     pub fn key(self) -> &'static str {
         match self {
@@ -309,6 +316,7 @@ impl ScheduleField {
             | Category::DetailComponent
             | Category::LevelMark
             | Category::BarTag
+            | Category::Tag
             | Category::CadImport
             | Category::TitleBlock => {
                 return Vec::new();
@@ -378,6 +386,7 @@ impl ScheduleField {
             | Category::DetailComponent
             | Category::LevelMark
             | Category::BarTag
+            | Category::Tag
             | Category::CadImport
             | Category::TitleBlock => Vec::new(),
         }

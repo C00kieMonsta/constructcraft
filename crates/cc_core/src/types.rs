@@ -72,6 +72,9 @@ pub enum Category {
     Connection,
     /// Niches: recesses in one face of a wall, hosted like doors and windows.
     Niche,
+    /// Tag types: what plans write by doors, windows, rooms, columns, beams
+    /// and footings (see [`crate::tag`]); their tags are drawn with their element.
+    Tag,
 }
 
 impl Category {
@@ -121,14 +124,16 @@ impl Category {
     ];
 
     /// Every category by name: [`Category::ALL`] (the ones views draw and
-    /// filter) and title blocks, whose types sheets use.
-    pub const NAMED: [Category; Category::ALL.len() + 1] = {
-        let mut out = [Category::TitleBlock; Category::ALL.len() + 1];
+    /// filter), title blocks, whose types sheets use, and tags, whose types
+    /// plans tag elements with.
+    pub const NAMED: [Category; Category::ALL.len() + 2] = {
+        let mut out = [Category::TitleBlock; Category::ALL.len() + 2];
         let mut i = 0;
         while i < Category::ALL.len() {
             out[i] = Category::ALL[i];
             i += 1;
         }
+        out[Category::ALL.len() + 1] = Category::Tag;
         out
     };
 
@@ -213,6 +218,7 @@ impl Category {
             Category::BarTag => "category-bar-tag",
             Category::Pile => "category-pile",
             Category::TitleBlock => "category-title-block",
+            Category::Tag => "category-tag",
             Category::Column => "category-column",
             Category::Beam => "category-beam",
             Category::Stair => "category-stair",
@@ -411,6 +417,12 @@ pub enum TypeData {
     /// Bar tags with text of `text_size` paper millimeters.
     BarTag {
         text_size: f64,
+    },
+    /// Tags of `target` elements in plans, drawn as `style` says.
+    Tag {
+        target: crate::tag::TagTarget,
+        #[serde(default)]
+        style: crate::tag::TagStyle,
     },
     LevelMark {
         text_size: f64,
@@ -677,6 +689,7 @@ impl TypeData {
             | TypeData::Text { .. }
             | TypeData::LevelMark { .. }
             | TypeData::BarTag { .. }
+            | TypeData::Tag { .. }
             | TypeData::CadImport {}
             | TypeData::DetailLine {}
             | TypeData::FilledRegion { .. }
@@ -757,6 +770,7 @@ impl TypeData {
             | TypeData::Text { .. }
             | TypeData::LevelMark { .. }
             | TypeData::BarTag { .. }
+            | TypeData::Tag { .. }
             | TypeData::CadImport {}
             | TypeData::DetailLine {}
             | TypeData::FilledRegion { .. }
@@ -984,6 +998,7 @@ impl ElementType {
             TypeData::Text { .. } => Category::Text,
             TypeData::LevelMark { .. } => Category::LevelMark,
             TypeData::BarTag { .. } => Category::BarTag,
+            TypeData::Tag { .. } => Category::Tag,
             TypeData::Pile { .. } => Category::Pile,
             TypeData::Column { .. } => Category::Column,
             TypeData::Beam { .. } => Category::Beam,
@@ -1178,6 +1193,7 @@ impl ElementType {
             | TypeData::Text { .. }
             | TypeData::LevelMark { .. }
             | TypeData::BarTag { .. }
+            | TypeData::Tag { .. }
             | TypeData::CadImport {}
             | TypeData::DetailLine {}
             | TypeData::FilledRegion { .. }

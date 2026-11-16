@@ -1182,7 +1182,9 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
         readonly_row(ui, &t!("prop-ifc-guid"), cc_ifc::guid::encode(el.uid.0));
     });
     let view = state.active_view;
-    let moved = view.and_then(|v| state.project().view(v)).is_some_and(|v| v.tag_offsets.contains_key(&id));
+    let moved = view
+        .and_then(|v| state.project().view(v))
+        .is_some_and(|v| v.tags.get(&id).is_some_and(|t| t.offset != glam::DVec2::ZERO));
     padded(ui, |ui| {
         ui.horizontal(|ui| {
             if ui.button(t!("action-delete")).clicked() {

@@ -349,6 +349,21 @@ fn component_extents(project: &Project, e: &Element) -> Option<(f64, f64, f64)> 
     size.is_finite().then_some((size.x, size.y, size.z))
 }
 
+/// A field's value for `e` written as a schedule cell writes it, keys
+/// translated by `label`; empty when the element has none.
+pub fn cell_text(
+    project: &Project,
+    geom: &ModelGeometry,
+    e: &Element,
+    field: ScheduleField,
+    label: &dyn Fn(&str) -> String,
+) -> String {
+    match value(project, geom, e, field).cell() {
+        Cell::Text(s) => s,
+        Cell::Key(k) => label(k),
+    }
+}
+
 fn value(project: &Project, geom: &ModelGeometry, e: &Element, field: ScheduleField) -> Value {
     value_cached(project, geom, e, field, &mut Memo::default())
 }

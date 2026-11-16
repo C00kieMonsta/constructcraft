@@ -3626,3 +3626,14 @@ sun-east = L
 sun-south = S
 sun-west = O
 sun-date-pattern = { $day }/{ $month }/{ $year }
+
+## Editable tags
+category-tag = Etiquetas
+tx-set-tag = Ajustar etiqueta
+tx-create-tag-type = Criar tipo de etiqueta
+tpl-tag-door = Etiqueta de porta
+tpl-tag-window = Etiqueta de janela
+tpl-tag-room = Etiqueta de ambiente
+tpl-tag-column = Etiqueta de pilar
+tpl-tag-beam = Etiqueta de viga
+tpl-tag-foundation = Etiqueta de fundação

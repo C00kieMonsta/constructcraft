@@ -406,6 +406,17 @@ Every reinforcing bar has a mark naming its shape (the same diameter, grade, leg
 {"command": "bar_length_check", "args": {"max_length": 12}}
 ```
 
+### Tags
+
+Plans tag doors, windows, rooms, columns, beams, pad footings and pile caps by themselves. A tag type (`tag_type_create`, `target` and a partial `style`) says what a tag writes and how it looks: up to 8 `lines` of text with `{Field}` placeholders (a schedule field by name, such as `{Width}`, `{Height}` or `{Comments}`, or `{Mark}`, `{TypeName}`, `{Name}`, `{Number}`, `{Area}`, `{Section}`, `{Level}`) and a size in paper millimeters, a `symbol` (`Circle`, `Hexagon`, `Rectangle`, `RoundedRectangle`, `Ellipse`, `Diamond`, `Triangle`, `Underline`, `None`, or `{"Component": id}` of a detail component drawn at paper size, its texts' fields filled in), its `width` and `height` (0 fits the text), pens, `leader` and `orientation`; `type_set` changes it. A project with no tag type of a target draws its tags as plans always did. Each plan picks a tag type per target (`view_set` `tag_types`) and adjusts the tag of each element with `tag_set` (`offset` or `delta`, `rotation`, `type`, `hidden`, `leader`, `reset`; `null` clears a field); `tag_get` shows the adjustments, the type and the texts.
+
+```text
+{"command": "tag_type_create", "args": {"target": "door", "name": "Door size", "style": {"lines": [{"text": "{Mark}", "size": 2.5}, {"text": "{Width} x {Height}", "size": 2}], "symbol": "Rectangle"}}}
+{"command": "view_set", "args": {"view": "Térreo", "tag_types": {"door": "Door size"}}}
+{"command": "tag_set", "args": {"view": "Térreo", "ids": [12, 14], "delta": [0, 0.5], "rotation": 90}}
+{"command": "tag_get", "args": {"view": "Térreo", "id": 12}}
+```
+
 ### Photorealistic rendering
 
 A 3D view keeps its render settings in `render` (`view_get`), changed by `view_set` with a merge patch: `samples` per pixel, light bounces (`max_depth`), the image's `width` and `height` in pixels, `fov_deg`, `exposure` in stops, `tone_map` (`Filmic` or `Standard`), the firefly `clamp`, `clay` (every opaque surface one white matte, glass kept, under the same sky and sun) and the `environment` (`sky_strength`, `sun_strength`, `ground_color`, `ground_plane`); `null` removes them. The sun is the view's (`sun`). `view_render` path traces the view on the processor and writes the image (`.png`, `.jpg`, or linear `.exr`/`.hdr`) with the view's camera, as the 3D view shows it; `settings` patches the view's settings for that render only, and `region` (`[x, y, width, height]` in pixels) renders only part of the image. It returns the size, the samples, the seconds and the triangles, and changes nothing in the model.

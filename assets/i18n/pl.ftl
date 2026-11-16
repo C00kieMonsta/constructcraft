@@ -3626,3 +3626,14 @@ sun-east = E
 sun-south = S
 sun-west = W
 sun-date-pattern = { $day }.{ $month }.{ $year }
+
+## Editable tags
+category-tag = Etykiety
+tx-set-tag = Dostosuj etykietę
+tx-create-tag-type = Utwórz typ etykiety
+tpl-tag-door = Etykieta drzwi
+tpl-tag-window = Etykieta okna
+tpl-tag-room = Etykieta pomieszczenia
+tpl-tag-column = Etykieta słupa
+tpl-tag-beam = Etykieta belki
+tpl-tag-foundation = Etykieta fundamentu

@@ -252,6 +252,7 @@ impl Category {
                 | Category::Text
                 | Category::LevelMark
                 | Category::BarTag
+                | Category::Tag
                 | Category::DetailComponent
                 | Category::Grid
                 | Category::CadImport

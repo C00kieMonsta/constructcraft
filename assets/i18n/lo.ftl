@@ -3628,3 +3628,14 @@ sun-east = E
 sun-south = S
 sun-west = W
 sun-date-pattern = { $day }/{ $month }/{ $year }
+
+## Editable tags
+category-tag = ປ້າຍ
+tx-set-tag = ປັບປ້າຍ
+tx-create-tag-type = ສ້າງປະເພດປ້າຍ
+tpl-tag-door = ປ້າຍປະຕູ
+tpl-tag-window = ປ້າຍປ່ອງຢ້ຽມ
+tpl-tag-room = ປ້າຍຫ້ອງ
+tpl-tag-column = ປ້າຍເສົາ
+tpl-tag-beam = ປ້າຍຄານ
+tpl-tag-foundation = ປ້າຍຖານຮາກ

@@ -65,6 +65,7 @@ pub mod structure;
 pub mod structure_material;
 pub mod sun;
 pub mod sweep;
+pub mod tags;
 pub mod topography;
 pub mod types;
 pub mod valve;

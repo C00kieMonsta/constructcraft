@@ -71,6 +71,7 @@ pub mod structural_material;
 pub mod structural_profile;
 pub mod sun;
 pub mod sweep;
+pub mod tag;
 mod template_spec;
 pub use template_spec::Defaults;
 pub mod title_block;

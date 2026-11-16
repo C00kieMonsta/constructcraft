@@ -392,6 +392,7 @@ impl Tool {
             Category::DetailComponent => Tool::DetailComponent { type_id },
             // Imported, not drawn; bar tags are placed by their command.
             Category::BarTag
+            | Category::Tag
             | Category::CadImport
             | Category::TitleBlock
             | Category::SteelBuilding

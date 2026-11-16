@@ -376,6 +376,25 @@ impl<'a> EditCtx<'a> {
         self.project.types.get_mut(&id)
     }
 
+    /// Tag types drawn as a detail component that is gone (or no longer a
+    /// detail component) draw no symbol.
+    fn sync_tag_types(&mut self) {
+        let types = &self.project.types;
+        let stale: Vec<ElementTypeId> = types
+            .values()
+            .filter(|t| {
+                matches!(&t.data, crate::TypeData::Tag { style, .. }
+                    if matches!(style.symbol, crate::tag::TagSymbol::Component(c) if !crate::tag::is_detail_component(types.get(&c))))
+            })
+            .map(|t| t.id)
+            .collect();
+        for id in stale {
+            if let Some(crate::TypeData::Tag { style, .. }) = self.type_mut(id).map(|t| &mut t.data) {
+                style.symbol = crate::tag::TagSymbol::None;
+            }
+        }
+    }
+
     /// Remove a type (callers make sure no element uses it).
     pub fn remove_type(&mut self, id: ElementTypeId) {
         if self.project.types.contains_key(&id) {
@@ -555,7 +574,13 @@ impl<'a> EditCtx<'a> {
         let changed: Vec<(ViewId, View)> = p
             .views
             .values()
-            .filter(|v| v.template.is_some() || !v.graphics.is_empty() || !v.tag_offsets.is_empty())
+            .filter(|v| {
+                v.template.is_some()
+                    || !v.graphics.is_empty()
+                    || !v.tag_offsets.is_empty()
+                    || !v.tags.is_empty()
+                    || !v.tag_types.is_empty()
+            })
             .filter_map(|v| {
                 let mut new = v.clone();
                 match new.template.map(|t| p.templates.get(&t)) {
@@ -564,8 +589,8 @@ impl<'a> EditCtx<'a> {
                     None => {}
                 }
                 new.graphics.repair(&p.filters, Some(&|id| p.elements.contains_key(&id)));
-                // Tags of deleted elements go.
-                new.tag_offsets.retain(|id, o| p.elements.contains_key(id) && o.is_finite());
+                // Tags of deleted elements and deleted tag types go.
+                crate::tag::repair_view_tags(&mut new, &p.elements, &p.types);
                 (new != *v).then_some((v.id, new))
             })
             .collect();
@@ -989,6 +1014,7 @@ impl<'a> EditCtx<'a> {
         self.sync_sketches();
         self.sync_callouts();
         self.sync_sun_ground();
+        self.sync_tag_types();
         self.sync_views();
         let p = &*self.project;
         self.tx.elements.retain(|id, c| {

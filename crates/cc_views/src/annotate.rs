@@ -4,10 +4,12 @@
 
 use crate::drawing::Anchor;
 use crate::notes::{self, SymbolPens};
+use crate::tag::{self, Align, TagCtx, TagSpot};
 use crate::{Drawing2D, LineStyle, Pen, format};
 use cc_core::dim_style::DimensionStyle;
+use cc_core::tag::TagTarget;
 use cc_core::{Dimension, DimensionKind, ElementKind, LevelId, Project, TypeData, ViewId};
-use cc_geom::{ModelGeometry, polygon};
+use cc_geom::ModelGeometry;
 use glam::DVec2;
 
 /// Model meters per paper millimeter at `scale`.
@@ -21,43 +23,12 @@ pub const HIGHLIGHT_ONLY: [u8; 4] = [255, 255, 255, 0];
 const PICK_AREA: [u8; 4] = [255, 255, 255, 1];
 
 /// Tags a view moved by hand: offsets in plan by the element they tag.
+#[cfg(test)]
 pub type TagOffsets = std::collections::BTreeMap<cc_core::ElementId, DVec2>;
 
-/// Where a tag sits once the view's offset for `id` moves it from its
-/// default spot: its box (center and half size, the default box moved) is
-/// recorded so it can be dragged, and a tag moved away from the element gets
-/// a leader from `anchor` (the point of the element it names) to its edge.
-/// Returns the offset to add to what the tag draws.
-fn place_tag(
-    d: &mut Drawing2D,
-    offsets: &TagOffsets,
-    id: cc_core::ElementId,
-    center: DVec2,
-    half: DVec2,
-    anchor: DVec2,
-) -> DVec2 {
-    let offset = offsets.get(&id).copied().filter(|o| o.is_finite()).unwrap_or(DVec2::ZERO);
-    let center = center + offset;
-    d.tags.push(crate::TagHandle { element: id, center, half, offset });
-    if offset.length() > 1e-9 && !(anchor - center).abs().cmple(half).all() {
-        // The leader stops at the edge of the tag's box.
-        let dir = (anchor - center).normalize_or_zero();
-        let tx = if dir.x.abs() > 1e-12 { half.x / dir.x.abs() } else { f64::INFINITY };
-        let ty = if dir.y.abs() > 1e-12 { half.y / dir.y.abs() } else { f64::INFINITY };
-        d.line(anchor, center + dir * tx.min(ty), LineStyle::Annotation, Some(id));
-    }
-    offset
-}
-
-/// Half size, in plan, of a single line of `text` `size` paper millimeters
-/// high, turned `angle` radians (its bounding box).
-fn text_half(text: &str, size: f64, angle: f64, mm: f64) -> DVec2 {
-    let (w, h) = (text.chars().count().max(1) as f64 * size * 0.6 * mm / 2.0, size * mm / 2.0);
-    let (s, c) = angle.sin_cos();
-    DVec2::new((w * c).abs() + (h * s).abs(), (w * s).abs() + (h * c).abs())
-}
-
-/// Tags of rooms and openings, and grids, for a floor or ceiling plan of `level`.
+/// Tags of rooms and openings, and grids, for a floor or ceiling plan of
+/// `level`; `label` translates the keys some tag fields give.
+#[allow(clippy::too_many_arguments)]
 pub fn plan_annotations(
     d: &mut Drawing2D,
     project: &Project,
@@ -66,21 +37,26 @@ pub fn plan_annotations(
     ceiling: bool,
     structural: bool,
     view: &cc_core::View,
+    label: &dyn Fn(&str) -> String,
 ) {
-    let (mm, offsets) = (mm(view.scale), &view.tag_offsets);
+    let ctx = TagCtx { project, geom, scale: view.scale, placements: &view.tags, types: &view.tag_types, label };
+    let mm = mm(view.scale);
     for e in project.elements.values() {
         match &e.kind {
             ElementKind::Room(room) if e.level == level && !structural => {
-                if let Some(boundary) = geom.rooms.get(&e.id) {
+                let boundary = geom.rooms.get(&e.id);
+                if let Some(boundary) = boundary {
                     d.fill(boundary.clone(), HIGHLIGHT_ONLY, Some(e.id));
-                    let area = format::area(polygon::area(boundary));
-                    room_tag(d, room.position, &room.name, &room.number, &area, mm, e.id);
-                } else {
+                }
+                if let Some(tag) = tag::prepare(&ctx, e, TagTarget::Room) {
+                    let spot = TagSpot {
+                        point: room.position,
+                        anchor: room.position,
+                        host_dir: None,
+                        align: Align::FirstBaseline,
+                    };
                     // Not enclosed: the tag is crossed out.
-                    room_tag(d, room.position, &room.name, &room.number, "—", mm, e.id);
-                    let (p, s) = (room.position, 2.5 * mm);
-                    d.line(p + DVec2::new(-s, -s), p + DVec2::new(s, s), LineStyle::Annotation, Some(e.id));
-                    d.line(p + DVec2::new(-s, s), p + DVec2::new(s, -s), LineStyle::Annotation, Some(e.id));
+                    tag::draw(d, &ctx, &tag, spot, boundary.is_none());
                 }
             }
             ElementKind::Grid(grid) => {
@@ -94,7 +70,7 @@ pub fn plan_annotations(
         }
     }
     if !ceiling && !structural {
-        opening_tags(d, project, geom, level, mm, offsets);
+        opening_tags(d, &ctx, level);
     }
 }
 
@@ -144,6 +120,7 @@ pub fn section_label(project: &Project, data: &TypeData) -> Option<String> {
 /// Tags of the beams, columns, pad footings and pile caps of `level`: their mark and
 /// section (`V1 15×40`). Beam tags run along the beam, beside it; column
 /// and footing tags sit above and to the right.
+#[cfg(test)]
 pub fn structure_tags(
     d: &mut Drawing2D,
     project: &Project,
@@ -152,28 +129,29 @@ pub fn structure_tags(
     scale: u32,
     offsets: &TagOffsets,
 ) {
-    let mm = mm(scale);
+    let placements = offsets
+        .iter()
+        .map(|(id, offset)| (*id, cc_core::tag::TagPlacement { offset: *offset, ..Default::default() }))
+        .collect();
+    let ctx =
+        TagCtx { project, geom, scale, placements: &placements, types: &Default::default(), label: &|k| k.to_string() };
+    structure_tags_in(d, &ctx, level);
+}
+
+/// [`structure_tags`] with a view's tag adjustments and types.
+pub fn structure_tags_in(d: &mut Drawing2D, ctx: &TagCtx, level: LevelId) {
+    let (project, geom, mm) = (ctx.project, ctx.geom, ctx.mm());
     for e in project.elements.values().filter(|e| e.level == level) {
-        let Some(section) = project.element_type(e.type_id).and_then(|t| section_label(project, &t.data)) else {
-            continue;
-        };
-        let text = if e.mark.is_empty() { section } else { format!("{} {section}", e.mark) };
-        match &e.kind {
+        let Some(target) = TagTarget::of(e, project) else { continue };
+        let spot = match &e.kind {
             ElementKind::Beam(_) => {
                 let Some(g) = geom.beams.get(&e.id) else { continue };
                 let u = (g.start_ext.0.max(g.start_ext.1) + g.end_ext.0.min(g.end_ext.1)) / 2.0;
                 // Readable: text runs left to right or bottom to top.
-                let mut dir = g.dir_at(u);
-                if dir.x < -1e-9 || (dir.x.abs() <= 1e-9 && dir.y < 0.0) {
-                    dir = -dir;
-                }
+                let dir = tag::readable(g.dir_at(u));
                 let up = dir.perp();
                 let p = g.world(u, 0.0) + up * (g.half + 1.0 * mm);
-                let angle = dir.y.atan2(dir.x);
-                let center = p + up * (1.25 * mm);
-                let half = text_half(&text, 2.5, angle, mm);
-                let offset = place_tag(d, offsets, e.id, center, half, g.world(u, 0.0));
-                d.tag_text(p + offset, &text, 2.5, Anchor::CenterBottom, angle, Some(e.id));
+                TagSpot { point: p, anchor: g.world(u, 0.0), host_dir: Some(dir), align: Align::CenterBottom }
             }
             ElementKind::Column(c) if c.structural => {
                 let Some(data @ TypeData::Column { .. }) = project.element_type(e.type_id).map(|t| &t.data) else {
@@ -183,34 +161,24 @@ pub fn structure_tags(
                 // A section that fails has no outline: tag the column's point.
                 let hi = outline.iter().fold(c.position, |a, p| a.max(*p));
                 let p = hi + DVec2::splat(1.0 * mm);
-                let half = text_half(&text, 2.5, 0.0, mm);
-                let offset = place_tag(d, offsets, e.id, p + half, half, c.position);
-                d.tag_text(p + offset, &text, 2.5, Anchor::LeftBottom, 0.0, Some(e.id));
+                TagSpot { point: p, anchor: c.position, host_dir: None, align: Align::LeftBottom }
             }
             ElementKind::Foundation(_) => {
                 let Some(g) = geom.foundations.get(&e.id) else { continue };
                 let lo = g.footprint.iter().fold(DVec2::splat(f64::INFINITY), |a, p| a.min(*p));
                 let hi = g.footprint.iter().fold(DVec2::splat(f64::NEG_INFINITY), |a, p| a.max(*p));
                 let p = DVec2::new(hi.x + mm, lo.y);
-                let half = text_half(&text, 2.5, 0.0, mm);
-                let offset = place_tag(d, offsets, e.id, p + half, half, (lo + hi) * 0.5);
-                d.tag_text(p + offset, &text, 2.5, Anchor::LeftBottom, 0.0, Some(e.id));
+                TagSpot { point: p, anchor: (lo + hi) * 0.5, host_dir: None, align: Align::LeftBottom }
             }
-            _ => {}
+            _ => continue,
+        };
+        if !(spot.point.is_finite() && spot.anchor.is_finite()) {
+            continue;
+        }
+        if let Some(tag) = tag::prepare(ctx, e, target) {
+            tag::draw(d, ctx, &tag, spot, false);
         }
     }
-}
-
-fn room_tag(d: &mut Drawing2D, p: DVec2, name: &str, number: &str, area: &str, mm: f64, id: cc_core::ElementId) {
-    let line = 3.6 * mm;
-    d.tag_text(p + DVec2::new(0.0, 0.4 * mm), name, 2.5, Anchor::CenterBottom, 0.0, Some(id));
-    d.tag_text(p - DVec2::new(0.0, line - 0.4 * mm), number, 2.2, Anchor::CenterBottom, 0.0, Some(id));
-    d.tag_text(p - DVec2::new(0.0, 2.0 * line - 0.4 * mm), area, 2.0, Anchor::CenterBottom, 0.0, Some(id));
-    let width = (name.chars().count().max(number.chars().count()).max(area.chars().count()) as f64 * 1.6 + 2.0) * mm;
-    let (x0, x1) = (p.x - width / 2.0, p.x + width / 2.0);
-    let (y0, y1) = (p.y - 2.0 * line, p.y + 3.4 * mm);
-    let rect = vec![DVec2::new(x0, y0), DVec2::new(x1, y0), DVec2::new(x1, y1), DVec2::new(x0, y1)];
-    d.fill(rect, PICK_AREA, Some(id));
 }
 
 /// Grid line with a bubble of `bubble_mm` paper millimeters at its end.
@@ -272,42 +240,28 @@ pub fn projected_grids(d: &mut Drawing2D, project: &Project, frame: &crate::proj
     }
 }
 
-fn opening_tags(
-    d: &mut Drawing2D,
-    project: &Project,
-    geom: &ModelGeometry,
-    level: LevelId,
-    mm: f64,
-    offsets: &TagOffsets,
-) {
-    for wall in geom.walls.values() {
+/// Tags of the doors and windows in the walls of `level`: outside the
+/// wall, on the side opposite the door swing.
+fn opening_tags(d: &mut Drawing2D, ctx: &TagCtx, level: LevelId) {
+    let (project, mm) = (ctx.project, ctx.mm());
+    for wall in ctx.geom.walls.values() {
         if project.element(wall.element).is_none_or(|e| e.level != level) {
             continue;
         }
         for o in &wall.openings {
             let Some(e) = project.element(o.element) else { continue };
-            if e.mark.is_empty() {
-                continue;
-            }
             let Some(host) = e.as_hosted() else { continue };
-            let door = matches!(e.kind, ElementKind::Door(_));
-            // Tags sit outside the wall, on the side opposite the door swing.
+            let Some(target @ (TagTarget::Door | TagTarget::Window)) = TagTarget::of(e, project) else { continue };
+            let Some(tag) = tag::prepare(ctx, e, target) else { continue };
             let side = if host.flip_facing { 1.0 } else { -1.0 };
             let u = (o.u0 + o.u1) / 2.0;
-            let r = 2.6 * mm;
-            let c = wall.world(u, side * (wall.half + r + 2.0 * mm));
-            let c = c + place_tag(d, offsets, e.id, c, DVec2::splat(r), wall.world(u, side * wall.half));
-            if door {
-                let circle: Vec<DVec2> =
-                    (0..24).map(|i| c + DVec2::from_angle(i as f64 / 24.0 * std::f64::consts::TAU) * r).collect();
-                d.polyline(&circle, true, LineStyle::Annotation, Some(e.id));
-            } else {
-                // Windows: a hexagon.
-                let hex: Vec<DVec2> =
-                    (0..6).map(|i| c + DVec2::from_angle(i as f64 / 6.0 * std::f64::consts::TAU) * r).collect();
-                d.polyline(&hex, true, LineStyle::Annotation, Some(e.id));
-            }
-            d.tag_text(c, &e.mark, 2.0, Anchor::Center, 0.0, Some(e.id));
+            // The tag's edge 2 mm off the wall's face.
+            let half = tag.half(Align::Center, mm);
+            let reach = half.x.max(half.y);
+            let c = wall.world(u, side * (wall.half + reach + 2.0 * mm));
+            let host_dir = Some(tag::readable(wall.tangent(u)));
+            let spot = TagSpot { point: c, anchor: wall.world(u, side * wall.half), host_dir, align: Align::Center };
+            tag::draw(d, ctx, &tag, spot, false);
         }
     }
 }

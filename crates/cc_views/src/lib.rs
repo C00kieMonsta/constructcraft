@@ -37,6 +37,7 @@ mod shadow;
 mod sheet;
 pub mod sheet_fields;
 pub mod sun_path;
+pub mod tag;
 mod topography;
 
 pub use annotate::{DimensionLayout, HIGHLIGHT_ONLY, dimension_layout, dimension_type, draw_dimension, draw_marks};
@@ -120,9 +121,17 @@ pub fn generate_temporary(
             if !ceiling {
                 plan::section_marks(&mut d, project, view.scale);
             }
-            annotate::plan_annotations(&mut d, project, geom, *level, ceiling, structural, view);
+            annotate::plan_annotations(&mut d, project, geom, *level, ceiling, structural, view, label);
             if tags {
-                annotate::structure_tags(&mut d, project, geom, *level, view.scale, &view.tag_offsets);
+                let ctx = tag::TagCtx {
+                    project,
+                    geom,
+                    scale: view.scale,
+                    placements: &view.tags,
+                    types: &view.tag_types,
+                    label,
+                };
+                annotate::structure_tags_in(&mut d, &ctx, *level);
             }
             d
         }

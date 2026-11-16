@@ -3626,3 +3626,14 @@ sun-east = E
 sun-south = S
 sun-west = W
 sun-date-pattern = { $year }-{ $month }-{ $day }
+
+## Editable tags
+category-tag = Tags
+tx-set-tag = Adjust Tag
+tx-create-tag-type = Create Tag Type
+tpl-tag-door = Door tag
+tpl-tag-window = Window tag
+tpl-tag-room = Room tag
+tpl-tag-column = Column tag
+tpl-tag-beam = Beam tag
+tpl-tag-foundation = Foundation tag

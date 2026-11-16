@@ -566,6 +566,7 @@ pub(crate) fn view_json(s: &Session, id: ViewId) -> Option<Value> {
         "sun": super::sun::view_sun_json(s.project(), v),
         "render": serde_json::to_value(&v.render).unwrap_or(Value::Null),
         "shading": if v.kind.takes_sun() { serde_json::to_value(v.shading).unwrap_or(Value::Null) } else { Value::Null },
+        "tag_types": super::tags::view_tag_types_json(s.project(), v),
     }))
 }
 

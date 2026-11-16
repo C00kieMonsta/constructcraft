@@ -2063,6 +2063,7 @@ impl<'a> Exporter<'a> {
             | TypeData::Text { .. }
             | TypeData::LevelMark { .. }
             | TypeData::BarTag { .. }
+            | TypeData::Tag { .. }
             | TypeData::CadImport {}
             | TypeData::DetailLine {}
             | TypeData::FilledRegion { .. }

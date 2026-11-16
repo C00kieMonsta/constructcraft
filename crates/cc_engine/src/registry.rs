@@ -352,6 +352,9 @@ registry![
     "Dimensions and text" => [
         annotate::DimensionCreate,
         annotate::TagMove,
+        tags::TagTypeCreate,
+        tags::TagSet,
+        tags::TagGet,
         annotate::DimensionChainCreate,
         annotate::DimensionOrdinateCreate,
         annotate::DimensionSetValue,

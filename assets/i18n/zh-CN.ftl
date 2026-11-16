@@ -3626,3 +3626,14 @@ sun-east = 东
 sun-south = 南
 sun-west = 西
 sun-date-pattern = { $year }-{ $month }-{ $day }
+
+## Editable tags
+category-tag = 标记
+tx-set-tag = 调整标记
+tx-create-tag-type = 创建标记类型
+tpl-tag-door = 门标记
+tpl-tag-window = 窗标记
+tpl-tag-room = 房间标记
+tpl-tag-column = 柱标记
+tpl-tag-beam = 梁标记
+tpl-tag-foundation = 基础标记

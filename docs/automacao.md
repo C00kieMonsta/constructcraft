@@ -406,6 +406,17 @@ Cada barra de armadura tem uma posição que identifica sua forma (mesmo diâmet
 {"command": "bar_length_check", "args": {"max_length": 12}}
 ```
 
+### Etiquetas
+
+As plantas etiquetam sozinhas portas, janelas, ambientes, pilares, vigas, sapatas e blocos sobre estacas. Um tipo de etiqueta (`tag_type_create`, `target` e um `style` parcial) diz o que a etiqueta escreve e como ela é: até 8 linhas (`lines`) de texto com campos `{Campo}` (um campo de tabela pelo nome, como `{Width}`, `{Height}` ou `{Comments}`, ou `{Mark}`, `{TypeName}`, `{Name}`, `{Number}`, `{Area}`, `{Section}`, `{Level}`) e um tamanho em milímetros de papel, um símbolo (`symbol`: `Circle`, `Hexagon`, `Rectangle`, `RoundedRectangle`, `Ellipse`, `Diamond`, `Triangle`, `Underline`, `None`, ou `{"Component": id}` de um componente de detalhe desenhado no tamanho do papel, com os campos dos seus textos preenchidos), sua largura e altura (`width`, `height`; 0 ajusta ao texto), penas, `leader` e `orientation`; `type_set` o altera. Um projeto sem tipo de etiqueta para um alvo desenha as etiquetas como as plantas sempre desenharam. Cada planta escolhe um tipo de etiqueta por alvo (`view_set` `tag_types`) e ajusta a etiqueta de cada elemento com `tag_set` (`offset` ou `delta`, `rotation`, `type`, `hidden`, `leader`, `reset`; `null` limpa um campo); `tag_get` mostra os ajustes, o tipo e os textos.
+
+```text
+{"command": "tag_type_create", "args": {"target": "door", "name": "Porta com tamanho", "style": {"lines": [{"text": "{Mark}", "size": 2.5}, {"text": "{Width} x {Height}", "size": 2}], "symbol": "Rectangle"}}}
+{"command": "view_set", "args": {"view": "Térreo", "tag_types": {"door": "Porta com tamanho"}}}
+{"command": "tag_set", "args": {"view": "Térreo", "ids": [12, 14], "delta": [0, 0.5], "rotation": 90}}
+{"command": "tag_get", "args": {"view": "Térreo", "id": 12}}
+```
+
 ### Renderização fotorrealista
 
 Uma vista 3D guarda suas configurações de renderização em `render` (`view_get`), mudadas por `view_set` com um patch de mesclagem: amostras por pixel (`samples`), reflexões da luz (`max_depth`), largura e altura da imagem em pixels (`width`, `height`), `fov_deg`, exposição em stops (`exposure`), mapeamento de tons (`tone_map`: `Filmic` ou `Standard`), o limite contra pontos brilhantes (`clamp`), `clay` (toda superfície opaca num mesmo branco fosco, o vidro mantido, sob o mesmo céu e sol) e o ambiente (`environment`: `sky_strength`, `sun_strength`, `ground_color`, `ground_plane`); `null` as remove. O sol é o da vista (`sun`). `view_render` faz o path tracing da vista no processador e grava a imagem (`.png`, `.jpg`, ou `.exr`/`.hdr` em luz linear) com a câmera da vista, como a vista 3D a mostra; `settings` altera as configurações da vista só para essa renderização, e `region` (`[x, y, largura, altura]` em pixels) renderiza só uma parte da imagem. Retorna o tamanho, as amostras, os segundos e os triângulos, e não muda nada no modelo.

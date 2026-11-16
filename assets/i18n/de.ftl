@@ -3626,3 +3626,14 @@ sun-east = O
 sun-south = S
 sun-west = W
 sun-date-pattern = { $day }.{ $month }.{ $year }
+
+## Editable tags
+category-tag = Beschriftungen
+tx-set-tag = Beschriftung anpassen
+tx-create-tag-type = Beschriftungstyp erstellen
+tpl-tag-door = Türbeschriftung
+tpl-tag-window = Fensterbeschriftung
+tpl-tag-room = Raumbeschriftung
+tpl-tag-column = Stützenbeschriftung
+tpl-tag-beam = Trägerbeschriftung
+tpl-tag-foundation = Fundamentbeschriftung
