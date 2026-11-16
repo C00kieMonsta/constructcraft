@@ -200,9 +200,17 @@ fn rows_may_stand_for_the_elements_alike() {
     let pair = got.iter().find(|r| r.2[3] == "2").expect("the row of two walls");
     assert_eq!(pair.2[2], m(4.0));
     assert_eq!(table_totals(&mut s, view)[2], "", "the length is not totaled");
-    // With no sorting every element is alike: one row.
+    // With no sorting a row gathers the elements alike in every column shown but the count:
+    // here those of one level and length (the two 4 m walls), with nothing varying.
     run(&mut s, "schedule_set", json!({"view": view, "sorting": []}));
-    assert_eq!(rows(&mut s, view).len(), 1);
+    let got = rows(&mut s, view);
+    assert_eq!(got.len(), 4, "{got:?}");
+    assert!(got.iter().all(|r| !r.2.contains(&varies)), "{got:?}");
+    let pair = got.iter().find(|r| r.2[3] == "2").expect("the row of two walls");
+    assert_eq!((pair.2[1].clone(), pair.2[2].clone()), (levels[0].clone(), m(4.0)));
+    // A totaled column does not split them: lengths add up per level.
+    run(&mut s, "schedule_set", json!({"view": view, "columns": [{"field": "Length", "total": true}]}));
+    assert_eq!(rows(&mut s, view).len(), 2);
     run(&mut s, "schedule_set", json!({"view": view, "itemize": true}));
     assert_eq!(rows(&mut s, view).len(), 5);
 }

@@ -761,8 +761,19 @@ pub fn schedule_where(
         });
     }
 
-    // Sorting: each row's keys once; stable, so ties keep the default order.
-    let levels = def.all_sorting();
+    // Sorting: each row's keys once; stable, so ties keep the default order. Rows gathered with no
+    // level of sorting are those alike in every column shown but the counted and totaled ones.
+    let mut levels = def.all_sorting();
+    if def.collapse && levels.is_empty() {
+        levels = fields
+            .iter()
+            .filter(|f| {
+                let format = def.format_of(**f);
+                **f != ScheduleField::Count && !format.hidden && !format.total.unwrap_or_else(|| summable(**f))
+            })
+            .map(|f| cc_core::SortLevel::new(*f))
+            .collect();
+    }
     let mut keyed: Vec<Keyed> = rows
         .into_iter()
         .map(|(e, values)| {

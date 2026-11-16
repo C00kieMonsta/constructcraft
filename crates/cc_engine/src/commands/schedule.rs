@@ -95,9 +95,10 @@ impl Command for ScheduleGet {
 /// levels, the first outermost; a level with `header`, `footer` or
 /// `blank_line` groups the rows alike in it under a heading, over a footer
 /// (the group's count and totals) or apart by a blank line. With `itemize`
-/// false, the elements alike in every sorting level share one row: values
-/// that differ among them read as varying and totaled columns add up (the
-/// `Count` field says how many). `columns` formats the columns of the fields
+/// false, the elements alike in every sorting level share one row (with no
+/// sorting, those alike in every column shown but `Count` and the totaled
+/// ones): values that differ among them read as varying and totaled columns
+/// add up (the `Count` field says how many). `columns` formats the columns of the fields
 /// named (`heading`, `align`: `Auto`, `Left`, `Center`, `Right`; `hidden`: a
 /// hidden field still sorts and filters; `total`: add the column up in
 /// footers and totals), `totals` shows or hides the totals row, and
@@ -119,7 +120,8 @@ pub struct ScheduleSet {
     /// The sorting levels, `[{"field": "Type", "header": true, "footer": true}, …]` (at most 4; `[]` for none).
     #[serde(default)]
     pub sorting: Option<Value>,
-    /// One row per element (default true); false gathers the elements alike in every sorting level in one row.
+    /// One row per element (default true); false gathers the elements alike in every sorting level in one row
+    /// (with no sorting, those alike in every column shown but the count and the totaled ones).
     #[serde(default)]
     pub itemize: Option<bool>,
     /// Show the totals row.
