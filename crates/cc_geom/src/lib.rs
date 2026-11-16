@@ -25,6 +25,7 @@ mod mesh;
 pub mod pad;
 pub mod paint;
 pub mod pile;
+mod plan_cover;
 pub mod polygon;
 pub mod profile_sweep;
 pub mod ramp;
@@ -53,7 +54,8 @@ pub use build::{
 pub use component::{instance_errors, resolve_component, resolve_component_in, resolve_instance, resolve_pieces};
 pub use cut::{clip_polygon, face_plane_segments};
 pub use mep::{SegmentGeom, TraySection, ValveGeom, segment_geom, valve_geom};
-pub use mesh::{MeshPlan, mesh_plan, plan_edges};
+pub use mesh::{MeshPlan, mesh_plan, plan_edges, top_edges};
+pub use plan_cover::PlanCover;
 pub use ramp::{RampGeom, RampPiece, ramp_geom};
 pub use rooms::{RoomArrangement, outer_boundary, room_boundary};
 pub use solid::{Face, Look, Ray, Solid, plane_axes};

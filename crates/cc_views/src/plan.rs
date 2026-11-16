@@ -1,7 +1,7 @@
 use crate::{Drawing2D, LineStyle};
-use cc_core::{DetailLevel, ElementKind, LevelId, Project, TypeData, ViewKind};
-use cc_geom::{Column, ModelGeometry, WallGeom, polygon};
-use glam::DVec2;
+use cc_core::{DetailLevel, ElementId, ElementKind, LevelId, Project, TypeData, ViewKind, VisualStyle};
+use cc_geom::{Column, MeshPlan, ModelGeometry, PlanCover, WallGeom, polygon};
+use glam::{DVec2, DVec3};
 use std::f64::consts::{PI, TAU};
 
 pub(crate) use crate::cut::POCHE;
@@ -41,7 +41,7 @@ pub fn plan(
     ceiling: bool,
     scale: u32,
 ) -> Drawing2D {
-    plan_of(project, geom, level, cut_height, (ceiling, false), scale, DetailLevel::Medium)
+    plan_of(project, geom, level, cut_height, (ceiling, false), scale, (DetailLevel::Medium, VisualStyle::HiddenLine))
 }
 
 /// Whether a structural plan shows the element: slabs, the load-bearing
@@ -64,7 +64,11 @@ pub fn is_structural(e: &cc_core::Element) -> bool {
 }
 
 /// A plan as [`plan`] draws it, at `detail`; a `structural` plan shows only
-/// the structure, with the beams above the cut drawn as seen from below.
+/// the structure, with the beams above the cut drawn as seen from below. A
+/// floor plan in a visual `style` that fills faces draws the pieces of
+/// components (and of swept profiles and connections) as seen from above:
+/// their edges only where no face of them lies over them (see
+/// [`PlanCover`]); the wireframe sees through them.
 pub fn plan_of(
     project: &Project,
     geom: &ModelGeometry,
@@ -72,7 +76,7 @@ pub fn plan_of(
     cut_height: f64,
     (ceiling, structural): (bool, bool),
     scale: u32,
-    detail: DetailLevel,
+    (detail, style): (DetailLevel, VisualStyle),
 ) -> Drawing2D {
     let shown = |e: &cc_core::Element| !structural || is_structural(e);
     let spacing = crate::cut::spacing(scale);
@@ -80,6 +84,19 @@ pub fn plan_of(
     let mut d = Drawing2D { fit_elements: true, ..Default::default() };
     let level_z = project.level_elevation(level);
     let cut_z = level_z + cut_height;
+    // Every piece is known before any is drawn: each may hide the others. A
+    // line within a projection line's width (on paper) of the outline of
+    // what lies over it merges with that outline.
+    let merge = LineStyle::Projection.pen().0 * f64::from(scale) / 1000.0;
+    let mut cover = (!ceiling && style.fills()).then(|| PlanCover::new(cut_z).with_margin(merge));
+    let connections = match ceiling {
+        true => Vec::new(),
+        false => connection_pieces(project, geom, level, cut_z, cover.as_mut()),
+    };
+    let components = match structural {
+        true => Vec::new(),
+        false => component_pieces(project, geom, level, (cut_z, ceiling, detail), cover.as_mut()),
+    };
 
     for e in project.elements.values().filter(|e| e.level == level && shown(e)) {
         let id = Some(e.id);
@@ -125,10 +142,10 @@ pub fn plan_of(
     }
     if !ceiling {
         draw_structure(&mut d, project, geom, level, cut_z, spacing, structural);
-        draw_connections(&mut d, project, geom, level, cut_z);
+        draw_pieces(&mut d, &connections, cut_z, false, cover.as_mut());
     }
     if !structural {
-        draw_components(&mut d, project, geom, level, cut_z, ceiling, detail);
+        draw_pieces(&mut d, &components, cut_z, ceiling, cover.as_mut());
     }
     if !structural && !ceiling {
         draw_masses(&mut d, project, geom, level, cut_z);
@@ -200,24 +217,51 @@ fn elevation_mark(d: &mut Drawing2D, lo: DVec2, hi: DVec2, look: DVec2, name: &s
     d.text(c + DVec2::new(r + 0.08, -r - 0.05), name, 2.5);
 }
 
+/// A piece a plan draws: a mesh with what it shows in plan, or the outline
+/// of a prism, with its number in the plan's cover when it is in one (see
+/// [`PlanCover::begin_piece`]); a 2D symbol (a piece drawn in plans only)
+/// is in none: it neither hides nor is hidden.
+enum PlanPiece<'a> {
+    Mesh { element: ElementId, plan: MeshPlan, piece: Option<usize> },
+    Outline { element: ElementId, footprint: &'a [DVec2], z0: f64, z1: f64, piece: Option<usize> },
+}
+
+/// A mesh piece and what it shows in plan, its faces and section added to
+/// `cover` unless it is a `symbol`.
+fn mesh_piece<'a>(
+    element: ElementId,
+    faces: &[Vec<DVec3>],
+    smooth: &[bool],
+    (cut_z, symbol): (f64, bool),
+    cover: Option<&mut PlanCover>,
+) -> PlanPiece<'a> {
+    let plan = cc_geom::mesh_plan(faces, smooth, cut_z);
+    let piece = cover.filter(|_| !symbol).map(|cover| {
+        let piece = cover.begin_piece();
+        cover.add_faces(faces);
+        cover.add_section(&plan.cut);
+        piece
+    });
+    PlanPiece::Mesh { element, plan, piece }
+}
+
 /// Outlines of component pieces marked for plans: in floor plans the pieces
 /// starting below the cut (pieces above it dashed), in ceiling plans only
 /// the pieces above the cut (light fixtures and the like). Swept profiles
-/// are drawn the same way.
-fn draw_components(
-    d: &mut Drawing2D,
+/// are drawn the same way. Those seen from above are added to `cover`.
+fn component_pieces<'a>(
     project: &Project,
-    geom: &ModelGeometry,
+    geom: &'a ModelGeometry,
     level: LevelId,
-    cut_z: f64,
-    ceiling: bool,
-    detail: DetailLevel,
-) {
+    (cut_z, ceiling, detail): (f64, bool, DetailLevel),
+    mut cover: Option<&mut PlanCover>,
+) -> Vec<PlanPiece<'a>> {
+    let mut out = Vec::new();
     for e in project.elements.values().filter(|e| e.level == level) {
         // Swept profiles (baseboards, crown moldings) cut and show like mesh pieces.
         if let ElementKind::Sweep(sw) = &e.kind {
             if let Some(faces) = cc_geom::profile_sweep::sweep_faces(project, e, sw) {
-                draw_mesh(d, &faces, cut_z, ceiling, e.id);
+                out.push(mesh_piece(e.id, &faces, &[], (cut_z, false), cover.as_deref_mut()));
             }
             continue;
         }
@@ -229,23 +273,59 @@ fn draw_components(
             continue;
         }
         for part in geom.components.get(&e.id).into_iter().flatten().filter(|p| p.in_plan && p.detail.shows(detail)) {
+            let symbol = part.plan_only;
             if !part.faces.is_empty() {
-                draw_mesh(d, &part.faces, cut_z, ceiling, e.id);
+                out.push(mesh_piece(e.id, &part.faces, &part.smooth, (cut_z, symbol), cover.as_deref_mut()));
                 continue;
             }
-            let above = part.z0 >= cut_z;
-            let style = match (ceiling, above) {
-                (false, false) | (true, true) => LineStyle::Projection,
-                (false, true) => LineStyle::Hidden,
-                (true, false) => continue,
-            };
-            d.polyline(&part.footprint, true, style, Some(e.id));
+            let piece = cover.as_deref_mut().filter(|_| !symbol && part.z0 < cut_z).map(|cover| {
+                let piece = cover.begin_piece();
+                cover.add_outline(&part.footprint, part.z1);
+                piece
+            });
+            let (footprint, z0, z1) = (&part.footprint[..], part.z0, part.z1);
+            out.push(PlanPiece::Outline { element: e.id, footprint, z0, z1, piece });
+        }
+    }
+    out
+}
+
+/// Draw `pieces` as they show in a plan cut at `cut_z`: with a `cover`
+/// (floor plans), the edges seen below the cut plane only where no face
+/// lies over them.
+fn draw_pieces(d: &mut Drawing2D, pieces: &[PlanPiece], cut_z: f64, ceiling: bool, mut cover: Option<&mut PlanCover>) {
+    for piece in pieces {
+        match piece {
+            PlanPiece::Mesh { element, plan, piece } => {
+                draw_plan(d, plan, ceiling, *element, cover.as_deref_mut().zip(*piece));
+            }
+            PlanPiece::Outline { element, footprint, z0, z1, piece } => {
+                let above = *z0 >= cut_z;
+                let style = match (ceiling, above) {
+                    (false, false) | (true, true) => LineStyle::Projection,
+                    (false, true) => LineStyle::Hidden,
+                    (true, false) => continue,
+                };
+                let id = Some(*element);
+                match cover.as_deref_mut().zip(*piece).filter(|_| !ceiling && !above) {
+                    Some((cover, piece)) => {
+                        // Its top outline, at the cut plane when it rises through it.
+                        let z = z1.min(cut_z);
+                        let n = footprint.len();
+                        for (i, a) in footprint.iter().enumerate() {
+                            let Some(b) = footprint.get((i + 1) % n) else { continue };
+                            for (p, q) in cover.visible(a.extend(z), b.extend(z), Some(piece)) {
+                                d.line(p, q, style, id);
+                            }
+                        }
+                    }
+                    None => d.polyline(footprint, true, style, id),
+                }
+            }
         }
     }
 }
 
-/// A mesh piece: its section at the cut plane, the edges seen below it and,
-/// dashed, those above (in ceiling plans only the edges above).
 /// Conceptual masses in a floor plan: those on its level or cut by its cut
 /// plane, as their body cuts and shows (see [`draw_mesh`]), with the mass
 /// floor of the level and its area.
@@ -255,7 +335,7 @@ fn draw_masses(d: &mut Drawing2D, project: &Project, geom: &ModelGeometry, level
         if !own && !(g.z_range.0 <= cut_z && cut_z <= g.z_range.1) {
             continue;
         }
-        draw_mesh(d, &g.faces, cut_z, false, *id);
+        draw_mesh(d, &g.faces, &[], cut_z, false, *id);
         if let Some(floor) = g.floors.iter().find(|f| f.level == level) {
             d.polyline(&floor.outline, true, LineStyle::Thin, Some(*id));
             let n = floor.outline.len().max(1) as f64;
@@ -273,24 +353,48 @@ fn draw_masses(d: &mut Drawing2D, project: &Project, geom: &ModelGeometry, level
 }
 
 /// Connections whose member stands on `level`: their plates and bolts as
-/// they cut and show (see [`draw_mesh`]).
-fn draw_connections(d: &mut Drawing2D, project: &Project, geom: &ModelGeometry, level: LevelId, cut_z: f64) {
+/// they cut and show (see [`draw_plan`]), added to `cover`.
+fn connection_pieces(
+    project: &Project,
+    geom: &ModelGeometry,
+    level: LevelId,
+    cut_z: f64,
+    mut cover: Option<&mut PlanCover>,
+) -> Vec<PlanPiece<'static>> {
+    let mut out = Vec::new();
     for g in geom.connections.values() {
         if project.element(g.member).is_some_and(|m| m.level == level) {
-            draw_mesh(d, &g.faces(), cut_z, false, g.element);
+            out.push(mesh_piece(g.element, &g.faces(), &[], (cut_z, false), cover.as_deref_mut()));
         }
     }
+    out
 }
 
-fn draw_mesh(d: &mut Drawing2D, faces: &[Vec<glam::DVec3>], cut_z: f64, ceiling: bool, id: cc_core::ElementId) {
-    let plan = cc_geom::mesh_plan(faces, cut_z);
+/// A mesh as it cuts and shows (see [`draw_plan`]), hiding nothing.
+fn draw_mesh(d: &mut Drawing2D, faces: &[Vec<DVec3>], smooth: &[bool], cut_z: f64, ceiling: bool, id: ElementId) {
+    draw_plan(d, &cc_geom::mesh_plan(faces, smooth, cut_z), ceiling, id, None);
+}
+
+/// A mesh piece: its section at the cut plane, the edges seen below it (with
+/// a `cover` it is a piece of, where nothing lies over them) and, dashed,
+/// those above (in ceiling plans only the edges above).
+fn draw_plan(d: &mut Drawing2D, plan: &MeshPlan, ceiling: bool, id: ElementId, cover: Option<(&mut PlanCover, usize)>) {
     let id = Some(id);
     if ceiling {
         plan.above.iter().for_each(|&(a, b)| d.line(a, b, LineStyle::Projection, id));
         return;
     }
     plan.cut.iter().for_each(|&(a, b)| d.line(a, b, LineStyle::Cut, id));
-    plan.below.iter().for_each(|&(a, b)| d.line(a, b, LineStyle::Projection, id));
+    match cover {
+        Some((cover, piece)) => {
+            for &(a, b) in &plan.below {
+                for (p, q) in cover.visible(a, b, Some(piece)) {
+                    d.line(p, q, LineStyle::Projection, id);
+                }
+            }
+        }
+        None => plan.below.iter().for_each(|&(a, b)| d.line(a.truncate(), b.truncate(), LineStyle::Projection, id)),
+    }
     plan.above.iter().for_each(|&(a, b)| d.line(a, b, LineStyle::Hidden, id));
 }
 
@@ -735,7 +839,7 @@ fn draw_curtain(
             CurtainPanel::Component { .. } => {
                 for part in p.parts.iter().filter(|q| q.in_plan && !q.void && q.detail.shows(detail)) {
                     if !part.faces.is_empty() {
-                        draw_mesh(d, &part.faces, cut_z, false, g.element);
+                        draw_mesh(d, &part.faces, &part.smooth, cut_z, false, g.element);
                     } else if let Some(style) = state((part.z0, part.z1)) {
                         d.polyline(&part.footprint, true, style, id);
                     }
@@ -1617,5 +1721,241 @@ mod tests {
         assert!(cut.iter().all(|(a, b)| {
             [a, b].iter().all(|p| (4.0 - 1e-9..=5.0 + 1e-9).contains(&p.x) && (-1e-9..=1.0 + 1e-9).contains(&p.y))
         }));
+    }
+
+    /// A piece of a component for the hidden line tests.
+    fn piece(name: &str, shape: cc_core::ComponentShape, plan_only: bool) -> cc_core::ComponentItem {
+        cc_core::ComponentItem {
+            name: name.into(),
+            shape,
+            material: String::new(),
+            in_plan: true,
+            void: false,
+            plan_only,
+            detail: Default::default(),
+        }
+    }
+
+    /// A box piece (a prism) from `lo`, `size` big.
+    fn box_piece(name: &str, lo: [f64; 3], size: [f64; 3], plan_only: bool) -> cc_core::ComponentItem {
+        let s = |v: f64| v.to_string();
+        let shape = cc_core::ComponentShape::Box {
+            x: s(lo[0]),
+            y: s(lo[1]),
+            z: s(lo[2]),
+            width: s(size[0]),
+            depth: s(size[1]),
+            height: s(size[2]),
+        };
+        piece(name, shape, plan_only)
+    }
+
+    /// A box piece as a fixed mesh (as imported), between `lo` and `hi`.
+    fn mesh_box(name: &str, lo: [f64; 3], hi: [f64; 3]) -> cc_core::ComponentItem {
+        let v = |i: u32| {
+            let pick = |k: usize, bit: u32| if i & bit == 0 { lo[k] } else { hi[k] };
+            [pick(0, 1), pick(1, 2), pick(2, 4)]
+        };
+        let faces = vec![
+            vec![0, 2, 3, 1],
+            vec![4, 5, 7, 6],
+            vec![0, 1, 5, 4],
+            vec![1, 3, 7, 5],
+            vec![3, 2, 6, 7],
+            vec![2, 0, 4, 6],
+        ];
+        let shape =
+            cc_core::ComponentShape::Mesh { vertices: (0..8).map(v).collect::<Vec<_>>().into(), faces: faces.into() };
+        piece(name, shape, false)
+    }
+
+    /// A project with one component of `items` placed at the origin of its first level.
+    fn placed(items: Vec<cc_core::ComponentItem>) -> (Document, LevelId, ElementId) {
+        use cc_core::{ComponentDef, ElementType, ElementTypeId};
+        let mut doc = Document::new(Project::from_template());
+        let level = doc.project.levels[0].id;
+        let id = doc.edit("t", |e| {
+            let type_id = ElementTypeId(e.alloc_id());
+            let def = ComponentDef { items, ..Default::default() };
+            e.add_type(ElementType {
+                id: type_id,
+                name: "Pieces".into(),
+                data: TypeData::Component { component: "Pieces".into(), def },
+                info: Default::default(),
+                uid: Default::default(),
+            });
+            let id = ElementId(e.alloc_id());
+            e.add_element(Element {
+                id,
+                level,
+                type_id,
+                mark: String::new(),
+                comments: String::new(),
+                uid: Default::default(),
+                kind: ElementKind::Component(Default::default()),
+                phase_created: Default::default(),
+                phase_demolished: None,
+                design_option: None,
+                paints: Vec::new(),
+            });
+            id
+        });
+        (doc, level, id)
+    }
+
+    /// The lines of `id` in `style` drawn in a plan.
+    fn lines_of(d: &Drawing2D, id: ElementId, style: LineStyle) -> Vec<(DVec2, DVec2)> {
+        d.prims
+            .iter()
+            .filter_map(|p| match p {
+                Prim::Line { a, b, style: s, element: Some(e), .. } if *e == id && *s == style => Some((*a, *b)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn total(lines: &[(DVec2, DVec2)]) -> f64 {
+        lines.iter().map(|(a, b)| a.distance(*b)).sum()
+    }
+
+    /// Hidden line plans see the pieces of a component from above: a slab
+    /// hides the box under it and the part of another box it lies over;
+    /// the wireframe sees through it. A 2D symbol under the slab shows.
+    #[test]
+    fn hidden_line_plans_hide_what_pieces_cover() {
+        let (doc, level, id) = placed(vec![
+            // A 2 x 2 m slab from 0.5 to 0.8 m (a prism).
+            box_piece("slab", [0.0, 0.0, 0.5], [2.0, 2.0, 0.3], false),
+            // Under it: a 0.5 m box, and a box half out of it (meshes).
+            mesh_box("under", [0.5, 0.5, 0.0], [1.0, 1.0, 0.3]),
+            mesh_box("half", [1.5, 0.5, 0.0], [3.0, 1.0, 0.3]),
+            // A symbol under the slab.
+            box_piece("symbol", [0.2, 1.5, 0.0], [0.2, 0.2, 0.01], true),
+        ]);
+        let geom = ModelGeometry::build(&doc.project);
+        let draw = |style| plan_of(&doc.project, &geom, level, 1.2, (false, false), 50, (DetailLevel::Medium, style));
+        let hidden = lines_of(&draw(VisualStyle::HiddenLine), id, LineStyle::Projection);
+        let wire = lines_of(&draw(VisualStyle::Wireframe), id, LineStyle::Projection);
+        // The slab's outline (8), the symbol's (0.8) and what shows of the
+        // half-covered box (2.5 of its 4 m); the wireframe sees all (14.8).
+        assert!((total(&hidden) - 11.3).abs() < 1e-6, "{}: {hidden:?}", total(&hidden));
+        assert!((total(&wire) - 14.8).abs() < 1e-6, "{}", total(&wire));
+        let inside = |p: DVec2| p.x > 1e-6 && p.x < 2.0 - 1e-6 && p.y > 1e-6 && p.y < 2.0 - 1e-6;
+        let symbol = |p: DVec2| (0.2 - 1e-9..=0.4 + 1e-9).contains(&p.x) && (1.5 - 1e-9..=1.7 + 1e-9).contains(&p.y);
+        assert!(
+            hidden.iter().all(|(a, b)| !inside((*a + *b) * 0.5) || symbol(*a) && symbol(*b)),
+            "only the symbol shows under the slab"
+        );
+        assert!(wire.iter().any(|(a, b)| inside((*a + *b) * 0.5) && !symbol(*a)), "the wireframe sees under it");
+        // Shaded plans hide the same lines.
+        let shaded = lines_of(&draw(VisualStyle::Shaded), id, LineStyle::Projection);
+        assert!((total(&shaded) - total(&hidden)).abs() < 1e-9);
+    }
+
+    /// A piece rising through the cut plane hides what is under its
+    /// section: a plate through a tall box shows only outside it.
+    #[test]
+    fn sections_at_the_cut_plane_hide_what_is_under_them() {
+        let (doc, level, id) = placed(vec![
+            mesh_box("tall", [4.0, 0.0, 0.0], [5.0, 1.0, 2.0]),
+            box_piece("plate", [3.5, 0.25, 0.1], [2.0, 0.5, 0.1], false),
+        ]);
+        let geom = ModelGeometry::build(&doc.project);
+        let d = plan(&doc.project, &geom, level, 1.2, false, 50);
+        assert!((total(&lines_of(&d, id, LineStyle::Cut)) - 4.0).abs() < 1e-9, "the tall box's section");
+        // The plate's 5 m outline less its 2 x 1 m inside the box.
+        let seen = lines_of(&d, id, LineStyle::Projection);
+        assert!((total(&seen) - 3.0).abs() < 1e-6, "{}: {seen:?}", total(&seen));
+    }
+
+    /// Curved surfaces draw their outlines and silhouettes only, never the
+    /// edges between their facets, also where a void cut them into pieces:
+    /// a dome with a slot through it shows its rim circles and the slot.
+    #[test]
+    fn curved_pieces_draw_no_facet_edges() {
+        use cc_core::{ComponentShape, ProfilePoint, SketchPlane};
+        let dome = ComponentShape::Revolution {
+            plane: SketchPlane::Front,
+            points: vec![
+                ProfilePoint::new("0.1", "0"),
+                ProfilePoint::arc("0.5", "0", "0.4"),
+                ProfilePoint::new("0.1", "0.4"),
+            ],
+            offset: "0".into(),
+            axis: "0".into(),
+            angle: "360".into(),
+        };
+        let slot =
+            cc_core::ComponentItem { void: true, ..box_piece("slot", [0.2, -0.05, -0.1], [0.5, 0.1, 1.0], false) };
+        let (doc, level, id) = placed(vec![piece("dome", dome, false), slot]);
+        let geom = ModelGeometry::build(&doc.project);
+        let parts = &geom.components[&id];
+        assert_eq!(parts.len(), 1);
+        assert!(parts[0].smooth.iter().filter(|s| **s).count() > 20, "a curved surface");
+        let d = plan(&doc.project, &geom, level, 1.2, false, 50);
+        let seen = lines_of(&d, id, LineStyle::Projection);
+        assert!(seen.len() > 20);
+        // On a chord of one rim (the next ring of facets is 7.7 mm in from
+        // the outer one), along a side of the slot or across its end.
+        let on_rim = |a: DVec2, b: DVec2| {
+            let near = |p: DVec2, r: f64| (r - 0.002..=r + 1e-6).contains(&p.length());
+            [0.5, 0.1].iter().any(|r| near(a, *r) && near(b, *r))
+        };
+        let side = |p: DVec2| (p.y.abs() - 0.05).abs() < 1e-6 && p.x.abs() > 0.2 - 1e-6;
+        let end = |p: DVec2| (p.x.abs() - 0.2).abs() < 1e-6 && p.y.abs() < 0.05 + 1e-6;
+        for &(a, b) in &seen {
+            let slot = side(a) && side(b) && (a.y - b.y).abs() < 1e-9 || end(a) && end(b);
+            assert!(on_rim(a, b) || slot, "a facet edge: {a} {b}");
+        }
+    }
+
+    /// One curve drawn by two pieces with different chords reads as one
+    /// line: a lid of 24 sides on a seat ring turned in 48 shows only its
+    /// own outline at 1:10, while the seat alone keeps its rounded outline
+    /// (its own surface rising from it hides nothing).
+    #[test]
+    fn outlines_of_one_curve_merge() {
+        use cc_core::{ComponentShape, ProfilePoint, SketchPlane};
+        let seat = ComponentShape::Revolution {
+            plane: SketchPlane::Front,
+            points: vec![
+                ProfilePoint::new("0.12", "0.385"),
+                ProfilePoint::new("0.20", "0.385"),
+                ProfilePoint::arc("0.20", "0.395", "0.01"),
+                ProfilePoint::new("0.19", "0.405"),
+                ProfilePoint::new("0.12", "0.405"),
+            ],
+            offset: "0".into(),
+            axis: "0".into(),
+            angle: "360".into(),
+        };
+        let lid = ComponentShape::Cylinder {
+            x: "0".into(),
+            y: "0".into(),
+            z: "0.405".into(),
+            radius: "0.2".into(),
+            height: "0.02".into(),
+        };
+        let polygon = |r: f64, n: f64| 2.0 * n * r * (std::f64::consts::PI / n).sin();
+        let seen = |items| {
+            let (doc, level, id) = placed(items);
+            let geom = ModelGeometry::build(&doc.project);
+            let d = plan_of(
+                &doc.project,
+                &geom,
+                level,
+                1.2,
+                (false, false),
+                10,
+                (DetailLevel::Medium, VisualStyle::HiddenLine),
+            );
+            total(&lines_of(&d, id, LineStyle::Projection))
+        };
+        // The seat alone: its outer and inner circles.
+        let alone = seen(vec![piece("seat", seat.clone(), false)]);
+        assert!((alone - polygon(0.2, 48.0) - polygon(0.12, 48.0)).abs() < 1e-6, "{alone}");
+        // Closed: the lid's outline only, no slivers of the seat between its chords.
+        let closed = seen(vec![piece("seat", seat, false), piece("lid", lid, false)]);
+        assert!((closed - polygon(0.2, 24.0)).abs() < 1e-6, "{closed}");
     }
 }

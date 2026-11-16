@@ -98,7 +98,8 @@ pub fn generate_temporary(
                 }
                 _ => (false, false, None),
             };
-            let mut d = plan_of(project, geom, *level, *cut_height, (ceiling, structural), view.scale, view.detail);
+            let drawn = (view.detail, view.style());
+            let mut d = plan_of(project, geom, *level, *cut_height, (ceiling, structural), view.scale, drawn);
             joins::merge(project, &mut d);
             let style = view.style();
             if !style.fills() {
@@ -226,7 +227,8 @@ fn underlay(d: &mut Drawing2D, project: &Project, geom: &ModelGeometry, view: &V
     let mut under = Vec::new();
     for (other, looking) in u.plans(&project.levels, level) {
         let ceiling = looking == cc_core::Looking::Up;
-        let mut p = plan_of(project, geom, other, cut_height, (ceiling, false), view.scale, view.detail);
+        let drawn = (view.detail, view.style());
+        let mut p = plan_of(project, geom, other, cut_height, (ceiling, false), view.scale, drawn);
         joins::merge(project, &mut p);
         graphics::apply(&mut p, &mut graphics::Resolver::new(project, geom, view, None), view.scale);
         under.extend(p.prims.into_iter().filter_map(underlay_prim));
