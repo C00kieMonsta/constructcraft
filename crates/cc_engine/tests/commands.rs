@@ -916,12 +916,12 @@ fn the_showcase_macro_builds_its_project() {
     assert_eq!(get(&mut s, 270)["type"]["id"], 62, "the distribution board");
     let views = run(&mut s, "views_list", json!({}));
     let view = |id: u64| views.as_array().unwrap().iter().find(|v| v["id"] == id).map(|v| v["name"].clone());
-    assert_eq!(view(357), Some(json!("Board diagram")));
-    assert_eq!(view(365), Some(json!("3D North-east")));
+    assert_eq!(view(359), Some(json!("Board diagram")));
+    assert_eq!(view(367), Some(json!("3D North-east")));
     let loads = run(&mut s, "circuit_loads", json!({"panel": 270}));
     assert!(loads.to_string().contains("Kitchen and bath outlets"));
-    for filter in [364, 366] {
-        assert!(run(&mut s, "filter_elements", json!({"filter": filter, "view": 363}))["count"].as_u64().unwrap() > 0);
+    for filter in [366, 368] {
+        assert!(run(&mut s, "filter_elements", json!({"filter": filter, "view": 365}))["count"].as_u64().unwrap() > 0);
     }
 }
 

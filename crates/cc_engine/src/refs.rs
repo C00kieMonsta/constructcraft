@@ -351,6 +351,24 @@ pub fn fill_pattern(p: &Project, r: &Ref) -> Result<cc_core::FillPatternId> {
     }
 }
 
+/// A pipe series of the project by id, code or name.
+pub fn pipe_series(p: &Project, r: &Ref) -> Result<cc_core::PipeSeriesId> {
+    match r {
+        Ref::Id(id) => {
+            let id = cc_core::PipeSeriesId(*id);
+            p.pipe_series_by_id(id)
+                .map(|_| id)
+                .ok_or_else(|| EngineError::not_found(format!("no pipe series with id {}", id.0)))
+        }
+        Ref::Name(n) => {
+            if let Some(s) = p.pipe_series_by_code(n) {
+                return Ok(s.id);
+            }
+            unique("pipe series", n, p.pipe_series.values().filter(|s| matches(&s.name, n)).map(|s| s.id).collect())
+        }
+    }
+}
+
 /// A structural profile by id or name.
 pub fn profile(p: &Project, r: &Ref) -> Result<cc_core::ProfileId> {
     match r {
