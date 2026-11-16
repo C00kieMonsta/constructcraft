@@ -16,6 +16,7 @@ cargo run -p cc_cli -- mcp                            # MCP server over stdio
 cargo run -p cc_cli -- lua examples/small_house.lua width=10   # a Lua script
 cargo run -p cc_cli -- --plugins examples/plugins commands     # the catalog with the example plugin's commands
 cargo run -p cc_cli -- reference > docs/commands.md   # regenerate the command reference (a test checks it)
+cargo run -p api_doc                                  # regenerate the API reference of the site (docs/api, from the doc comments)
 
 cargo nextest run --workspace                          # all tests (cargo-nextest)
 cargo test --workspace --doc                          # doctests (nextest does not run them)

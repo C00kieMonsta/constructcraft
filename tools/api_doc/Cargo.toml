@@ -1,0 +1,17 @@
+[package]
+name = "api_doc"
+description = "Writes the API reference of the workspace's crates (docs/api) for the site"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+syn = { version = "2", default-features = false, features = ["full", "parsing", "printing"] }
+# `span-locations`: signatures are sliced from the source by line and column.
+proc-macro2 = { version = "1", features = ["span-locations"] }
+
+[lints]
+workspace = true
