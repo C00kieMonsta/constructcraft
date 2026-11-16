@@ -5,8 +5,9 @@
 //! of every pair of faces that overlap on screen, at a point inside their
 //! overlap; sorting by centroid depth alone fails for large faces such as roofs.
 
+use crate::shadow::{self, Catch, Shadows};
 use crate::{Drawing2D, LineStyle, cut::POCHE, format};
-use cc_core::{CameraState, DetailLevel, Direction, ElementId, Project, TypeData, VisualStyle};
+use cc_core::{CameraState, DetailLevel, Direction, ElementId, Project, ShadingSettings, TypeData, VisualStyle};
 use cc_geom::polygon::signed_area;
 use cc_geom::{ModelGeometry, clip_polygon, face_plane_segments};
 use glam::{DVec2, DVec3};
@@ -70,28 +71,40 @@ fn clip_segment(a: DVec3, b: DVec3, point: DVec3, normal: DVec3) -> Option<(DVec
     }
 }
 
-/// A face's fill shaded by a light: the default light fixed to the view
-/// (from behind the viewer, above and to the left) when `sun` is `None`,
-/// else the sun's direction (towards it; the zero vector, a sun below the
-/// horizon, leaves the ambient light only).
-fn shade(color: [u8; 3], normal: DVec3, frame: &Frame, sun: Option<DVec3>) -> [u8; 4] {
-    let k = match sun {
+/// The cosine of the angle between a face's unit `normal` and the light:
+/// the default light fixed to the view (from behind the viewer, above and to
+/// the left) when `sun` is `None`, else the sun's direction (towards it; the
+/// zero vector, a sun below the horizon, lights no face).
+fn facing(normal: DVec3, frame: &Frame, sun: Option<DVec3>) -> f64 {
+    match sun {
         None => {
             let light = (frame.forward * 0.6 + frame.right * 0.3 - frame.up * 0.5).normalize();
-            0.62 + 0.38 * (-normal.dot(light)).max(0.0)
+            -normal.dot(light)
         }
-        Some(towards) => 0.62 + 0.38 * normal.dot(towards).max(0.0),
-    };
+        Some(towards) => normal.dot(towards),
+    }
+}
+
+/// A face's fill in the shaded style: white, greyed by the light (see
+/// [`ShadingSettings::grey`]).
+fn grey(normal: DVec3, frame: &Frame, sun: Option<DVec3>, shading: &ShadingSettings) -> [u8; 4] {
+    let g = (shading.grey(facing(normal, frame, sun)) * 255.0).round().clamp(0.0, 255.0) as u8;
+    [g, g, g, 255]
+}
+
+/// A face's fill in `color` shaded by the light (the textures style).
+fn shade(color: [u8; 3], normal: DVec3, frame: &Frame, sun: Option<DVec3>, shading: &ShadingSettings) -> [u8; 4] {
+    let k = shadow::textures_light(shading, facing(normal, frame, sun));
     // Wash colors towards white so linework stays legible.
     let c = |v: u8| ((v as f64 * 0.55 + 255.0 * 0.45) * k).min(255.0) as u8;
     [c(color[0]), c(color[1]), c(color[2]), 255]
 }
 
 /// How a view draws the model: its detail level, its visual style, the
-/// spacing of patterns (cut and surface hatches) in drawing units and the
-/// light that shades its faces.
+/// spacing of patterns (cut and surface hatches) in drawing units, the
+/// light that shades its faces and the shadows it casts.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Look {
+pub struct Look<'a> {
     pub detail: DetailLevel,
     pub style: VisualStyle,
     pub spacing: f64,
@@ -100,27 +113,77 @@ pub struct Look {
     /// is below the horizon (ambient light only). `None`: the default light,
     /// fixed to the view.
     pub light: Option<DVec3>,
+    /// The shadows the sun casts while it is above the horizon, in the
+    /// styles that fill faces with more than white (see `shadow`); `None`: none.
+    pub shadows: Option<Shadows<'a>>,
+    /// How light faces turned away from the light are and how dark shadows
+    /// are ([`cc_core::View::shading`]).
+    pub shading: ShadingSettings,
 }
 
-impl Look {
+impl<'a> Look<'a> {
     /// The look of `view` in `project`: lit by the view's sun when it has
-    /// one ([`cc_core::View::sun`]).
-    pub fn of(project: &Project, view: &cc_core::View) -> Self {
+    /// one ([`cc_core::View::sun`]), which casts shadows when it is set to
+    /// ([`cc_core::sun::SunSettings::shadows`]): on the model `geom` and on
+    /// the ground plane ([`Project::sun_ground_height`]), `skip` being the
+    /// elements the view's graphics leave out of them. What is `indoors`
+    /// of a floor plan's or a section's faces catches none (without it,
+    /// every face catches them; see [`shadow::Catch`]).
+    pub fn of(
+        project: &Project,
+        geom: &ModelGeometry,
+        view: &cc_core::View,
+        skip: Option<&'a shadow::Skip>,
+        indoors: Option<&'a shadow::Indoors>,
+    ) -> Self {
         let light = project
             .sun_state(view)
             .filter(|_| view.kind.takes_sun())
             .map(|s| if s.above_horizon && s.direction.is_finite() { s.direction } else { DVec3::ZERO });
-        Self { detail: view.detail, style: view.style(), spacing: crate::cut::spacing(view.scale), light }
+        let shadows = Self::casts_shadows(view).then(|| {
+            let bottom = geom.bounds().map(|(lo, _)| lo.z);
+            let catch = match (&view.kind, indoors) {
+                (cc_core::ViewKind::FloorPlan { .. }, Some(indoors)) => Catch::Site(indoors),
+                (cc_core::ViewKind::Section { .. }, Some(indoors)) => Catch::Outdoors(indoors),
+                _ => Catch::All,
+            };
+            Shadows { ground: Some(project.sun_ground_height(view, bottom)), skip, catch }
+        });
+        let shading = if view.kind.takes_sun() { view.shading.clamped() } else { ShadingSettings::default() };
+        Self {
+            detail: view.detail,
+            style: view.style(),
+            spacing: crate::cut::spacing(view.scale),
+            light,
+            shadows,
+            shading,
+        }
     }
 
-    /// Shaded, at the medium detail level, patterns as at 1:100, the default light.
+    /// Whether `view` is set to draw its sun's shadows: it has a sun that
+    /// casts them, in a visual style that shows them (wherever the sun
+    /// stands). Ceiling plans, which look up at what the sun does not
+    /// reach, draw none.
+    pub fn casts_shadows(view: &cc_core::View) -> bool {
+        let looks_up = matches!(view.kind, cc_core::ViewKind::CeilingPlan { .. });
+        view.kind.takes_sun() && !looks_up && view.sun.as_ref().is_some_and(|s| s.shadows) && view.style().colored()
+    }
+
+    /// Shaded, at the medium detail level, patterns as at 1:100, the default light, no shadows.
     pub fn plain() -> Self {
-        Self { detail: DetailLevel::Medium, style: VisualStyle::Shaded, spacing: crate::cut::spacing(100), light: None }
+        Self {
+            detail: DetailLevel::Medium,
+            style: VisualStyle::Shaded,
+            spacing: crate::cut::spacing(100),
+            light: None,
+            shadows: None,
+            shading: ShadingSettings::default(),
+        }
     }
 }
 
 /// The fill of a face of `solid` in `style` (none for the wireframe).
-fn face_color(solid: &cc_geom::Solid, face: usize, normal: DVec3, frame: &Frame, look: Look) -> Option<[u8; 4]> {
+fn face_color(solid: &cc_geom::Solid, face: usize, normal: DVec3, frame: &Frame, look: Look<'_>) -> Option<[u8; 4]> {
     // A painted face shows its paint.
     let paint = solid.paint_of(face);
     let color = paint.map_or(solid.color, |p| p.color);
@@ -129,9 +192,9 @@ fn face_color(solid: &cc_geom::Solid, face: usize, normal: DVec3, frame: &Frame,
     let mut c = match look.style {
         VisualStyle::Wireframe => return None,
         VisualStyle::HiddenLine => [255, 255, 255, 255],
-        VisualStyle::Shaded => shade(color, normal, frame, look.light),
+        VisualStyle::Shaded => grey(normal, frame, look.light, &look.shading),
         VisualStyle::ConsistentColors => [color[0], color[1], color[2], 255],
-        VisualStyle::Textures => shade(appearance, normal, frame, look.light),
+        VisualStyle::Textures => shade(appearance, normal, frame, look.light, &look.shading),
     };
     // Transparent materials let what is behind show through (never fully: alpha 0 means "no hit").
     c[3] = ((1.0 - transparency.clamp(0.0, 1.0)) * 255.0).round().clamp(40.0, 255.0) as u8;
@@ -173,6 +236,8 @@ struct ProjectedFace {
     normal: DVec3,
     point: DVec3,
     pts: Vec<DVec2>,
+    /// Its outline in the model, as `pts` shows it (when shadows are cast).
+    verts: Vec<DVec3>,
     color: Option<[u8; 4]>,
     element: ElementId,
     /// Index of its solid in the geometry and of the face in it (its surface pattern).
@@ -205,7 +270,7 @@ pub fn render(
     geom: &ModelGeometry,
     frame: &Frame,
     cut: Option<CutStyle>,
-    look: Look,
+    look: Look<'_>,
     patterns: &cc_core::fill_pattern::FillPatterns,
 ) -> Drawing2D {
     let (detail, style) = (look.detail, look.style);
@@ -213,6 +278,29 @@ pub fn render(
     let mut faces = Vec::new();
     let shown = |s: &&cc_geom::Solid| s.detail.shows(detail);
     let cut = cut.filter(|_| detail.shows_layers());
+    // The sun's shadows: what casts them (the model beyond the cut plane;
+    // in a floor plan the whole model, which reads the site) and, where
+    // the view has spaces indoors, what covers them from the sky. Either
+    // past a limit: no shadows.
+    let sun = look.light.filter(|l| style.colored() && l.length_squared() > 0.5);
+    let skip = look.shadows.and_then(|s| s.skip);
+    let (site, indoors) = match look.shadows.map_or(Catch::All, |s| s.catch) {
+        Catch::All => (false, None),
+        Catch::Site(indoors) => (true, Some(indoors)),
+        Catch::Outdoors(indoors) => (false, Some(indoors)),
+    };
+    let seen = |s: &cc_geom::Solid| s.detail.shows(detail);
+    let mut cover = None;
+    let mut scene = look.shadows.zip(sun).and_then(|(_, sun)| {
+        if indoors.is_some_and(|i| i.failed) {
+            return None;
+        }
+        if indoors.is_some_and(|i| !i.is_empty()) {
+            cover = Some(shadow::Scene::covers(geom, skip, &seen, None)?);
+        }
+        let near = frame.near.filter(|_| !site).map(|n| (frame.origin + frame.forward * n, frame.forward));
+        shadow::Scene::new(geom, sun, skip, &seen, near)
+    });
     for (index, solid) in geom.solids.iter().enumerate().filter(|(_, s)| shown(s)) {
         let edges = solid.feature_edges();
         let seams = solid.smooth_edges();
@@ -241,6 +329,7 @@ pub fn render(
                 normal: face.normal,
                 point: verts[0],
                 pts: verts.iter().map(|v| frame.project(*v)).collect(),
+                verts: if scene.is_some() { verts } else { Vec::new() },
                 color: face_color(solid, face_index, face.normal, frame, look),
                 element: solid.element,
                 solid: index,
@@ -276,6 +365,7 @@ pub fn render(
             normal: symbol.normal,
             point: verts[0],
             pts: verts.iter().map(|v| frame.project(*v)).collect(),
+            verts: Vec::new(),
             color: None,
             element: symbol.element,
             solid: usize::MAX,
@@ -285,18 +375,77 @@ pub fn render(
         });
     }
     let mut d = Drawing2D::default();
+    // The shadows on each face, and on the ground seen from above: all of
+    // them, or none when a limit was passed.
+    let mut shadows: Vec<Vec<Vec<DVec2>>> = Vec::new();
+    if let Some(scene) = scene.as_mut() {
+        let ground = look.shadows.and_then(|s| s.ground).filter(|_| frame.forward.z < -1e-3);
+        let mut under: Vec<Vec<DVec2>> = Vec::new();
+        if let Some((z, bounds)) = ground.zip(geom.bounds()) {
+            // A floor plan's ground catches none where it is indoors.
+            let inside = cover.as_mut().zip(indoors).filter(|_| site);
+            for ring in scene.on_ground(z, bounds, inside) {
+                let ring = planes.iter().fold(ring, |r, &(p, n)| clip_polygon(&r, p, n));
+                if ring.len() >= 3 {
+                    under.push(ring.iter().map(|p| frame.project(*p)).collect());
+                }
+            }
+        }
+        shadows = faces
+            .iter()
+            .map(|f| {
+                // Faces that show through, and those the view hides, catch none.
+                let catches = f.color.is_some_and(|c| c[3] == 255)
+                    && !skip.is_some_and(|k| k.hidden.contains(&f.element) || k.clear.contains(&f.element));
+                if !catches {
+                    return Vec::new();
+                }
+                // What is indoors catches none: a section's face whole, by
+                // the point in front of it; a floor plan's by its part indoors.
+                let mut inside = cover.as_mut().zip(indoors).map(|(c, i)| (c, i, f.element));
+                if !site
+                    && let Some((cover, indoors, element)) = inside.take()
+                    && let Some(p) = shadow::point_within(&f.verts, f.normal)
+                    && indoors.holds(p + f.normal * shadow::FACE_PROBE)
+                    && cover.above(p + f.normal * shadow::FACE_PROBE, Some(element))
+                {
+                    return Vec::new();
+                }
+                let rings = scene.on_face(&f.verts, f.normal, (f.solid, f.face), inside);
+                rings.into_iter().map(|r| r.into_iter().map(|p| frame.project(p)).collect()).collect()
+            })
+            .collect();
+        if scene.failed() {
+            shadows.clear();
+        } else {
+            for ring in under {
+                d.fill(ring, [0, 0, 0, shadow::ground_veil(&look.shading)], None);
+            }
+        }
+    }
     if style.fills() {
         let order = paint_order(frame, &faces);
         let mut slots: Vec<Option<ProjectedFace>> = faces.into_iter().map(Some).collect();
-        for f in order.into_iter().filter_map(|i| slots[i].take()) {
+        for (i, f) in order.into_iter().filter_map(|i| Some((i, slots[i].take()?))) {
             if let Some(color) = f.color {
+                // A shadow is a veil over the face's fill, under its lines; it
+                // belongs to no element (it is neither picked nor overridden).
+                let veil = sun.map_or(0, |sun| shadow::veil(style, f.normal.dot(sun), &look.shading));
+                let cast = shadows.get_mut(i).map(std::mem::take).unwrap_or_default();
+                let veils = |d: &mut Drawing2D| {
+                    for ring in cast.iter().filter(|_| veil > 0) {
+                        d.fill(ring.clone(), [0, 0, 0, veil], None);
+                    }
+                };
                 if style == VisualStyle::Textures
                     && let Some(solid) = geom.solids.get(f.solid)
                 {
                     d.fill(f.pts.clone(), color, Some(f.element));
+                    veils(&mut d);
                     surface_lines(&mut d, patterns, solid, f.face, &f.pts, look.spacing);
                 } else {
                     d.fill(f.pts, color, Some(f.element));
+                    veils(&mut d);
                 }
             }
             for (a, b) in f.edges {
@@ -356,8 +505,9 @@ fn depth_at(frame: &Frame, f: &ProjectedFace, s: DVec2) -> f64 {
     f.normal.dot(f.point - base) / f.normal.dot(frame.forward)
 }
 
-/// Clip a convex polygon by a counter-clockwise convex polygon.
-fn clip_convex(subject: &[DVec2], clipper: &[DVec2]) -> Vec<DVec2> {
+/// Clip a polygon by a counter-clockwise convex polygon (Sutherland-Hodgman;
+/// a polygon that is not convex may come out with sides along the clip's).
+pub(crate) fn clip_convex(subject: &[DVec2], clipper: &[DVec2]) -> Vec<DVec2> {
     let mut out = subject.to_vec();
     for i in 0..clipper.len() {
         if out.is_empty() {
@@ -519,7 +669,7 @@ impl Ord for Depth {
 }
 
 /// Join segments end-to-end into closed loops.
-fn chain_loops(segs: &[(DVec2, DVec2)]) -> Vec<Vec<DVec2>> {
+pub(crate) fn chain_loops(segs: &[(DVec2, DVec2)]) -> Vec<Vec<DVec2>> {
     const TOL: f64 = 1e-6;
     let mut used = vec![false; segs.len()];
     let mut loops = Vec::new();
@@ -613,7 +763,7 @@ pub fn view_frame(view: &cc_core::View) -> Option<Frame> {
     }
 }
 
-pub fn elevation(project: &Project, geom: &ModelGeometry, direction: Direction, look: Look) -> Drawing2D {
+pub fn elevation(project: &Project, geom: &ModelGeometry, direction: Direction, look: Look<'_>) -> Drawing2D {
     let frame = elevation_frame(direction);
     let mut d = render(geom, &frame, None, look, &project.fill_patterns);
     level_lines(&mut d, project, &frame);
@@ -626,7 +776,7 @@ pub fn section(
     (start, end): (DVec2, DVec2),
     depth: f64,
     scale: u32,
-    look: Look,
+    look: Look<'_>,
 ) -> Drawing2D {
     let frame = section_frame(start, end, depth);
     let cut = CutStyle { project, spacing: crate::cut::spacing(scale) };
@@ -664,7 +814,7 @@ fn existing_ground(d: &mut Drawing2D, geom: &ModelGeometry, frame: &Frame) {
     }
 }
 
-pub fn axonometric(project: &Project, geom: &ModelGeometry, camera: &CameraState, look: Look) -> Drawing2D {
+pub fn axonometric(project: &Project, geom: &ModelGeometry, camera: &CameraState, look: Look<'_>) -> Drawing2D {
     render(geom, &camera_frame(camera), None, look, &project.fill_patterns)
 }
 
@@ -760,7 +910,8 @@ mod tests {
     }
     /// Each visual style draws the same wall differently: the wireframe
     /// only lines (the far face's edges too), hidden line white faces,
-    /// consistent colors the material's color unlit, textures the
+    /// shaded the same faces and edges greyed by the light, consistent
+    /// colors the material's color unlit, textures the
     /// material's appearance with its surface pattern in the pattern's color.
     #[test]
     fn visual_styles_fill_faces_their_own_way() {
@@ -795,8 +946,13 @@ mod tests {
         let color = doc.project.material_color(&material);
         let consistent = fills(&draw(V::ConsistentColors));
         assert!(consistent.iter().all(|c| c[..3] == color), "{consistent:?} vs {color:?}");
-        let shaded = fills(&draw(V::Shaded));
-        assert!(shaded.iter().all(|c| c[..3] != color), "shading washes the color");
+        // Shaded: hidden line's edges over white faces greyed by the light, not the material's color.
+        let shaded = draw(V::Shaded);
+        assert_eq!(lines(&shaded), lines(&hidden));
+        let greys = fills(&shaded);
+        assert!(!greys.is_empty() && greys.iter().all(|c| c[0] == c[1] && c[1] == c[2]), "{greys:?}");
+        assert!(greys.iter().all(|c| f64::from(c[0]) >= 255.0 * V::SHADED_AMBIENT - 1.0), "never dark: {greys:?}");
+        assert!(greys.iter().any(|c| c[0] > 200), "the face turned to the light is near white: {greys:?}");
         let textures = draw(V::Textures);
         let bricks = textures
             .prims
@@ -835,6 +991,11 @@ mod tests {
         assert!(!south.is_empty() && south.len() == north.len());
         assert!(brightness(&south) > brightness(&north), "{south:?} vs {north:?}");
         assert_eq!(north, night, "the face turned away gets the ambient light only");
+        // White greyed by the light: a mid grey turned away, near white facing a sun 45° up.
+        assert!(north.iter().all(|c| c[..3] == [153; 3]), "{north:?}");
+        assert!(south.iter().all(|c| c[..3] == [225; 3]), "{south:?}");
+        assert_eq!(cc_core::VisualStyle::shaded_grey(1.0), 1.0);
+        assert_eq!(cc_core::VisualStyle::shaded_grey(f64::NAN), cc_core::VisualStyle::SHADED_AMBIENT);
         assert_ne!(lit(None), south);
         // No sun: the default light; a view's sun comes from the project.
         let mut view = cc_core::View::new(
@@ -843,15 +1004,22 @@ mod tests {
             100,
             cc_core::ViewKind::Elevation { direction: Direction::South },
         );
-        assert_eq!(Look::of(&doc.project, &view).light, None);
-        assert_eq!(Look::of(&doc.project, &view), Look { light: None, ..Look::of(&doc.project, &view) });
+        assert_eq!(Look::of(&doc.project, &geom, &view, None, None).light, None);
+        assert_eq!(
+            Look::of(&doc.project, &geom, &view, None, None),
+            Look { light: None, ..Look::of(&doc.project, &geom, &view, None, None) }
+        );
         view.sun = Some(SunSettings::default());
         let state = doc.project.sun_state(&view).unwrap();
         assert!(state.above_horizon);
-        assert_eq!(Look::of(&doc.project, &view).light, Some(state.direction));
+        assert_eq!(Look::of(&doc.project, &geom, &view, None, None).light, Some(state.direction));
         view.sun =
             Some(SunSettings { mode: SunMode::Still { date: Default::default(), time: 0 }, ..Default::default() });
-        assert_eq!(Look::of(&doc.project, &view).light, Some(DVec3::ZERO), "midnight at the equator");
+        assert_eq!(
+            Look::of(&doc.project, &geom, &view, None, None).light,
+            Some(DVec3::ZERO),
+            "midnight at the equator"
+        );
     }
 
     #[test]
@@ -905,6 +1073,7 @@ mod tests {
                 normal,
                 point: verts[0],
                 pts: verts.iter().map(|v| frame.project(*v)).collect(),
+                verts: Vec::new(),
                 color: Some([0; 4]),
                 element: ElementId(1),
                 solid: 0,
@@ -1013,6 +1182,7 @@ mod tests {
                 normal,
                 point: verts[0],
                 pts: verts.iter().map(|v| frame.project(*v)).collect(),
+                verts: Vec::new(),
                 color: Some([0; 4]),
                 element: ElementId(1),
                 solid: 0,

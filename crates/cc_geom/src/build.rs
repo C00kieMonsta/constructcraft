@@ -71,6 +71,7 @@ fn opening_parts_with(
                 plan_only: false,
                 detail: Default::default(),
                 faces: Vec::new(),
+                smooth: Vec::new(),
             })
             .collect();
     };
@@ -542,11 +543,7 @@ impl ModelGeometry {
             for part in parts.iter().filter(|p| !p.plan_only) {
                 let mut s = Solid::of_material(e.id, e.category(), project, &part.material);
                 s.detail = part.detail;
-                if part.faces.is_empty() {
-                    s.add_prism(&part.footprint, |_| part.z0, |_| part.z1);
-                } else {
-                    s.add_polygons(part.faces.clone());
-                }
+                s.add_part(part);
                 if !s.faces.is_empty() {
                     self.solids.push(s);
                 }
@@ -1213,11 +1210,7 @@ impl ModelGeometry {
                     } else {
                         Solid::of_material(e.id, e.category(), project, &p.material)
                     };
-                    if p.faces.is_empty() {
-                        s.add_prism(&p.footprint, |_| p.z0, |_| p.z1);
-                    } else {
-                        s.add_polygons(p.faces.clone());
-                    }
+                    s.add_part(&p);
                     s.detail = p.detail;
                     if !s.faces.is_empty() {
                         self.solids.push(s);

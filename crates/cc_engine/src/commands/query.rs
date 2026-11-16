@@ -565,6 +565,7 @@ pub(crate) fn view_json(s: &Session, id: ViewId) -> Option<Value> {
         "callout": callout,
         "sun": super::sun::view_sun_json(s.project(), v),
         "render": serde_json::to_value(&v.render).unwrap_or(Value::Null),
+        "shading": if v.kind.takes_sun() { serde_json::to_value(v.shading).unwrap_or(Value::Null) } else { Value::Null },
     }))
 }
 
@@ -598,7 +599,9 @@ impl Command for ViewsList {
 /// (`1:50`, or `1/4" = 1'-0"` in imperial projects), and its `sun`: null,
 /// or the settings `view_set` takes plus `derived` (azimuth and altitude,
 /// `above_horizon`, the current frame's `date` and `time`, `sunrise` and
-/// `sunset`, the number of `frames` and `site_known`).
+/// `sunset`, the number of `frames`, `site_known` and whether it is the
+/// `conventional` sun), and its `shading` (`ambient` and `shadow`, null for
+/// views that take no sun).
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ViewGet {

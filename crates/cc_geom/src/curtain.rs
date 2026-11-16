@@ -188,11 +188,7 @@ pub fn solids(project: &Project, element: &Element, c: &CurtainGeom) -> Vec<Soli
                 for part in p.parts.iter().filter(|q| !q.plan_only && !q.void) {
                     let i = solid_for(&mut by_material, &part.material);
                     let Some((_, s)) = by_material.get_mut(i) else { continue };
-                    if part.faces.is_empty() {
-                        s.add_prism(&part.footprint, |_| part.z0, |_| part.z1);
-                    } else {
-                        s.add_polygons(part.faces.clone());
-                    }
+                    s.add_part(part);
                 }
             }
         }

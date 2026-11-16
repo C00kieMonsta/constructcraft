@@ -27,9 +27,24 @@ fn newell(verts: &[DVec3]) -> DVec3 {
 /// Smooth facets meeting at less than this angle (cosine) read as one surface.
 pub(crate) const SMOOTH_COS: f64 = 0.85;
 
+/// Faces whose normals are closer than this (cosine) lie in one plane.
+const COPLANAR_COS: f64 = 0.9999;
+
 impl Face {
     pub fn new(verts: Vec<DVec3>, normal: DVec3) -> Self {
         Self { verts, normal: normal.normalize_or_zero(), smooth: false }
+    }
+
+    /// A polygon with the normal of its winding (Newell's method); `None`
+    /// when it has fewer than three points or no area.
+    pub fn of_polygon(verts: Vec<DVec3>) -> Option<Self> {
+        let n = verts.len();
+        let normal: DVec3 = verts
+            .iter()
+            .zip(verts.iter().cycle().skip(1))
+            .map(|(a, b)| DVec3::new((a.y - b.y) * (a.z + b.z), (a.z - b.z) * (a.x + b.x), (a.x - b.x) * (a.y + b.y)))
+            .sum();
+        (n >= 3 && normal.length_squared() > 1e-20 && normal.is_finite()).then(|| Face::new(verts, normal))
     }
 
     /// Orthonormal in-plane basis `(u, v)`.
@@ -225,58 +240,25 @@ impl Solid {
     /// Visible outline edges grouped by face: the parts of each face boundary
     /// not shared with a coplanar neighbor face (so split faces read as one).
     pub fn feature_edges(&self) -> Vec<Vec<(DVec3, DVec3)>> {
-        let mut all: Vec<(usize, DVec3, DVec3)> = Vec::new();
-        for (fi, f) in self.faces.iter().enumerate() {
-            let n = f.verts.len();
-            all.extend((0..n).map(|i| (fi, f.verts[i], f.verts[(i + 1) % n])));
-        }
-        // Small solids compare every pair of faces; larger ones only edges
-        // whose boxes touch (see `EdgeGrid`).
-        let grid = (all.len() > GRID_MIN_EDGES).then(|| EdgeGrid::new(&all));
-        let mut seen = vec![usize::MAX; all.len()];
-        let mut candidates = Vec::new();
-        let mut out = vec![Vec::new(); self.faces.len()];
-        for (ei, &(fi, a, b)) in all.iter().enumerate() {
-            let (Some(face), Some(face_out)) = (self.faces.get(fi), out.get_mut(fi)) else { continue };
-            let ab = b - a;
-            let len2 = ab.length_squared();
-            if len2 < 1e-12 {
-                continue;
+        let all = boundary_edges(&self.faces);
+        // Edges of other faces with the same normal (or smooth neighbors) hide what they overlap.
+        let joins = |fi: usize, fj: usize| {
+            let (Some(face), Some(other)) = (self.faces.get(fi), self.faces.get(fj)) else { return false };
+            let cos = other.normal.dot(face.normal);
+            cos >= COPLANAR_COS || (face.smooth && other.smooth && cos > SMOOTH_COS)
+        };
+        let mut covers: Vec<Vec<(f64, f64)>> = vec![Vec::new(); all.len()];
+        for_each_overlap(&all, joins, |i, _, lo, hi| {
+            if let Some(list) = covers.get_mut(i) {
+                list.push((lo, hi));
             }
-            // Edges of other faces with the same normal (or smooth neighbors) hide what they overlap.
-            let joins = |fj: usize, other: &Face| {
-                let cos = other.normal.dot(face.normal);
-                fj != fi && (cos >= 0.9999 || (face.smooth && other.smooth && cos > SMOOTH_COS))
-            };
-            let mut covered: Vec<(f64, f64)> = Vec::new();
-            let mut cover = |c: DVec3, d: DVec3| {
-                let off = |p: DVec3| (p - a).cross(ab).length_squared() / len2;
-                if off(c) > 1e-10 || off(d) > 1e-10 {
-                    return;
-                }
-                let (tc, td) = ((c - a).dot(ab) / len2, (d - a).dot(ab) / len2);
-                let (lo, hi) = (tc.min(td).max(0.0), tc.max(td).min(1.0));
-                if hi - lo > 1e-9 {
-                    covered.push((lo, hi));
-                }
-            };
-            match &grid {
-                Some(grid) => {
-                    grid.near(a, b, ei, &mut seen, &mut candidates);
-                    for &cj in &candidates {
-                        if let Some(&(fj, c, d)) = all.get(cj)
-                            && self.faces.get(fj).is_some_and(|other| joins(fj, other))
-                        {
-                            cover(c, d);
-                        }
-                    }
-                }
-                None => {
-                    for (_, other) in self.faces.iter().enumerate().filter(|(fj, other)| joins(*fj, other)) {
-                        let m = other.verts.len();
-                        (0..m).for_each(|k| cover(other.verts[k], other.verts[(k + 1) % m]));
-                    }
-                }
+        });
+        let mut out = vec![Vec::new(); self.faces.len()];
+        for (&(fi, a, b), mut covered) in all.iter().zip(covers) {
+            let Some(face_out) = out.get_mut(fi) else { continue };
+            let ab = b - a;
+            if ab.length_squared() < 1e-12 {
+                continue;
             }
             covered.sort_by(|x, y| x.0.total_cmp(&y.0));
             let mut t = 0.0;
@@ -296,20 +278,18 @@ impl Solid {
     /// The shading normal at each vertex of each face: a flat face's own
     /// normal, and on a smooth facet the average of the normals of the
     /// smooth facets meeting at that point (those that read as one surface
-    /// with it), so a curved surface shades without steps.
+    /// with it), each weighted by its angle there, so a curved surface
+    /// shades without steps however its facets were split.
     pub fn vertex_normals(&self) -> Vec<Vec<DVec3>> {
         // Facets meet at the same points; look them up on a fine grid.
         let key = |p: DVec3| {
             let q = (p * 1e5).round();
             (q.x as i64, q.y as i64, q.z as i64)
         };
-        let mut at: std::collections::HashMap<(i64, i64, i64), Vec<usize>> = std::collections::HashMap::new();
+        let mut at: std::collections::HashMap<(i64, i64, i64), Vec<(usize, f64)>> = std::collections::HashMap::new();
         for (fi, face) in self.faces.iter().enumerate().filter(|(_, f)| f.smooth) {
-            for p in &face.verts {
-                let list = at.entry(key(*p)).or_default();
-                if list.last() != Some(&fi) {
-                    list.push(fi);
-                }
+            for (p, angle) in face.verts.iter().zip(corner_angles(&face.verts)) {
+                at.entry(key(*p)).or_default().push((fi, angle));
             }
         }
         self.faces
@@ -325,9 +305,9 @@ impl Solid {
                             .get(&key(*p))
                             .into_iter()
                             .flatten()
-                            .filter_map(|fj| self.faces.get(*fj))
-                            .map(|other| other.normal)
-                            .filter(|n| n.dot(face.normal) > SMOOTH_COS)
+                            .filter_map(|(fj, angle)| Some((self.faces.get(*fj)?.normal, *angle)))
+                            .filter(|(n, _)| n.dot(face.normal) > SMOOTH_COS)
+                            .map(|(n, angle)| n * angle)
                             .sum();
                         let n = sum.normalize_or_zero();
                         if n == DVec3::ZERO || !n.is_finite() { face.normal } else { n }
@@ -430,27 +410,23 @@ impl Solid {
     /// where the face is seen and its neighbor is not.
     pub fn smooth_edges(&self) -> Vec<Vec<(DVec3, DVec3, DVec3)>> {
         let mut out = vec![Vec::new(); self.faces.len()];
-        for (fi, face) in self.faces.iter().enumerate().filter(|(_, f)| f.smooth) {
-            let n = face.verts.len();
-            for i in 0..n {
-                let (a, b) = (face.verts[i], face.verts[(i + 1) % n]);
-                let shared = self.faces.iter().enumerate().find_map(|(fj, other)| {
-                    if fj == fi || !other.smooth || other.normal.dot(face.normal) <= SMOOTH_COS {
-                        return None;
-                    }
-                    let m = other.verts.len();
-                    (0..m)
-                        .any(|k| {
-                            let (c, d) = (other.verts[k], other.verts[(k + 1) % m]);
-                            c.distance(b) < 1e-9 && d.distance(a) < 1e-9
-                        })
-                        .then_some(other.normal)
-                });
-                if let (Some(normal), Some(list)) = (shared, out.get_mut(fi)) {
-                    list.push((a, b, normal));
-                }
-            }
+        if !self.faces.iter().any(|f| f.smooth) {
+            return out;
         }
+        let edges = boundary_edges(&self.faces);
+        // Facets in one plane (the pieces of a split facet) make no silhouette.
+        let turns = |fi: usize, fj: usize| {
+            let (Some(face), Some(other)) = (self.faces.get(fi), self.faces.get(fj)) else { return false };
+            let cos = other.normal.dot(face.normal);
+            face.smooth && other.smooth && cos > SMOOTH_COS && cos < COPLANAR_COS
+        };
+        // The pieces of facets split by a boolean (meeting in T-junctions)
+        // still find each other.
+        for_each_neighbor(&edges, turns, |i, j, lo, hi| {
+            let (Some(&(fi, a, b)), Some(&(fj, ..))) = (edges.get(i), edges.get(j)) else { return };
+            let (Some(other), Some(list)) = (self.faces.get(fj), out.get_mut(fi)) else { return };
+            list.push((a.lerp(b, lo), a.lerp(b, hi), other.normal));
+        });
         out
     }
 
@@ -482,17 +458,17 @@ impl Solid {
     /// Append planar polygons, each with the normal of its winding (Newell's
     /// method); degenerate polygons are dropped.
     pub fn add_polygons(&mut self, polygons: impl IntoIterator<Item = Vec<DVec3>>) {
-        for verts in polygons {
-            let n = verts.len();
-            let normal: DVec3 = (0..n)
-                .map(|i| {
-                    let (a, b) = (verts[i], verts[(i + 1) % n]);
-                    DVec3::new((a.y - b.y) * (a.z + b.z), (a.z - b.z) * (a.x + b.x), (a.x - b.x) * (a.y + b.y))
-                })
-                .sum();
-            if n >= 3 && normal.length_squared() > 1e-20 && normal.is_finite() {
-                self.faces.push(Face::new(verts, normal));
-            }
+        self.faces.extend(polygons.into_iter().filter_map(Face::of_polygon));
+    }
+
+    /// Mark smooth the facets of curved surfaces among the faces from index
+    /// `from` on (see [`curved_facets`]), for solids whose builder does not
+    /// know which they are (component pieces, imported meshes).
+    pub fn smooth_curved(&mut self, from: usize) {
+        let Some(faces) = self.faces.get_mut(from..) else { return };
+        let flags = curved(faces);
+        for (face, curved) in faces.iter_mut().zip(flags) {
+            face.smooth |= curved;
         }
     }
 
@@ -608,8 +584,199 @@ impl Solid {
     }
 }
 
+/// Which of `polygons` (the faces of one closed piece, such as a component
+/// piece) are facets of curved surfaces (see [`Solid::smooth_curved`]), one
+/// flag per polygon; degenerate polygons are not.
+pub fn curved_facets(polygons: &[Vec<DVec3>]) -> Vec<bool> {
+    let faces: Vec<Face> = polygons
+        .iter()
+        .map(|p| Face::of_polygon(p.clone()).unwrap_or_else(|| Face::new(Vec::new(), DVec3::ZERO)))
+        .collect();
+    curved(&faces)
+}
+
+/// The facets of curved surfaces among `faces`: those meeting another face
+/// along an edge at less than the angle of [`SMOOTH_COS`] without lying in
+/// its plane, and every face joined to one of them in one plane (the pieces
+/// a boolean cut a facet into). Faces meeting all their neighbors at a
+/// sharper angle, as those of a box, are not; so the edges between facets
+/// are hidden and the creases sharper than that angle stay.
+fn curved(faces: &[Face]) -> Vec<bool> {
+    let edges = boundary_edges(faces);
+    let mut parent: Vec<usize> = (0..faces.len()).collect();
+    let mut bent = vec![false; faces.len()];
+    let near = |fi: usize, fj: usize| {
+        let (Some(a), Some(b)) = (faces.get(fi), faces.get(fj)) else { return false };
+        a.normal.dot(b.normal) > SMOOTH_COS
+    };
+    // Pieces meeting in T-junctions join too.
+    for_each_neighbor(&edges, near, |i, j, _, _| {
+        let (Some(&(fi, ..)), Some(&(fj, ..))) = (edges.get(i), edges.get(j)) else { return };
+        let (Some(a), Some(b)) = (faces.get(fi), faces.get(fj)) else { return };
+        if a.normal.dot(b.normal) >= COPLANAR_COS {
+            join(&mut parent, fi, fj);
+        } else {
+            for f in [fi, fj] {
+                if let Some(slot) = bent.get_mut(f) {
+                    *slot = true;
+                }
+            }
+        }
+    });
+    let mut region = vec![false; faces.len()];
+    for (f, &b) in bent.iter().enumerate() {
+        if b && let Some(slot) = region.get_mut(root(&mut parent, f)) {
+            *slot = true;
+        }
+    }
+    (0..faces.len()).map(|f| region.get(root(&mut parent, f)).copied().unwrap_or(false)).collect()
+}
+
+/// The representative of `i`'s set in a union-find forest whose parents
+/// never exceed their children (see [`join`]), halving the path on the way.
+fn root(parent: &mut [usize], mut i: usize) -> usize {
+    loop {
+        let Some(&p) = parent.get(i) else { return i };
+        if p >= i {
+            return i;
+        }
+        let up = parent.get(p).copied().unwrap_or(p);
+        if let Some(slot) = parent.get_mut(i) {
+            *slot = up;
+        }
+        i = up;
+    }
+}
+
+/// Join the sets of `a` and `b` (the larger root under the smaller, so
+/// every parent index is below its child's and [`root`] ends).
+fn join(parent: &mut [usize], a: usize, b: usize) {
+    let (ra, rb) = (root(parent, a), root(parent, b));
+    if let Some(slot) = parent.get_mut(ra.max(rb)) {
+        *slot = ra.min(rb);
+    }
+}
+
+/// Every boundary edge of `faces`: its face's index and its ends.
+fn boundary_edges(faces: &[Face]) -> Vec<(usize, DVec3, DVec3)> {
+    faces
+        .iter()
+        .enumerate()
+        .flat_map(|(fi, f)| f.verts.iter().zip(f.verts.iter().cycle().skip(1)).map(move |(a, b)| (fi, *a, *b)))
+        .collect()
+}
+
+/// The angle of a polygon at each of its points (radians; 0 where a side
+/// has no length).
+fn corner_angles(verts: &[DVec3]) -> Vec<f64> {
+    let n = verts.len();
+    verts
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let (Some(prev), Some(next)) = (verts.get((i + n - 1) % n), verts.get((i + 1) % n)) else { return 0.0 };
+            let angle = (*prev - *p).angle_between(*next - *p);
+            if angle.is_finite() { angle } else { 0.0 }
+        })
+        .collect()
+}
+
+/// Up to this many edges at the same two points are paired directly (more
+/// are matched along their lines, see [`for_each_neighbor`]).
+const MAX_SHARED: usize = 8;
+
+/// [`for_each_overlap`], quick for meshes whose faces meet edge to edge:
+/// an edge with others at the same two points (within 0.01 mm) is paired
+/// with those, wholly covered, and only the edges left (the pieces of a
+/// boolean, meeting in T-junctions) are matched along their lines.
+fn for_each_neighbor(
+    edges: &[(usize, DVec3, DVec3)],
+    pair: impl Fn(usize, usize) -> bool,
+    mut visit: impl FnMut(usize, usize, f64, f64),
+) {
+    let key = |p: DVec3| {
+        let q = (p * 1e5).round();
+        (q.x as i64, q.y as i64, q.z as i64)
+    };
+    let mut at: std::collections::HashMap<_, Vec<usize>> = std::collections::HashMap::new();
+    for (i, &(_, a, b)) in edges.iter().enumerate() {
+        let (ka, kb) = (key(a), key(b));
+        if ka != kb && a.is_finite() && b.is_finite() {
+            at.entry(if ka < kb { (ka, kb) } else { (kb, ka) }).or_default().push(i);
+        }
+    }
+    let mut paired = vec![false; edges.len()];
+    for group in at.values().filter(|g| g.len() >= 2 && g.len() <= MAX_SHARED) {
+        for &i in group {
+            for &j in group {
+                let (Some(&(fi, ..)), Some(&(fj, ..))) = (edges.get(i), edges.get(j)) else { continue };
+                if fi == fj {
+                    continue;
+                }
+                if let Some(slot) = paired.get_mut(i) {
+                    *slot = true;
+                }
+                if pair(fi, fj) {
+                    visit(i, j, 0.0, 1.0);
+                }
+            }
+        }
+    }
+    let rest: Vec<usize> = (0..edges.len()).filter(|i| paired.get(*i) == Some(&false)).collect();
+    let loose: Vec<(usize, DVec3, DVec3)> = rest.iter().filter_map(|i| edges.get(*i).copied()).collect();
+    for_each_overlap(&loose, pair, |i, j, lo, hi| {
+        if let (Some(&i), Some(&j)) = (rest.get(i), rest.get(j)) {
+            visit(i, j, lo, hi);
+        }
+    });
+}
+
+/// Calls `visit(i, j, lo, hi)` for every edge `j` of `edges` (each a face
+/// index and the edge's ends) lying along edge `i` of another face, the two
+/// faces accepted by `pair`: `lo..hi` is the stretch of edge `i` (0 at its
+/// start, 1 at its end) that edge `j` covers. Small sets compare every
+/// pair of edges; larger ones only edges whose boxes touch (see `EdgeGrid`).
+fn for_each_overlap(
+    edges: &[(usize, DVec3, DVec3)],
+    pair: impl Fn(usize, usize) -> bool,
+    mut visit: impl FnMut(usize, usize, f64, f64),
+) {
+    let grid = (edges.len() > GRID_MIN_EDGES).then(|| EdgeGrid::new(edges));
+    let mut seen = vec![usize::MAX; edges.len()];
+    let mut candidates = Vec::new();
+    for (i, &(fi, a, b)) in edges.iter().enumerate() {
+        let ab = b - a;
+        let len2 = ab.length_squared();
+        if len2 < 1e-12 {
+            continue;
+        }
+        let mut check = |j: usize| {
+            let Some(&(fj, c, d)) = edges.get(j) else { return };
+            if fj == fi || !pair(fi, fj) {
+                return;
+            }
+            let off = |p: DVec3| (p - a).cross(ab).length_squared() / len2;
+            if off(c) > 1e-10 || off(d) > 1e-10 {
+                return;
+            }
+            let (tc, td) = ((c - a).dot(ab) / len2, (d - a).dot(ab) / len2);
+            let (lo, hi) = (tc.min(td).max(0.0), tc.max(td).min(1.0));
+            if hi - lo > 1e-9 {
+                visit(i, j, lo, hi);
+            }
+        };
+        match &grid {
+            Some(grid) => {
+                grid.near(a, b, i, &mut seen, &mut candidates);
+                candidates.iter().for_each(|&j| check(j));
+            }
+            None => (0..edges.len()).for_each(check),
+        }
+    }
+}
+
 /// Edges of a solid binned in a uniform grid by their bounding boxes, grown
-/// by a margin above the collinearity tolerance of [`Solid::feature_edges`]:
+/// by a margin above the collinearity tolerance of `for_each_overlap`:
 /// only edges sharing a cell can overlap, so dense meshes are not quadratic.
 struct EdgeGrid {
     cell: f64,
@@ -900,6 +1067,37 @@ mod tests {
         s.faces[1] = facet(10.0, 80.0);
         let normals = s.vertex_normals();
         assert!(normals[0][1].distance(s.faces[0].normal) < 1e-9);
+    }
+
+    /// Prisms over regular polygons: sides 15° and 30° apart read as one
+    /// curved surface, 45° apart (an octagon) and 90° (a box) stay creases.
+    #[test]
+    fn curved_facets_stop_at_creases() {
+        let smooth_sides = |n: usize| {
+            let ring: Vec<DVec2> =
+                (0..n).map(|i| DVec2::from_angle(i as f64 / n as f64 * std::f64::consts::TAU)).collect();
+            let mut s = Solid::new(ElementId(1), Category::Component, [0; 3]);
+            s.add_box(DVec2::new(5.0, 0.0), DVec2::X, DVec2::Y, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
+            let start = s.faces.len();
+            s.add_prism(&ring, |_| 0.0, |_| 1.0);
+            s.smooth_curved(start);
+            let (box_faces, prism) = s.faces.split_at(start);
+            assert!(box_faces.iter().all(|f| !f.smooth), "faces before `start` are left alone");
+            assert!(prism.iter().filter(|f| f.normal.z.abs() > 0.5).all(|f| !f.smooth), "caps");
+            prism.iter().filter(|f| f.normal.z.abs() < 0.5).all(|f| f.smooth)
+        };
+        assert!(smooth_sides(24) && smooth_sides(12));
+        assert!(!smooth_sides(8) && !smooth_sides(4));
+        // Pieces of one plane join the surface their pieces touch.
+        let p = |x: f64, y: f64, z: f64| DVec3::new(x, y, z);
+        let flags = curved_facets(&[
+            vec![p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0), p(1.0, 0.0, 1.0)],
+            vec![p(0.0, 0.0, 0.0), p(1.0, 0.0, 1.0), p(0.0, 0.0, 1.0)],
+            // Turned 10° about the edge x = 1 from the first.
+            vec![p(1.0, 0.0, 0.0), p(1.0 + 10f64.to_radians().cos(), 10f64.to_radians().sin(), 0.0), p(1.0, 0.0, 1.0)],
+            vec![p(5.0, 5.0, 5.0)],
+        ]);
+        assert_eq!(flags, [true, true, true, false]);
     }
 
     #[test]

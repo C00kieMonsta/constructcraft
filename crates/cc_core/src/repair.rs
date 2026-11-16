@@ -838,6 +838,12 @@ impl Project {
                     repairs += 1;
                 }
             }
+            // Shading: only on views that take a sun, its values in range.
+            if !view.kind.takes_sun() && !view.shading.is_default() {
+                view.shading = Default::default();
+                repairs += 1;
+            }
+            repairs += view.shading.repair();
             // Render settings: only on views that take them, their values in range.
             if view.render.is_some() && !view.kind.takes_render() {
                 view.render = None;

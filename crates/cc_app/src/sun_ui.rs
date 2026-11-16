@@ -20,7 +20,7 @@ use cc_core::sun::{
     Daylight, MAX_MINUTE, MAX_YEAR, MIN_YEAR, SunDate, SunInterval, SunMode, SunSettings, SunSite, UTC_OFFSET_RANGE,
     days_in_month, view_forward,
 };
-use cc_core::{LevelId, ViewId, ViewKind};
+use cc_core::{LevelId, ViewId};
 use cc_engine::Ref;
 use cc_engine::commands::site::SiteSet;
 use cc_engine::commands::sun::{SunArg, SunPresetDelete, SunPresetRename, SunPresetSave};
@@ -87,11 +87,12 @@ pub fn open_for(state: &mut AppState, view: ViewId) {
         return;
     }
     let had_sun = v.sun.is_some();
+    let v_kind = v.kind.clone();
     let clean = !state.session.doc.is_dirty();
     let edits = Edits::begin(state);
     let start = state.session.doc.undo_depth();
     if !had_sun {
-        set_sun(state, view, SunArg::default());
+        set_sun(state, view, default_arg(&v_kind));
     }
     let last_date = state.project().view(view).and_then(|v| v.sun.as_ref()).and_then(|s| date_of(&s.mode));
     state.dialogs.sun =
@@ -148,10 +149,27 @@ fn set_sun(state: &mut AppState, view: ViewId, arg: SunArg) -> bool {
     run(state, None, ViewSet { view: Ref::Id(view.0), sun: Some(Some(arg)), ..Default::default() })
 }
 
+/// What gives a view of `kind` without a sun its first one: the conventional
+/// sun casting shadows for elevations and sections, the default sun for the
+/// others (see [`SunSettings::default_for`]).
+fn default_arg(kind: &cc_core::ViewKind) -> SunArg {
+    let sun = SunSettings::default_for(kind);
+    match sun.mode.is_conventional() {
+        true => SunArg { mode: Some(CONVENTIONAL.into()), shadows: Some(sun.shadows), ..Default::default() },
+        false => SunArg::default(),
+    }
+}
+
+/// The mode name `view_set` takes for the conventional sun.
+const CONVENTIONAL: &str = "conventional";
+
 /// Change the view's sun as `f` changes a copy of it (`view_set`), in one
 /// undo step per `merge` key.
 fn edit_sun(state: &mut AppState, view: ViewId, merge: Option<u64>, f: impl FnOnce(&mut SunSettings)) -> bool {
-    crate::engine_edit::view(state, view, merge, |v| f(v.sun.get_or_insert_with(SunSettings::default)))
+    crate::engine_edit::view(state, view, merge, |v| {
+        let kind = v.kind.clone();
+        f(v.sun.get_or_insert_with(|| SunSettings::default_for(&kind)))
+    })
 }
 
 /// Another kind of sun: the engine starts it from its defaults keeping the date.
@@ -242,6 +260,17 @@ fn left(ui: &mut Ui, state: &mut AppState, d: &mut SunDialog) {
                 }
             }
         });
+    });
+    crate::table::padded(ui, |ui| {
+        let on = sun.mode.is_conventional();
+        let r =
+            ui.add_enabled(!on, egui::Button::new(t!("sun-conventional"))).on_hover_text(t!("sun-conventional-tip"));
+        if r.clicked() {
+            if let Some(date) = date_of(&sun.mode) {
+                d.last_date = Some(date);
+            }
+            set_sun(state, d.view, SunArg { mode: Some(CONVENTIONAL.into()), frame: Some(0), ..Default::default() });
+        }
     });
     section(ui, "sun-presets", t!("sun-presets"), |ui| presets(ui, state, d, &sun));
 }
@@ -467,7 +496,7 @@ fn right(ui: &mut Ui, state: &mut AppState, id: ViewId) {
             }
         }
         ui.add_space(6.0);
-        common_rows(ui, state, id, &sun, matches!(view.kind, ViewKind::ThreeD { .. }));
+        common_rows(ui, state, id, &sun);
     });
 }
 
@@ -853,8 +882,10 @@ fn lighting_rows(ui: &mut Ui, state: &mut AppState, id: ViewId, azimuth: f64, al
     }
 }
 
-/// What every kind of sun has: the sun path, shadows and the ground plane.
-fn common_rows(ui: &mut Ui, state: &mut AppState, id: ViewId, sun: &SunSettings, three_d: bool) {
+/// What every kind of sun has: the sun path, shadows (cast in 3D views and,
+/// in the styles that fill faces with more than white, in plans, elevations
+/// and sections) and the ground plane.
+fn common_rows(ui: &mut Ui, state: &mut AppState, id: ViewId, sun: &SunSettings) {
     let label = t!("sun-show-path");
     let mut path = sun.show_path;
     if row(ui, &label, |ui| check(ui, &mut path, &label)).changed() {
@@ -862,12 +893,7 @@ fn common_rows(ui: &mut Ui, state: &mut AppState, id: ViewId, sun: &SunSettings,
     }
     let label = t!("sun-shadows");
     let mut shadows = sun.shadows;
-    let r = row(ui, &label, |ui| {
-        ui.add_enabled_ui(three_d, |ui| check(ui, &mut shadows, &label))
-            .inner
-            .on_disabled_hover_text(t!("sun-shadows-3d"))
-    });
-    if r.changed() {
+    if row(ui, &label, |ui| check(ui, &mut shadows, &label)).changed() {
         edit_sun(state, id, None, |s| s.shadows = shadows);
     }
     let levels: Vec<(LevelId, String, f64)> =
@@ -892,6 +918,41 @@ fn common_rows(ui: &mut Ui, state: &mut AppState, id: ViewId, sun: &SunSettings,
     let wanted = if on { level.or(lowest) } else { None };
     if wanted != ground {
         edit_sun(state, id, None, |s| s.ground = wanted);
+    }
+    shading_rows(ui, state, id);
+}
+
+/// The view's shading: the *Ambient light* and *Shadow intensity* rows, as
+/// percentages, each drag one undo step (`view_set` `shading`).
+fn shading_rows(ui: &mut Ui, state: &mut AppState, id: ViewId) {
+    use cc_core::ShadingSettings as S;
+    let Some(shading) = state.project().view(id).map(|v| v.shading) else { return };
+    let rows = [
+        ("ambient", t!("prop-ambient-light"), shading.ambient, S::MIN_AMBIENT..=S::MAX_AMBIENT),
+        ("shadow", t!("prop-shadow-intensity"), shading.shadow, S::MIN_SHADOW..=S::MAX_SHADOW),
+    ];
+    for (field, label, value, range) in rows {
+        let mut pct = (value * 100.0).round();
+        let range = (range.start() * 100.0)..=(range.end() * 100.0);
+        let r = row(ui, &label, |ui| {
+            let r = ui.add(DragValue::new(&mut pct).range(range).speed(0.5).max_decimals(0).suffix(" %"));
+            // Reported by its row's label (the label itself is painted).
+            let (enabled, shown, name) = (ui.is_enabled(), pct, label.clone());
+            r.widget_info(|| {
+                let mut info = egui::WidgetInfo::drag_value(enabled, shown);
+                info.label = Some(name.clone());
+                info
+            });
+            r
+        });
+        let new = pct / 100.0;
+        if r.changed() && (new - value).abs() > 1e-9 {
+            crate::engine_edit::view(state, id, Some(key((id.0, "shading", field))), |v| match field {
+                "ambient" => v.shading.ambient = new,
+                _ => v.shading.shadow = new,
+            });
+        }
+        done(state, r.drag_stopped() || r.lost_focus());
     }
 }
 
@@ -924,29 +985,35 @@ fn status(ui: &mut Ui, state: &AppState, id: ViewId) {
 // ---------------------------------------------------------------- properties
 
 /// The sun rows of a view's graphics section: the *Sun* button (it opens
-/// the dialog) and, when the view has a sun, the sun path and shadows.
+/// the dialog), when the view has a sun the sun path and shadows, and the
+/// view's shading (ambient light and shadow intensity).
 pub fn view_rows(ui: &mut Ui, state: &mut AppState, id: ViewId) {
     let Some(view) = state.project().view(id).cloned() else { return };
     if !view.kind.takes_sun() {
         return;
     }
-    let text = view.sun.as_ref().map_or_else(|| t!("sun-none"), |s| tr(s.mode.key()));
+    let text = view.sun.as_ref().map_or_else(|| t!("sun-none"), |s| mode_label(&s.mode));
     if row(ui, &t!("prop-sun"), |ui| ui.button(text).clicked()) {
         open_for(state, id);
     }
-    let Some(sun) = view.sun else { return };
-    let label = t!("prop-sun-path");
-    let mut path = sun.show_path;
-    if row(ui, &label, |ui| check(ui, &mut path, &label)).changed() {
-        edit_sun(state, id, None, |s| s.show_path = path);
-    }
-    if matches!(view.kind, ViewKind::ThreeD { .. }) {
+    if let Some(sun) = view.sun {
+        let label = t!("prop-sun-path");
+        let mut path = sun.show_path;
+        if row(ui, &label, |ui| check(ui, &mut path, &label)).changed() {
+            edit_sun(state, id, None, |s| s.show_path = path);
+        }
         let label = t!("sun-shadows");
         let mut shadows = sun.shadows;
         if row(ui, &label, |ui| check(ui, &mut shadows, &label)).changed() {
             edit_sun(state, id, None, |s| s.shadows = shadows);
         }
     }
+    shading_rows(ui, state, id);
+}
+
+/// The name of a kind of sun, the conventional sun by its own.
+fn mode_label(mode: &SunMode) -> String {
+    if mode.is_conventional() { t!("sun-conventional") } else { tr(mode.key()) }
 }
 
 #[cfg(test)]

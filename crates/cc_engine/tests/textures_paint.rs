@@ -226,6 +226,8 @@ fn elevations_show_painted_faces() {
             })
             .collect()
     };
+    // Materials show in the consistent colors style (the shaded style greys white faces).
+    run(&mut s, "view_set", json!({"view": south_view, "visual_style": "consistent_colors"}));
     let before = fills(&mut s);
     let south = face_point(&mut s, id, -DVec3::Y);
     run(&mut s, "paint", json!({"element": id, "point": south.to_array(), "material": red}));
@@ -233,6 +235,10 @@ fn elevations_show_painted_faces() {
     assert_ne!(before, after);
     // The face seen is now reddish.
     assert!(after.iter().any(|c| c[0] > c[1] + 40 && c[0] > c[2] + 40), "{after:?}");
+    // Shaded: grey whatever the paint.
+    run(&mut s, "view_set", json!({"view": south_view, "visual_style": "shaded"}));
+    let shaded = fills(&mut s);
+    assert!(!shaded.is_empty() && shaded.iter().all(|c| c[0] == c[1] && c[1] == c[2]), "{shaded:?}");
 }
 
 #[test]

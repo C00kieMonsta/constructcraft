@@ -1,8 +1,14 @@
 struct Uniforms {
     view_proj: mat4x4<f32>,
     light_dir: vec4<f32>,
-    /// x: 1 to leave faces unlit (hidden line, consistent colors).
+    /// x: 1 to leave faces unlit (hidden line, consistent colors); y: 1 to
+    /// shade them grey (shaded); z: what the unlit styles keep of a color
+    /// in a cast shadow.
     style: vec4<f32>,
+    /// The shaded style's greys, as displayed: x where no light reaches,
+    /// y what a face square to the light adds, z a cast shadow's (never
+    /// lighter than the face); w the opacity of the ground's shadows.
+    shading: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -149,10 +155,25 @@ fn surface(color: vec3<f32>, plane: vec2<f32>, fg: vec4<f32>, bg: vec4<f32>, tex
     return base;
 }
 
+// The shaded style's grey of a face at `facing` (the cosine of its angle to
+// the light), as displayed: white square to it, the ambient grey turned away.
+fn shaded_grey(facing: f32) -> f32 {
+    return u.shading.x + u.shading.y * clamp(facing, 0.0, 1.0);
+}
+
+// A face of the shaded style: its color (white, unless view graphics
+// override it) as displayed, times its grey.
+fn greyed(base: vec3<f32>, grey: f32, alpha: f32) -> vec4<f32> {
+    return vec4<f32>(gamma_from_linear(base) * grey, alpha);
+}
+
 @fragment
 fn fs_face(i: VsOut) -> @location(0) vec4<f32> {
     let n = normalize(i.normal);
     let base = surface(i.color.rgb, i.plane, i.fg, i.bg, i.tex);
+    if u.style.y > 0.5 {
+        return greyed(base, shaded_grey(dot(n, normalize(u.light_dir.xyz))), i.color.a);
+    }
     let diffuse = max(dot(n, normalize(u.light_dir.xyz)), 0.0);
     // Hemispheric ambient keeps faces turned away from the sun readable.
     let sky = 0.5 + 0.5 * n.z;

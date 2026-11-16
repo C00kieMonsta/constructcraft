@@ -47,7 +47,13 @@ pub fn resolve_instance(
     component: Option<&cc_core::Component>,
     extra: &[(&str, f64)],
 ) -> Vec<ComponentPart> {
-    instance_pieces(ty, element, component, extra, &|ctx| cut_voids(def.resolve_with(ctx).0))
+    let mut parts = instance_pieces(ty, element, component, extra, &|ctx| cut_voids(def.resolve_with(ctx).0));
+    // Known once here, where the pieces are resolved (and shared), not for
+    // every placed copy.
+    for part in parts.iter_mut().filter(|p| !p.plan_only) {
+        part.smooth = crate::solid::curved_facets(&part.faces);
+    }
+    parts
 }
 
 /// The errors of a placed component's pieces (a failing script's among them).
@@ -121,6 +127,31 @@ fn cut_voids(parts: Vec<ComponentPart>) -> Vec<ComponentPart> {
     solids.retain(|p| p.footprint.len() >= 3);
     solids.extend(symbols);
     solids
+}
+
+impl Solid {
+    /// Append the faces of a component piece (a prism's built from its
+    /// footprint), the facets of its curved surfaces smooth: as the piece
+    /// says (see [`resolve_instance`]), else found here.
+    pub fn add_part(&mut self, part: &ComponentPart) {
+        let start = self.faces.len();
+        if part.faces.is_empty() {
+            self.add_prism(&part.footprint, |_| part.z0, |_| part.z1);
+            self.smooth_curved(start);
+            return;
+        }
+        if part.smooth.len() != part.faces.len() {
+            self.add_polygons(part.faces.iter().cloned());
+            self.smooth_curved(start);
+            return;
+        }
+        for (verts, smooth) in part.faces.iter().zip(&part.smooth) {
+            if let Some(mut face) = crate::solid::Face::of_polygon(verts.clone()) {
+                face.smooth = *smooth;
+                self.faces.push(face);
+            }
+        }
+    }
 }
 
 /// The closed faces of a piece (a prism's are built from its footprint).
@@ -278,6 +309,125 @@ mod tests {
         // Pieces no void reaches stay prisms.
         let def = ComponentDef { items: vec![item("cube", bx("0", "1", "1"), false)], ..Default::default() };
         assert!(resolve_component(&def, &BTreeMap::new())[0].faces.is_empty());
+    }
+
+    /// A placed component's curved surfaces read as surfaces: their facets
+    /// are smooth (so the edges between them are no outlines and they shade
+    /// as one), also where a void cut them into pieces; boxes stay sharp.
+    #[test]
+    fn placed_curved_pieces_have_smooth_facets() {
+        let n = |v: &str| v.to_string();
+        let cylinder = |x: &str, z: &str, r: &str, h: &str| ComponentShape::Cylinder {
+            x: n(x),
+            y: n("0.5"),
+            z: n(z),
+            radius: n(r),
+            height: n(h),
+        };
+        let cube = |x: &str| ComponentShape::Box {
+            x: n(x),
+            y: n("0"),
+            z: n("0"),
+            width: n("1"),
+            depth: n("1"),
+            height: n("1"),
+        };
+        // A tube: a 0.1 m wide ring of radius 0.2 to 0.3 turned about x = 7.
+        let tube = ComponentShape::Revolution {
+            plane: SketchPlane::Front,
+            points: vec![
+                ProfilePoint::new("7.2", "0"),
+                ProfilePoint::new("7.3", "0"),
+                ProfilePoint::new("7.3", "0.5"),
+                ProfilePoint::new("7.2", "0.5"),
+            ],
+            offset: n("0.5"),
+            axis: n("7"),
+            angle: n("360"),
+        };
+        let def = ComponentDef {
+            items: vec![
+                item("drum", cylinder("0.5", "0", "0.3", "1"), false),
+                item("crate", cube("2"), false),
+                // A cube with a round hole 0.8 m deep from its top.
+                item("bowl", cube("4"), false),
+                item("hole", cylinder("4.5", "0.2", "0.3", "1"), true),
+                item("tube", tube, false),
+            ],
+            ..Default::default()
+        };
+        let mut doc = cc_core::Document::new(cc_core::Project::from_template());
+        let id = doc.edit("t", |e| {
+            let ty = cc_core::ElementTypeId(e.alloc_id());
+            e.add_type(ElementType {
+                id: ty,
+                name: "curved".into(),
+                data: cc_core::TypeData::Component { component: "curved".into(), def },
+                info: Default::default(),
+                uid: Default::default(),
+            });
+            let id = ElementId(e.alloc_id());
+            e.add_element(cc_core::Element {
+                id,
+                level: e.project().levels[0].id,
+                type_id: ty,
+                mark: String::new(),
+                comments: String::new(),
+                uid: Default::default(),
+                kind: cc_core::ElementKind::Component(Default::default()),
+                phase_created: Default::default(),
+                phase_demolished: None,
+                design_option: None,
+                paints: Vec::new(),
+            });
+            id
+        });
+        let geom = crate::ModelGeometry::build(&doc.project);
+        let solids: Vec<&Solid> = geom.solids.iter().filter(|s| s.element == id).collect();
+        assert_eq!(solids.len(), 4, "drum, crate, bowl, tube");
+        let upright = |f: &crate::solid::Face| f.normal.z.abs() < 1e-6;
+        let level = |f: &crate::solid::Face| f.normal.z.abs() > 1.0 - 1e-6;
+        // Edges between upright faces: what a curved side would draw as lines.
+        let vertical_edges = |s: &Solid, near: &dyn Fn(DVec2) -> bool| -> f64 {
+            s.feature_edges()
+                .into_iter()
+                .flatten()
+                .filter(|(a, b)| (a.z - b.z).abs() > 1e-6 && near(((*a + *b) * 0.5).truncate()))
+                .map(|(a, b)| a.distance(b))
+                .sum()
+        };
+        let everywhere = |_: DVec2| true;
+
+        let drum = solids[0];
+        assert!(drum.faces.iter().filter(|f| upright(f)).all(|f| f.smooth), "the drum's sides are smooth");
+        assert!(drum.faces.iter().filter(|f| level(f)).all(|f| !f.smooth), "its caps are not");
+        assert_eq!(vertical_edges(drum, &everywhere), 0.0);
+
+        let crate_ = solids[1];
+        assert!(crate_.faces.iter().all(|f| !f.smooth));
+        let outline: f64 = crate_.feature_edges().iter().flatten().map(|(a, b)| a.distance(*b)).sum();
+        assert!((outline - 2.0 * 12.0).abs() < 1e-9, "a box keeps its 12 edges: {outline}");
+
+        let bowl = solids[2];
+        let axis = DVec2::new(4.5, 0.5);
+        let in_hole = |p: DVec2| p.distance(axis) < 0.31;
+        let hole: Vec<_> = bowl.faces.iter().filter(|f| upright(f) && in_hole(f.centroid().truncate())).collect();
+        assert!(!hole.is_empty() && hole.iter().all(|f| f.smooth), "the hole's sides are smooth");
+        assert!(
+            bowl.faces.iter().filter(|f| !in_hole(f.centroid().truncate()) || level(f)).all(|f| !f.smooth),
+            "the cube's faces and the hole's bottom are not"
+        );
+        assert_eq!(vertical_edges(bowl, &in_hole), 0.0, "no lines down the hole");
+        let corners = vertical_edges(bowl, &|p| !in_hole(p));
+        assert!((corners - 2.0 * 4.0).abs() < 1e-9, "the cube's four corners: {corners}");
+        // The edges between the hole's facets are still found (for silhouettes), from both sides.
+        let seams: f64 = bowl.smooth_edges().iter().flatten().map(|(a, b, _)| a.distance(*b)).sum();
+        assert!((seams - 2.0 * 24.0 * 0.8).abs() < 1e-6, "{seams}");
+
+        let tube = solids[3];
+        assert!(tube.faces.iter().filter(|f| upright(f)).all(|f| f.smooth), "both walls of the tube");
+        assert!(tube.faces.iter().filter(|f| level(f)).all(|f| !f.smooth), "its flat ends");
+        assert_eq!(vertical_edges(tube, &everywhere), 0.0);
     }
 
     #[test]

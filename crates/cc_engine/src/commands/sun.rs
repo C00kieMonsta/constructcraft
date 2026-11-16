@@ -36,8 +36,15 @@ pub struct SunArg {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preset: Option<String>,
     /// `still` (one moment), `single_day` (a study over one day), `multi_day`
-    /// (a study over several days) or `lighting` (a light from a direction
-    /// given by hand). Another mode starts from its defaults, keeping the date.
+    /// (a study over several days), `lighting` (a light from a direction
+    /// given by hand) or `conventional`: the façade drawing's sun, a
+    /// lighting relative to the view (azimuth 225, altitude atan(1/√2) ≈
+    /// 35.26) whose rays run along a cube's diagonal from over the viewer's
+    /// left shoulder, so a shadow falls down and to the right as far as its
+    /// caster stands in front of the face (`view_get` shows it as
+    /// `lighting`, with `derived.conventional`). Another mode starts from
+    /// its defaults, keeping the date; `conventional` always resets the
+    /// light's direction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
     /// Still and single day: the date, `YYYY-MM-DD`.
@@ -85,10 +92,11 @@ pub struct SunArg {
     /// Draw the sun path diagram.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_path: Option<bool>,
-    /// Cast shadows (3D views).
+    /// Cast shadows: in 3D views, and in plans, elevations and sections
+    /// drawn in the shaded, consistent colors or textures style.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shadows: Option<bool>,
-    /// The level whose plane receives the shadows (id or name), or `null` for no ground plane.
+    /// The level whose plane receives the shadows (id or name), or `null` for the lowest level.
     #[serde(default, deserialize_with = "refs::nullable", skip_serializing_if = "Option::is_none")]
     pub ground: Option<Option<Ref>>,
 }
@@ -194,7 +202,11 @@ pub(crate) fn apply_sun(p: &Project, current: Option<&SunSettings>, arg: &SunArg
         }
         sun.mode = find_preset(p, name)?.mode.clone();
     }
-    if let Some(name) = &arg.mode {
+    if let Some(name) = &arg.mode
+        && name.trim().eq_ignore_ascii_case("conventional")
+    {
+        sun.mode = SunMode::conventional();
+    } else if let Some(name) = &arg.mode {
         let fresh =
             SunMode::from_name(name).ok_or_else(|| EngineError::invalid(t!("msg-sun-mode-unknown", "name" => name)))?;
         if fresh.name() != sun.mode.name() {
@@ -450,6 +462,7 @@ pub(crate) fn view_sun_json(p: &Project, v: &View) -> Value {
     }
     daylight_into(&mut d, &site, state.frame.map(|f| f.date));
     d.insert("frames".into(), json!(sun.frames(&site).len()));
+    d.insert("conventional".into(), json!(sun.mode.is_conventional()));
     d.insert("site_known".into(), json!(site.known));
     let mut out = sun_json(p, sun);
     if let Some(o) = out.as_object_mut() {

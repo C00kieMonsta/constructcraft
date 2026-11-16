@@ -3076,7 +3076,7 @@ fn every_dialog_keeps_its_body_inside() {
     for section in [Section::General, Section::Interface, Section::FileLocations, Section::Saving, Section::Shortcuts] {
         opens.push((format!("preferences {section:?}"), Box::new(move |s| crate::preferences::open(s, section))));
     }
-    // Sun Settings in each kind of sun, and in a 3D view (shadows enabled).
+    // Sun Settings in each kind of sun, and in a 3D view.
     for (mode, three_d) in
         [("still", false), ("single_day", false), ("multi_day", false), ("lighting", false), ("multi_day", true)]
     {
@@ -4844,13 +4844,53 @@ fn view_properties_show_the_sun() {
     let mut harness = themed_harness(state, egui::vec2(360.0, 1600.0), egui::Theme::Light, draw);
     let still = tr(cc_core::sun::SunMode::default().key());
     assert!(harness.query_by_label(&still).is_some());
-    assert!(harness.query_by_label(&t!("sun-shadows")).is_none(), "shadows only in 3D views");
     harness.get_by_label(&t!("prop-sun-path")).click();
     harness.run();
     assert!(!harness.state().project().view(plan).unwrap().sun.as_ref().unwrap().show_path);
+    // Shadows are cast in plans, elevations and sections too: the row is there and sets them.
+    assert!(!harness.state().project().view(plan).unwrap().sun.as_ref().unwrap().shadows);
+    harness.get_by_label(&t!("sun-shadows")).click();
+    harness.run();
+    assert!(harness.state().project().view(plan).unwrap().sun.as_ref().unwrap().shadows);
     harness.get_by_label(&still).click();
     harness.run();
     assert!(harness.state().dialogs.sun.is_some());
+}
+
+/// An elevation given a sun in Sun Settings starts with the conventional
+/// sun casting shadows; *Conventional (45°)* brings it back from another
+/// mode; the dialog and the view's properties show the shading rows.
+#[test]
+fn elevations_start_with_the_conventional_sun() {
+    use crate::commands::UiCommand;
+    use crate::i18n::tr;
+    use cc_core::sun::SunMode;
+    let mut state = sample_state();
+    let elevation = sample_view(&state, |v| matches!(v.kind, cc_core::ViewKind::Elevation { .. }));
+    state.active_view = Some(elevation);
+    assert!(state.project().view(elevation).unwrap().sun.is_none());
+    crate::commands::run(&mut state, &egui::Context::default(), UiCommand::SunSettings);
+    let sun = |s: &AppState| s.project().view(elevation).unwrap().sun.clone().unwrap();
+    assert_eq!(sun(&state).mode, SunMode::conventional());
+    assert!(sun(&state).shadows);
+    let mut harness = sun_harness(state);
+    assert!(harness.query_by_label(&t!("prop-ambient-light")).is_some());
+    assert!(harness.query_by_label(&t!("prop-shadow-intensity")).is_some());
+    harness.get_by_label(&tr(SunMode::from_name("still").unwrap().key())).click();
+    harness.run();
+    assert!(matches!(sun(harness.state()).mode, SunMode::Still { .. }));
+    harness.get_by_label(&t!("sun-conventional")).click();
+    harness.run();
+    assert_eq!(sun(harness.state()).mode, SunMode::conventional());
+    harness.get_by_label(&t!("action-ok")).click();
+    harness.run();
+    // The properties name the conventional sun and show the shading rows.
+    let state = harness.into_state();
+    let draw: fn(&mut egui::Ui, &mut AppState) = |ui, state| crate::properties::show(ui, state);
+    let harness = themed_harness(state, egui::vec2(360.0, 1600.0), egui::Theme::Light, draw);
+    assert!(harness.query_by_label(&t!("sun-conventional")).is_some());
+    assert!(harness.query_by_label(&t!("prop-ambient-light")).is_some());
+    assert!(harness.query_by_label(&t!("prop-shadow-intensity")).is_some());
 }
 
 // ---------------------------------------------------------------- render window

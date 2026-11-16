@@ -364,3 +364,319 @@ fn sun_arg_inverts_the_settings() {
     run(&mut s, "view_set", json!({"view": b, "sun": serde_json::to_value(&arg).unwrap()}));
     assert_eq!(s.project().views[&cc_core::ViewId(b)].sun.clone().unwrap(), settings);
 }
+
+/// The sun's shadows in a view's drawing: black veils that belong to no element.
+fn shadows(s: &mut Session, view: u64) -> usize {
+    let d = s.drawing(cc_core::ViewId(view)).unwrap();
+    let veil =
+        |p: &&cc_views::Prim| matches!(p, cc_views::Prim::Fill { color: [0, 0, 0, a], element: None, .. } if *a > 0);
+    d.prims.iter().filter(veil).count()
+}
+
+/// A sun set to cast shadows casts them in plans and elevations drawn in
+/// the shaded style, not in hidden line; what the view hides, for good or
+/// for now, casts none; exports carry them.
+#[test]
+fn shadows_are_cast_in_plans_and_elevations() {
+    let mut s = Session::default();
+    // A house of four walls on a floor, and a screen wall 2 m off each side.
+    for (a, b) in [([0, 0], [6, 0]), ([6, 0], [6, 4]), ([6, 4], [0, 4]), ([0, 4], [0, 0])] {
+        run(&mut s, "wall_create", json!({"start": a, "end": b}));
+    }
+    run(&mut s, "floor_create", json!({"boundary": [[0, 0], [6, 0], [6, 4], [0, 4]]}));
+    for (a, b) in [([2, -2], [4, -2]), ([8, 1], [8, 3]), ([4, 6], [2, 6]), ([-2, 3], [-2, 1])] {
+        run(&mut s, "wall_create", json!({"start": a, "end": b}));
+    }
+    let first = |s: &mut Session, category: &str| {
+        run(s, "views_list", json!({"category": category}))[0]["id"].as_u64().unwrap()
+    };
+    let (plan, elevation) = (first(&mut s, "floor_plan"), first(&mut s, "elevation"));
+    // A light from behind the viewer's left shoulder (in the plan, from the south-west).
+    let sun = json!({"mode": "lighting", "azimuth": 200, "altitude": 40, "relative_to_view": true, "show_path": false});
+    for view in [plan, elevation] {
+        run(&mut s, "view_set", json!({"view": view, "visual_style": "shaded", "sun": sun}));
+        assert_eq!(shadows(&mut s, view), 0, "shadows are off by default");
+        let set = set_sun(&mut s, view, json!({"shadows": true}));
+        assert_eq!(set["shadows"], true);
+        let cast = shadows(&mut s, view);
+        assert!(cast > 0, "view {view}");
+        // Hidden line draws none; back in the shaded style they return.
+        run(&mut s, "view_set", json!({"view": view, "visual_style": "hidden_line"}));
+        assert_eq!(shadows(&mut s, view), 0);
+        run(&mut s, "view_set", json!({"view": view, "visual_style": "shaded"}));
+        assert_eq!(shadows(&mut s, view), cast);
+        // The walls hidden for now, then for good: nothing casts (the floor lies on the ground).
+        run(&mut s, "view_temporary", json!({"view": view, "action": "hide_category", "categories": ["wall"]}));
+        assert_eq!(shadows(&mut s, view), 0, "walls hidden for now");
+        run(&mut s, "view_temporary", json!({"view": view, "action": "reset"}));
+        assert_eq!(shadows(&mut s, view), cast);
+        let walls: Vec<u64> = run(&mut s, "elements_list", json!({"category": "wall"}))
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["id"].as_u64().unwrap())
+            .collect();
+        run(&mut s, "element_hide_in_view", json!({"view": view, "ids": walls}));
+        assert_eq!(shadows(&mut s, view), 0, "walls hidden");
+        run(&mut s, "element_hide_in_view", json!({"view": view, "ids": walls, "hidden": false}));
+        assert_eq!(shadows(&mut s, view), cast);
+        // A sun at the horizon casts none.
+        set_sun(&mut s, view, json!({"altitude": 0}));
+        assert_eq!(shadows(&mut s, view), 0);
+        set_sun(&mut s, view, json!({"altitude": 40}));
+    }
+    // The exported drawing carries them: black fills that let the faces show through.
+    let dir = std::env::temp_dir().join(format!("cc_shadows_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("plan.svg");
+    run(&mut s, "view_export", json!({"view": plan, "path": path.to_str().unwrap()}));
+    let svg = std::fs::read_to_string(&path).unwrap();
+    assert!(svg.contains(r#"fill="rgb(0,0,0)" fill-opacity="#), "no veil in the SVG");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The elements the sun's shadows of a view's drawing lie on: a veil comes
+/// right after the fill of its face (`None`: on the ground, before any face).
+fn shadowed(s: &mut Session, view: u64) -> Vec<Option<u64>> {
+    let d = s.drawing(cc_core::ViewId(view)).unwrap();
+    let mut on = None;
+    let mut out = Vec::new();
+    for p in &d.prims {
+        match p {
+            cc_views::Prim::Fill { color: [0, 0, 0, a], element: None, .. } if *a > 0 => out.push(on),
+            cc_views::Prim::Fill { element: Some(e), .. } => on = Some(e.0),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Each view casts its shadows as it is read. A house with eaves, an open
+/// terrace beside it and an annex behind, inside a garden wall: the plan
+/// casts on the ground and on the terrace, not on the floor indoors; the
+/// section through the house leaves its room alone and casts the annex's
+/// eave on the annex's front, though the garden wall closes the garden
+/// around both; the elevation casts the house's eave on its front; the
+/// ceiling plan casts nothing.
+#[test]
+fn shadows_follow_how_each_view_is_read() {
+    let mut s = Session::default();
+    let id = |v: Value| v["id"].as_u64().unwrap();
+    let loop_of = |s: &mut Session, (x0, y0, x1, y1): (f64, f64, f64, f64)| -> Vec<u64> {
+        let corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+        (0..4).map(|i| id(run(s, "wall_create", json!({"start": corners[i], "end": corners[(i + 1) % 4]})))).collect()
+    };
+    let house = loop_of(&mut s, (0.0, 0.0, 6.0, 4.0));
+    let annex = loop_of(&mut s, (12.0, 6.0, 16.0, 9.0));
+    let garden = loop_of(&mut s, (-4.0, -4.0, 20.0, 13.0));
+    let rect = |x0: f64, y0: f64, x1: f64, y1: f64| json!([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
+    let floor = id(run(&mut s, "floor_create", json!({"boundary": rect(0.0, 0.0, 6.0, 4.0)})));
+    let terrace = id(run(&mut s, "floor_create", json!({"boundary": rect(6.0, 0.0, 9.0, 4.0)})));
+    run(&mut s, "roof_create", json!({"boundary": rect(0.0, 0.0, 6.0, 4.0), "overhang": 0.6}));
+    run(&mut s, "roof_create", json!({"boundary": rect(12.0, 6.0, 16.0, 9.0), "overhang": 0.6}));
+
+    // What is indoors: the rooms under their roofs; not the garden, under an eave or not.
+    let (project, geom) = s.project_and_geometry();
+    let indoors = cc_views::Indoors::of(project, geom, None, cc_core::DetailLevel::Medium);
+    assert!(!indoors.failed);
+    let at = |x: f64, y: f64| glam::DVec3::new(x, y, 1.0);
+    assert!(indoors.holds(at(3.0, 2.0)) && indoors.holds(at(14.0, 7.5)), "the rooms");
+    assert!(!indoors.holds(at(3.0, -0.4)) && !indoors.holds(at(14.0, 5.6)), "under the eaves");
+    assert!(!indoors.holds(at(-2.0, 2.0)) && !indoors.holds(at(7.5, 2.0)), "the garden, the terrace");
+    assert!(!indoors.holds(at(30.0, 2.0)), "outside the garden wall");
+
+    let first = |s: &mut Session, category: &str| {
+        run(s, "views_list", json!({"category": category}))[0]["id"].as_u64().unwrap()
+    };
+    let plan = first(&mut s, "floor_plan");
+    let elevation = id(run(&mut s, "view_create", json!({"kind": "elevation", "direction": "south"})));
+    // Looking north from a line through the house's room.
+    let section =
+        id(run(&mut s, "view_create", json!({"kind": "section", "start": [22, 2], "end": [-6, 2], "depth": 14})));
+    let ceiling = id(run(&mut s, "view_create", json!({"kind": "ceiling_plan"})));
+    // The sun in the south-south-west, low.
+    let sun = json!({"mode": "lighting", "azimuth": 200, "altitude": 25, "relative_to_view": false,
+        "shadows": true, "show_path": false});
+    for view in [plan, elevation, section, ceiling] {
+        run(&mut s, "view_set", json!({"view": view, "visual_style": "shaded", "sun": sun}));
+    }
+    let count = |on: &[Option<u64>], ids: &[u64]| on.iter().filter(|e| e.is_some_and(|e| ids.contains(&e))).count();
+
+    let on = shadowed(&mut s, plan);
+    assert!(on.contains(&None), "on the ground");
+    assert!(count(&on, &[terrace]) > 0, "the house's shadow on the terrace: {on:?}");
+    assert_eq!(count(&on, &[floor]), 0, "none indoors: {on:?}");
+
+    let on = shadowed(&mut s, section);
+    assert_eq!(count(&on, &house), 0, "the room cut keeps its plain shading: {on:?}");
+    assert!(count(&on, &annex) > 0, "the annex's eave on its front: {on:?}");
+    assert!(count(&on, &garden) > 0, "the house's shadow on the garden wall: {on:?}");
+
+    let on = shadowed(&mut s, elevation);
+    assert!(count(&on, &house) > 0, "the eave on the house's front: {on:?}");
+    assert!(count(&on, &annex) > 0);
+
+    assert!(shadowed(&mut s, ceiling).is_empty(), "a ceiling plan draws none");
+    // The ground under the house's eave is no room: in the plan it keeps
+    // the shadow, right up to the wall on the side away from the sun.
+    let d = s.drawing(cc_core::ViewId(plan)).unwrap();
+    let shaded = |x: f64, y: f64| {
+        d.prims.iter().any(|p| {
+            matches!(p, cc_views::Prim::Fill { pts, color: [0, 0, 0, a], element: None, .. }
+                if *a > 0 && cc_geom::polygon::contains(pts, glam::DVec2::new(x, y)))
+        })
+    };
+    assert!(shaded(3.0, 4.3) && !shaded(3.0, 2.0), "behind the house, not in it");
+    // With the roofs hidden in the section, nothing covers the rooms:
+    // they are no longer indoors and the sun gets in.
+    let roofs: Vec<u64> = run(&mut s, "elements_list", json!({"category": "roof"}))
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["id"].as_u64().unwrap())
+        .collect();
+    run(&mut s, "element_hide_in_view", json!({"view": section, "ids": roofs}));
+    let on = shadowed(&mut s, section);
+    assert!(count(&on, &house) > 0, "{on:?}");
+}
+
+/// The bounds of points: (min, max).
+fn bounds_of(pts: &[glam::DVec2]) -> (glam::DVec2, glam::DVec2) {
+    let lo = pts.iter().fold(glam::DVec2::splat(f64::INFINITY), |a, p| a.min(*p));
+    let hi = pts.iter().fold(glam::DVec2::splat(f64::NEG_INFINITY), |a, p| a.max(*p));
+    (lo, hi)
+}
+
+/// The conventional sun of façade drawings: in the south elevation, a
+/// short wall standing in front of a long one casts its shadow on it down
+/// and to the right, the shadow's right edge as far right of the short
+/// wall as its front stands in front of the long wall, and its top as far
+/// down as its back stands out.
+#[test]
+fn the_conventional_sun_casts_down_and_to_the_right() {
+    let mut s = Session::default();
+    let id = |v: Value| v["id"].as_u64().unwrap();
+    let back = id(run(&mut s, "wall_create", json!({"start": [0, 0], "end": [10, 0]})));
+    let front = id(run(&mut s, "wall_create", json!({"start": [4, -2], "end": [5, -2]})));
+    let elevation = id(run(&mut s, "view_create", json!({"kind": "elevation", "direction": "south"})));
+    let sun = set_sun(&mut s, elevation, json!({"mode": "conventional", "shadows": true, "show_path": false}));
+    assert_eq!(sun["mode"], "lighting");
+    assert_eq!(sun["azimuth"], 225.0);
+    assert!((sun["altitude"].as_f64().unwrap() - 35.264_389_682_754_654).abs() < 1e-9);
+    assert_eq!(sun["relative_to_view"], true);
+    assert_eq!(sun["derived"]["conventional"], true);
+    // Seen from the south looking north, the sun stands in the south-west.
+    assert_eq!(sun["derived"]["azimuth"], 225.0);
+    run(&mut s, "view_set", json!({"view": elevation, "visual_style": "shaded"}));
+
+    let thickness = |s: &mut Session, wall: u64| {
+        run(s, "element_get", json!({"id": wall}))["derived"]["thickness"].as_f64().unwrap()
+    };
+    let (t_back, t_front) = (thickness(&mut s, back), thickness(&mut s, front));
+    let d = s.drawing(cc_core::ViewId(elevation)).unwrap();
+    let fills_of = |e: u64| -> Vec<glam::DVec2> {
+        d.prims
+            .iter()
+            .filter_map(|p| match p {
+                cc_views::Prim::Fill { pts, element: Some(x), .. } if x.0 == e => Some(pts.clone()),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    };
+    let (lo, hi) = bounds_of(&fills_of(front));
+    // Drawing units per meter, from the short wall's 1 m length.
+    let k = hi.x - lo.x;
+    assert!(k > 0.0);
+    let veils: Vec<glam::DVec2> = d
+        .prims
+        .iter()
+        .filter_map(|p| match p {
+            cc_views::Prim::Fill { pts, color: [0, 0, 0, a], element: None, .. } if *a > 0 => Some(pts.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert!(!veils.is_empty(), "a shadow");
+    let (_, shadow_hi) = bounds_of(&veils);
+    // The front of the short wall stands 2 m less the half thicknesses out.
+    let out_front = 2.0 + t_front / 2.0 - t_back / 2.0;
+    let out_back = out_front - t_front;
+    let across = (shadow_hi.x - hi.x) / k;
+    let down = (hi.y - shadow_hi.y) / k;
+    assert!((across - out_front).abs() < 1e-3, "right by {across}, not {out_front}");
+    assert!((down - out_back).abs() < 1e-3, "down by {down}, not {out_back}");
+
+    // Back to another mode and to the conventional sun again: its direction is reset.
+    set_sun(&mut s, elevation, json!({"azimuth": 100}));
+    assert_eq!(sun_of(&mut s, elevation)["derived"]["conventional"], false);
+    let again = set_sun(&mut s, elevation, json!({"mode": "Conventional"}));
+    assert_eq!(again["azimuth"], 225.0);
+    assert_eq!(again["derived"]["conventional"], true);
+    assert_eq!(
+        refused(&mut s, "view_set", json!({"view": elevation, "sun": {"mode": "conventional", "date": "2026-01-01"}})),
+        ErrorCode::InvalidArguments
+    );
+}
+
+/// A view's shading: `view_get` shows it, `view_set` patches it in one
+/// undo step and refuses values out of range, unknown fields and views
+/// without a sun; it lightens the shade and the shadows of the drawing.
+#[test]
+fn shading_is_set_per_view() {
+    let mut s = Session::default();
+    let id = |v: Value| v["id"].as_u64().unwrap();
+    run(&mut s, "wall_create", json!({"start": [0, 0], "end": [10, 0]}));
+    run(&mut s, "wall_create", json!({"start": [4, -2], "end": [5, -2]}));
+    let elevation = id(run(&mut s, "view_create", json!({"kind": "elevation", "direction": "south"})));
+    let view = run(&mut s, "view_get", json!({"view": elevation}));
+    assert_eq!(view["shading"], json!({"ambient": 0.6, "shadow": 0.55}));
+    let sun = json!({"mode": "conventional", "shadows": true, "show_path": false});
+    run(&mut s, "view_set", json!({"view": elevation, "visual_style": "shaded", "sun": sun}));
+    let darkest = |s: &mut Session| {
+        let d = s.drawing(cc_core::ViewId(elevation)).unwrap();
+        d.prims
+            .iter()
+            .filter_map(|p| match p {
+                cc_views::Prim::Fill { color: [0, 0, 0, a], element: None, .. } => Some(*a),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0)
+    };
+    let before = darkest(&mut s);
+    assert!(before > 0);
+    let depth = s.doc.undo_depth();
+    let out = run(&mut s, "view_set", json!({"view": elevation, "shading": {"shadow": 0.3}}));
+    assert_eq!(out["shading"], json!({"ambient": 0.6, "shadow": 0.3}));
+    assert_eq!(s.doc.undo_depth(), depth + 1);
+    let lighter = darkest(&mut s);
+    assert!(0 < lighter && lighter < before, "{lighter} < {before}");
+    run(&mut s, "view_set", json!({"view": elevation, "shading": {"ambient": 0.8}}));
+    assert_eq!(run(&mut s, "view_get", json!({"view": elevation}))["shading"], json!({"ambient": 0.8, "shadow": 0.3}));
+    run(&mut s, "view_set", json!({"view": elevation, "shading": {"shadow": 0}}));
+    assert_eq!(darkest(&mut s), 0, "no visible shadow");
+    for bad in [json!({"ambient": 0.2}), json!({"shadow": 1.5}), json!({"ambient": "x"}), json!({"light": 1})] {
+        assert_eq!(
+            refused(&mut s, "view_set", json!({"view": elevation, "shading": bad})),
+            ErrorCode::InvalidArguments
+        );
+    }
+    let schedule = id(run(&mut s, "view_create", json!({"kind": "schedule", "category": "wall"})));
+    assert_eq!(run(&mut s, "view_get", json!({"view": schedule}))["shading"], Value::Null);
+    refused(&mut s, "view_set", json!({"view": schedule, "shading": {"ambient": 0.8}}));
+    // Undone with its step; saved and loaded with the project, repaired when out of range.
+    s.doc.undo(); // the schedule
+    assert_eq!(s.project().views[&cc_core::ViewId(elevation)].shading.shadow, 0.0);
+    s.doc.undo();
+    assert_eq!(s.project().views[&cc_core::ViewId(elevation)].shading.shadow, 0.3);
+    let text = cc_core::to_ron(s.project()).unwrap();
+    let (back, repairs) = cc_core::from_ron_with_repairs(&text).unwrap();
+    assert_eq!(repairs, 0);
+    assert_eq!(back.views[&cc_core::ViewId(elevation)].shading, cc_core::ShadingSettings { ambient: 0.8, shadow: 0.3 });
+    let broken = text.replace("ambient: 0.8", "ambient: 5.0");
+    assert_ne!(broken, text, "the file holds the shading");
+    let (back, repairs) = cc_core::from_ron_with_repairs(&broken).unwrap();
+    assert!(repairs >= 1);
+    assert_eq!(back.views[&cc_core::ViewId(elevation)].shading.ambient, 1.0);
+}

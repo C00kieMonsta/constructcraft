@@ -41,6 +41,10 @@ pub struct SceneMesh {
     pub edges: Vec<Vertex>,
     /// Faces drawn without light (hidden line, consistent colors).
     pub unlit: bool,
+    /// Faces shaded grey by the light, as displayed (the shaded style: see
+    /// [`cc_core::VisualStyle::shaded_grey`]), a cast shadow's grey where
+    /// the sun does not reach them; else lit in their colors.
+    pub grey: bool,
     /// Where each solid part of the model sits in the buffers, in the order
     /// it was added (see [`SceneMesh::highlight`]); empty for meshes whose
     /// solids the selection does not change (analytical, rebar).
@@ -286,8 +290,9 @@ pub struct SolidStyle {
 }
 
 impl SceneMesh {
-    /// The model's solids; `style` gives each element's view graphics
-    /// (`None` hides it).
+    /// The model's solids in their materials' colors, lit (outside any
+    /// view's style: thumbnails); `style` gives each element's view
+    /// graphics (`None` hides it).
     pub fn build(
         tess: &Tessellation,
         selected: &BTreeSet<ElementId>,
@@ -296,21 +301,26 @@ impl SceneMesh {
         Self::build_at(tess, selected, style, cc_core::DetailLevel::Medium)
     }
 
-    /// [`SceneMesh::build`] for a view at `detail`: component pieces show at
-    /// the levels they are set for.
+    /// [`SceneMesh::build`] at `detail`: component pieces show at the
+    /// levels they are set for.
     pub fn build_at(
         tess: &Tessellation,
         selected: &BTreeSet<ElementId>,
         style: &mut dyn FnMut(ElementId) -> Option<SolidStyle>,
         detail: cc_core::DetailLevel,
     ) -> Self {
-        Self::build_styled(tess, selected, style, detail, cc_core::VisualStyle::Shaded)
+        // The consistent colors' faces, lit.
+        let mut mesh = Self::build_styled(tess, selected, style, detail, cc_core::VisualStyle::ConsistentColors);
+        mesh.unlit = false;
+        mesh
     }
 
-    /// [`SceneMesh::build_at`] in a visual style: the wireframe has only
-    /// edges, hidden line white unlit faces, consistent colors the faces'
-    /// colors unlit, textures the materials' appearance colors with their
-    /// surface patterns (view graphics' color overrides win over both).
+    /// The model's solids in a visual style, at `detail`: the wireframe has
+    /// only edges, hidden line white unlit faces, shaded white faces
+    /// greyed by the light (see [`SceneMesh::grey`]), consistent colors the
+    /// faces' colors unlit, textures the materials' appearance colors with
+    /// their surface patterns, lit (view graphics' color overrides win over
+    /// all of them).
     pub fn build_styled(
         tess: &Tessellation,
         selected: &BTreeSet<ElementId>,
@@ -333,13 +343,17 @@ impl SceneMesh {
         textures: &TextureSet,
     ) -> Self {
         use cc_core::VisualStyle as V;
-        let mut mesh = Self { unlit: matches!(visual, V::HiddenLine | V::ConsistentColors), ..Self::default() };
+        let mut mesh = Self {
+            unlit: matches!(visual, V::HiddenLine | V::ConsistentColors),
+            grey: visual == V::Shaded,
+            ..Self::default()
+        };
         let mut styles: std::collections::HashMap<ElementId, Option<SolidStyle>> = Default::default();
         for (part, solid) in tess.solids.iter().enumerate().filter(|(_, s)| s.detail.shows(detail)) {
             let Some(st) = *styles.entry(solid.element).or_insert_with(|| style(solid.element)) else { continue };
             let sel = selected.contains(&solid.element);
             let own = match visual {
-                V::HiddenLine => [255, 255, 255],
+                V::HiddenLine | V::Shaded => [255, 255, 255],
                 V::Textures => solid.look.appearance,
                 _ => solid.look.color,
             };
@@ -571,22 +585,33 @@ mod tests {
                 visual,
             )
         };
+        // Shaded: white faces greyed by the light, no patterns.
         let shaded = build(V::Shaded);
-        assert!(!shaded.unlit && shaded.vertices.iter().all(|v| v.fg[3] == 0.0));
+        assert!(!shaded.unlit && shaded.grey && shaded.vertices.iter().all(|v| v.fg[3] == 0.0));
+        assert!(shaded.vertices.iter().all(|v| v.color[..3] == [1.0, 1.0, 1.0]));
         // The wireframe: the same edges, no faces.
         let wire = build(V::Wireframe);
         assert!(wire.indices.is_empty() && wire.transparent_indices.is_empty());
         assert_eq!(wire.edges.len(), shaded.edges.len());
         // Hidden line: white, unlit faces.
         let hidden = build(V::HiddenLine);
-        assert!(hidden.unlit && hidden.vertices.iter().all(|v| v.color[..3] == [1.0, 1.0, 1.0]));
-        assert!(build(V::ConsistentColors).unlit);
+        assert!(hidden.unlit && !hidden.grey && hidden.vertices.iter().all(|v| v.color[..3] == [1.0, 1.0, 1.0]));
+        assert_eq!(hidden.edges.len(), shaded.edges.len());
+        let consistent = build(V::ConsistentColors);
+        assert!(consistent.unlit && !consistent.grey);
+        // Outside a view: the consistent colors, lit.
+        let plain = SceneMesh::build_plain(&tess, &BTreeSet::new());
+        assert!(!plain.unlit && !plain.grey);
+        assert_eq!(
+            drawn(&plain.vertices, plain.indices.iter().copied()),
+            drawn(&consistent.vertices, consistent.indices.iter().copied())
+        );
         // Textures: lit, the brick pattern (kind 8) in its color on the faces of
         // solids made of a material (most of them; door frames are not).
         let textured = build(V::Textures);
         let brick = cc_core::Pattern::ALL.iter().position(|p| *p == cc_core::Pattern::Brick).unwrap() as f32;
         let bricked: Vec<&Vertex> = textured.vertices.iter().filter(|v| v.fg[3] == brick).collect();
-        assert!(!textured.unlit && bricked.len() * 2 > textured.vertices.len(), "{}", bricked.len());
+        assert!(!textured.unlit && !textured.grey && bricked.len() * 2 > textured.vertices.len(), "{}", bricked.len());
         assert!(bricked.iter().all(|v| (v.fg[0] - srgb_to_linear(90)).abs() < 1e-6));
     }
 
@@ -642,11 +667,12 @@ mod tests {
         // Coordinates in repeats of 0.5 m, kept near zero per face.
         assert!(mapped.iter().all(|v| v.tex[0].abs() < 1e4 && v.tex[1].abs() < 1e4));
         assert!(mapped.iter().any(|v| v.tex[0].fract().abs() > 1e-3 || v.tex[0].abs() > 1.5));
-        // Shaded views do not texture; the painted face shows its paint's color.
-        assert!(build(V::Shaded).vertices.iter().all(|v| v.tex[2] == 0.0));
+        // Shaded views do not texture, nor show paints (white faces); in consistent
+        // colors the painted face shows its paint's color.
+        assert!(build(V::Shaded).vertices.iter().all(|v| v.tex[2] == 0.0 && v.color[..3] == [1.0; 3]));
         let c = paint.shading_color();
         let want = [srgb_to_linear(c[0]), srgb_to_linear(c[1]), srgb_to_linear(c[2])];
-        assert!(build(V::Shaded).vertices.iter().any(|v| v.color[..3] == want));
+        assert!(build(V::ConsistentColors).vertices.iter().any(|v| v.color[..3] == want));
     }
 
     /// The vertices of triangles or lines, sorted, to compare what two meshes draw.

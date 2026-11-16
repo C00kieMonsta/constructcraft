@@ -167,6 +167,36 @@ impl RoomArrangement {
         self.boundary(point)
     }
 
+    /// Every space the walls' outlines close, their own bodies among them:
+    /// the bounded faces of the arrangement, each counter-clockwise (a face
+    /// around others, such as a room around a free-standing wall, as its
+    /// outer boundary alone). Whatever lies in none of them is open to the
+    /// outside. Each face is traced once.
+    pub fn spaces(&self) -> Vec<Vec<DVec2>> {
+        let mut seen: BTreeSet<(Key, Key)> = BTreeSet::new();
+        let mut out = Vec::new();
+        for &(a, b) in &self.edges {
+            for start in [(a, b), (b, a)] {
+                if seen.contains(&start) {
+                    continue;
+                }
+                let Some(face) = trace_face(&self.points, &self.neighbors, start) else {
+                    seen.insert(start);
+                    continue;
+                };
+                let keys: Vec<Key> = face.iter().map(|p| key(*p)).collect();
+                for i in 0..keys.len() {
+                    seen.insert((keys[i], keys[(i + 1) % keys.len()]));
+                }
+                // The face around a connected part of the walls runs clockwise.
+                if polygon::signed_area(&face) > 1e-6 {
+                    out.push(simplify(face));
+                }
+            }
+        }
+        out
+    }
+
     /// The boundary of the face around `point` (not inside a wall).
     fn boundary(&self, point: DVec2) -> Option<Vec<DVec2>> {
         let (points, edges, neighbors) = (&self.points, &self.edges, &self.neighbors);
@@ -346,6 +376,33 @@ mod tests {
         assert!(room_boundary(&open, DVec2::new(1.0, 1.5)).is_none());
         assert!(room_boundary(&walls(), DVec2::new(2.0, 1.5)).is_none());
         assert!(room_boundary(&walls(), DVec2::new(9.0, 1.5)).is_none());
+    }
+
+    /// The spaces of an arrangement are its rooms and its walls' bodies:
+    /// together the whole of what the walls close, and nothing outside it
+    /// or between walls that leave a side open.
+    #[test]
+    fn spaces_are_what_the_walls_close() {
+        let spaces = RoomArrangement::new(walls()).spaces();
+        let holding = |p: DVec2| spaces.iter().filter(|s| polygon::contains(s, p)).collect::<Vec<_>>();
+        let room = holding(DVec2::new(1.0, 1.5));
+        assert_eq!(room.len(), 1);
+        assert!((polygon::area(room[0]) - 1.95 * 3.0).abs() < 1e-9);
+        let partition = holding(DVec2::new(2.0, 1.5));
+        assert_eq!(partition.len(), 1, "a wall's body is a space too");
+        assert!((polygon::area(partition[0]) - 0.1 * 3.0).abs() < 1e-9);
+        assert!(holding(DVec2::new(9.0, 1.5)).is_empty());
+        assert!(spaces.iter().all(|s| polygon::signed_area(s) > 0.0));
+        let total: f64 = spaces.iter().map(|s| polygon::area(s)).sum();
+        assert!((total - 4.4 * 3.4).abs() < 1e-9, "{total}");
+        // A side left open: only the walls' bodies are closed.
+        let mut open = walls();
+        open.remove(3);
+        open.remove(3);
+        let spaces = RoomArrangement::new(open).spaces();
+        assert!(!spaces.iter().any(|s| polygon::contains(s, DVec2::new(1.0, 1.5))));
+        assert!(spaces.iter().any(|s| polygon::contains(s, DVec2::new(-0.1, 1.5))));
+        assert!(RoomArrangement::new(Vec::new()).spaces().is_empty());
     }
 
     #[test]

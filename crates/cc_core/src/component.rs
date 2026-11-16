@@ -860,6 +860,10 @@ pub struct ComponentPart {
     pub detail: DetailLevels,
     /// Faces of a piece that is not a vertical prism (empty for prisms).
     pub faces: Vec<Vec<DVec3>>,
+    /// Per face of `faces`, whether it is a facet of a curved surface (see
+    /// `cc_geom::Solid::smooth_curved`); filled in when a placed piece is
+    /// resolved, empty otherwise.
+    pub smooth: Vec<bool>,
 }
 
 /// Why a piece could not be resolved.
@@ -1189,6 +1193,7 @@ fn part(item_index: usize, item: &ComponentItem, (footprint, z0, z1, faces): Res
         plan_only: item.plan_only,
         detail: item.detail,
         faces,
+        smooth: Vec::new(),
     }
 }
 
