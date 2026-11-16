@@ -937,6 +937,7 @@ group-model = Modell
 hint-component = Klicken zum Platzieren; Leertaste dreht um 90°.
 hint-param-reset = Auf den Typwert zurücksetzen
 msg-component-created = Komponente „{ $name }“ erstellt; klicken Sie in einen Grundriss, um sie zu platzieren.
+msg-component-empty = Komponente „{ $name }“ ohne Teile gespeichert: Zeichnen Sie eines in der Komponentenumgebung (Komponente bearbeiten), um sie platzieren zu können.
 section-component = Komponente
 section-instance-params = Exemplarparameter
 section-type-params = Typparameter · gemeinsam

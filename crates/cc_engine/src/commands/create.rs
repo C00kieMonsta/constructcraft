@@ -961,6 +961,13 @@ impl Command for ComponentPlace {
         let p = s.project();
         let level = refs::level_or_first(p, self.level.as_ref())?;
         let type_id = refs::type_of(p, Category::Component, Some(&self.type_ref))?;
+        if let Some(cc_core::TypeData::Component { def, .. }) = p.element_type(type_id).map(|t| &t.data)
+            && def.items.is_empty()
+        {
+            return Err(EngineError::invalid(
+                "the component has no pieces yet: draw one in the component environment before placing it",
+            ));
+        }
         let device = match p.element_type(type_id).map(|t| &t.data) {
             Some(cc_core::TypeData::Component { def, .. }) => def.mep.and_then(|m| m.device()),
             _ => None,

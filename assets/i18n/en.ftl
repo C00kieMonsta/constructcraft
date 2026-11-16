@@ -942,6 +942,7 @@ group-model = Model
 hint-component = Click to place; Space rotates 90°.
 hint-param-reset = Reset to the type value
 msg-component-created = Component “{ $name }” created; click in a plan to place it.
+msg-component-empty = Component “{ $name }” saved with no pieces: draw one in the component environment (Edit Component) to place it.
 section-component = Component
 section-instance-params = Instance Parameters
 section-type-params = Type Parameters · shared

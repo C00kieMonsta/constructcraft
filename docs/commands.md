@@ -2588,7 +2588,7 @@ No parameters.
 
 ### `component_piece_delete`
 
-*edit* — Remove a piece of a component (a component keeps at least one, but a niche may have none).
+*edit* — Remove a piece of a component (it may be left with none while it is shaped).
 
 | Parameter | Type | | Description |
 |---|---|---|---|

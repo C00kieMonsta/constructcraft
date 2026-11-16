@@ -942,6 +942,7 @@ group-model = モデル
 hint-component = クリックして配置; スペースキーで 90° 回転。
 hint-param-reset = タイプ値にリセット
 msg-component-created = コンポーネント「{ $name }」を作成しました。平面図をクリックして配置してください。
+msg-component-empty = コンポーネント「{ $name }」はパーツなしで保存されました。配置するには、コンポーネント環境（コンポーネントを編集）でパーツを描いてください。
 section-component = コンポーネント
 section-instance-params = インスタンスパラメータ
 section-type-params = タイプパラメータ · 共有

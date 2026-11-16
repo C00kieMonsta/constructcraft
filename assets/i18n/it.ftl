@@ -937,6 +937,7 @@ group-model = Modello
 hint-component = Fai clic per inserire; Spazio ruota di 90°.
 hint-param-reset = Ripristina il valore del tipo
 msg-component-created = Componente «{ $name }» creato; fai clic in una pianta per inserirlo.
+msg-component-empty = Componente «{ $name }» salvato senza pezzi: disegnane uno nell’ambiente dei componenti (Modifica componente) per poterlo inserire.
 section-component = Componente
 section-instance-params = Parametri di istanza
 section-type-params = Parametri del tipo · condivisi

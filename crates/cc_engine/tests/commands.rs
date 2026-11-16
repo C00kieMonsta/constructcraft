@@ -3496,7 +3496,9 @@ fn component_create_starts_from_a_kind() {
         let ty = run(&mut s, "component_create", json!({"name": format!("New {kind}"), "kind": kind}));
         assert_eq!(params(&ty).len(), count, "{kind}: {:?}", params(&ty));
         assert!(ty["params"]["def"]["kind"].as_str().unwrap().eq_ignore_ascii_case(kind), "{kind}");
-        assert!(!ty["params"]["def"]["items"].as_array().unwrap().is_empty(), "{kind}");
+        // A generic component starts empty; the others with a body.
+        let items = ty["params"]["def"]["items"].as_array().map_or(0, Vec::len);
+        assert_eq!(items == 0, kind == "Generic", "{kind}");
     }
     // Doors and windows cut their opening: they are types of those categories.
     let door = run(&mut s, "component_create", json!({"name": "Door 2", "kind": "Door"}));

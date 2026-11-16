@@ -180,9 +180,17 @@ pub fn save_file(state: &mut AppState) {
 /// Leave the environment keeping the changes.
 pub fn finish(state: &mut AppState) {
     state.sketch = None;
+    // A component with nothing to place (no pieces, no opening) is kept
+    // without picking its tool.
+    let empty = component(state).is_some_and(|(_, def)| def.items.is_empty() && def.opening.is_none());
     if let Some(env) = state.component_env.take()
         && env.created
     {
+        if empty {
+            let name = state.project().element_type(env.type_id).map(|t| t.name.clone()).unwrap_or_default();
+            state.message = t!("msg-component-empty", "name" => name);
+            return;
+        }
         crate::new_component_dialog::place(state, env.type_id);
     }
 }

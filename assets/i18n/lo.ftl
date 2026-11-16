@@ -919,6 +919,7 @@ group-model = ແບບຈຳລອງ
 hint-component = ຄລິກເພື່ອວາງ; Spacebar ເພື່ອໝຸນ 90°.
 hint-param-reset = ຕັ້ງຄ່າຄືນເປັນຄ່າຕາມປະເພດ
 msg-component-created = ສ້າງຊິ້ນສ່ວນ “{ $name }” ແລ້ວ; ຄລິກໃສ່ແຜນຜັງເພື່ອວາງ.
+msg-component-empty = ບັນທຶກຊິ້ນສ່ວນ “{ $name }” ໂດຍບໍ່ມີຊິ້ນສ່ວນຍ່ອຍ: ແຕ້ມອັນໜຶ່ງໃນສະພາບແວດລ້ອມຊິ້ນສ່ວນ (ແກ້ໄຂຊິ້ນສ່ວນ) ເພື່ອວາງມັນ.
 section-component = ຊິ້ນສ່ວນ
 section-instance-params = ພາຣາມິເຕີສະເພາະຕົວວັດຖຸ
 section-type-params = ພາລາມິເຕີປະເພດ · ໃຊ້ຮ່ວມກັນ

@@ -937,6 +937,7 @@ group-model = Modelo
 hint-component = Haga clic para colocar; Espacio gira 90°.
 hint-param-reset = Restablecer al valor del tipo
 msg-component-created = Componente «{ $name }» creado; haga clic en una planta para colocarlo.
+msg-component-empty = Componente «{ $name }» guardado sin piezas: dibuje una en el entorno de componentes (Editar componente) para poder colocarlo.
 section-component = Componente
 section-instance-params = Parámetros de ejemplar
 section-type-params = Parámetros del tipo · compartidos
