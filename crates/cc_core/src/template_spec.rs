@@ -421,8 +421,8 @@ mod tests {
         assert_eq!(p.units, crate::Units::default());
         let levels: Vec<_> = p.levels.iter().map(|l| (l.id, l.elevation)).collect();
         assert_eq!(levels, [(LevelId(1), 0.0), (LevelId(2), 3.0)]);
-        assert_eq!((p.types.len(), p.views.len(), p.materials.len(), p.profiles.len()), (64, 15, 13, 6));
-        assert_eq!(p.next_id(), 102);
+        assert_eq!((p.types.len(), p.views.len(), p.materials.len(), p.profiles.len()), (72, 15, 13, 6));
+        assert_eq!(p.next_id(), 110);
         for (id, name) in [
             (3, "Alvenaria 15 cm"),
             (5, "Divisória gesso 10 cm"),
@@ -439,6 +439,10 @@ mod tests {
             (63, "Luminária de teto 100 VA"),
             (84, "Carimbo padrão"),
             (95, "Porta-janela 2 folhas 140x220"),
+            (102, "Etiqueta de porta"),
+            (107, "Etiqueta de fundação"),
+            (108, "Marca de corte"),
+            (109, "Marca de elevação"),
         ] {
             assert_eq!(p.types[&ElementTypeId(id)].name, name, "type {id}");
         }

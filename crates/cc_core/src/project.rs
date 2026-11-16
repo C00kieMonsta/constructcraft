@@ -471,6 +471,9 @@ impl Project {
         p.ensure_uids();
         // Last, so the ids of everything above stay as they were.
         p.convert_sections_to_profiles(&n);
+        // Tag and view mark types, after everything else for the same reason.
+        p.ensure_tag_types(&n);
+        p.ensure_mark_types(&n);
         p
     }
 

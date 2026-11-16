@@ -7,6 +7,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use cc_core::ViewId;
+use cc_core::view_mark::MarkKind;
 use cc_engine::{ErrorCode, Session};
 use cc_views::{Anchor, LineStyle, Prim};
 use glam::DVec2;
@@ -211,10 +212,20 @@ fn default_mark_types_draw_what_plans_always_drew() {
         let n = e["name"].as_str().unwrap();
         assert!(texts.iter().any(|t| t.1 == n && t.2 == 2.5 && t.3 == Anchor::LeftBottom), "{n}");
     }
-    // Types of the default styles draw the same.
+    // The template has a mark type of each kind, of the default style: a
+    // project without mark types (an older file) draws the same plan.
+    let template: Vec<String> = [MarkKind::Section, MarkKind::Elevation]
+        .map(|k| s.project().mark_types_of(k).map(|t| t.name.clone()).collect::<Vec<_>>().join(","))
+        .into();
+    assert_eq!(template, ["Marca de corte", "Marca de elevação"]);
+    let mut bare = s.project().clone();
+    bare.types.retain(|_, t| t.category() != cc_core::Category::ViewMark);
+    let mut older = Session::new(cc_core::Document::new(bare));
+    assert_eq!(prims(&mut older, plan), before);
+    // More types of the default styles draw the same.
     let a = run(&mut s, "view_mark_type_create", json!({"kind": "section"}));
     let b = run(&mut s, "view_mark_type_create", json!({"kind": "elevation"}));
-    assert_eq!(a["name"].as_str(), Some("Marca de corte"));
+    assert_eq!(a["name"].as_str(), Some("Marca de corte 2"));
     assert_eq!(b["params"]["style"]["head"], json!(0.0));
     assert_eq!(prims(&mut s, plan), before);
 }
@@ -233,7 +244,10 @@ fn mark_types_restyle_section_and_elevation_marks() {
     let style = json!({"head": 16.0, "top": {"text": "{Letter}", "size": 4.0}, "bottom": {"text": "{Name}", "size": 2.0}, "heads": "Start"});
     let big = run(&mut s, "view_mark_type_create", json!({"kind": "section", "name": "Big", "style": style}));
     run(&mut s, "view_mark_type_create", json!({"kind": "section", "name": "Plain"}));
-    // The project's first section mark type applies.
+    // The project's first section mark type applies: the template's, until it goes.
+    let template_section = s.project().mark_types_of(MarkKind::Section).next().unwrap().id.0;
+    assert_eq!(free_texts(&mut s, plan).iter().filter(|t| t.1 == "B" && t.2 == 3.5).count(), 2);
+    run(&mut s, "type_delete", json!({"type": template_section}));
     let mark = s.drawing(ViewId(plan)).unwrap().sections.iter().find(|h| h.view.0 == section).cloned().unwrap();
     assert!((mark.radius - 0.8).abs() < 1e-9, "16 mm at 1:100: {}", mark.radius);
     let texts = free_texts(&mut s, plan);
@@ -258,7 +272,9 @@ fn mark_types_restyle_section_and_elevation_marks() {
     // Elevation markers: a paper-size head with a hexagon, the name inside.
     let style =
         json!({"head": 10.0, "symbol": "Hexagon", "top": {"text": "{Name}", "size": 2.0}, "label": {"text": ""}});
+    let template_elevation = s.project().mark_types_of(MarkKind::Elevation).next().unwrap().id.0;
     run(&mut s, "view_mark_type_create", json!({"kind": "elevation", "style": style}));
+    run(&mut s, "type_delete", json!({"type": template_elevation}));
     let name = s.project().view(ViewId(elevation)).unwrap().name.clone();
     let texts = free_texts(&mut s, plan);
     assert!(texts.iter().any(|t| t.1 == name && t.2 == 2.0 && t.3 == Anchor::Center), "{texts:?}");
@@ -332,7 +348,8 @@ fn component_symbols_and_bad_values_are_repaired() {
     // A section mark drawn as the component, its fields filled in.
     run(&mut s, "view_create", json!({"kind": "section", "start": [0.0, 3.0], "end": [8.0, 3.0], "name": "Corte Z"}));
     let style = json!({"symbol": {"Component": component}, "top": {"text": ""}, "bottom": {"text": ""}});
-    run(&mut s, "view_mark_type_create", json!({"kind": "section", "style": style}));
+    let section_type = s.project().mark_types_of(MarkKind::Section).next().unwrap().id.0;
+    run(&mut s, "type_set", json!({"type": section_type, "params": {"style": style}}));
     let texts = free_texts(&mut s, plan);
     assert_eq!(texts.iter().filter(|t| t.1 == "<Corte Z>").count(), 2, "a head at each end: {texts:?}");
 

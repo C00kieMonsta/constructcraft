@@ -468,9 +468,9 @@ impl crate::Project {
     }
 
     /// Add a tag type of the default style for every target that has none,
-    /// named by `n` from the targets' template keys. Projects get their tag
-    /// types on demand: plans draw a target without one in its
-    /// [default style](TagTarget::default_style).
+    /// named by `n` from the targets' template keys. The template carries one
+    /// per target; plans draw a target of a project without one (older
+    /// files) in its [default style](TagTarget::default_style).
     pub fn ensure_tag_types(&mut self, n: &dyn Fn(&str) -> String) {
         for target in TagTarget::ALL {
             if self.tag_types_of(target).next().is_some() {
@@ -513,8 +513,9 @@ mod tests {
     #[test]
     fn placements_and_view_tag_types_are_repaired() {
         let mut p = crate::Project::from_template();
-        assert!(p.tag_types_of(TagTarget::Door).next().is_none(), "projects get tag types on demand");
+        assert!(TagTarget::ALL.iter().all(|&t| p.tag_types_of(t).count() == 1), "the template has one per target");
         p.ensure_tag_types(&|k: &str| k.to_string());
+        assert!(TagTarget::ALL.iter().all(|&t| p.tag_types_of(t).count() == 1), "and adds none to a project with one");
         let level = p.levels[0].id;
         let room_type = p.default_type(crate::Category::Room).unwrap();
         let room = ElementId(p.alloc_id());

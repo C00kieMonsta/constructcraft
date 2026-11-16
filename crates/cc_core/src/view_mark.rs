@@ -235,6 +235,21 @@ pub fn repair_view_marks(
 }
 
 impl crate::Project {
+    /// Adds a mark type of each kind the project has none of, with the
+    /// kind's default style, named by `n` from the kind's template key.
+    pub fn ensure_mark_types(&mut self, n: &dyn Fn(&str) -> String) {
+        for kind in MarkKind::ALL {
+            if self.mark_types_of(kind).next().is_some() {
+                continue;
+            }
+            let id = crate::ElementTypeId(self.alloc_id());
+            let data = TypeData::ViewMark { kind, style: kind.default_style() };
+            let name = n(kind.template_key());
+            self.types
+                .insert(id, ElementType { id, name, data, info: Default::default(), uid: crate::Uid::generate() });
+        }
+    }
+
     /// The view mark types of `kind`, in id order.
     pub fn mark_types_of(&self, kind: MarkKind) -> impl Iterator<Item = &ElementType> {
         self.types.values().filter(move |t| matches!(&t.data, TypeData::ViewMark { kind: k, .. } if *k == kind))

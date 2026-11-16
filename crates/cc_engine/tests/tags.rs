@@ -80,7 +80,17 @@ fn default_tag_types_draw_what_plans_always_drew() {
     let room_texts: Vec<String> = texts(&mut s, plan, room).into_iter().map(|t| t.1).collect();
     assert_eq!(room_texts[0], "Sala");
     assert_eq!(room_texts.len(), 3);
-    // A tag type per target, made with the default style: the plans do not change.
+    // The template has a tag type per target, of the default style: a
+    // project without tag types (an older file) draws the same plans.
+    let tag_types = run(&mut s, "types_list", json!({"category": "tag"}));
+    assert_eq!(tag_types.as_array().unwrap().len(), 6);
+    let mut bare = s.project().clone();
+    bare.types.retain(|_, t| t.category() != cc_core::Category::Tag);
+    let mut older = Session::new(cc_core::Document::new(bare));
+    assert_eq!(before, (prims(&mut older, plan), prims(&mut older, structural)));
+    // More types per target, made with the default style: the plans do not change.
+    let template_door_tag = run(&mut s, "tag_get", json!({"view": plan, "id": door}))["type"]["name"].clone();
+    let template_door_tag = template_door_tag.as_str().unwrap().to_string();
     let mut door_tag = String::new();
     for target in ["door", "window", "room", "column", "beam", "foundation"] {
         let t = run(&mut s, "tag_type_create", json!({"target": target}));
@@ -91,18 +101,20 @@ fn default_tag_types_draw_what_plans_always_drew() {
     }
     assert_eq!(before, (prims(&mut s, plan), prims(&mut s, structural)));
     // Names are unique; targets are known.
+    assert_eq!(door_tag, format!("{template_door_tag} 2"));
     assert_eq!(
         fails(&mut s, "tag_type_create", json!({"target": "door", "name": door_tag})),
         ErrorCode::InvalidArguments
     );
     assert_eq!(fails(&mut s, "tag_type_create", json!({"target": "wall"})), ErrorCode::InvalidArguments);
     let again = run(&mut s, "tag_type_create", json!({"target": "door"}));
-    assert_eq!(again["name"], format!("{door_tag} 2"));
+    assert_eq!(again["name"], format!("{template_door_tag} 3"));
 }
 
 #[test]
 fn styles_set_fields_sizes_and_symbols() {
     let (mut s, plan, [door, window, _, _]) = house();
+    let template_door_tag = run(&mut s, "tag_get", json!({"view": plan, "id": door}))["type"]["id"].clone();
     let custom = run(
         &mut s,
         "tag_type_create",
@@ -111,6 +123,8 @@ fn styles_set_fields_sizes_and_symbols() {
             "symbol": "Rectangle", "width": 0, "height": 0
         }}),
     );
+    assert_eq!(run(&mut s, "tag_get", json!({"view": plan, "id": door}))["type"]["id"], template_door_tag);
+    run(&mut s, "type_delete", json!({"type": template_door_tag}));
     let t = run(&mut s, "tag_get", json!({"view": plan, "id": door}));
     assert_eq!(t["type"]["id"], custom["id"], "the project's first door tag type");
     let size = t["texts"][1].as_str().unwrap().to_string();
@@ -172,6 +186,7 @@ fn plans_move_turn_hide_and_retype_tags() {
     assert_eq!(texts(&mut s, plan, door)[0].0, home);
     assert!(s.project().view(cc_core::ViewId(plan)).unwrap().tags.is_empty(), "default placements are removed");
     // Another type for one element, and for the plan.
+    let template_door_tag = run(&mut s, "tag_get", json!({"view": plan, "id": door}))["type"]["id"].clone();
     let square = id(&run(
         &mut s,
         "tag_type_create",
@@ -179,6 +194,8 @@ fn plans_move_turn_hide_and_retype_tags() {
     ));
     let plain =
         id(&run(&mut s, "tag_type_create", json!({"target": "door", "name": "Plain", "style": {"symbol": "None"}})));
+    assert_eq!(annotation_lines(&mut s, plan, door), lines_home, "the template's door tag type comes first");
+    run(&mut s, "type_delete", json!({"type": template_door_tag}));
     assert_eq!(annotation_lines(&mut s, plan, door), 4, "the first door tag type");
     run(&mut s, "tag_set", json!({"view": plan, "ids": [door], "type": "Plain"}));
     assert_eq!(annotation_lines(&mut s, plan, door), 0);
@@ -245,10 +262,12 @@ fn beams_are_tagged_along_and_a_component_can_be_the_symbol() {
     let component = s.project().types.values().find(|t| t.name == "Door bubble").unwrap().id.0;
     let plans = run(&mut s, "views_list", json!({"category": "floor_plan"}));
     let plan = id(&plans[0]);
+    // On the template's door tag type.
+    let door_tag = run(&mut s, "tag_get", json!({"view": plan, "id": door}))["type"]["id"].clone();
     run(
         &mut s,
-        "tag_type_create",
-        json!({"target": "door", "style": {"symbol": {"Component": component}, "lines": []}}),
+        "type_set",
+        json!({"type": door_tag, "params": {"style": {"symbol": {"Component": component}, "lines": []}}}),
     );
     let drawn = texts(&mut s, plan, door);
     assert_eq!(drawn.len(), 1, "{drawn:?}");
