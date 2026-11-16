@@ -239,6 +239,16 @@ Uma cortina de vidro é uma parede cujo tipo tem uma grade de cortina em vez de 
 {"command": "wall_create", "args": {"start": [2, 0], "end": [6, 0], "type": "Vitrine", "height": 2.8}}
 ```
 
+### Séries de tubos
+
+Uma série de tubos é uma linha de produtos: suas bitolas (diâmetro externo, parede e diâmetro interno) e as conexões vendidas para ela com suas dimensões. `pipe_catalog` lista as 22 séries embutidas (Brasil, Europa, EUA) ou, com `series`, as linhas de uma série em milímetros. `pipe_series_import` copia para o projeto uma série embutida (`code`) ou um arquivo de série (`path` ou `text`, JSON em milímetros como `pipe_series_export` o escreve); `on_clash` (`skip`, `replace`, `rename`) resolve um código que o projeto já tem, e `sizes` (`["all"]` ou rótulos) também cria os tipos de tubo, com o nome da série e da bitola. `pipe_type_create` cria um tipo de uma linha, importando uma série embutida quando preciso. Um tipo de uma série mantém o diâmetro externo da linha (`type_set` aceita `series` e `size`; `series` nulo o deixa livre), e o dimensionamento usa o diâmetro interno da linha: `mep_sizing` dá a cada trecho de uma série a bitola (`size`) necessária, e `mep_size_apply` o mantém na sua série, criando o tipo que faltar. `pipe_series_delete` recusa uma série em uso, a menos que `detach`. Os tipos de tubo dos modelos são bitolas de séries, e os tubos de modelo de projetos antigos são ligados a elas ao abrir.
+
+```text
+{"command": "pipe_series_import", "args": {"code": "BR-PVC-SOLD", "sizes": ["40 mm", "50 mm"]}}
+{"command": "pipe_type_create", "args": {"series": "BR-COBRE-E", "size": "22 mm"}}
+{"command": "type_set", "args": {"type": "Tubo PVC soldável 40 mm", "params": {"size": "60 mm"}}}
+```
+
 ### Eletrocalhas e registros
 
 `cable_tray_create` desenha um trecho de eletrocalha como `conduit_create` (com `circuits`, `offset`, `end_offset`); um projeto sem tipo de eletrocalha ganha um (200 × 100 mm, leito), e `cable_tray_type_create` cria outros (`width`, `height`, `style`: `ladder`, `solid_bottom` ou `perforated`). Eletrocalhas só se ligam a outras eletrocalhas, e as curvas e tês entre elas aparecem em `mep_fittings`. `valve_place` coloca um registro num tubo, num `point` perto dele ou a uma `distance` ao longo dele, de um `type` ou de uma função `kind` (`gate`, `ball`, `check`, `globe`; um tipo dessa função é criado quando não há); `valve_type_create` cria tipos de várias funções (`kinds`) de uma vez. O registro tem o diâmetro e o sistema do seu tubo, é um nó da rede e acompanha o tubo; `element_get` mostra `derived.point`, `kind` e `diameter`, e `element_set` o desloca ao longo do tubo (`params.at`).

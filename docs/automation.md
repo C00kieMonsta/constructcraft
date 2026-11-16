@@ -239,6 +239,16 @@ A curtain wall is a wall whose type has a curtain grid instead of layers: vertic
 {"command": "wall_create", "args": {"start": [2, 0], "end": [6, 0], "type": "Storefront", "height": 2.8}}
 ```
 
+### Pipe series
+
+A pipe series is one product line: its sizes (outside diameter, wall and inside diameter) and the fittings sold for it with their dimensions. `pipe_catalog` lists the 22 built-in series (Brazil, Europe, US) or, with `series`, one series' rows in millimeters. `pipe_series_import` copies a built-in series (`code`) or a series file (`path` or `text`, JSON in millimeters as `pipe_series_export` writes it) into the project; `on_clash` (`skip`, `replace`, `rename`) settles a code the project has, and `sizes` (`["all"]` or labels) also makes the pipe types, named after the series and size. `pipe_type_create` makes one type of a row, importing a built-in series when needed. A type of a series keeps the row's outside diameter (`type_set` takes `series` and `size`; a null `series` makes it free), and sizing uses the row's inside diameter: `mep_sizing` gives each run of a series the `size` it needs, and `mep_size_apply` keeps it in its series, making the missing type. `pipe_series_delete` refuses a series in use unless `detach`. The templates' pipe types are sizes of series, and older projects' template pipes are linked to them when opened.
+
+```text
+{"command": "pipe_series_import", "args": {"code": "EU-PVCU-1452-PN10", "sizes": ["d32", "d63"]}}
+{"command": "pipe_type_create", "args": {"series": "US-CU-L", "size": "3/4\""}}
+{"command": "type_set", "args": {"type": "PVC-U pressure pipe PN10 d32", "params": {"size": "d50"}}}
+```
+
 ### Cable trays and valves
 
 `cable_tray_create` draws a cable tray run like `conduit_create` (with `circuits`, `offset`, `end_offset`); a project without a cable tray type gets one (200 × 100 mm, ladder), and `cable_tray_type_create` makes others (`width`, `height`, `style`: `ladder`, `solid_bottom` or `perforated`). Trays join only other trays, and their elbows and tees are listed by `mep_fittings`. `valve_place` puts a valve on a pipe at a `point` near it or a `distance` along it, of a `type` or a `kind` (`gate`, `ball`, `check`, `globe`; a type of that kind is made when there is none); `valve_type_create` makes types of several `kinds` at once. A valve takes its pipe's diameter and system, is a node of its network and follows the pipe; `element_get` shows its `derived.point`, `kind` and `diameter`, and `element_set` moves it along the pipe (`params.at`).

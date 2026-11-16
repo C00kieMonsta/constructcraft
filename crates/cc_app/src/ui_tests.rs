@@ -3227,6 +3227,14 @@ fn small_sizes_read_in_inches_in_imperial_projects() {
     let mut state = imperial_state();
     let inch = cc_core::units::INCH;
     let pipe = state.project().types.values().find(|t| matches!(t.data, cc_core::TypeData::Pipe { .. })).unwrap().id;
+    // A free pipe type (a size of a series keeps its row's diameter).
+    state.session.doc.edit("free", |e| {
+        if let Some(cc_core::TypeData::Pipe { diameter, series, size, .. }) = e.type_mut(pipe).map(|t| &mut t.data) {
+            *diameter = 0.5 * inch;
+            *series = None;
+            size.clear();
+        }
+    });
     state.dialogs.type_editor = Some(pipe);
     let mut harness = type_dialog_harness(state);
     harness.run();
