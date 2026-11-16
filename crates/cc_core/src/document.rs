@@ -999,8 +999,34 @@ impl<'a> EditCtx<'a> {
         }
     }
 
+    /// Pipe types of a series keep their row's outside diameter; types whose
+    /// series or size is gone drop the reference and keep the diameter. Runs
+    /// when this edit touched settings (series live there) or a pipe type,
+    /// and writes only what changes.
+    fn sync_pipe_series(&mut self) {
+        let settings = self.tx.settings.is_some();
+        let fixes: Vec<(ElementTypeId, crate::TypeData)> = self
+            .project
+            .types
+            .values()
+            .filter(|t| settings || self.tx.types.contains_key(&t.id))
+            .filter_map(|t| {
+                let fix = crate::pipe_series_project::pipe_fix(self.project, &t.data)?;
+                let mut data = t.data.clone();
+                crate::pipe_series_project::apply_pipe_fix(&mut data, fix).then_some((t.id, data))
+            })
+            .collect();
+        for (id, data) in fixes {
+            if let Some(t) = self.type_mut(id) {
+                t.data = data;
+            }
+        }
+    }
+
     /// Fill in "after" states and drop no-op entries.
     fn finish(mut self) -> Transaction {
+        // Pipe types follow their series rows.
+        self.sync_pipe_series();
         // Legacy sections follow their profiles first, so what reads them below sees the new size.
         self.sync_profiles();
         // Member hosts (steel buildings, trusses) next: they read what the

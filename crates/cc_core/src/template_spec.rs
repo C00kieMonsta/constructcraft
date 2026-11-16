@@ -17,6 +17,11 @@ pub(crate) type Sized2 = (&'static str, f64, f64);
 /// A name key and three values.
 pub(crate) type Sized3 = (&'static str, f64, f64, f64);
 
+/// A template pipe type: its name key, the diameter it had before pipe
+/// series (format 28 and older), and the built-in series code and size
+/// label it is now a size of.
+pub(crate) type PipeSpec = (&'static str, f64, &'static str, &'static str);
+
 /// A library type whose name states a size: the library's name key, the
 /// key used instead, and the parameters (keys) set to that size.
 pub(crate) type SizedLibraryType = (&'static str, &'static str, &'static [Sized1]);
@@ -61,8 +66,8 @@ pub(crate) struct TemplateSpec {
     pub stair: Sized3,
     /// Railing: key, height, post spacing.
     pub railing: Sized2,
-    /// Supply pipes, then drain pipes: key, diameter.
-    pub pipes: [Sized1; 7],
+    /// Supply pipes, then drain pipes: key, old diameter, series code, size.
+    pub pipes: [PipeSpec; 7],
     /// Conduits: key, diameter.
     pub conduits: [Sized1; 3],
     /// Grid: key, bubble size (paper mm).
@@ -136,13 +141,13 @@ const METRIC: TemplateSpec = TemplateSpec {
     stair: ("tpl-type-stair", 1.0, 0.18, 0.28),
     railing: ("tpl-type-railing", 1.1, 1.2),
     pipes: [
-        ("tpl-type-pipe-20", 0.020),
-        ("tpl-type-pipe-25", 0.025),
-        ("tpl-type-pipe-32", 0.032),
-        ("tpl-type-pipe-sewer-40", 0.040),
-        ("tpl-type-pipe-sewer-50", 0.050),
-        ("tpl-type-pipe-sewer-75", 0.075),
-        ("tpl-type-pipe-sewer-100", 0.100),
+        ("tpl-type-pipe-20", 0.020, "BR-PVC-SOLD", "20 mm"),
+        ("tpl-type-pipe-25", 0.025, "BR-PVC-SOLD", "25 mm"),
+        ("tpl-type-pipe-32", 0.032, "BR-PVC-SOLD", "32 mm"),
+        ("tpl-type-pipe-sewer-40", 0.040, "BR-PVC-ESG-N", "DN 40"),
+        ("tpl-type-pipe-sewer-50", 0.050, "BR-PVC-ESG-N", "DN 50"),
+        ("tpl-type-pipe-sewer-75", 0.075, "BR-PVC-ESG-N", "DN 75"),
+        ("tpl-type-pipe-sewer-100", 0.100, "BR-PVC-ESG-N", "DN 100"),
     ],
     conduits: [("tpl-type-conduit-20", 0.020), ("tpl-type-conduit-25", 0.025), ("tpl-type-conduit-32", 0.032)],
     grid: ("tpl-type-grid", 8.0),
@@ -208,13 +213,13 @@ const IMPERIAL: TemplateSpec = TemplateSpec {
     stair: ("tpl-imp-type-stair", 3.0 * FOOT, 7.75 * INCH, 10.0 * INCH),
     railing: ("tpl-imp-type-railing", 42.0 * INCH, 4.0 * FOOT),
     pipes: [
-        ("tpl-imp-type-pipe-1-2", 0.5 * INCH),
-        ("tpl-imp-type-pipe-3-4", 0.75 * INCH),
-        ("tpl-imp-type-pipe-1", 1.0 * INCH),
-        ("tpl-imp-type-pipe-sewer-1-1-2", 1.5 * INCH),
-        ("tpl-imp-type-pipe-sewer-2", 2.0 * INCH),
-        ("tpl-imp-type-pipe-sewer-3", 3.0 * INCH),
-        ("tpl-imp-type-pipe-sewer-4", 4.0 * INCH),
+        ("tpl-imp-type-pipe-1-2", 0.5 * INCH, "US-PVC-SCH40", "1/2\""),
+        ("tpl-imp-type-pipe-3-4", 0.75 * INCH, "US-PVC-SCH40", "3/4\""),
+        ("tpl-imp-type-pipe-1", 1.0 * INCH, "US-PVC-SCH40", "1\""),
+        ("tpl-imp-type-pipe-sewer-1-1-2", 1.5 * INCH, "US-PVC-DWV", "1-1/2\""),
+        ("tpl-imp-type-pipe-sewer-2", 2.0 * INCH, "US-PVC-DWV", "2\""),
+        ("tpl-imp-type-pipe-sewer-3", 3.0 * INCH, "US-PVC-DWV", "3\""),
+        ("tpl-imp-type-pipe-sewer-4", 4.0 * INCH, "US-PVC-DWV", "4\""),
     ],
     conduits: [
         ("tpl-imp-type-conduit-1-2", 0.5 * INCH),
@@ -422,7 +427,8 @@ mod tests {
         let levels: Vec<_> = p.levels.iter().map(|l| (l.id, l.elevation)).collect();
         assert_eq!(levels, [(LevelId(1), 0.0), (LevelId(2), 3.0)]);
         assert_eq!((p.types.len(), p.views.len(), p.materials.len(), p.profiles.len()), (72, 15, 13, 6));
-        assert_eq!(p.next_id(), 110);
+        // The two pipe series take the last ids.
+        assert_eq!(p.next_id(), 112);
         for (id, name) in [
             (3, "Alvenaria 15 cm"),
             (5, "Divisória gesso 10 cm"),
@@ -542,7 +548,10 @@ mod tests {
                     _ => {}
                 },
                 TypeData::Beam { width, height, .. } => sizes.extend([*width, *height]),
-                TypeData::Rebar { diameter, .. } | TypeData::Pipe { diameter, .. } => sizes.push(*diameter),
+                // Pipes of a series have the standard's sizes, not round ones.
+                TypeData::Rebar { diameter, .. } | TypeData::Pipe { diameter, series: None, .. } => {
+                    sizes.push(*diameter)
+                }
                 TypeData::Conduit { diameter, .. } => sizes.push(*diameter),
                 TypeData::Foundation { width, length, thickness, .. } => sizes.extend([*width, *length, *thickness]),
                 TypeData::Stair { width, max_riser, tread, .. } => sizes.extend([*width, *max_riser, *tread]),

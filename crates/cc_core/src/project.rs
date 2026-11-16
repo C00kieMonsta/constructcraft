@@ -385,8 +385,8 @@ impl Project {
             ),
             (n(railing), TypeData::Railing { height: railing_height, post_spacing, material: n("tpl-mat-wood") }),
         ]);
-        for (key, diameter) in s.pipes {
-            types.push((n(key), TypeData::Pipe { diameter, material: n("tpl-mat-pvc") }));
+        for (key, diameter, _, _) in s.pipes {
+            types.push((n(key), TypeData::pipe(diameter, n("tpl-mat-pvc"))));
         }
         for (key, diameter) in s.conduits {
             types.push((n(key), TypeData::Conduit { diameter, material: n("tpl-mat-pvc") }));
@@ -478,6 +478,8 @@ impl Project {
         // Tag and view mark types, after everything else for the same reason.
         p.ensure_tag_types(&n);
         p.ensure_mark_types(&n);
+        // The pipe types are sizes of built-in series, copied in.
+        p.link_template_pipes(system, &|key| vec![n(key)]);
         p
     }
 
@@ -668,14 +670,15 @@ impl Project {
                 self.materials.push(m);
             }
             // Two supply pipes and two drain pipes.
-            for (key, diameter) in [0, 1, 4, 6].into_iter().filter_map(|i| s.pipes.get(i).copied()) {
+            for (key, diameter, _, _) in [0, 1, 4, 6].into_iter().filter_map(|i| s.pipes.get(i).copied()) {
                 let id = ElementTypeId(self.alloc_id());
-                let data = TypeData::Pipe { diameter, material: pvc.clone() };
+                let data = TypeData::pipe(diameter, pvc.clone());
                 self.types.insert(
                     id,
                     ElementType { id, name: n(key), data, info: Default::default(), uid: crate::Uid::generate() },
                 );
             }
+            self.link_template_pipes(s.system, &|key| vec![n(key)]);
             // Projects without the library get all of it below.
             if self.default_type(Category::Component).is_some() {
                 for (component, name, def) in s.sized_library(&n, crate::component::mep_library(&n)) {

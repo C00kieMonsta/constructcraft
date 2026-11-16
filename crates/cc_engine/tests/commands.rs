@@ -906,22 +906,22 @@ fn the_showcase_macro_builds_its_project() {
     assert_eq!([count(&mut s, "wall"), count(&mut s, "door"), count(&mut s, "room")], [13, 5, 5]);
     assert!(count(&mut s, "rebar") > 0 && count(&mut s, "pipe") > 0 && count(&mut s, "conduit") > 0);
     let get = |s: &mut Session, id: u64| run(s, "element_get", json!({"id": id}));
-    assert!(get(&mut s, 118)["params"]["bulge"].as_f64().unwrap() > 0.0, "the arc wall");
+    assert!(get(&mut s, 120)["params"]["bulge"].as_f64().unwrap() > 0.0, "the arc wall");
     // Its strip footing follows the arc (#22).
     let foundations = run(&mut s, "elements_list", json!({"category": "foundation"}));
     let ids: Vec<u64> = foundations.as_array().unwrap().iter().map(|f| f["id"].as_u64().unwrap()).collect();
     assert!(ids.iter().any(|&f| get(&mut s, f)["params"]["shape"]["Strip"]["bulge"].as_f64().is_some_and(|b| b > 0.0)));
-    assert!(get(&mut s, 137)["params"]["shape"]["Hip"].is_object(), "the hip roof");
-    assert_eq!(get(&mut s, 115)["phase_demolished"]["id"], 86, "the demolished partition");
-    assert_eq!(get(&mut s, 268)["type"]["id"], 62, "the distribution board");
+    assert!(get(&mut s, 139)["params"]["shape"]["Hip"].is_object(), "the hip roof");
+    assert_eq!(get(&mut s, 117)["phase_demolished"]["id"], 86, "the demolished partition");
+    assert_eq!(get(&mut s, 270)["type"]["id"], 62, "the distribution board");
     let views = run(&mut s, "views_list", json!({}));
     let view = |id: u64| views.as_array().unwrap().iter().find(|v| v["id"] == id).map(|v| v["name"].clone());
-    assert_eq!(view(355), Some(json!("Board diagram")));
-    assert_eq!(view(363), Some(json!("3D North-east")));
-    let loads = run(&mut s, "circuit_loads", json!({"panel": 268}));
+    assert_eq!(view(357), Some(json!("Board diagram")));
+    assert_eq!(view(365), Some(json!("3D North-east")));
+    let loads = run(&mut s, "circuit_loads", json!({"panel": 270}));
     assert!(loads.to_string().contains("Kitchen and bath outlets"));
-    for filter in [362, 364] {
-        assert!(run(&mut s, "filter_elements", json!({"filter": filter, "view": 361}))["count"].as_u64().unwrap() > 0);
+    for filter in [364, 366] {
+        assert!(run(&mut s, "filter_elements", json!({"filter": filter, "view": 363}))["count"].as_u64().unwrap() > 0);
     }
 }
 
@@ -1498,7 +1498,7 @@ fn building_services_through_commands() {
         .to_string();
     let pipes = run(&mut s, "types_list", json!({"category": "pipe"}));
     let drain_100 = pipes.as_array().unwrap().iter().map(id).find(|t| {
-        (run(&mut s, "type_get", json!({"type": t}))["params"]["diameter"].as_f64().unwrap() - 0.1).abs() < 1e-9
+        (run(&mut s, "type_get", json!({"type": t}))["params"]["diameter"].as_f64().unwrap() - 0.1016).abs() < 1e-9
     });
 
     // A 100 mm drain falls 1 % from under the floor; a riser goes up from its end.
@@ -1627,7 +1627,7 @@ fn fixtures_and_devices_connect_to_the_networks() {
         .iter()
         .map(id)
         .find(|t| {
-            (run(&mut s, "type_get", json!({"type": t}))["params"]["diameter"].as_f64().unwrap() - 0.1).abs() < 1e-9
+            (run(&mut s, "type_get", json!({"type": t}))["params"]["diameter"].as_f64().unwrap() - 0.1016).abs() < 1e-9
         })
         .unwrap();
     run(&mut s, "pipe_create", json!({"start": [0, 0], "end": [6, 0], "system": "sanitary", "type": drain_100}));
@@ -1811,7 +1811,8 @@ fn sizing_drains_water_pipes_and_circuits() {
     // Applying widens the drain main; the water main stays.
     let applied = run(&mut s, "mep_size_apply", json!({}));
     assert!(applied["changed"].as_array().unwrap().contains(&json!(drain)), "{applied}");
-    assert_eq!(run(&mut s, "element_get", json!({"id": drain}))["type"]["id"], json!(of(0.1)));
+    // The template's DN 100 drain is 101.6 mm outside (its series row).
+    assert_eq!(run(&mut s, "element_get", json!({"id": drain}))["type"]["id"], json!(of(0.1016)));
     assert_eq!(run(&mut s, "element_get", json!({"id": water}))["type"]["id"], json!(of(0.02)));
 
     // A 3000 VA circuit 51 m from its board (no conduits: measured straight).

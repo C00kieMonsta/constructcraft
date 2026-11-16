@@ -47,6 +47,7 @@ pub mod pile;
 pub mod pipe_catalog;
 pub mod pipe_file;
 pub mod pipe_series;
+mod pipe_series_project;
 pub mod profile;
 pub mod profile_catalog;
 pub mod profile_sweep;

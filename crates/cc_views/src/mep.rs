@@ -506,7 +506,8 @@ mod tests {
         let pipe_t = doc
             .project
             .types_of(Category::Pipe)
-            .find(|t| matches!(t.data, TypeData::Pipe { diameter, .. } if (diameter - 0.1).abs() < 1e-9))
+            // DN 100 of the template's drain series: 101.6 mm outside.
+            .find(|t| matches!(t.data, TypeData::Pipe { diameter, .. } if (diameter - 0.1016).abs() < 1e-9))
             .unwrap()
             .id;
         let (pipe, riser) = doc.edit("t", |e| {
@@ -562,8 +563,8 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(texts.iter().any(|t| t.starts_with("ES Ø100") && t.contains("i = 1")), "{texts:?}");
-        assert!(texts.contains(&"ES Ø100"), "{texts:?}");
+        assert!(texts.iter().any(|t| t.starts_with("ES Ø102") && t.contains("i = 1")), "{texts:?}");
+        assert!(texts.contains(&"ES Ø102"), "{texts:?}");
         assert_eq!(d.hit_test(DVec2::new(2.5, 0.0), 0.01), Some(pipe));
         assert!(d.hit_test(DVec2::new(5.0, 0.0), 0.01).is_some());
         let colored = SystemKind::Sanitary.default_color();
