@@ -33,11 +33,25 @@ fn steel_defaults_make_the_catalog_types_once() {
     let depth = s.doc.undo_depth();
     let out = run(&mut s, "truss_create", json!({"start": SPAN[0], "end": SPAN[1], "height": 1.0, "panels": 4}));
     assert_eq!(s.doc.undo_depth(), depth + 1, "one undo step");
-    assert_eq!(out["members"].as_array().unwrap().len(), 17, "posts at both supports");
-    assert_eq!(types_named(&s, "Ue 150x60x20x2,00"), 1, "the chords' beam type");
+    assert_eq!(out["members"].as_array().unwrap().len(), 11, "two chords, posts at both supports");
+    assert_eq!(types_named(&s, "Ue 150x60x20x2,00"), 1, "the bottom chord's beam type");
     assert_eq!(types_named(&s, "Ue 100x50x17x2,00"), 2, "the web's beam type and the posts' column type");
+    // The chords are channels on their sides, open toward the web: the top one is its own, mirrored type.
+    let placed = |s: &Session, role: &str| {
+        let p = s.project();
+        let Some(ElementKind::Truss(t)) = p.element(ElementId(id(&out))).map(|e| &e.kind) else { panic!("a truss") };
+        let ty = if role == "top" { t.top_chord_type } else { t.bottom_chord_type };
+        match p.element_type(ty).map(|t| &t.data) {
+            Some(cc_core::TypeData::Beam { profile_rotation_deg, profile_mirror, .. }) => {
+                (*profile_rotation_deg, *profile_mirror)
+            }
+            _ => panic!("a beam type"),
+        }
+    };
+    assert_eq!((placed(&s, "top"), placed(&s, "bottom")), ((90.0, true), (90.0, false)));
+    let types = s.project().types.len();
     run(&mut s, "truss_create", json!({"start": [0, 5], "end": [6, 5], "height": 1.0, "material": "steel"}));
-    assert_eq!(types_named(&s, "Ue 150x60x20x2,00"), 1);
+    assert_eq!(s.project().types.len(), types, "the same types again");
     assert_eq!(trusses(&s), 2);
     run(&mut s, "undo", json!({}));
     run(&mut s, "undo", json!({}));
@@ -50,7 +64,7 @@ fn timber_defaults_and_concrete_refused() {
     let args = json!({"start": SPAN[0], "end": SPAN[1], "height": 1.2, "material": "timber", "shape": "gable",
         "pattern": "kingpost", "panels": 4, "copies": 3, "spacing": 0.6});
     let out = run(&mut s, "truss_create", args);
-    assert_eq!(out["members"].as_array().unwrap().len(), 33, "11 per copy");
+    assert_eq!(out["members"].as_array().unwrap().len(), 18, "6 per copy");
     assert_eq!(types_named(&s, "Peça 6x16"), 1);
     assert_eq!(types_named(&s, "Peça 6x12"), 2);
     let d = derived(&mut s, id(&out));
@@ -94,8 +108,9 @@ fn element_set_of_panels_regenerates_in_one_step() {
     run(&mut s, "element_set", json!({"id": host, "params": {"panels": 6}}));
     assert_eq!(s.doc.undo_depth(), depth + 1);
     let after = derived(&mut s, host)["members"].clone();
-    assert_eq!(after["bottom_chords"].as_array().unwrap().len(), 6);
-    assert_eq!(after["bottom_chords"][0], before["bottom_chords"][0], "same id for the first panel");
+    assert_eq!(after["bottom_chords"], before["bottom_chords"], "one continuous chord, the same id");
+    assert_eq!(after["diagonals"].as_array().unwrap().len(), 6);
+    assert_eq!(after["diagonals"][0], before["diagonals"][0], "same id for the first panel");
     let params = &run(&mut s, "element_get", json!({"id": host}))["params"];
     assert_eq!((params["panels"].clone(), params["shape"].clone()), (json!(6), json!("Flat")));
     for bad in [json!({"members": []}), json!({"shape": "Gable", "panels": 5}), json!({"height": 0})] {
@@ -143,6 +158,53 @@ fn a_default_flat_truss_is_braced_at_its_supports() {
         let node = node.unwrap_or_else(|| panic!("a node at the support {x}"));
         let bars = model.members.iter().filter(|m| m.start == node || m.end == node).count();
         assert!(bars >= 2, "{bars} bar(s) at the support {x}");
+    }
+}
+
+#[test]
+fn the_members_meet_at_the_panel_points_whatever_their_sections() {
+    // Steel posts stand inside the chords' channels, timber ones between
+    // the chords' faces, and the chords run on over the end posts: the
+    // analytical model still has one node per panel point and no stubs.
+    for material in ["steel", "timber"] {
+        let mut s = Session::default();
+        let args = json!({"start": SPAN[0], "end": SPAN[1], "height": 1.0, "panels": 4, "bottom_offset": 2.0,
+            "material": material});
+        run(&mut s, "truss_create", args);
+        let geom = s.geometry().clone();
+        let model = cc_geom::analytical::analytical_model(s.project(), &geom);
+        assert_eq!(model.nodes.len(), 10, "{material}");
+        // Each chord split into 4, 5 posts and 4 diagonals.
+        assert_eq!(model.members.len(), 17, "{material}");
+        assert!(model.nodes.iter().all(|n| !n.support), "{material}: posts stand on the chord, not on supports");
+        for n in &model.nodes {
+            let (x, z) = (n.position.x / 1.5, n.position.z);
+            assert!((x - x.round()).abs() < 1e-9 && ((z - 2.0).abs() < 1e-9 || (z - 3.0).abs() < 1e-9), "{n:?}");
+        }
+    }
+}
+
+#[test]
+fn the_chords_close_the_ends_over_the_posts() {
+    let mut s = Session::default();
+    let args = json!({"start": SPAN[0], "end": SPAN[1], "height": 1.0, "panels": 4, "bottom_offset": 2.0});
+    let host = id(&run(&mut s, "truss_create", args));
+    let members = derived(&mut s, host)["members"].clone();
+    let geom = s.geometry().clone();
+    // Ue 100x50 posts, 50 mm along the truss: the chords' bodies reach 25 mm past the span.
+    for chord in ["top_chords", "bottom_chords"] {
+        let g = &geom.beams[&ElementId(members[chord][0].as_u64().unwrap())];
+        assert!((g.length - 6.05).abs() < 1e-9 && (g.origin.x + 0.025).abs() < 1e-9, "{chord}");
+        assert!((g.start_ext.0, g.end_ext.0) == (0.0, g.length), "{chord}: not cut at the posts");
+    }
+    // The posts stand inside the channels, on their webs (2 mm), the last one turned around.
+    let posts: Vec<_> = members["verticals"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap()).collect();
+    for (i, post) in posts.iter().enumerate() {
+        let Some(ElementKind::Column(c)) = s.project().element(ElementId(*post)).map(|e| &e.kind) else {
+            panic!("a column")
+        };
+        assert!((c.base_offset - 1.972).abs() < 1e-6 && (c.height - 1.056).abs() < 1e-6, "{c:?}");
+        assert_eq!(c.rotation_deg, if i + 1 == posts.len() { 180.0 } else { 0.0 });
     }
 }
 

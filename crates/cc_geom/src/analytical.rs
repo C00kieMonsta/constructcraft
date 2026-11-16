@@ -1,8 +1,10 @@
 //! The analytical model: columns and beams as center lines (members) between
 //! shared points (nodes), for structural analysis programs. A beam framed
-//! into a column ends on the column's axis, a beam ending on another beam
-//! ends on that beam's line, and a member is split wherever another member
-//! ends on it, so connected members share their nodes.
+//! into a column, or running on over one it passes, ends on the column's
+//! axis, a beam ending on another beam ends on that beam's line, a column
+//! standing on or under a beam (a truss's vertical between its chords) ends
+//! on the beam's line, and a member is split wherever another member ends
+//! on it, so connected members share their nodes.
 
 use crate::{BeamEnd, ModelGeometry};
 use cc_core::{ElementId, ElementKind, Project, TypeData};
@@ -60,6 +62,22 @@ struct Line {
     b: DVec3,
     /// Half width in plan, for beam ends landing on it.
     half: f64,
+    /// Half depth measured plumb, for column ends landing on it.
+    half_depth: f64,
+    /// A column whose base is on the ground, not on a beam.
+    support: bool,
+    /// The columns a beam's ends frame into.
+    framed: [Option<ElementId>; 2],
+}
+
+/// Whether `p` is inside `hull` or within [`TOL`] of its boundary.
+fn covers(hull: &[DVec2], p: DVec2) -> bool {
+    hull.len() >= 3
+        && (crate::polygon::contains(hull, p)
+            || (0..hull.len()).any(|i| {
+                let (q, _) = crate::polygon::closest_on_segment(hull[i], hull[(i + 1) % hull.len()], p);
+                q.distance(p) < TOL
+            }))
 }
 
 /// Parameter of `p` projected on segment `a`-`b`, and its distance to it.
@@ -84,6 +102,8 @@ fn project_plan(a: DVec3, b: DVec3, p: DVec2) -> (f64, f64) {
 pub fn analytical_model(project: &Project, geom: &ModelGeometry) -> AnalyticalModel {
     let mut lines: Vec<Line> = Vec::new();
     let mut column_axes: Vec<(ElementId, DVec2)> = Vec::new();
+    // Footprint (hull) and span of each column, for beams that pass over or under it.
+    let mut footprints: Vec<(DVec2, Vec<DVec2>, (f64, f64))> = Vec::new();
     for e in project.elements.values() {
         let ElementKind::Column(c) = &e.kind else { continue };
         if !c.structural || !matches!(project.element_type(e.type_id).map(|t| &t.data), Some(TypeData::Column { .. })) {
@@ -92,8 +112,22 @@ pub fn analytical_model(project: &Project, geom: &ModelGeometry) -> AnalyticalMo
         let (base, top) = project.column_span(e, c);
         let (a, b) = (c.position.extend(base), c.position.extend(top));
         if a.is_finite() && b.is_finite() && top - base > TOL {
-            lines.push(Line { element: e.id, kind: MemberKind::Column, a, b, half: 0.0 });
+            lines.push(Line {
+                element: e.id,
+                kind: MemberKind::Column,
+                a,
+                b,
+                half: 0.0,
+                half_depth: 0.0,
+                support: true,
+                framed: [None; 2],
+            });
             column_axes.push((e.id, c.position));
+            let outline = project
+                .element_type(e.type_id)
+                .map(|t| crate::build::column_outline(project, &t.data, c.position, c.rotation_deg))
+                .unwrap_or_default();
+            footprints.push((c.position, crate::polygon::convex_hull(&outline), (base, top)));
         }
     }
     let first_beam = lines.len();
@@ -113,11 +147,40 @@ pub fn analytical_model(project: &Project, geom: &ModelGeometry) -> AnalyticalMo
                 }
                 None => at(u),
             },
-            _ => at(u),
+            // An end that runs on over (or under) a column it does not frame
+            // into, as a truss's chord over its end vertical: on that column's axis.
+            _ => {
+                let p = at(u);
+                let (z0, z1) = g.z_at(u);
+                let reach = (z1 - z0) * 0.5 + REACH;
+                footprints
+                    .iter()
+                    .filter(|(_, hull, span)| {
+                        p.z >= span.0 - reach && p.z <= span.1 + reach && covers(hull, p.truncate())
+                    })
+                    .map(|(axis, _, _)| {
+                        let (z0, z1) = g.z_at((*axis - g.origin).dot(g.dir));
+                        axis.extend((z0 + z1) * 0.5)
+                    })
+                    .min_by(|a, b| a.distance(p).total_cmp(&b.distance(p)))
+                    .unwrap_or(p)
+            }
         };
         let (a, b) = (end_point(g.start, 0.0), end_point(g.end, g.length));
         if a.is_finite() && b.is_finite() && a.distance(b) > TOL {
-            lines.push(Line { element: g.element, kind: MemberKind::Beam, a, b, half: g.half });
+            let (z0, z1) = g.z_at(0.0);
+            let half_depth = (z1 - z0) * 0.5;
+            let column = |end: BeamEnd| if let BeamEnd::Column(c) = end { Some(c) } else { None };
+            lines.push(Line {
+                element: g.element,
+                kind: MemberKind::Beam,
+                a,
+                b,
+                half: g.half,
+                half_depth,
+                support: false,
+                framed: [column(g.start), column(g.end)],
+            });
         }
     }
     // Beam ends that stop on another beam end on its line.
@@ -147,6 +210,34 @@ pub fn analytical_model(project: &Project, geom: &ModelGeometry) -> AnalyticalMo
         }
     }
 
+    // Column ends that stop at a beam passing them (its face, or inside its
+    // section) end on its line; a base that does stands on the beam, not on
+    // a support. A beam framed into the column meets it on its axis already.
+    for i in 0..first_beam {
+        for top in [false, true] {
+            let p = if top { lines[i].b } else { lines[i].a };
+            let host = (first_beam..lines.len())
+                .filter(|&j| !lines[j].framed.contains(&Some(lines[i].element)))
+                .filter_map(|j| {
+                    let (t, d) = project_plan(lines[j].a, lines[j].b, p.truncate());
+                    let q = lines[j].a + (lines[j].b - lines[j].a) * t;
+                    let near = d <= lines[j].half + REACH && (q.z - p.z).abs() <= lines[j].half_depth + REACH;
+                    near.then_some((q, q.distance(p)))
+                })
+                .min_by(|x, y| x.1.total_cmp(&y.1));
+            if let Some((q, _)) = host {
+                // On the column's own axis, at the beam's height.
+                let q = p.truncate().extend(q.z);
+                if top {
+                    lines[i].b = q;
+                } else {
+                    lines[i].a = q;
+                    lines[i].support = false;
+                }
+            }
+        }
+    }
+
     // Shared nodes.
     let mut nodes: Vec<Node> = Vec::new();
     let mut node_at = |p: DVec3, support: bool| -> usize {
@@ -158,8 +249,7 @@ pub fn analytical_model(project: &Project, geom: &ModelGeometry) -> AnalyticalMo
         nodes.push(Node { id, position: p, support });
         id
     };
-    let ends: Vec<(usize, usize)> =
-        lines.iter().map(|l| (node_at(l.a, l.kind == MemberKind::Column), node_at(l.b, false))).collect();
+    let ends: Vec<(usize, usize)> = lines.iter().map(|l| (node_at(l.a, l.support), node_at(l.b, false))).collect();
 
     // Split each line at the nodes lying on it.
     let mut members = Vec::new();

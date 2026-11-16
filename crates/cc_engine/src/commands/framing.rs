@@ -1,7 +1,7 @@
 //! Bracing and trusses: sloped members between points in space, braces
 //! between columns and trusses laid out from a span, a height and a pattern.
 
-use super::structure_material::{material_arg, type_or_row};
+use super::structure_material::{catalog_type_placed, material_arg, type_or_row};
 use super::{add_element, edit, ids_json};
 use crate::error::{EngineError, Result};
 use crate::refs::{self, Point, Ref, point};
@@ -124,16 +124,22 @@ impl Command for BracesBetweenColumns {
 pub struct TrussRows {
     pub chord: (&'static str, &'static str),
     pub web: (&'static str, &'static str),
+    /// Whether the rows are channels laid on their sides: the bottom chord
+    /// open upward, the top chord and the diagonals open downward, so the
+    /// web stands inside the chords.
+    pub flat: bool,
 }
 
 /// Steel and timber rows; `None` for concrete (trusses are not offered).
 pub fn truss_rows(m: StructuralMaterial) -> Option<TrussRows> {
     match m {
-        StructuralMaterial::Steel => {
-            Some(TrussRows { chord: ("NBR6355-Ue", "Ue 150x60x20x2,00"), web: ("NBR6355-Ue", "Ue 100x50x17x2,00") })
-        }
+        StructuralMaterial::Steel => Some(TrussRows {
+            chord: ("NBR6355-Ue", "Ue 150x60x20x2,00"),
+            web: ("NBR6355-Ue", "Ue 100x50x17x2,00"),
+            flat: true,
+        }),
         StructuralMaterial::Timber => {
-            Some(TrussRows { chord: ("Timber-Sawn", "Peça 6x16"), web: ("Timber-Sawn", "Peça 6x12") })
+            Some(TrussRows { chord: ("Timber-Sawn", "Peça 6x16"), web: ("Timber-Sawn", "Peça 6x12"), flat: false })
         }
         StructuralMaterial::Concrete => None,
     }
@@ -152,11 +158,20 @@ pub fn new_truss_type(id: ElementTypeId) -> ElementType {
 /// is laid out as Pratt). Chords and diagonals are beams, verticals are
 /// columns, all ordinary elements the truss keeps in step with its
 /// parameters (`element_set` regenerates them, keeping their ids); a member
-/// edited or deleted by hand is detached and left alone. `copies` trusses
-/// are made `spacing` apart to the left of start → end. Default types come
-/// from the profile catalog for the `material` (steel: `Ue 150x60x20x2,00`
-/// chords, `Ue 100x50x17x2,00` web and posts; timber: `Peça 6x16` chords,
-/// `Peça 6x12` web and posts), made when missing; concrete is refused.
+/// edited or deleted by hand is detached and left alone. Each chord is one
+/// continuous beam per straight run (two top chords on a gable). Verticals
+/// stand between the chords: on the faces of solid chords, or inside a
+/// channel that opens toward the web, and they are turned so the side
+/// nearest the chords' width lies across the truss. Where the truss ends on
+/// a vertical (both ends of a flat truss, the high end of a mono one) the
+/// chords run on over it and the vertical at the far end is turned around,
+/// so the ends are closed. `copies` trusses are made `spacing` apart to the
+/// left of start → end. Default types come from the profile catalog for the
+/// `material` (steel: `Ue 150x60x20x2,00` chords laid on their sides, the
+/// bottom one open upward and the top one downward, `Ue 100x50x17x2,00`
+/// diagonals laid the same way and posts inside the chords; timber:
+/// `Peça 6x16` chords, `Peça 6x12` web and posts), made when missing;
+/// concrete is refused.
 /// Out-of-range values are refused. One undo step; returns the truss's `id`
 /// and its `members`.
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
@@ -265,9 +280,15 @@ impl Command for TrussCreate {
         let host_type = p.default_type(Category::Truss);
         let depth = s.doc.undo_depth();
         let result = (|| -> Result<Value> {
-            truss.top_chord_type = type_or_row(s, top_given, Category::Beam, rows.chord)?;
-            truss.bottom_chord_type = type_or_row(s, bottom_given, Category::Beam, rows.chord)?;
-            truss.web_type = type_or_row(s, web_given, Category::Beam, rows.web)?;
+            // A row's beam type, laid flat (and turned over) for channel rows.
+            let beam = |s: &mut Session, given: Option<ElementTypeId>, row, over: bool| match given {
+                Some(t) => Ok(t),
+                None if rows.flat => catalog_type_placed(s, Category::Beam, row, 90.0, over),
+                None => type_or_row(s, None, Category::Beam, row),
+            };
+            truss.top_chord_type = beam(s, top_given, rows.chord, true)?;
+            truss.bottom_chord_type = beam(s, bottom_given, rows.chord, false)?;
+            truss.web_type = beam(s, web_given, rows.web, true)?;
             truss.post_type = type_or_row(s, post_given, Category::Column, rows.web)?;
             truss.check_types(s.project()).map_err(EngineError::invalid)?;
             let kind = ElementKind::Truss(Box::new(truss));
