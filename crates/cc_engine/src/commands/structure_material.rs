@@ -70,7 +70,7 @@ pub(crate) fn catalog_type(
     series: &str,
     designation: &str,
 ) -> Result<ElementTypeId> {
-    catalog_type_turned(s, category, (series, designation), 0.0)
+    catalog_type_placed(s, category, (series, designation), 0.0, false)
 }
 
 /// [`catalog_type`] with the profile turned `rotation_deg` (90 lays a
@@ -78,16 +78,30 @@ pub(crate) fn catalog_type(
 pub(crate) fn catalog_type_turned(
     s: &mut Session,
     category: Category,
+    row: (&str, &str),
+    rotation_deg: f64,
+) -> Result<ElementTypeId> {
+    catalog_type_placed(s, category, row, rotation_deg, false)
+}
+
+/// [`catalog_type_turned`] with the profile also mirrored when `mirror`
+/// (before it is turned: a channel laid on its side with 90 opens upward,
+/// and downward when mirrored).
+pub(crate) fn catalog_type_placed(
+    s: &mut Session,
+    category: Category,
     (series, designation): (&str, &str),
     rotation_deg: f64,
+    mirror: bool,
 ) -> Result<ElementTypeId> {
     let p = s.project();
     let is_row = |d: &cc_core::ProfileDef| {
         d.catalog.as_ref().is_some_and(|c| c.series == series && c.designation == designation) || d.name == designation
     };
     let turned = |data: &TypeData| match data {
-        TypeData::Column { profile_rotation_deg: r, .. } | TypeData::Beam { profile_rotation_deg: r, .. } => {
-            (r - rotation_deg).abs() < 1e-9
+        TypeData::Column { profile_rotation_deg: r, profile_mirror: m, .. }
+        | TypeData::Beam { profile_rotation_deg: r, profile_mirror: m, .. } => {
+            (r - rotation_deg).abs() < 1e-9 && *m == mirror
         }
         _ => false,
     };
@@ -102,12 +116,14 @@ pub(crate) fn catalog_type_turned(
     let code = if category == Category::Column { "column" } else { "beam" };
     let out = ProfileTypeCreate { profile: Ref::Name(profile), category: code.into(), ..Default::default() }.run(s)?;
     let id = out["id"].as_u64().map(ElementTypeId).ok_or_else(|| EngineError::not_found("the new type"))?;
-    if rotation_deg != 0.0 {
+    if rotation_deg != 0.0 || mirror {
         edit(s, t!("tx-profile-type-create"), |e| {
-            if let Some(TypeData::Column { profile_rotation_deg, .. } | TypeData::Beam { profile_rotation_deg, .. }) =
-                e.type_mut(id).map(|t| &mut t.data)
+            if let Some(
+                TypeData::Column { profile_rotation_deg, profile_mirror, .. }
+                | TypeData::Beam { profile_rotation_deg, profile_mirror, .. },
+            ) = e.type_mut(id).map(|t| &mut t.data)
             {
-                *profile_rotation_deg = rotation_deg;
+                (*profile_rotation_deg, *profile_mirror) = (rotation_deg, mirror);
             }
             Ok(())
         })?;
