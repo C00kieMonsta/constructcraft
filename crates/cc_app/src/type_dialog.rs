@@ -204,6 +204,11 @@ fn component_parameters(ui: &mut Ui, state: &mut AppState, ty: &ElementType) {
             (ui.button(t!("action-edit-component")).clicked(), ui.button(t!("action-save-component")).clicked())
         });
         if edit {
+            // The dialog's edits are kept and it closes, so it does not stay
+            // in front of the environment.
+            crate::dialog::session::commit(state);
+            state.dialogs.type_editor = None;
+            state.dialogs.type_rename = None;
             crate::component_env::open(state, tid);
         }
         if save {
