@@ -44,6 +44,7 @@ mod obj;
 mod pad;
 mod phases;
 mod piles;
+mod pipes;
 mod profiles;
 mod project_templates;
 mod rebar_copy;

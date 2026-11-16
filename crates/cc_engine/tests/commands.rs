@@ -1802,7 +1802,9 @@ fn sizing_drains_water_pipes_and_circuits() {
     // Seven toilets: 42 fixture units at the outlet, 100 mm.
     let main = pipe(drain);
     assert_eq!(main["load"], json!(42.0), "{main}");
-    assert_eq!((main["required_mm"].clone(), main["ok"].clone()), (json!(100.0), json!(false)));
+    // Within the drain's series (BR-PVC-ESG-N), DN 100 is 101.6 mm outside.
+    assert_eq!((main["required_mm"].clone(), main["ok"].clone()), (json!(102.0), json!(false)));
+    assert_eq!(main["size"], json!("DN 100"));
     // Their weights add up to 2.1: 0.43 l/s, still within 20 mm at the source.
     let supply = pipe(water);
     assert!((supply["load"].as_f64().unwrap() - 2.1).abs() < 1e-9, "{supply}");

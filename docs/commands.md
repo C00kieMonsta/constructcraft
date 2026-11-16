@@ -1806,7 +1806,7 @@ No parameters.
 
 ### `mep_size_apply`
 
-*edit* — Give each sized pipe the smallest pipe type of the project at least as wide as `mep_sizing` requires. Pipes already wide enough keep their type unless `downsize` is set.
+*edit* — Give each sized pipe the type `mep_sizing` requires. A pipe whose type is a size of a pipe series gets that series' type of the required size, made (named after the series and size) when the project lacks it; other pipes get the smallest pipe type of no series at least as wide. Pipes already wide enough keep their type unless `downsize` is set. Returns the pipes `changed` and the types `created`.
 
 | Parameter | Type | | Description |
 |---|---|---|---|

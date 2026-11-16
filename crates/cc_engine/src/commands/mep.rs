@@ -992,6 +992,7 @@ impl Command for MepSizing {
                     "speed_m_s": x.speed,
                     "diameter_mm": (x.diameter * 1000.0).round(),
                     "required_mm": (x.required * 1000.0).round(),
+                    "size": x.size,
                     "ok": x.ok(),
                 })
             })
@@ -1017,9 +1018,34 @@ impl Command for MepSizing {
     }
 }
 
-/// Give each sized pipe the smallest pipe type of the project at least as
-/// wide as `mep_sizing` requires. Pipes already wide enough keep their type
-/// unless `downsize` is set.
+/// The smallest pipe type of no series at least `diameter` across (else the
+/// largest); any pipe type when the project has none of no series.
+fn free_pipe_type_for(p: &Project, diameter: f64) -> Option<cc_core::ElementTypeId> {
+    let mut types: Vec<(f64, cc_core::ElementTypeId)> = p
+        .types_of(Category::Pipe)
+        .filter(|t| matches!(t.data, cc_core::TypeData::Pipe { series: None, .. }))
+        .filter_map(|t| Some((t.diameter()?, t.id)))
+        .collect();
+    if types.is_empty() {
+        return pipe_type_for(p, diameter);
+    }
+    types.sort_by(|a, b| a.0.total_cmp(&b.0));
+    types.iter().find(|(d, _)| *d >= diameter - 1e-6).or(types.last()).map(|x| x.1)
+}
+
+/// What a sized pipe becomes: a type of the project, or the row of a series
+/// whose type the edit finds or makes.
+enum Target {
+    Type(cc_core::ElementTypeId),
+    Row(cc_core::PipeSeriesId, String),
+}
+
+/// Give each sized pipe the type `mep_sizing` requires. A pipe whose type is
+/// a size of a pipe series gets that series' type of the required size,
+/// made (named after the series and size) when the project lacks it; other
+/// pipes get the smallest pipe type of no series at least as wide. Pipes
+/// already wide enough keep their type unless `downsize` is set. Returns
+/// the pipes `changed` and the types `created`.
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct MepSizeApply {
@@ -1038,26 +1064,55 @@ impl Command for MepSizeApply {
             if x.ok() && !self.downsize {
                 continue;
             }
-            let Some(type_id) = pipe_type_for(p, x.required) else { continue };
+            let Some(run) = p.element(x.run) else { continue };
+            let series = p.element_type(run.type_id).and_then(|t| p.pipe_row(&t.data)).map(|(s, _)| s.id);
+            if let (Some(sid), Some(size)) = (series, &x.size) {
+                match super::pipes::type_of_row(p, sid, size) {
+                    Some(t) if t == run.type_id => {}
+                    Some(t) => changes.push((x.run, Target::Type(t))),
+                    None => changes.push((x.run, Target::Row(sid, size.clone()))),
+                }
+                continue;
+            }
+            let Some(type_id) = free_pipe_type_for(p, x.required) else { continue };
             let wide_enough =
                 p.element_type(type_id).and_then(|t| t.diameter()).is_some_and(|d| d >= x.required - 1e-6);
-            if wide_enough && p.element(x.run).is_some_and(|e| e.type_id != type_id) {
-                changes.push((x.run, type_id));
+            if wide_enough && run.type_id != type_id {
+                changes.push((x.run, Target::Type(type_id)));
             }
         }
         if changes.is_empty() {
-            return Ok(json!({"changed": []}));
+            return Ok(json!({"changed": [], "created": []}));
         }
         let ids: Vec<ElementId> = changes.iter().map(|c| c.0).collect();
-        edit(s, t!("tx-mep-size"), |e| {
-            for (id, type_id) in changes {
+        let created = edit(s, t!("tx-mep-size"), |e| {
+            let mut created = Vec::new();
+            for (id, target) in changes {
+                let type_id = match target {
+                    Target::Type(t) => t,
+                    Target::Row(sid, size) => {
+                        let p = e.project();
+                        let material =
+                            p.element(id).and_then(|el| p.element_type(el.type_id)).and_then(|t| match &t.data {
+                                cc_core::TypeData::Pipe { material, .. } => Some(material.clone()),
+                                _ => None,
+                            });
+                        let Some((t, found)) = super::pipes::series_type(e, sid, &size, material) else {
+                            continue;
+                        };
+                        if found == super::pipes::Found::Created {
+                            created.push(t.0);
+                        }
+                        t
+                    }
+                };
                 if let Some(el) = e.element_mut(id) {
                     el.type_id = type_id;
                 }
             }
-            Ok(())
+            Ok(created)
         })?;
-        Ok(json!({"changed": super::ids_json(&ids)}))
+        Ok(json!({"changed": super::ids_json(&ids), "created": created}))
     }
 }
 
