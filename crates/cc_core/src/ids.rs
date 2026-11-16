@@ -32,6 +32,7 @@ id_type!(OptionId, "OP");
 id_type!(FillPatternId, "FP");
 id_type!(ProfileId, "PR");
 id_type!(BrowserSchemeId, "BO");
+id_type!(PipeSeriesId, "PS");
 
 impl Default for PhaseId {
     /// Unassigned: read as the last phase until one is given.

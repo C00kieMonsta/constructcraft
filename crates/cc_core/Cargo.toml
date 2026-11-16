@@ -13,6 +13,7 @@ glam.workspace = true
 serde = { workspace = true, features = ["rc"] }
 ron.workspace = true
 thiserror.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

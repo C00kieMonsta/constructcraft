@@ -104,6 +104,9 @@ pub struct Project {
     /// Named structural profiles (tracked as settings).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub profiles: BTreeMap<crate::ProfileId, crate::structural_profile::ProfileDef>,
+    /// Pipe series (see [`crate::pipe_series`]; tracked as settings).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub pipe_series: BTreeMap<crate::PipeSeriesId, crate::PipeSeries>,
     /// Design option sets (see [`crate::design_option`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub option_sets: Vec<crate::OptionSet>,
@@ -156,6 +159,7 @@ impl Project {
             line_styles: BTreeMap::new(),
             fill_patterns: BTreeMap::new(),
             profiles: BTreeMap::new(),
+            pipe_series: BTreeMap::new(),
             option_sets: Vec::new(),
             browser: Default::default(),
             bar_marking: Default::default(),
@@ -996,6 +1000,7 @@ impl Project {
             browser,
             bar_marking,
             profiles,
+            pipe_series,
             sun_presets,
             active_option,
             next_id,
@@ -1024,6 +1029,7 @@ impl Project {
             browser: browser.clone(),
             bar_marking: bar_marking.clone(),
             profiles: profiles.clone(),
+            pipe_series: pipe_series.clone(),
             sun_presets: sun_presets.clone(),
             active_option: *active_option,
             next_id: *next_id,
@@ -1051,6 +1057,7 @@ impl Project {
         let line_styles = self.line_styles.keys().map(|k| k.0);
         let fill_patterns = self.fill_patterns.keys().map(|k| k.0);
         let profiles = self.profiles.keys().map(|k| k.0);
+        let pipe_series = self.pipe_series.keys().map(|k| k.0);
         let option_sets = self.option_sets.iter().map(|s| s.id.0);
         let options = self.option_sets.iter().flat_map(|s| s.options.iter().map(|o| o.id.0));
         let schemes = self.browser.schemes.iter().map(|s| s.id.0);
@@ -1067,6 +1074,7 @@ impl Project {
             .chain(line_styles)
             .chain(fill_patterns)
             .chain(profiles)
+            .chain(pipe_series)
             .chain(option_sets)
             .chain(options)
             .chain(schemes)

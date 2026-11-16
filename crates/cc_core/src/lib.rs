@@ -44,6 +44,9 @@ pub mod pat;
 mod persist;
 pub mod phase;
 pub mod pile;
+pub mod pipe_catalog;
+pub mod pipe_file;
+pub mod pipe_series;
 pub mod profile;
 pub mod profile_catalog;
 pub mod profile_sweep;
@@ -112,7 +115,7 @@ pub use graphics::{
 };
 pub use ids::{
     BrowserSchemeId, ElementId, ElementTypeId, FillPatternId, FilterId, GroupId, LevelId, LineStyleId, OptionId,
-    OptionSetId, PhaseFilterId, PhaseId, ProfileId, SystemId, TemplateId, Uid, ViewId,
+    OptionSetId, PhaseFilterId, PhaseId, PipeSeriesId, ProfileId, SystemId, TemplateId, Uid, ViewId,
 };
 pub use lightning::{ConductorRole, LightningConductor, LpsClass};
 pub use material::{Material, MaterialClass, Pattern, PatternFill};
@@ -122,6 +125,7 @@ pub use persist::{
     load_with_repairs, load_with_repairs_localized, read_to_string_limited, save, to_ron,
 };
 pub use phase::{Phase, PhaseDisplay, PhaseFilter, PhaseGraphics, PhaseState, PhaseStatus};
+pub use pipe_series::{CatalogFitting, FittingRowKind, PipeJoint, PipeMaterial, PipeSeries, PipeSize, PipeUse};
 pub use profile::{ProfilePoint, SketchPlane};
 pub use project::{
     Group, Level, Project, ProjectField, ProjectInfo, can_join_geometry, join_priority, template_default,

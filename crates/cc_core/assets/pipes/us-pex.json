@@ -1,0 +1,39 @@
+{
+  "format": 1,
+  "code": "US-PEX",
+  "name": "PEX tubing",
+  "short": "PEX",
+  "standard": "ASTM F876 (CTS SDR 9 tubing), ASTM F1807 (metal insert fittings with copper crimp rings)",
+  "material": "PEX",
+  "use": "supply",
+  "joint": "crimp",
+  "pressure": "SDR 9",
+  "sources": [
+    {"url": "https://res.cloudinary.com/dzhpkjoqj/TradeService/Viega_00373_5-8_OTHER2.pdf", "title": "Viega PureFlow PEX tubing technical data / material specification", "covers": "SDR 9 PEX tubing dimensions (OD, minimum wall, nominal ID) 3/8 to 2 in"},
+    {"url": "https://engineeringtoolbox.com/ASTM-F876-PEX-tube-d_2139.html", "title": "Engineering ToolBox, ASTM F876 PEX tube dimensions", "covers": "cross-check of OD and minimum wall, 1/2 to 2 in"},
+    {"url": "https://www.pexuniverse.com/uploads/literature/sc-645x32-spec.pdf", "title": "Sioux Chief ASTM F1807 PEX brass/copper fitting system submittal (6_X series)", "covers": "F1807 fitting end length (0.625 in min), fitting kinds (elbows, tees, couplings) for 3/8 to 1 in"}
+  ],
+  "pipes": [
+    {"size": "3/8\"", "de": 12.7, "e": 1.91, "di": 8.89},
+    {"size": "1/2\"", "de": 15.88, "e": 1.91, "di": 12.06},
+    {"size": "3/4\"", "de": 22.22, "e": 2.59, "di": 17.04},
+    {"size": "1\"", "de": 28.57, "e": 3.34, "di": 21.89},
+    {"size": "1-1/4\"", "de": 34.92, "e": 4.08, "di": 26.77},
+    {"size": "1-1/2\"", "de": 41.27, "e": 4.84, "di": 31.6},
+    {"size": "2\"", "de": 53.97, "e": 6.3, "di": 41.38}
+  ],
+  "fittings": [
+    {"kind": "elbow", "angle": 90, "size": "3/8\"", "socket": 15.88, "z": null, "derived": "socket = ASTM F1807 minimum fitting end (insert) length 0.625 in"},
+    {"kind": "tee", "size": "3/8\"", "socket": 15.88, "z": null, "z2": null, "derived": "socket = ASTM F1807 minimum fitting end (insert) length 0.625 in"},
+    {"kind": "coupling", "size": "3/8\"", "socket": 15.88, "z": null, "derived": "socket = ASTM F1807 minimum fitting end (insert) length 0.625 in"},
+    {"kind": "elbow", "angle": 90, "size": "1/2\"", "socket": 15.88, "z": null, "derived": "socket = ASTM F1807 minimum fitting end (insert) length 0.625 in"},
+    {"kind": "tee", "size": "1/2\"", "socket": 15.88, "z": null, "z2": null, "derived": "socket = ASTM F1807 minimum fitting end (insert) length 0.625 in"},
+    {"kind": "coupling", "size": "1/2\"", "socket": 15.88, "z": null, "derived": "socket = ASTM F1807 minimum fitting end (insert) length 0.625 in"},
+    {"kind": "elbow", "angle": 90, "size": "3/4\"", "socket": 15.88, "z": null, "derived": "socket = ASTM F1807 minimum fitting end (insert) length 0.625 in"},
+    {"kind": "tee", "size": "3/4\"", "socket": 15.88, "z": null, "z2": null, "derived": "socket = ASTM F1807 minimum fitting end (insert) length 0.625 in"},
+    {"kind": "coupling", "size": "3/4\"", "socket": 15.88, "z": null, "derived": "socket = ASTM F1807 minimum fitting end (insert) length 0.625 in"},
+    {"kind": "elbow", "angle": 90, "size": "1\"", "socket": 15.88, "z": null, "derived": "socket = ASTM F1807 minimum fitting end (insert) length 0.625 in"},
+    {"kind": "tee", "size": "1\"", "socket": 15.88, "z": null, "z2": null, "derived": "socket = ASTM F1807 minimum fitting end (insert) length 0.625 in"},
+    {"kind": "coupling", "size": "1\"", "socket": 15.88, "z": null, "derived": "socket = ASTM F1807 minimum fitting end (insert) length 0.625 in"}
+  ]
+}

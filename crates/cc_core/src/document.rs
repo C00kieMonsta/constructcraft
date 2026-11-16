@@ -27,6 +27,7 @@ struct Settings {
     line_styles: crate::detail::LineStyles,
     fill_patterns: crate::fill_pattern::FillPatterns,
     profiles: BTreeMap<crate::ProfileId, crate::structural_profile::ProfileDef>,
+    pipe_series: BTreeMap<crate::PipeSeriesId, crate::PipeSeries>,
     option_sets: Vec<crate::OptionSet>,
     browser: crate::browser::BrowserOrganization,
     bar_marking: crate::bar_marks::BarMarking,
@@ -53,6 +54,7 @@ impl Settings {
             line_styles: p.line_styles.clone(),
             fill_patterns: p.fill_patterns.clone(),
             profiles: p.profiles.clone(),
+            pipe_series: p.pipe_series.clone(),
             option_sets: p.option_sets.clone(),
             browser: p.browser.clone(),
             bar_marking: p.bar_marking.clone(),
@@ -78,6 +80,7 @@ impl Settings {
         p.line_styles = self.line_styles;
         p.fill_patterns = self.fill_patterns;
         p.profiles = self.profiles;
+        p.pipe_series = self.pipe_series;
         p.option_sets = self.option_sets;
         p.browser = self.browser;
         p.bar_marking = self.bar_marking;
@@ -647,6 +650,12 @@ impl<'a> EditCtx<'a> {
     pub fn profiles_mut(&mut self) -> &mut BTreeMap<crate::ProfileId, crate::structural_profile::ProfileDef> {
         self.touch_settings();
         &mut self.project.profiles
+    }
+
+    /// The project's pipe series.
+    pub fn pipe_series_mut(&mut self) -> &mut BTreeMap<crate::PipeSeriesId, crate::PipeSeries> {
+        self.touch_settings();
+        &mut self.project.pipe_series
     }
 
     /// Construction phases, in time order.
