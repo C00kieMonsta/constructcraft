@@ -1166,6 +1166,11 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
             }
             finish(state, &r);
         }
+        // The type's mark, shared by every element of the type: edited in Type Properties.
+        if category.is_model() {
+            let type_mark = state.project().element_type(el.type_id).map(|t| t.info.type_mark.clone());
+            readonly_row(ui, &t!("info-type-mark"), type_mark.unwrap_or_default());
+        }
         let mut pinned = state.project().is_pinned(id);
         if row(ui, &t!("prop-pinned"), |ui| crate::table::checkbox(ui, &mut pinned)).changed() {
             crate::actions::run_command(state, cc_engine::commands::modify::ElementsPin { ids: vec![id.0], pinned });
