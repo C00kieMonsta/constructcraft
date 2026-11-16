@@ -819,6 +819,25 @@ fn duplicated_type_keeps_the_typed_name() {
     assert!(harness.state().dialogs.type_editor.is_none());
 }
 
+/// *Edit Component* in Type Properties closes the dialog as it opens the
+/// environment (before, the dialog stayed in front of it).
+#[test]
+fn edit_component_closes_type_properties() {
+    let mut state = sample_state();
+    let table = state
+        .project()
+        .types_of(cc_core::Category::Component)
+        .find(|t| matches!(&t.data, cc_core::TypeData::Component { component, .. } if component == "Mesa"))
+        .map(|t| t.id)
+        .unwrap();
+    state.dialogs.type_editor = Some(table);
+    let mut harness = type_dialog_harness(state);
+    harness.get_by_label(&t!("action-edit-component")).click();
+    harness.run();
+    assert!(harness.state().component_env.is_some());
+    assert!(harness.state().dialogs.type_editor.is_none());
+}
+
 /// Typing a name and moving on to another field confirms the name.
 #[test]
 fn type_name_is_kept_when_another_field_is_clicked() {
