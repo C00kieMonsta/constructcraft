@@ -2126,7 +2126,7 @@ No parameters.
 
 ### `tag_get`
 
-*query* — The tag of an element in a floor or ceiling plan: the plan's adjustments (`placement`, see `tag_set`), the tag type it is drawn with (`type`: null when the project has no tag type of the target and the default style applies), its `target`, the `texts` its lines write (empty lines included), whether it is `drawn` (hidden tags and tags writing nothing are not), and, when drawn, its box (`center` and `half` size, meters in plan). For a grid (in a plan, an elevation or a section): its `placement`, the `ends` with a bubble and the `bubbles` drawn (`start`, `center`, `radius`).
+*query* — The tag of an element in a floor or ceiling plan: the plan's adjustments (`placement`, see `tag_set`), the tag type it is drawn with (`type`: null when the project has no tag type of the target and the default style applies), its `target`, the `texts` its lines write (empty lines included), whether it is `drawn` (hidden tags and tags writing nothing are not), and, when drawn, its box (`center`, `half` its size along and across the tag, meters in plan, and `rotation`, degrees). For a grid (in a plan, an elevation or a section): its `placement`, the `ends` with a bubble and the `bubbles` drawn (`start`, `center`, `radius`).
 
 | Parameter | Type | | Description |
 |---|---|---|---|

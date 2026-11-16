@@ -250,7 +250,8 @@ fn grid_line(
         }
         d.fill(circle, PICK_AREA, id);
         if !matches!(style.symbol, TagSymbol::Component(_)) {
-            d.tag_text(center, grid.name.as_str(), style.text_height(bubble), Anchor::Center, 0.0, id);
+            let size = style.text_height(bubble);
+            d.colored_text(center, grid.name.as_str(), size, (Anchor::Center, 0.0), id, style.color);
         }
         d.bubbles.push(crate::BubbleHandle { element: e.id, start: at_start, center, radius: r, offset });
     }

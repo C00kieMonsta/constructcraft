@@ -297,8 +297,8 @@ pub fn paint_drawing(painter: &Painter, d: &Drawing2D, xf: &Xf, opts: &PaintOpti
             Drawn::Nothing => {}
             Drawn::Shapes => painter.extend(out.drain(..)),
             Drawn::Text { at, px } => {
-                if let Prim::Text { text, anchor, angle, .. } = prim {
-                    paint_text(painter, at, text, px, *anchor, *angle as f32);
+                if let Prim::Text { text, anchor, angle, color, .. } = prim {
+                    paint_text(painter, at, text, px, (*anchor, *angle as f32), *color);
                 }
             }
         };
@@ -414,7 +414,7 @@ pub(crate) fn prim_shapes(
             image_shapes(ctx, image, *faded, corners, hl, out);
             Drawn::Shapes
         }
-        Prim::Text { pos, text, size, element, anchor, angle } => {
+        Prim::Text { pos, text, size, element, anchor, angle, .. } => {
             if opts.only.is_some() {
                 return Drawn::Nothing;
             }
@@ -544,8 +544,17 @@ fn image_shapes(
 }
 
 /// Text anchored at `pos` and rotated by `angle` (radians, counter-clockwise on the drawing).
-pub(crate) fn paint_text(painter: &Painter, pos: Pos2, text: &str, px: f32, anchor: cc_views::Anchor, angle: f32) {
-    let galley = painter.layout_no_wrap(text.to_string(), egui::FontId::proportional(px), Color32::from_gray(20));
+/// Paint `text` at `pos`, `px` points high, in its own `color` (`None`: the ink).
+pub(crate) fn paint_text(
+    painter: &Painter,
+    pos: Pos2,
+    text: &str,
+    px: f32,
+    (anchor, angle): (cc_views::Anchor, f32),
+    color: Option<[u8; 3]>,
+) {
+    let ink = color.map_or(Color32::from_gray(20), |[r, g, b]| Color32::from_rgb(r, g, b));
+    let galley = painter.layout_no_wrap(text.to_string(), egui::FontId::proportional(px), ink);
     let size = galley.size();
     let local = match anchor {
         cc_views::Anchor::LeftBottom => egui::vec2(0.0, -size.y),
@@ -556,7 +565,7 @@ pub(crate) fn paint_text(painter: &Painter, pos: Pos2, text: &str, px: f32, anch
     // Screen Y points down, so drawing rotations are negated.
     let rot = egui::emath::Rot2::from_angle(-angle);
     let top_left = pos + rot * local;
-    painter.add(egui::epaint::TextShape::new(top_left, galley, Color32::from_gray(20)).with_angle(-angle));
+    painter.add(egui::epaint::TextShape::new(top_left, galley, ink).with_angle(-angle));
 }
 
 #[cfg(test)]

@@ -322,7 +322,7 @@ fn draw_head(
     for (t, at) in texts {
         let text = fields.fill(&t.text);
         if !text.is_empty() {
-            d.text_at(at, text, t.size, crate::Anchor::Center, 0.0);
+            d.colored_text(at, text, t.size, (crate::Anchor::Center, 0.0), None, style.color);
         }
     }
     if style.arrow == MarkArrow::Narrow {
@@ -332,7 +332,8 @@ fn draw_head(
     // The label below and to the right of the head, clear of the arrow.
     let label = fields.fill(&style.label.text);
     if !label.is_empty() {
-        d.text(c + DVec2::new(r + r * 0.32, -r - r * 0.2), label, style.label.size);
+        let at = c + DVec2::new(r + r * 0.32, -r - r * 0.2);
+        d.colored_text(at, label, style.label.size, (crate::Anchor::LeftBottom, 0.0), None, style.color);
     }
 }
 
@@ -466,6 +467,7 @@ fn draw_masses(d: &mut Drawing2D, project: &Project, geom: &ModelGeometry, level
                 anchor: crate::Anchor::Center,
                 angle: 0.0,
                 element: Some(*id),
+                color: None,
             });
         }
     }

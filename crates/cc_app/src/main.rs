@@ -78,6 +78,7 @@ mod sun_overlay;
 mod sun_ui;
 mod systems_dialog;
 mod table;
+mod tag_type_ui;
 mod text_tool;
 mod theme;
 mod thumbnails;

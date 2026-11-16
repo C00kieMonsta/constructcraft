@@ -826,7 +826,9 @@ fn annotate_tab(ui: &mut Ui, state: &mut AppState) {
     group(ui, t!("group-level-marks"), |ui| {
         command_buttons(ui, state, &[UiCommand::LevelMarkPlan, UiCommand::LevelMarkSection]);
     });
-    group(ui, t!("group-tags"), |ui| command_button(ui, state, UiCommand::StructureTags));
+    group(ui, t!("group-tags"), |ui| {
+        command_buttons(ui, state, &[UiCommand::StructureTags, UiCommand::TagTypes]);
+    });
     group(ui, t!("group-selection"), |ui| command_button(ui, state, UiCommand::Select));
 }
 

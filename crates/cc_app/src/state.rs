@@ -98,6 +98,8 @@ pub struct Dialogs {
     pub browser_org: Option<crate::browser_org_dialog::BrowserOrgDialog>,
     /// The project's line styles.
     pub line_styles: Option<crate::line_styles_dialog::LineStylesDialog>,
+    /// The tag and view mark types (*Annotate → Tag Types*).
+    pub tag_types: Option<crate::tag_type_ui::TagTypesDialog>,
     /// The Sun Settings of a view.
     pub sun: Option<crate::sun_ui::SunDialog>,
     /// The render window of a 3D view (*View → Render*).

@@ -96,14 +96,16 @@ fn svg(drawing: &Drawing2D, paper: DVec2, fonts: &[skrifa::FontRef]) -> String {
                     points.join(" ")
                 );
             }
-            Prim::Text { pos, text, size, anchor, angle, .. } => {
+            Prim::Text { pos, text, size, anchor, angle, color, .. } => {
                 if text.trim().is_empty() {
                     continue;
                 }
+                let [cr, cg, cb] = color.unwrap_or([TEXT_GRAY; 3]);
+                let fill = format!("rgb({cr},{cg},{cb})");
                 if !fonts.is_empty() {
                     let d = glyph_path(fonts, text, *pos, *size, *anchor, *angle, h);
                     if !d.is_empty() {
-                        let _ = writeln!(s, r#"<path d="{d}" fill="rgb({g},{g},{g})" stroke="none"/>"#, g = TEXT_GRAY);
+                        let _ = writeln!(s, r#"<path d="{d}" fill="{fill}" stroke="none"/>"#);
                     }
                     continue;
                 }
@@ -119,12 +121,11 @@ fn svg(drawing: &Drawing2D, paper: DVec2, fonts: &[skrifa::FontRef]) -> String {
                 };
                 let _ = writeln!(
                     s,
-                    r#"<text x="{}" y="{}" font-family="Helvetica, Arial, sans-serif" font-size="{}" text-anchor="{text_anchor}" fill="rgb({g},{g},{g})" stroke="none"{rotate}>{}</text>"#,
+                    r#"<text x="{}" y="{}" font-family="Helvetica, Arial, sans-serif" font-size="{}" text-anchor="{text_anchor}" fill="{fill}" stroke="none"{rotate}>{}</text>"#,
                     num(p.x),
                     y(p.y),
                     num(*size),
                     xml_escape(text),
-                    g = TEXT_GRAY
                 );
             }
             Prim::Image { origin, u, v, image, faded, .. } => {
@@ -257,7 +258,7 @@ pub fn to_pdf(drawing: &Drawing2D, paper: DVec2) -> Vec<u8> {
                 }
                 let _ = writeln!(Utf8(&mut content), "q {gs}{} rg {path}h f Q", rgb([r, g, b]));
             }
-            Prim::Text { pos, text, size, anchor, angle, .. } => {
+            Prim::Text { pos, text, size, anchor, angle, color, .. } => {
                 let bytes: Vec<u8> = text.chars().map(win_ansi).collect();
                 if text.trim().is_empty() {
                     continue;
@@ -268,10 +269,13 @@ pub fn to_pdf(drawing: &Drawing2D, paper: DVec2) -> Vec<u8> {
                 let along = DVec2::new(cos, sin);
                 let up = DVec2::new(-sin, cos);
                 let p = *pos - along * (width * frac) - up * (base * size);
-                let g = num(TEXT_GRAY as f64 / 255.0);
+                let ink = match color {
+                    Some(c) => format!("{} rg", rgb(*c)),
+                    None => format!("{} g", num(TEXT_GRAY as f64 / 255.0)),
+                };
                 let _ = write!(
                     Utf8(&mut content),
-                    "BT {g} g /F1 {} Tf {} {} {} {} {} {} Tm ",
+                    "BT {ink} /F1 {} Tf {} {} {} {} {} {} Tm ",
                     num(*size),
                     num(cos),
                     num(sin),
@@ -608,6 +612,30 @@ mod tests {
         assert!(svg.contains("rotate("));
         // Paper y is flipped: the line at y = 10 sits at 287 from the top.
         assert!(svg.contains(r#"y1="287""#));
+    }
+
+    /// A text in its own color is written in it by SVG, PDF and DXF; texts
+    /// without one keep the ink they always had.
+    #[test]
+    fn texts_keep_their_own_color() {
+        let mut d = Drawing2D::default();
+        d.text_at(DVec2::new(10.0, 10.0), "Ink", 3.0, Anchor::Center, 0.0);
+        let paper = DVec2::new(100.0, 100.0);
+        let svg = to_svg(&d, paper);
+        let pdf = String::from_utf8_lossy(&to_pdf(&d, paper)).into_owned();
+        assert!(svg.contains(r#"fill="rgb(20,20,20)""#) && !svg.contains("rgb(200,10,30)"));
+        assert!(pdf.contains("BT 0.078 g") && !pdf.contains(" rg /F1"), "{pdf}");
+        d.colored_text(DVec2::new(20.0, 20.0), "Red", 3.0, (Anchor::Center, 0.0), None, Some([200, 10, 30]));
+        let svg = to_svg(&d, paper);
+        let pdf = String::from_utf8_lossy(&to_pdf(&d, paper)).into_owned();
+        assert!(svg.contains(r#"fill="rgb(200,10,30)""#));
+        assert!(pdf.contains("BT 0.784 0.039 0.118 rg /F1"), "{pdf}");
+        let dxf = crate::dxf::to_dxf(&d, crate::dxf::DxfScale::model(50), &|_| "A".into());
+        let dxf = String::from_utf8_lossy(&dxf).into_owned();
+        let lines: Vec<&str> = dxf.lines().map(str::trim).collect();
+        let colors: Vec<&str> = lines.windows(2).filter(|w| w[0] == "62").map(|w| w[1]).collect();
+        let red = crate::dxf::aci([200, 10, 30]).to_string();
+        assert_eq!(colors[colors.len().saturating_sub(2)..], ["7", red.as_str()], "the texts' colors come last");
     }
 
     #[test]

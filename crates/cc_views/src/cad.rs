@@ -145,6 +145,7 @@ pub fn draw(d: &mut Drawing2D, c: &CadImport, id: ElementId, scale: u32) {
                     anchor: Anchor::LeftBottom,
                     angle: dir.y.atan2(dir.x),
                     element,
+                    color: None,
                 });
             }
         }

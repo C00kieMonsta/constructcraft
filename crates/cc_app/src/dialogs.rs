@@ -37,6 +37,7 @@ pub fn show(ctx: &Context, state: &mut AppState) {
     crate::phases_dialog::show(ctx, state);
     crate::design_options_ui::show(ctx, state);
     crate::line_styles_dialog::show(ctx, state);
+    crate::tag_type_ui::show(ctx, state);
     crate::browser_org_dialog::show(ctx, state);
     crate::sun_ui::show(ctx, state);
     // After Sun Settings: the render window opens again when the Sun Settings it opened close.

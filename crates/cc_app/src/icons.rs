@@ -61,6 +61,7 @@ pub enum Icon {
     FilledRegion,
     MaskingRegion,
     LineStyles,
+    TagTypes,
     BrowserOrganization,
     LevelMarkPlan,
     LevelMarkSection,
@@ -203,7 +204,7 @@ pub enum Icon {
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 188] = [
+    pub const ALL: [Icon; 189] = [
         Icon::New,
         Icon::Open,
         Icon::Save,
@@ -254,6 +255,7 @@ impl Icon {
         Icon::FilledRegion,
         Icon::MaskingRegion,
         Icon::LineStyles,
+        Icon::TagTypes,
         Icon::BrowserOrganization,
         Icon::LevelMarkPlan,
         Icon::LevelMarkSection,
@@ -447,6 +449,7 @@ impl Icon {
             Icon::FilledRegion => include_str!("../../../assets/icons/ui/filled-region.svg"),
             Icon::MaskingRegion => include_str!("../../../assets/icons/ui/masking-region.svg"),
             Icon::LineStyles => include_str!("../../../assets/icons/ui/line-styles.svg"),
+            Icon::TagTypes => include_str!("../../../assets/icons/ui/tag-types.svg"),
             Icon::BrowserOrganization => include_str!("../../../assets/icons/ui/browser-organization.svg"),
             Icon::LevelMarkPlan => include_str!("../../../assets/icons/ui/level-mark-plan.svg"),
             Icon::LevelMarkSection => include_str!("../../../assets/icons/ui/level-mark-section.svg"),

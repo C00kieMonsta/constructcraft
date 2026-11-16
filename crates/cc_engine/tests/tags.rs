@@ -45,7 +45,7 @@ fn texts(s: &mut Session, view: u64, element: u64) -> Vec<(DVec2, String, f64, A
     d.prims
         .iter()
         .filter_map(|p| match p {
-            Prim::Text { pos, text, size, anchor, angle, element: Some(e) } if e.0 == element => {
+            Prim::Text { pos, text, size, anchor, angle, element: Some(e), .. } if e.0 == element => {
                 Some((*pos, text.clone(), *size, *anchor, *angle))
             }
             _ => None,

@@ -1176,35 +1176,17 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
             crate::actions::run_command(state, cc_engine::commands::modify::ElementsPin { ids: vec![id.0], pinned });
         }
     });
+    // Its tag in the active view (moved, turned, retyped, hidden, reset there).
+    crate::tag_type_ui::element_section(ui, state, &el);
     crate::phases_dialog::element_rows(ui, state, &el);
     crate::design_options_ui::element_rows(ui, state, &el);
     section(ui, "ifc", t!("section-ifc"), |ui| {
         readonly_row(ui, &t!("prop-ifc-guid"), cc_ifc::guid::encode(el.uid.0));
     });
-    let view = state.active_view;
-    let moved = view
-        .and_then(|v| state.project().view(v))
-        .is_some_and(|v| v.tags.get(&id).is_some_and(|t| t.offset != glam::DVec2::ZERO));
     padded(ui, |ui| {
-        ui.horizontal(|ui| {
-            if ui.button(t!("action-delete")).clicked() {
-                state.delete_selection();
-            }
-            // The tag was moved in this view: put it back.
-            if moved
-                && let Some(view) = view
-                && ui.button(t!("action-reset-tag")).clicked()
-            {
-                let reset = cc_engine::commands::annotate::TagMove {
-                    view: cc_engine::Ref::Id(view.0),
-                    id: id.0,
-                    delta: None,
-                    offset: None,
-                    reset: true,
-                };
-                actions::run_command(state, reset);
-            }
-        });
+        if ui.button(t!("action-delete")).clicked() {
+            state.delete_selection();
+        }
     });
 }
 
@@ -3128,6 +3110,8 @@ fn view_sections(ui: &mut Ui, state: &mut AppState, id: ViewId) {
         | ViewKind::Elevation { .. }
         | ViewKind::Diagram { .. } => {}
     }
+    // The tag types of plans, the mark type of sections and elevations.
+    crate::tag_type_ui::view_rows(ui, state, id);
     crate::phases_dialog::view_section(ui, state, id);
     crate::design_options_ui::view_section(ui, state, id);
 

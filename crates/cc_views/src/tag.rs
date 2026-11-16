@@ -296,9 +296,9 @@ fn pen(style: &TagStyle) -> Option<Pen> {
 
 /// Draw `tag` at `spot` (moved by its placement's offset), with a leader
 /// back to the element when its leader mode says so, and record its box so
-/// it can be dragged (`handle`: rooms are picked by their tag, so theirs is
-/// recorded only once moved). `crossed` crosses the tag out (a room not
-/// enclosed, when the style says so).
+/// it can be dragged and turned (a click on a room's tag still picks the
+/// room). `crossed` crosses the tag out (a room not enclosed, when the
+/// style says so).
 pub fn draw(d: &mut Drawing2D, ctx: &TagCtx, tag: &Tag, spot: TagSpot, crossed: bool) {
     let mm = ctx.mm();
     let id = Some(tag.element);
@@ -315,9 +315,7 @@ pub fn draw(d: &mut Drawing2D, ctx: &TagCtx, tag: &Tag, spot: TagSpot, crossed: 
     let half = DVec2::new((lh.x * c).abs() + (lh.y * s).abs(), (lh.x * s).abs() + (lh.y * c).abs());
     let center = to(center_local);
     let moved = offset.length() > 1e-9;
-    if spot.align != Align::FirstBaseline || moved {
-        d.tags.push(crate::TagHandle { element: tag.element, center, half, offset });
-    }
+    d.tags.push(crate::TagHandle { element: tag.element, center, half: lh, rotation: angle, offset });
     let pen = pen(&tag.style);
     let outside = !(spot.anchor - center).abs().cmple(half).all();
     let leader = match tag.placement.leader.unwrap_or(tag.style.leader) {
@@ -360,7 +358,7 @@ pub fn draw(d: &mut Drawing2D, ctx: &TagCtx, tag: &Tag, spot: TagSpot, crossed: 
         d.fill(vec![to(lo), to(DVec2::new(hi.x, lo.y)), to(hi), to(DVec2::new(lo.x, hi.y))], OPAQUE, id);
     }
     for (pos, text, size, anchor) in &layout.texts {
-        d.tag_text(to(*pos), text.as_str(), *size, *anchor, angle, id);
+        d.colored_text(to(*pos), text.as_str(), *size, (*anchor, angle), id, tag.style.text_color);
     }
     if spot.align == Align::FirstBaseline && layout.symbol.is_none() {
         let (lo, hi) = (layout.lo, layout.hi);
