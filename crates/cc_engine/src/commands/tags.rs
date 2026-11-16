@@ -10,6 +10,7 @@ use crate::registry::{Command, CommandKind};
 use crate::session::Session;
 use crate::t;
 use cc_core::tag::{LeaderMode, TagPlacement, TagStyle, TagSymbol, TagTarget, is_detail_component, is_tag_type_of};
+use cc_core::view_mark::MarkKind;
 use cc_core::{ElementId, ElementType, ElementTypeId, Project, TypeData, View, ViewId};
 use glam::DVec2;
 use schemars::JsonSchema;
@@ -176,6 +177,15 @@ fn tagged(p: &Project, id: u64) -> Result<(ElementId, TagTarget)> {
     Ok((id, target))
 }
 
+/// The target of the element `id`, or `None` for a grid; other elements are refused.
+fn tagged_or_grid(p: &Project, raw: u64) -> Result<(ElementId, Option<TagTarget>)> {
+    let id = refs::element(p, raw)?;
+    if p.element(id).is_some_and(|e| matches!(e.kind, cc_core::ElementKind::Grid(_))) {
+        return Ok((id, None));
+    }
+    tagged(p, raw).map(|(id, target)| (id, Some(target)))
+}
+
 /// Adjust the tags of elements in a floor or ceiling plan, in one undo
 /// step: move them (`offset` from the default spot or `delta` from where
 /// they are, meters in plan), turn them (`rotation`, degrees
@@ -184,12 +194,19 @@ fn tagged(p: &Project, id: u64) -> Result<(ElementId, TagTarget)> {
 /// when they get a leader to their element (`leader`: `auto`, when moved;
 /// `always`; `never`). `null` clears a field (`offset` back home); `reset`
 /// clears everything first. Each plan keeps its own adjustments.
+///
+/// Grids take part too, in plans and in the elevations and sections that
+/// show them: `offset` and `delta` move a grid's end bubble (the top one in
+/// elevations and sections) and `start_offset` its start bubble (the bottom
+/// one), each with an elbow leader back to the line; `hidden` hides the
+/// bubbles (the line stays). Grids take no `rotation`, `type` or `leader`.
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct TagSet {
-    /// Plan id or name.
+    /// Plan id or name (or an elevation or a section, for grids only).
     pub view: Ref,
-    /// Ids of the tagged elements (doors, windows, rooms, columns, beams, pad footings and pile caps).
+    /// Ids of the tagged elements (doors, windows, rooms, columns, beams,
+    /// pad footings and pile caps) or of grids.
     pub ids: Vec<u64>,
     /// Place the tags `[dx, dy]` meters from their default spot (`null`: back there).
     #[serde(default, deserialize_with = "refs::nullable", skip_serializing_if = "Option::is_none")]
@@ -197,6 +214,10 @@ pub struct TagSet {
     /// Move the tags by `[dx, dy]` meters from where they are.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delta: Option<Point>,
+    /// Grids only: place the start bubble `[dx, dy]` meters (in the view's
+    /// drawing coordinates) from where it sits (`null`: back there).
+    #[serde(default, deserialize_with = "refs::nullable", skip_serializing_if = "Option::is_none")]
+    pub start_offset: Option<Option<Point>>,
     /// The tags' angle, degrees counter-clockwise (`null`: as their style orients them).
     #[serde(default, deserialize_with = "refs::nullable", skip_serializing_if = "Option::is_none")]
     pub rotation: Option<Option<f64>>,
@@ -222,7 +243,9 @@ impl Command for TagSet {
     const KIND: CommandKind = CommandKind::Edit;
     fn run(self, s: &mut Session) -> Result<Value> {
         let p = s.project();
-        let view = plan(p, &self.view)?;
+        let view = refs::view(p, &self.view)?;
+        let in_plan = p.view(view).and_then(View::level).is_some();
+        let projected = p.view(view).is_some_and(|v| MarkKind::of_view(&v.kind).is_some());
         if self.ids.is_empty() || self.ids.len() > MAX_IDS {
             return Err(EngineError::invalid(format!("give 1 to {MAX_IDS} element ids")));
         }
@@ -246,10 +269,38 @@ impl Command for TagSet {
             Some(None) => Some(None),
             None => None,
         };
+        let start_offset = match self.start_offset {
+            Some(Some(o)) => Some(point(o)?),
+            Some(None) => Some(DVec2::ZERO),
+            None => None,
+        };
         let current = p.view(view).map(|v| v.tags.clone()).unwrap_or_default();
         let mut placements: Vec<(ElementId, TagPlacement)> = Vec::new();
         for raw in &self.ids {
-            let (id, target) = tagged(p, *raw)?;
+            let (id, target) = tagged_or_grid(p, *raw)?;
+            match target {
+                Some(_) if !in_plan => {
+                    return Err(EngineError::invalid("tags are adjusted in floor and ceiling plans"));
+                }
+                None if !(in_plan || projected) => {
+                    return Err(EngineError::invalid(
+                        "grid bubbles are adjusted in floor and ceiling plans, elevations and sections",
+                    ));
+                }
+                None if rotation.is_some() || self.type_ref.is_some() || leader.is_some() => {
+                    return Err(EngineError::invalid(format!(
+                        "grid {} takes offset, delta, start_offset, hidden and reset only",
+                        id.0
+                    )));
+                }
+                Some(_) if start_offset.is_some() => {
+                    return Err(EngineError::invalid(format!(
+                        "element {}: only grids have a start bubble (start_offset)",
+                        id.0
+                    )));
+                }
+                _ => {}
+            }
             let mut t =
                 if self.reset { TagPlacement::default() } else { current.get(&id).copied().unwrap_or_default() };
             if let Some(o) = offset {
@@ -258,16 +309,19 @@ impl Command for TagSet {
             if let Some(d) = delta {
                 t.offset += d;
             }
-            if t.offset.length() > MAX_TAG_OFFSET {
+            if let Some(o) = start_offset {
+                t.start_offset = o;
+            }
+            if t.offset.length() > MAX_TAG_OFFSET || t.start_offset.length() > MAX_TAG_OFFSET {
                 return Err(EngineError::invalid(format!("a tag stays within {MAX_TAG_OFFSET} m of its element")));
             }
             if let Some(r) = rotation {
                 t.rotation_deg = r;
             }
-            match &self.type_ref {
-                Some(Some(r)) => t.tag_type = Some(tag_type(p, target, r)?),
-                Some(None) => t.tag_type = None,
-                None => {}
+            match (&self.type_ref, target) {
+                (Some(Some(r)), Some(target)) => t.tag_type = Some(tag_type(p, target, r)?),
+                (Some(None), _) => t.tag_type = None,
+                _ => {}
             }
             if let Some(h) = self.hidden {
                 t.hidden = h;
@@ -297,6 +351,7 @@ fn placement_json(p: &Project, id: ElementId, t: &TagPlacement) -> Value {
     json!({
         "id": id.0,
         "offset": [t.offset.x, t.offset.y],
+        "start_offset": [t.start_offset.x, t.start_offset.y],
         "rotation": t.rotation_deg,
         "type": t.tag_type.map(|ty| json!({"id": ty.0, "name": p.type_name(ty)})),
         "hidden": t.hidden,
@@ -310,13 +365,15 @@ fn placement_json(p: &Project, id: ElementId, t: &TagPlacement) -> Value {
 /// default style applies), its `target`, the `texts` its lines write
 /// (empty lines included), whether it is `drawn` (hidden tags and tags
 /// writing nothing are not), and, when drawn, its box (`center` and `half`
-/// size, meters in plan).
+/// size, meters in plan). For a grid (in a plan, an elevation or a
+/// section): its `placement`, the `ends` with a bubble and the `bubbles`
+/// drawn (`start`, `center`, `radius`).
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct TagGet {
-    /// Plan id or name.
+    /// Plan id or name (or an elevation or a section, for a grid).
     pub view: Ref,
-    /// Id of the tagged element.
+    /// Id of the tagged element or of a grid.
     pub id: u64,
 }
 
@@ -325,6 +382,9 @@ impl Command for TagGet {
     const KIND: CommandKind = CommandKind::Query;
     fn run(self, s: &mut Session) -> Result<Value> {
         let p = s.project();
+        if let (id, None) = tagged_or_grid(p, self.id)? {
+            return grid_get(s, &self.view, id);
+        }
         let view = plan(p, &self.view)?;
         let (id, target) = tagged(p, self.id)?;
         let drawing = s.drawing(view);
@@ -360,6 +420,39 @@ impl Command for TagGet {
             "half": handle.map(|h| [h.half.x, h.half.y]),
         }))
     }
+}
+
+/// `tag_get` of a grid: the view's adjustments of its bubbles, the ends
+/// with a bubble and each bubble drawn (`start`, `center`, `radius`).
+fn grid_get(s: &mut Session, r: &Ref, id: ElementId) -> Result<Value> {
+    let p = s.project();
+    let view = refs::view(p, r)?;
+    let shows = p.view(view).is_some_and(|v| v.level().is_some() || MarkKind::of_view(&v.kind).is_some());
+    if !shows {
+        return Err(EngineError::invalid("grids are drawn in floor and ceiling plans, elevations and sections"));
+    }
+    let drawing = s.drawing(view);
+    let p = s.project();
+    let v = p.view(view).ok_or_else(|| EngineError::not_found("view"))?;
+    let e = p.element(id).ok_or_else(|| EngineError::not_found("element"))?;
+    let cc_core::ElementKind::Grid(grid) = &e.kind else { return Err(EngineError::not_found("grid")) };
+    let placement = v.tags.get(&id).copied().unwrap_or_default();
+    let (_, _, ends) = cc_views::grid_style(p, e, grid);
+    let bubbles: Vec<Value> = drawing
+        .as_ref()
+        .map(|d| d.bubbles.iter().filter(|b| b.element == id).collect::<Vec<_>>())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|b| json!({"start": b.start, "center": [b.center.x, b.center.y], "radius": b.radius}))
+        .collect();
+    Ok(json!({
+        "view": view.0,
+        "id": id.0,
+        "target": "grid",
+        "placement": placement_json(p, id, &placement),
+        "ends": ends.code(),
+        "bubbles": bubbles,
+    }))
 }
 
 /// A view's tag type per target, as `view_get` shows them.

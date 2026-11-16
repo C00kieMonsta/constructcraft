@@ -417,6 +417,16 @@ Plans tag doors, windows, rooms, columns, beams, pad footings and pile caps by t
 {"command": "tag_get", "args": {"view": "Térreo", "id": 12}}
 ```
 
+Grids and the marks of sections and elevations are styled the same way. A grid type's `style` (`type_set` `params.style`) sets the `ends` with a bubble (`End`, `Start`, `Both`, `None`; a grid's own `ends`, through `element_set` `params`, comes first), the bubble's `symbol` (a shape, or a detail component whose texts write `{Name}`), `text_size`, `pen`, `color` and `line_pattern`. Each plan, elevation or section moves a grid's bubbles with `tag_set` (`offset` or `delta` for the end bubble, `start_offset` for the start one, each drawn with an elbow back to the line) or hides them (`hidden`; the line stays). A view mark type (`view_mark_type_create`, `kind` `section` or `elevation` and a partial `style`) draws the heads of sections and the markers of elevations: the `head` size in paper millimeters (0: 0.5 m in the model, as elevation markers always were), its `symbol`, a `split` line, the `top`, `bottom` and `label` texts with `{Number}`, `{Sheet}`, `{Name}` and `{Letter}`, the `arrow`, the section's `heads`, its `line_weight` and the colors. A section or an elevation is marked with its own type (`view_set` `mark_type`), else the project's first of its kind, else as plans always marked it. `mark_move` moves an elevation's marker in one floor plan (`delta`, `offset` or `reset`).
+
+```text
+{"command": "type_set", "args": {"type": "Grid 8 mm", "params": {"style": {"ends": "Both", "symbol": "Hexagon", "text_size": 4}}}}
+{"command": "tag_set", "args": {"view": "Térreo", "ids": [30], "offset": [1.5, 0], "start_offset": [-1.5, 0]}}
+{"command": "view_mark_type_create", "args": {"kind": "section", "name": "Big head", "style": {"head": 16, "top": {"text": "{Letter}", "size": 4}}}}
+{"command": "view_set", "args": {"view": "Section A", "mark_type": "Big head"}}
+{"command": "mark_move", "args": {"plan": "Térreo", "view": "Elevação: Sul", "delta": [0, -2]}}
+```
+
 ### Photorealistic rendering
 
 A 3D view keeps its render settings in `render` (`view_get`), changed by `view_set` with a merge patch: `samples` per pixel, light bounces (`max_depth`), the image's `width` and `height` in pixels, `fov_deg`, `exposure` in stops, `tone_map` (`Filmic` or `Standard`), the firefly `clamp`, `clay` (every opaque surface one white matte, glass kept, under the same sky and sun) and the `environment` (`sky_strength`, `sun_strength`, `ground_color`, `ground_plane`); `null` removes them. The sun is the view's (`sun`). `view_render` path traces the view on the processor and writes the image (`.png`, `.jpg`, or linear `.exr`/`.hdr`) with the view's camera, as the 3D view shows it; `settings` patches the view's settings for that render only, and `region` (`[x, y, width, height]` in pixels) renders only part of the image. It returns the size, the samples, the seconds and the triangles, and changes nothing in the model.

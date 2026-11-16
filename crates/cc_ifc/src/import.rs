@@ -3311,7 +3311,7 @@ impl<'a> Importer<'a> {
             }
             let name = axis.arg(0).as_str().unwrap_or_default().to_string();
             let element = ElementId(self.p.alloc_id());
-            let grid = Grid { start, end, name };
+            let grid = Grid { start, end, name, ends: None };
             let el = Element {
                 id: element,
                 level,

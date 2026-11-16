@@ -389,7 +389,7 @@ impl Project {
         }
         types.extend([
             (n("tpl-type-room"), TypeData::Room {}),
-            (n(s.grid.0), TypeData::Grid { bubble: s.grid.1 }),
+            (n(s.grid.0), TypeData::Grid { bubble: s.grid.1, style: Default::default() }),
             (n(s.dimension.0), TypeData::Dimension { text_size: s.dimension.1, style: DimensionStyle::of(system) }),
         ]);
         for (key, size) in s.texts {
@@ -597,7 +597,7 @@ impl Project {
                 TypeData::Railing { height: railing_height, post_spacing, material: n("tpl-mat-wood") },
             ),
             (Category::Room, "tpl-type-room", TypeData::Room {}),
-            (Category::Grid, s.grid.0, TypeData::Grid { bubble: s.grid.1 }),
+            (Category::Grid, s.grid.0, TypeData::Grid { bubble: s.grid.1, style: Default::default() }),
             (
                 Category::Dimension,
                 s.dimension.0,
@@ -1426,6 +1426,8 @@ pub fn template_default(key: &str) -> &'static str {
         "tpl-tag-column" => "Etiqueta de pilar",
         "tpl-tag-beam" => "Etiqueta de viga",
         "tpl-tag-foundation" => "Etiqueta de fundação",
+        "tpl-mark-section" => "Marca de corte",
+        "tpl-mark-elevation" => "Marca de elevação",
         "tpl-type-column-rect" => "Pilar 20 x 20 cm",
         "tpl-type-column-round" => "Pilar circular 30 cm",
         "tpl-type-beam" => "Viga 15 x 40 cm",

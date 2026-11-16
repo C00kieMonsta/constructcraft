@@ -323,6 +323,11 @@ pub struct ViewSet {
     /// project's first tag type of the target. Targets left out keep theirs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tag_types: Option<std::collections::BTreeMap<String, Option<Ref>>>,
+    /// Sections and elevations: the view mark type (id or name, of the
+    /// view's kind) their mark in plans is drawn with, or `null` for the
+    /// project's first of the kind (see `view_mark_type_create`).
+    #[serde(default, deserialize_with = "refs::nullable", skip_serializing_if = "Option::is_none")]
+    pub mark_type: Option<Option<Ref>>,
 }
 
 /// The render settings `patch` makes of `current` (the defaults when none):
@@ -445,6 +450,11 @@ impl Command for ViewSet {
         };
         let tag_types =
             self.tag_types.as_ref().map(|patch| super::tags::apply_view_tag_types(p, &view, patch)).transpose()?;
+        let mark_type = self
+            .mark_type
+            .as_ref()
+            .map(|r| super::view_marks::apply_view_mark_type(p, &view, r.as_ref()))
+            .transpose()?;
         // Properties the view's template controls stay as the template has them.
         if let Some(t) = view.template.and_then(|t| p.template(t)) {
             let mut new = view.clone();
@@ -510,6 +520,9 @@ impl Command for ViewSet {
             }
             if let Some(tag_types) = tag_types {
                 v.tag_types = tag_types;
+            }
+            if let Some(mark_type) = mark_type {
+                v.mark_type = mark_type;
             }
             Ok(())
         })?;

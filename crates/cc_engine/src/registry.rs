@@ -355,6 +355,8 @@ registry![
         tags::TagTypeCreate,
         tags::TagSet,
         tags::TagGet,
+        view_marks::ViewMarkTypeCreate,
+        view_marks::MarkMove,
         annotate::DimensionChainCreate,
         annotate::DimensionOrdinateCreate,
         annotate::DimensionSetValue,

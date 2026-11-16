@@ -413,6 +413,14 @@ pub struct View {
     /// project's first tag type of the target).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub tag_types: std::collections::BTreeMap<crate::tag::TagTarget, crate::ElementTypeId>,
+    /// Sections and elevations: the view mark type their mark in plans is
+    /// drawn with (`None`: the project's first of its kind; see [`crate::view_mark`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mark_type: Option<crate::ElementTypeId>,
+    /// Floor plans: how far this plan moved the markers of elevations from
+    /// where they sit, meters in plan, by elevation view.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub mark_offsets: std::collections::BTreeMap<ViewId, glam::DVec2>,
     /// How much of the elements the view draws (see [`DetailLevel`]).
     #[serde(default, skip_serializing_if = "DetailLevel::is_medium")]
     pub detail: DetailLevel,
@@ -825,6 +833,8 @@ impl View {
             tag_offsets: Default::default(),
             tags: Default::default(),
             tag_types: Default::default(),
+            mark_type: None,
+            mark_offsets: Default::default(),
             detail: DetailLevel::Medium,
             visual_style: None,
             crop: None,

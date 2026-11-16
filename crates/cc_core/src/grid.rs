@@ -13,9 +13,124 @@
 //! dragged onto the bubble line of a parallel grid's end (keeping the grid
 //! parallel to it), and [`aligned_ends`] gives a grid the extents of a
 //! parallel reference grid.
+//!
+//! **Style.** A grid type's [`GridStyle`] says which ends get a bubble
+//! ([`BubbleEnds`], which a grid may override with `Grid::ends`), the
+//! bubble's symbol (a tag symbol, or a detail component whose texts write
+//! `{Name}`), the text size, the pen, the color and the line's pattern.
+//! Each view may move a grid's bubbles (`TagPlacement::offset` the end
+//! bubble, `start_offset` the start one, drawn with an elbow leader) or hide
+//! them (`hidden`).
 
-use crate::{ElementId, Grid};
+use crate::tag::TagSymbol;
+use crate::{ElementId, Grid, LinePattern};
 use glam::DVec2;
+use serde::{Deserialize, Serialize};
+
+/// Which ends of a grid line (or of a section line) get a bubble (a head).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum BubbleEnds {
+    /// At its end, as grids always had.
+    #[default]
+    End,
+    Start,
+    Both,
+    None,
+}
+
+impl BubbleEnds {
+    pub const ALL: [BubbleEnds; 4] = [BubbleEnds::End, BubbleEnds::Start, BubbleEnds::Both, BubbleEnds::None];
+
+    pub fn at_start(self) -> bool {
+        matches!(self, BubbleEnds::Start | BubbleEnds::Both)
+    }
+
+    pub fn at_end(self) -> bool {
+        matches!(self, BubbleEnds::End | BubbleEnds::Both)
+    }
+
+    /// The name commands use: `end`, `start`, `both`, `none`.
+    pub fn code(self) -> &'static str {
+        match self {
+            BubbleEnds::End => "end",
+            BubbleEnds::Start => "start",
+            BubbleEnds::Both => "both",
+            BubbleEnds::None => "none",
+        }
+    }
+
+    /// The ends named `code` (any case).
+    pub fn from_code(code: &str) -> Option<BubbleEnds> {
+        let code = code.trim();
+        BubbleEnds::ALL.into_iter().find(|e| e.code().eq_ignore_ascii_case(code))
+    }
+}
+
+/// Smallest and largest grid text, paper millimeters.
+pub const MIN_TEXT_SIZE: f64 = 0.5;
+pub const MAX_TEXT_SIZE: f64 = 50.0;
+/// Share of the bubble's size a grid's text is when its style sets none.
+pub const TEXT_SHARE: f64 = 0.45;
+
+/// How a grid type draws its grids (see the module documentation).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GridStyle {
+    /// The ends with a bubble (a grid's own `ends` comes first).
+    pub ends: BubbleEnds,
+    /// The bubble: a shape the size of the type's `bubble`, or a detail
+    /// component drawn at paper size (a component meter being 1000 paper
+    /// millimeters), whose texts' `{Name}` writes the grid's name.
+    pub symbol: TagSymbol,
+    /// Height of the name, paper millimeters (`None`: 0.45 of the bubble).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_size: Option<f64>,
+    /// Pen weight of the line and the bubble, paper millimeters (`None`: the usual pens).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pen: Option<f64>,
+    /// Color of the line, the bubble and the name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<[u8; 3]>,
+    /// The line's dashes (`None`: dash-dot, as center lines).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_pattern: Option<LinePattern>,
+}
+
+impl Default for GridStyle {
+    fn default() -> Self {
+        Self {
+            ends: BubbleEnds::End,
+            symbol: TagSymbol::Circle,
+            text_size: None,
+            pen: None,
+            color: None,
+            line_pattern: None,
+        }
+    }
+}
+
+impl GridStyle {
+    /// Bring the values within their limits; returns how many were changed.
+    /// A component symbol is checked against the project by
+    /// [`crate::tag::repair_tag_types`].
+    pub fn repair(&mut self) -> usize {
+        let mut n = 0;
+        if self.text_size.is_some_and(|s| !(s.is_finite() && (MIN_TEXT_SIZE..=MAX_TEXT_SIZE).contains(&s))) {
+            self.text_size = None;
+            n += 1;
+        }
+        if self.pen.is_some_and(|w| !(w.is_finite() && (crate::tag::MIN_PEN..=crate::tag::MAX_PEN).contains(&w))) {
+            self.pen = None;
+            n += 1;
+        }
+        n
+    }
+
+    /// The name's height for a bubble of `bubble` paper millimeters.
+    pub fn text_height(&self, bubble: f64) -> f64 {
+        self.text_size.unwrap_or(bubble * TEXT_SHARE)
+    }
+}
 
 /// Grids whose directions differ by at most this many degrees (either way
 /// along the line) belong to the same series when naming.
@@ -215,7 +330,7 @@ mod tests {
     use super::*;
 
     fn grid(name: &str, a: [f64; 2], b: [f64; 2]) -> Grid {
-        Grid { start: DVec2::from(a), end: DVec2::from(b), name: name.into() }
+        Grid { start: DVec2::from(a), end: DVec2::from(b), name: name.into(), ends: None }
     }
 
     fn name_after(grids: &[Grid], a: [f64; 2], b: [f64; 2]) -> String {

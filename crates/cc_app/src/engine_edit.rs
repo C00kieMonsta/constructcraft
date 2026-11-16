@@ -135,6 +135,7 @@ pub fn view(state: &mut AppState, id: ViewId, key: Option<u64>, f: impl FnOnce(&
                 .map(|t| (t.code().to_string(), new.tag_types.get(&t).map(|id| Ref::Id(id.0))))
                 .collect()
         }),
+        mark_type: (new.mark_type != old.mark_type).then(|| new.mark_type.map(|t| Ref::Id(t.0))),
     };
     run(state, key, command)
 }

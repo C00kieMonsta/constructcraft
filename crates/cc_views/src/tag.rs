@@ -387,7 +387,7 @@ fn polyline_pen(d: &mut Drawing2D, pts: &[DVec2], pen: Option<Pen>, id: Option<E
 
 /// The points of a symbol filling the box `lo`..`hi` in the tag's frame
 /// (the two ends of an underline).
-fn symbol_outline(symbol: TagSymbol, lo: DVec2, hi: DVec2) -> Vec<DVec2> {
+pub(crate) fn symbol_outline(symbol: TagSymbol, lo: DVec2, hi: DVec2) -> Vec<DVec2> {
     let c = (lo + hi) / 2.0;
     let r = (hi - lo) / 2.0;
     let around = |n: usize| -> Vec<DVec2> {
@@ -432,26 +432,53 @@ fn symbol_outline(symbol: TagSymbol, lo: DVec2, hi: DVec2) -> Vec<DVec2> {
 /// A detail component drawn as the tag at `center`, turned `angle`: its
 /// meters are paper millimeters times 1000, its texts' fields filled in.
 fn draw_component(d: &mut Drawing2D, ctx: &TagCtx, tag: &Tag, type_id: ElementTypeId, center: DVec2, angle: f64) {
-    let p = ctx.project;
+    let Some(e) = ctx.project.element(tag.element) else { return };
+    let at = (center, angle, ctx.scale);
+    draw_symbol_component(d, ctx.project, type_id, at, Some(tag.element), &|text| expand(ctx, e, text));
+}
+
+/// The detail component `type_id` drawn as a symbol (a tag, a grid bubble,
+/// a view mark) at `center`, turned `angle`, at 1:`scale`: its meters are
+/// paper millimeters times 1000, its texts written by `fill`. Nothing is
+/// drawn when the type is not a detail component.
+pub fn draw_symbol_component(
+    d: &mut Drawing2D,
+    p: &Project,
+    type_id: ElementTypeId,
+    (center, angle, scale): (DVec2, f64, u32),
+    element: Option<ElementId>,
+    fill: &dyn Fn(&str) -> String,
+) {
     let Some(cc_core::TypeData::Component { component, def }) = p.element_type(type_id).map(|t| &t.data) else {
         return;
     };
     if def.kind != cc_core::ComponentKind::Detail {
         return;
     }
-    let Some(e) = p.element(tag.element) else { return };
     let place = cc_core::detail_component::Place {
         t: cc_core::transform::PlanTransform { angle, mirror: false, translation: center },
-        scale: f64::from(ctx.scale.max(1)),
+        scale: f64::from(scale.max(1)),
     };
     let lookup = |n: &str| p.detail_def(n);
     cc_core::detail_component::walk(&lookup, component, def, &Default::default(), place, &mut |v| {
         let mut pieces = v.pieces.clone();
         for t in &mut pieces.texts {
-            t.text = expand(ctx, e, &t.text);
+            t.text = fill(&t.text);
         }
-        crate::detail_component::draw_pieces(d, &p.fill_patterns, &pieces, &v.place, ctx.scale, Some(tag.element));
+        crate::detail_component::draw_pieces(d, &p.fill_patterns, &pieces, &v.place, scale, element);
     });
+}
+
+/// `template` with each `{Field}` replaced by what `value` gives for its
+/// key (`None`: nothing).
+pub fn fill_fields(template: &str, value: &dyn Fn(&str) -> Option<String>) -> String {
+    use cc_core::title_block::{FieldPart, field_parts};
+    let mut out = String::new();
+    field_parts(template, |part| match part {
+        FieldPart::Text { shown, .. } => out.push_str(shown),
+        FieldPart::Field { key, .. } => out.push_str(&value(key.trim()).unwrap_or_default()),
+    });
+    out.chars().take(MAX_LINE_CHARS).collect()
 }
 
 #[cfg(test)]

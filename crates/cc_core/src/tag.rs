@@ -296,6 +296,10 @@ pub struct TagPlacement {
     /// How far the tag was moved from its default spot, meters in plan.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub offset: DVec2,
+    /// How far a grid's start bubble was moved from where it sits, meters in
+    /// the view (a grid's `offset` moves its end bubble).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub start_offset: DVec2,
     /// The tag's angle, degrees counter-clockwise (`None`: as its style orients it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotation_deg: Option<f64>,
@@ -353,8 +357,15 @@ pub fn repair_view_tags(
             n += 1;
             return false;
         };
-        if !(p.offset.is_finite() && p.offset.length() < MAX_OFFSET) {
-            p.offset = DVec2::ZERO;
+        for o in [&mut p.offset, &mut p.start_offset] {
+            if !(o.is_finite() && o.length() < MAX_OFFSET) {
+                *o = DVec2::ZERO;
+                n += 1;
+            }
+        }
+        // Only a grid has a start bubble.
+        if p.start_offset != DVec2::ZERO && !matches!(e.kind, ElementKind::Grid(_)) {
+            p.start_offset = DVec2::ZERO;
             n += 1;
         }
         if p.rotation_deg.is_some_and(|r| !(r.is_finite() && r.abs() <= 360.0)) {
@@ -378,23 +389,44 @@ pub fn repair_view_tags(
     n
 }
 
-/// Reset the component symbols of tag types that are not detail
-/// components of `types` (deleted, or of another kind); returns how many.
-pub fn repair_tag_types(types: &mut BTreeMap<ElementTypeId, ElementType>) -> usize {
-    let bad: Vec<ElementTypeId> = types
+/// The symbol a tag, grid or view mark type draws.
+pub fn symbol_of(data: &TypeData) -> Option<TagSymbol> {
+    match data {
+        TypeData::Tag { style, .. } => Some(style.symbol),
+        TypeData::Grid { style, .. } => Some(style.symbol),
+        TypeData::ViewMark { style, .. } => Some(style.symbol),
+        _ => None,
+    }
+}
+
+/// The types of `types` drawn as a detail component that is not one of
+/// `types` (deleted, or of another kind).
+pub fn stale_symbols(types: &BTreeMap<ElementTypeId, ElementType>) -> Vec<ElementTypeId> {
+    types
         .values()
-        .filter_map(|t| match &t.data {
-            TypeData::Tag { style: TagStyle { symbol: TagSymbol::Component(c), .. }, .. }
-                if !is_detail_component(types.get(c)) =>
-            {
-                Some(t.id)
-            }
-            _ => None,
-        })
-        .collect();
+        .filter(|t| matches!(symbol_of(&t.data), Some(TagSymbol::Component(c)) if !is_detail_component(types.get(&c))))
+        .map(|t| t.id)
+        .collect()
+}
+
+/// Give a tag, grid or view mark type drawn as a component that is gone
+/// its plain symbol back: none for tags, a circle for grids and marks.
+pub fn reset_symbol(data: &mut TypeData) {
+    match data {
+        TypeData::Tag { style, .. } => style.symbol = TagSymbol::None,
+        TypeData::Grid { style, .. } => style.symbol = TagSymbol::Circle,
+        TypeData::ViewMark { style, .. } => style.symbol = TagSymbol::Circle,
+        _ => {}
+    }
+}
+
+/// Reset the component symbols of tag, grid and view mark types that are
+/// not detail components of `types` (deleted, or of another kind); returns how many.
+pub fn repair_tag_types(types: &mut BTreeMap<ElementTypeId, ElementType>) -> usize {
+    let bad = stale_symbols(types);
     for id in &bad {
-        if let Some(TypeData::Tag { style, .. }) = types.get_mut(id).map(|t| &mut t.data) {
-            style.symbol = TagSymbol::None;
+        if let Some(t) = types.get_mut(id) {
+            reset_symbol(&mut t.data);
         }
     }
     bad.len()

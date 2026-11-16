@@ -393,6 +393,7 @@ impl Tool {
             // Imported, not drawn; bar tags are placed by their command.
             Category::BarTag
             | Category::Tag
+            | Category::ViewMark
             | Category::CadImport
             | Category::TitleBlock
             | Category::SteelBuilding

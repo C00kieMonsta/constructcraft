@@ -81,6 +81,7 @@ pub mod truss;
 mod types;
 pub mod units;
 mod view;
+pub mod view_mark;
 pub mod wall_framing;
 pub mod wall_ops;
 

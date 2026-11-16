@@ -317,6 +317,7 @@ impl ScheduleField {
             | Category::LevelMark
             | Category::BarTag
             | Category::Tag
+            | Category::ViewMark
             | Category::CadImport
             | Category::TitleBlock => {
                 return Vec::new();
@@ -387,6 +388,7 @@ impl ScheduleField {
             | Category::LevelMark
             | Category::BarTag
             | Category::Tag
+            | Category::ViewMark
             | Category::CadImport
             | Category::TitleBlock => Vec::new(),
         }

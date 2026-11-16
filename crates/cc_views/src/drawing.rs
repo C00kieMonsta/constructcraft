@@ -221,6 +221,10 @@ pub struct Drawing2D {
     pub sections: Vec<SectionHandle>,
     /// The marks of callouts drawn in the view: picked, moved and resized there.
     pub callouts: Vec<crate::callout::CalloutHandle>,
+    /// The markers of elevations in a plan: picked and moved there.
+    pub marks: Vec<MarkHandle>,
+    /// The bubbles of grids: picked and moved in the view.
+    pub bubbles: Vec<BubbleHandle>,
     /// Lookups over `prims`, built the first time they are needed (see
     /// [`DrawingIndex`]); a copy of the drawing starts without them.
     pub index: DrawingIndex,
@@ -269,6 +273,27 @@ pub struct TagHandle {
     pub offset: DVec2,
 }
 
+/// The marker of an elevation in a plan, as drawn: picked within `half` of
+/// `center`; `offset` is how far the plan moved it from where it sits.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MarkHandle {
+    pub view: cc_core::ViewId,
+    pub center: DVec2,
+    pub half: DVec2,
+    pub offset: DVec2,
+}
+
+/// A grid's bubble, as drawn: picked within `radius` of `center`; `start`
+/// for the bubble at the grid's start, and `offset` how far the view moved it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BubbleHandle {
+    pub element: ElementId,
+    pub start: bool,
+    pub center: DVec2,
+    pub radius: f64,
+    pub offset: DVec2,
+}
+
 impl Drawing2D {
     /// The primitives of the view itself, without its underlay and its overlay.
     pub fn own_prims(&self) -> &[Prim] {
@@ -313,6 +338,16 @@ impl Drawing2D {
     pub fn tag_at(&self, p: DVec2) -> Option<TagHandle> {
         self.tags.iter().rev().find(|t| (p - t.center).abs().cmple(t.half).all()).copied()
     }
+
+    /// The elevation marker at `p` (the last drawn on top), if any.
+    pub fn mark_at(&self, p: DVec2) -> Option<MarkHandle> {
+        self.marks.iter().rev().find(|m| (p - m.center).abs().cmple(m.half).all()).copied()
+    }
+
+    /// The grid bubble at `p` (the last drawn on top), if any.
+    pub fn bubble_at(&self, p: DVec2) -> Option<BubbleHandle> {
+        self.bubbles.iter().rev().find(|b| b.center.distance(p) <= b.radius).copied()
+    }
 }
 
 impl Drawing2D {
@@ -335,6 +370,23 @@ impl Drawing2D {
         }
         if closed && pts.len() > 2 {
             self.line(pts[pts.len() - 1], pts[0], style, element);
+        }
+    }
+
+    /// [`Self::polyline`] with its own pen.
+    pub fn polyline_pen(
+        &mut self,
+        pts: &[DVec2],
+        closed: bool,
+        style: LineStyle,
+        pen: Option<Pen>,
+        element: Option<ElementId>,
+    ) {
+        for w in pts.windows(2) {
+            self.line_pen(w[0], w[1], style, pen, element);
+        }
+        if closed && pts.len() > 2 {
+            self.line_pen(pts[pts.len() - 1], pts[0], style, pen, element);
         }
     }
 

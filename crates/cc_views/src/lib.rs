@@ -40,9 +40,13 @@ pub mod sun_path;
 pub mod tag;
 mod topography;
 
-pub use annotate::{DimensionLayout, HIGHLIGHT_ONLY, dimension_layout, dimension_type, draw_dimension, draw_marks};
+pub use annotate::{
+    DimensionLayout, HIGHLIGHT_ONLY, dimension_layout, dimension_type, draw_dimension, draw_marks, grid_style,
+};
 pub use component_view::{ComponentView, ComponentViewKind, ViewConnector, component_view};
-pub use drawing::{Anchor, Drawing2D, LineStyle, Pen, Prim, ResolvedPen, SectionHandle, TagHandle, halftone};
+pub use drawing::{
+    Anchor, BubbleHandle, Drawing2D, LineStyle, MarkHandle, Pen, Prim, ResolvedPen, SectionHandle, TagHandle, halftone,
+};
 pub use drawing_index::DrawingIndex;
 pub use legend::legend;
 pub use plan::{is_structural, plan, plan_of, section_pieces};
@@ -100,7 +104,8 @@ pub fn generate_temporary(
                 _ => (false, false, None),
             };
             let drawn = (view.detail, view.style());
-            let mut d = plan_of(project, geom, *level, *cut_height, (ceiling, structural), view.scale, drawn);
+            let marks = (view.scale, &view.mark_offsets);
+            let mut d = plan::plan_drawing(project, geom, *level, *cut_height, (ceiling, structural), marks, drawn);
             joins::merge(project, &mut d);
             let style = view.style();
             if !style.fills() {
@@ -138,7 +143,7 @@ pub fn generate_temporary(
         ViewKind::Elevation { direction } => {
             let mut d = elevation(project, geom, *direction, look);
             if let Some(frame) = projected::view_frame(view) {
-                annotate::projected_grids(&mut d, project, &frame, view.scale);
+                annotate::projected_grids(&mut d, project, &frame, view.scale, &view.tags);
             }
             d
         }
@@ -146,7 +151,7 @@ pub fn generate_temporary(
             let mut d = section(project, geom, (*start, *end), *depth, view.scale, look);
             joins::merge(project, &mut d);
             if let Some(frame) = projected::view_frame(view) {
-                annotate::projected_grids(&mut d, project, &frame, view.scale);
+                annotate::projected_grids(&mut d, project, &frame, view.scale, &view.tags);
             }
             d
         }

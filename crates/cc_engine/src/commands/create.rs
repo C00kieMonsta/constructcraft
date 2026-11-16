@@ -763,7 +763,14 @@ impl Command for GridCreate {
         let p = s.project();
         let level = refs::level_or_first(p, self.level.as_ref())?;
         let name = self.name.unwrap_or_else(|| cc_core::grid::next_name(grids(p), start, end));
-        create(s, t!("tx-create-grid"), level, Category::Grid, None, ElementKind::Grid(Grid { start, end, name }))
+        create(
+            s,
+            t!("tx-create-grid"),
+            level,
+            Category::Grid,
+            None,
+            ElementKind::Grid(Grid { start, end, name, ends: None }),
+        )
     }
 }
 

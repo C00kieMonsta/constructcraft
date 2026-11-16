@@ -198,7 +198,8 @@ impl Project {
                     }
                 }
                 TypeData::Ceiling { thickness, .. } => repairs += usize::from(fix_positive(thickness, 0.02)),
-                TypeData::Grid { bubble } => repairs += usize::from(fix_positive(bubble, 8.0)),
+                TypeData::Grid { bubble, style } => repairs += usize::from(fix_positive(bubble, 8.0)) + style.repair(),
+                TypeData::ViewMark { style, .. } => repairs += style.repair(),
                 TypeData::Dimension { text_size, style } => {
                     repairs += usize::from(fix_positive(text_size, 2.5)) + style.repair()
                 }
@@ -873,11 +874,13 @@ impl Project {
             repairs += t.repair(&self.filters, &self.phase_filters, &levels);
         }
         repairs += crate::tag::repair_tag_types(&mut self.types);
+        let elevations = self.elevation_ids();
         let elements = &self.elements;
         let exists = |id: crate::ElementId| elements.contains_key(&id);
         for view in self.views.values_mut() {
             repairs += view.graphics.repair(&self.filters, Some(&exists));
             repairs += crate::tag::repair_view_tags(view, elements, &self.types);
+            repairs += crate::view_mark::repair_view_marks(view, &elevations, &self.types);
             match view.template.map(|t| self.templates.get(&t)) {
                 Some(None) => {
                     view.template = None;

@@ -7,10 +7,12 @@ use crate::notes::{self, SymbolPens};
 use crate::tag::{self, Align, TagCtx, TagSpot};
 use crate::{Drawing2D, LineStyle, Pen, format};
 use cc_core::dim_style::DimensionStyle;
-use cc_core::tag::TagTarget;
+use cc_core::grid::{BubbleEnds, GridStyle};
+use cc_core::tag::{TagPlacement, TagSymbol, TagTarget};
 use cc_core::{Dimension, DimensionKind, ElementKind, LevelId, Project, TypeData, ViewId};
 use cc_geom::ModelGeometry;
 use glam::DVec2;
+use std::collections::BTreeMap;
 
 /// Model meters per paper millimeter at `scale`.
 fn mm(scale: u32) -> f64 {
@@ -40,7 +42,6 @@ pub fn plan_annotations(
     label: &dyn Fn(&str) -> String,
 ) {
     let ctx = TagCtx { project, geom, scale: view.scale, placements: &view.tags, types: &view.tag_types, label };
-    let mm = mm(view.scale);
     for e in project.elements.values() {
         match &e.kind {
             ElementKind::Room(room) if e.level == level && !structural => {
@@ -60,11 +61,8 @@ pub fn plan_annotations(
                 }
             }
             ElementKind::Grid(grid) => {
-                let bubble = match project.element_type(e.type_id).map(|t| &t.data) {
-                    Some(TypeData::Grid { bubble }) => *bubble,
-                    _ => 8.0,
-                };
-                grid_line(d, grid.start, grid.end, &grid.name, bubble, mm, e.id);
+                let placement = view.tags.get(&e.id).copied().unwrap_or_default();
+                grid_line(d, project, e, grid, (grid.start, grid.end), (view.scale, placement));
             }
             _ => {}
         }
@@ -181,17 +179,81 @@ pub fn structure_tags_in(d: &mut Drawing2D, ctx: &TagCtx, level: LevelId) {
     }
 }
 
-/// Grid line with a bubble of `bubble_mm` paper millimeters at its end.
-fn grid_line(d: &mut Drawing2D, start: DVec2, end: DVec2, name: &str, bubble_mm: f64, mm: f64, id: cc_core::ElementId) {
+/// The bubble size (paper mm) and style of the grid `e`'s type, and the
+/// ends that get a bubble (the grid's own, else its style's).
+pub fn grid_style(project: &Project, e: &cc_core::Element, grid: &cc_core::Grid) -> (f64, GridStyle, BubbleEnds) {
+    let (bubble, style) = match project.element_type(e.type_id).map(|t| &t.data) {
+        Some(TypeData::Grid { bubble, style }) => (*bubble, *style),
+        _ => (8.0, GridStyle::default()),
+    };
+    (bubble, style, grid.ends.unwrap_or(style.ends))
+}
+
+/// The line of the grid `e` from `start` to `end` (in the view's drawing
+/// coordinates) at 1:`scale`, with a bubble at the ends its style says,
+/// each moved as the view's `placement` says (with an elbow leader back to
+/// the line's end) or, when the placement hides them, none.
+fn grid_line(
+    d: &mut Drawing2D,
+    project: &Project,
+    e: &cc_core::Element,
+    grid: &cc_core::Grid,
+    (start, end): (DVec2, DVec2),
+    (scale, placement): (u32, TagPlacement),
+) {
+    let id = Some(e.id);
+    let (bubble, style, ends) = grid_style(project, e, grid);
     let dir = (end - start).normalize_or_zero();
-    let r = bubble_mm * mm / 2.0;
-    let center = end + dir * r;
-    d.line(start, end, LineStyle::Center, Some(id));
-    let circle: Vec<DVec2> =
-        (0..32).map(|i| center + DVec2::from_angle(i as f64 / 32.0 * std::f64::consts::TAU) * r).collect();
-    d.polyline(&circle, true, LineStyle::Annotation, Some(id));
-    d.fill(circle, PICK_AREA, Some(id));
-    d.tag_text(center, name, bubble_mm * 0.45, Anchor::Center, 0.0, Some(id));
+    let r = bubble * mm(scale) / 2.0;
+    let styled = style.pen.is_some() || style.color.is_some();
+    let line_pen = (styled || style.line_pattern.is_some()).then_some(Pen {
+        color: style.color,
+        weight: style.pen,
+        pattern: style.line_pattern,
+        halftone: false,
+    });
+    let pen = styled.then_some(Pen { color: style.color, weight: style.pen, ..Pen::default() });
+    d.line_pen(start, end, LineStyle::Center, line_pen, id);
+    if placement.hidden {
+        return;
+    }
+    let bubbles = [
+        (true, ends.at_start(), start, -dir, placement.start_offset),
+        (false, ends.at_end(), end, dir, placement.offset),
+    ];
+    for (at_start, shown, tip, out, offset) in bubbles {
+        if !shown {
+            continue;
+        }
+        let offset = Some(offset).filter(|o| o.is_finite()).unwrap_or(DVec2::ZERO);
+        let center = tip + out * r + offset;
+        if offset != DVec2::ZERO {
+            // An elbow: along the line, across to the bubble, along again.
+            let near = center - out * r;
+            let run = (near - tip).dot(out).max(0.0) / 3.0;
+            let pts = [tip, tip + out * run, near - out * run, near];
+            d.polyline_pen(&pts, false, LineStyle::Annotation, pen, id);
+        }
+        let circle: Vec<DVec2> =
+            (0..32).map(|i| center + DVec2::from_angle(i as f64 / 32.0 * std::f64::consts::TAU) * r).collect();
+        match style.symbol {
+            TagSymbol::Circle => d.polyline_pen(&circle, true, LineStyle::Annotation, pen, id),
+            TagSymbol::None => {}
+            TagSymbol::Component(t) => {
+                let fill = |text: &str| tag::fill_fields(text, &|k| (k == "Name").then(|| grid.name.clone()));
+                tag::draw_symbol_component(d, project, t, (center, 0.0, scale), id, &fill);
+            }
+            symbol => {
+                let pts = tag::symbol_outline(symbol, center - DVec2::splat(r), center + DVec2::splat(r));
+                d.polyline_pen(&pts, true, LineStyle::Annotation, pen, id);
+            }
+        }
+        d.fill(circle, PICK_AREA, id);
+        if !matches!(style.symbol, TagSymbol::Component(_)) {
+            d.tag_text(center, grid.name.as_str(), style.text_height(bubble), Anchor::Center, 0.0, id);
+        }
+        d.bubbles.push(crate::BubbleHandle { element: e.id, start: at_start, center, radius: r, offset });
+    }
 }
 
 /// How far a grid may lean from the direction an elevation or a section
@@ -203,8 +265,16 @@ const GRID_LEAN: f64 = 0.01;
 /// stands with its bubble on top, as tall as what the view draws. A section
 /// shows the grids that cross what it sees: between the ends of its line,
 /// and between its cut and its depth. They belong to their grid, so the
-/// view's graphics hide them with the category or one by one.
-pub fn projected_grids(d: &mut Drawing2D, project: &Project, frame: &crate::projected::Frame, scale: u32) {
+/// view's graphics hide them with the category or one by one. The grid's
+/// style draws them, the line's bottom being its start; the view's
+/// `placements` move or hide their bubbles as in plans.
+pub fn projected_grids(
+    d: &mut Drawing2D,
+    project: &Project,
+    frame: &crate::projected::Frame,
+    scale: u32,
+    placements: &BTreeMap<cc_core::ElementId, TagPlacement>,
+) {
     let mm = mm(scale);
     let levels = project.levels.iter().map(|l| frame.project(glam::DVec3::new(0.0, 0.0, l.elevation)).y);
     let (lo, hi) = match d.bounds() {
@@ -232,11 +302,8 @@ pub fn projected_grids(d: &mut Drawing2D, project: &Project, frame: &crate::proj
         if frame.near.is_some_and(|n| far < n - 1e-6) || frame.far.is_some_and(|f| near > f + 1e-6) {
             continue;
         }
-        let bubble = match project.element_type(e.type_id).map(|t| &t.data) {
-            Some(TypeData::Grid { bubble }) => *bubble,
-            _ => 8.0,
-        };
-        grid_line(d, DVec2::new(x, bottom), DVec2::new(x, top), &grid.name, bubble, mm, e.id);
+        let placement = placements.get(&e.id).copied().unwrap_or_default();
+        grid_line(d, project, e, grid, (DVec2::new(x, bottom), DVec2::new(x, top)), (scale, placement));
     }
 }
 

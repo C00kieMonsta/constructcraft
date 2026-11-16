@@ -2064,6 +2064,7 @@ impl<'a> Exporter<'a> {
             | TypeData::LevelMark { .. }
             | TypeData::BarTag { .. }
             | TypeData::Tag { .. }
+            | TypeData::ViewMark { .. }
             | TypeData::CadImport {}
             | TypeData::DetailLine {}
             | TypeData::FilledRegion { .. }

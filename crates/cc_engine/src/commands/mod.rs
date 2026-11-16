@@ -69,6 +69,7 @@ pub mod tags;
 pub mod topography;
 pub mod types;
 pub mod valve;
+pub mod view_marks;
 pub mod views;
 pub mod wall_framing;
 pub mod wall_rebar;
