@@ -3842,8 +3842,8 @@ wall-profile-no-area = ໂປຣໄຟລ໌ບໍ່ໄດ້ອ້ອມພື
 layer-to-top = ຮອດເທິງສຸດ
 
 ## Wall profile sketch
-edit-wall-profile = ແກ້ໄຂໂປຣໄຟລ໌
-reset-wall-profile = ຕັ້ງໂປຣໄຟລ໌ຄືນໃໝ່
+edit-wall-profile = ແກ້ໄຂໂປຣໄຟລ໌ຝາ
+reset-wall-profile = ຕັ້ງໂປຣໄຟລ໌ຝາຄືນໃໝ່
 cmd-desc-edit-wall-profile = ເປີດໂປຣໄຟລ໌ດ້ານໜ້າຂອງຝາທີ່ເລືອກໃນແບບຮ່າງ: ໜ້າຝາຕາມຄວາມຍາວຂອງມັນ, ໂດຍພື້ນ ແລະ ດ້ານເທິງສາມາດອຽງ, ເປັນຂັ້ນ ຫຼື ໂຄ້ງໄດ້.
 cmd-desc-reset-wall-profile = ລຶບໂປຣໄຟລ໌ດ້ານໜ້າຂອງຝາທີ່ເລືອກ: ພື້ນ ແລະ ດ້ານເທິງຂອງມັນກັບມາຢູ່ລະດັບອີກ.
 why-select-wall = ເລືອກຝາໜຶ່ງອັນ.

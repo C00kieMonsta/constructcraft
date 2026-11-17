@@ -3841,8 +3841,8 @@ wall-profile-no-area = Профіль не охоплює жодної площ�
 layer-to-top = До верху
 
 ## Wall profile sketch
-edit-wall-profile = Редагувати профіль
-reset-wall-profile = Скинути профіль
+edit-wall-profile = Редагувати профіль стіни
+reset-wall-profile = Скинути профіль стіни
 cmd-desc-edit-wall-profile = Відкриває в ескізі профіль фасаду вибраної стіни: грань стіни вздовж неї, з похилою, ступінчастою або вигнутою основою та верхом.
 cmd-desc-reset-wall-profile = Видаляє профіль фасаду вибраної стіни: її основа і верх знову горизонтальні.
 why-select-wall = Виберіть одну стіну.

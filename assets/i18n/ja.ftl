@@ -3840,8 +3840,8 @@ wall-profile-no-area = プロファイルが面積を囲んでいません。
 layer-to-top = 上端まで
 
 ## Wall profile sketch
-edit-wall-profile = プロファイルを編集
-reset-wall-profile = プロファイルをリセット
+edit-wall-profile = 壁プロファイルを編集
+reset-wall-profile = 壁プロファイルをリセット
 cmd-desc-edit-wall-profile = 選択した壁の立面プロファイルをスケッチで開きます: 壁に沿った壁面で、下端と上端を傾斜、段状、曲線にできます。
 cmd-desc-reset-wall-profile = 選択した壁の立面プロファイルを削除します: 下端と上端が再び水平になります。
 why-select-wall = 壁を 1 つ選択してください。

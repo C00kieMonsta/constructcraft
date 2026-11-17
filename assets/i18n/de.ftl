@@ -3840,8 +3840,8 @@ wall-profile-no-area = Das Profil umschließt keine Fläche.
 layer-to-top = Bis oben
 
 ## Wall profile sketch
-edit-wall-profile = Profil bearbeiten
-reset-wall-profile = Profil zurücksetzen
+edit-wall-profile = Wandprofil bearbeiten
+reset-wall-profile = Wandprofil zurücksetzen
 cmd-desc-edit-wall-profile = Öffnet das Ansichtsprofil der gewählten Wand in einer Skizze: die Wandfläche entlang der Wand, mit geneigter, abgestufter oder gekrümmter Unter- und Oberkante.
 cmd-desc-reset-wall-profile = Entfernt das Ansichtsprofil der gewählten Wand: Unter- und Oberkante sind wieder waagerecht.
 why-select-wall = Eine Wand auswählen.

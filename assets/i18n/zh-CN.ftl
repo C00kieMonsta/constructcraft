@@ -3840,8 +3840,8 @@ wall-profile-no-area = 轮廓未围出任何面积。
 layer-to-top = 至顶部
 
 ## Wall profile sketch
-edit-wall-profile = 编辑轮廓
-reset-wall-profile = 重置轮廓
+edit-wall-profile = 编辑墙轮廓
+reset-wall-profile = 重置墙轮廓
 cmd-desc-edit-wall-profile = 在草图中打开所选墙的立面轮廓：沿墙的墙面，底部和顶部可以倾斜、阶梯或弯曲。
 cmd-desc-reset-wall-profile = 移除所选墙的立面轮廓：其底部和顶部恢复水平。
 why-select-wall = 请选择一面墙。

@@ -3840,8 +3840,8 @@ wall-profile-no-area = Profil nie obejmuje żadnej powierzchni.
 layer-to-top = Do góry
 
 ## Wall profile sketch
-edit-wall-profile = Edytuj profil
-reset-wall-profile = Resetuj profil
+edit-wall-profile = Edytuj profil ściany
+reset-wall-profile = Resetuj profil ściany
 cmd-desc-edit-wall-profile = Otwiera w szkicu profil elewacji zaznaczonej ściany: lico ściany wzdłuż niej, z pochyłą, schodkową lub zakrzywioną podstawą i górą.
 cmd-desc-reset-wall-profile = Usuwa profil elewacji zaznaczonej ściany: jej podstawa i góra znów są poziome.
 why-select-wall = Zaznacz jedną ścianę.

@@ -3840,8 +3840,8 @@ wall-profile-no-area = El perfil no encierra ningún área.
 layer-to-top = Hasta arriba
 
 ## Wall profile sketch
-edit-wall-profile = Editar perfil
-reset-wall-profile = Restablecer perfil
+edit-wall-profile = Editar perfil del muro
+reset-wall-profile = Restablecer perfil del muro
 cmd-desc-edit-wall-profile = Abre en un boceto el perfil de alzado del muro seleccionado: la cara del muro a lo largo de él, con la base y la parte superior inclinadas, escalonadas o curvas.
 cmd-desc-reset-wall-profile = Quita el perfil de alzado del muro seleccionado: su base y su parte superior vuelven a quedar horizontales.
 why-select-wall = Seleccione un muro.

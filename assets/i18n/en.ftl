@@ -3840,8 +3840,8 @@ wall-profile-no-area = The profile encloses no area.
 layer-to-top = To top
 
 ## Wall profile sketch
-edit-wall-profile = Edit Profile
-reset-wall-profile = Reset Profile
+edit-wall-profile = Edit Wall Profile
+reset-wall-profile = Reset Wall Profile
 cmd-desc-edit-wall-profile = Open the selected wall's elevation profile in a sketch: the wall's face along it, with a sloped, stepped or curved base and top.
 cmd-desc-reset-wall-profile = Remove the selected wall's elevation profile: its base and top are level again.
 why-select-wall = Select one wall.

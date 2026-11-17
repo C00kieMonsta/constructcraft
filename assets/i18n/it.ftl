@@ -3840,8 +3840,8 @@ wall-profile-no-area = Il profilo non racchiude alcuna area.
 layer-to-top = Fino in cima
 
 ## Wall profile sketch
-edit-wall-profile = Modifica profilo
-reset-wall-profile = Ripristina profilo
+edit-wall-profile = Modifica profilo del muro
+reset-wall-profile = Ripristina profilo del muro
 cmd-desc-edit-wall-profile = Apre in uno schizzo il profilo di prospetto del muro selezionato: la faccia del muro lungo di esso, con base e sommità inclinate, a gradini o curve.
 cmd-desc-reset-wall-profile = Rimuove il profilo di prospetto del muro selezionato: base e sommità tornano orizzontali.
 why-select-wall = Selezionare un muro.
