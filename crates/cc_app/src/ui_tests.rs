@@ -5896,3 +5896,44 @@ fn the_door_tool_places_no_door_in_a_spline_wall() {
     assert_eq!(doors(harness.state()), count);
     assert_eq!(harness.state().session.doc.undo_depth(), depth);
 }
+
+/// A spline wall's properties show its length, but no arc angle and no
+/// elevation profile (it takes neither).
+#[test]
+fn a_spline_walls_palette_shows_its_length_only() {
+    let mut state = spline_state();
+    let wall = spline_wall(&mut state);
+    // A straight wall of the same type, beside it.
+    let at = |x: f64, y: f64| (SPLINE_ORIGIN + glam::DVec2::new(x, y)).to_array();
+    let args = serde_json::json!({"start": at(-1.0, -2.0), "end": at(1.0, -2.0)});
+    let straight = cc_core::ElementId(state.session.execute("wall_create", args).unwrap()["id"].as_u64().unwrap());
+    state.set_tool(crate::tools::Tool::Select);
+    state.selection = [straight].into_iter().collect();
+    let length = {
+        let e = state.project().element(wall).unwrap();
+        cc_views::format::length(state.project().wall_length(e, e.as_wall().unwrap()))
+    };
+    let mut harness = wall_palette_harness(state);
+    harness.run();
+    let spins = |h: &Harness<'static, AppState>| h.query_all_by_role(Role::SpinButton).count();
+    let straight_spins = spins(&harness);
+    assert!(harness.query_by_label(&t!("section-wall-profile")).is_some());
+    harness.state_mut().selection = [wall].into_iter().collect();
+    harness.run();
+    assert!(harness.query_by_label(&length).is_some(), "{length}");
+    assert_eq!(spins(&harness), straight_spins - 1, "no arc angle");
+    assert!(harness.query_by_label(&t!("section-wall-profile")).is_none());
+}
+
+/// Trim/extend refuses a spline wall with the localized reason in the status bar.
+#[test]
+fn trimming_a_spline_wall_says_why_not() {
+    let mut state = spline_state();
+    let wall = spline_wall(&mut state);
+    let at = |x: f64, y: f64| (SPLINE_ORIGIN + glam::DVec2::new(x, y)).to_array();
+    let args = serde_json::json!({"start": at(3.0, -2.0), "end": at(3.0, 2.0)});
+    let line = state.session.execute("wall_create", args).unwrap()["id"].as_u64().unwrap();
+    let command = cc_engine::commands::modify::TrimExtend { id: wall.0, pick: at(0.0, 1.0), reference: line };
+    assert!(crate::actions::run_command(&mut state, command).is_none());
+    assert_eq!(state.message, t!("msg-spline-wall"));
+}
