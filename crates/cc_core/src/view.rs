@@ -401,10 +401,26 @@ pub struct View {
     /// show automatically (see [`crate::design_option`]).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub design_options: std::collections::BTreeMap<crate::OptionSetId, crate::OptionId>,
-    /// Tags moved by hand in this view: their offset in plan from where they
-    /// sit by default, by the element they tag.
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    /// Tags moved by hand in files before format 29, by the element they
+    /// tag: read only, moved into [`View::tags`] by repair.
+    #[serde(default, skip_serializing)]
     pub tag_offsets: std::collections::BTreeMap<crate::ElementId, glam::DVec2>,
+    /// How this view adjusts the tags of elements (moved, turned, another
+    /// type, hidden, leader), by the element they tag (see [`crate::tag`]).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub tags: std::collections::BTreeMap<crate::ElementId, crate::tag::TagPlacement>,
+    /// The tag type this view tags each target with (missing: the
+    /// project's first tag type of the target).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub tag_types: std::collections::BTreeMap<crate::tag::TagTarget, crate::ElementTypeId>,
+    /// Sections and elevations: the view mark type their mark in plans is
+    /// drawn with (`None`: the project's first of its kind; see [`crate::view_mark`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mark_type: Option<crate::ElementTypeId>,
+    /// Floor plans: how far this plan moved the markers of elevations from
+    /// where they sit, meters in plan, by elevation view.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub mark_offsets: std::collections::BTreeMap<ViewId, glam::DVec2>,
     /// How much of the elements the view draws (see [`DetailLevel`]).
     #[serde(default, skip_serializing_if = "DetailLevel::is_medium")]
     pub detail: DetailLevel,
@@ -815,6 +831,10 @@ impl View {
             phase_filter: None,
             design_options: Default::default(),
             tag_offsets: Default::default(),
+            tags: Default::default(),
+            tag_types: Default::default(),
+            mark_type: None,
+            mark_offsets: Default::default(),
             detail: DetailLevel::Medium,
             visual_style: None,
             crop: None,

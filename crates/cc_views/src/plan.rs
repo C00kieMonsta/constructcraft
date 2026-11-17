@@ -1,7 +1,10 @@
 use crate::{Drawing2D, LineStyle};
-use cc_core::{DetailLevel, ElementId, ElementKind, LevelId, Project, TypeData, ViewKind, VisualStyle};
+use cc_core::tag::TagSymbol;
+use cc_core::view_mark::{MarkArrow, MarkStyle};
+use cc_core::{DetailLevel, ElementId, ElementKind, LevelId, Project, TypeData, ViewId, ViewKind, VisualStyle};
 use cc_geom::{Column, MeshPlan, ModelGeometry, PlanCover, WallGeom, polygon};
 use glam::{DVec2, DVec3};
+use std::collections::BTreeMap;
 use std::f64::consts::{PI, TAU};
 
 pub(crate) use crate::cut::POCHE;
@@ -76,6 +79,20 @@ pub fn plan_of(
     cut_height: f64,
     (ceiling, structural): (bool, bool),
     scale: u32,
+    drawn: (DetailLevel, VisualStyle),
+) -> Drawing2D {
+    plan_drawing(project, geom, level, cut_height, (ceiling, structural), (scale, &BTreeMap::new()), drawn)
+}
+
+/// [`plan_of`] with the elevation markers moved by `marks` (a plan's
+/// [`cc_core::View::mark_offsets`]).
+pub(crate) fn plan_drawing(
+    project: &Project,
+    geom: &ModelGeometry,
+    level: LevelId,
+    cut_height: f64,
+    (ceiling, structural): (bool, bool),
+    (scale, marks): (u32, &BTreeMap<ViewId, DVec2>),
     (detail, style): (DetailLevel, VisualStyle),
 ) -> Drawing2D {
     let shown = |e: &cc_core::Element| !structural || is_structural(e);
@@ -184,7 +201,8 @@ pub fn plan_of(
             if let ViewKind::Elevation { direction } = v.kind
                 && !v.is_detail()
             {
-                elevation_mark(&mut d, lo, hi, direction.look(), &v.name);
+                let offset = marks.get(&v.id).copied().filter(|o| o.is_finite()).unwrap_or(DVec2::ZERO);
+                elevation_mark(&mut d, project, v, (lo, hi), direction.look(), (scale, offset));
             }
         }
     }
@@ -193,28 +211,130 @@ pub fn plan_of(
 
 /// Distance from the model extents to elevation markers, in meters.
 const ELEVATION_MARK_OFFSET: f64 = 1.2;
-const ELEVATION_MARK_RADIUS: f64 = 0.25;
+/// Radius of a head drawn at model size (a style's head of 0), meters.
+const MODEL_HEAD_RADIUS: f64 = 0.25;
 
-/// Elevation marker outside the model: a circle with a filled arrow pointing
-/// along `look` (towards the model), labeled with the view name.
-fn elevation_mark(d: &mut Drawing2D, lo: DVec2, hi: DVec2, look: DVec2, name: &str) {
+/// Elevation marker outside the model, `offset` from where it sits: as its
+/// mark type says (by default a circle with a filled arrow pointing along
+/// `look`, towards the model, labeled with the view name), listed in
+/// `d.marks` to be picked and moved.
+fn elevation_mark(
+    d: &mut Drawing2D,
+    project: &Project,
+    view: &cc_core::View,
+    (lo, hi): (DVec2, DVec2),
+    look: DVec2,
+    (scale, offset): (u32, DVec2),
+) {
+    let Some(style) = project.mark_style(view) else { return };
     let center = (lo + hi) * 0.5;
     let half = (hi - lo) * 0.5;
     let reach = (half.x * look.x.abs() + half.y * look.y.abs()) + ELEVATION_MARK_OFFSET;
-    let c = center - look * reach;
-    let r = ELEVATION_MARK_RADIUS;
-    let circle: Vec<DVec2> = (0..24)
-        .map(|i| {
-            let a = i as f64 / 24.0 * std::f64::consts::TAU;
-            c + DVec2::new(a.cos(), a.sin()) * r
+    let c = center - look * reach + offset;
+    let r = head_radius(&style, scale);
+    let fields = MarkFields::of(project, view);
+    draw_head(d, project, &style, &fields, (c, look, r), (24, scale));
+    d.marks.push(crate::MarkHandle { view: view.id, center: c, half: DVec2::splat(1.6 * r), offset });
+}
+
+/// Radius of a mark's head at 1:`scale`, meters.
+fn head_radius(style: &MarkStyle, scale: u32) -> f64 {
+    let k = f64::from(scale.max(1)) / 1000.0;
+    if style.head > 0.0 { style.head * 0.5 * k } else { MODEL_HEAD_RADIUS }
+}
+
+/// What a view mark's `{Field}`s write: `Number`, `Sheet`, `Name`, `Letter`.
+pub(crate) struct MarkFields {
+    number: String,
+    sheet: String,
+    name: String,
+}
+
+impl MarkFields {
+    pub(crate) fn of(project: &Project, view: &cc_core::View) -> Self {
+        let (number, sheet) = section_labels(project, view);
+        Self { number, sheet, name: view.name.clone() }
+    }
+
+    fn value(&self, key: &str) -> Option<String> {
+        Some(match key {
+            "Number" => self.number.clone(),
+            "Sheet" => self.sheet.clone(),
+            "Name" => self.name.clone(),
+            "Letter" => self.name.split_whitespace().last().unwrap_or_default().chars().take(4).collect(),
+            _ => return None,
         })
-        .collect();
-    d.polyline(&circle, true, LineStyle::Annotation, None);
+    }
+
+    /// `template` with its fields filled in.
+    pub(crate) fn fill(&self, template: &str) -> String {
+        crate::tag::fill_fields(template, &|k| self.value(k))
+    }
+}
+
+/// A mark's head at `c` of radius `r` with its arrow pointing along `look`
+/// and its texts, as `style` says: the arrow under the head (filled white)
+/// or, a narrow one, over it; the outline drawn with `segments` chords
+/// when a circle; at 1:`scale`.
+fn draw_head(
+    d: &mut Drawing2D,
+    project: &Project,
+    style: &MarkStyle,
+    fields: &MarkFields,
+    (c, look, r): (DVec2, DVec2, f64),
+    (segments, scale): (u32, u32),
+) {
+    let [ink_r, ink_g, ink_b] = style.color.unwrap_or(LineStyle::Annotation.pen().1);
+    let [ar, ag, ab] = style.arrow_color.or(style.color).unwrap_or([ink_r, ink_g, ink_b]);
+    let pen = style.color.map(|color| crate::Pen { color: Some(color), ..Default::default() });
     let side = look.perp();
-    let arrow = vec![c + look * (r * 1.6), c + side * (r * 0.8), c - side * (r * 0.8)];
-    d.fill(arrow, [30, 90, 170, 255], None);
-    // Label below and to the right of the circle, clear of the arrow.
-    d.text(c + DVec2::new(r + 0.08, -r - 0.05), name, 2.5);
+    let wide = vec![c + side * (2.0 * r), c + look * 1.4 * r, c - side * (2.0 * r)];
+    match style.arrow {
+        MarkArrow::Filled => d.fill(wide, [ar, ag, ab, 255], None),
+        MarkArrow::Open => {
+            let open = crate::Pen { color: Some([ar, ag, ab]), ..Default::default() };
+            d.polyline_pen(&wide, true, LineStyle::Annotation, Some(open), None);
+        }
+        MarkArrow::Narrow | MarkArrow::None => {}
+    }
+    let under = matches!(style.arrow, MarkArrow::Filled | MarkArrow::Open);
+    let outline: Vec<DVec2> = match style.symbol {
+        TagSymbol::Circle => (0..segments)
+            .map(|i| {
+                let a = f64::from(i) / f64::from(segments) * std::f64::consts::TAU;
+                c + DVec2::new(a.cos(), a.sin()) * r
+            })
+            .collect(),
+        TagSymbol::None | TagSymbol::Component(_) => Vec::new(),
+        symbol => crate::tag::symbol_outline(symbol, c - DVec2::splat(r), c + DVec2::splat(r)),
+    };
+    if under {
+        d.fill(outline.clone(), [255, 255, 255, 255], None);
+    }
+    d.polyline_pen(&outline, true, LineStyle::Annotation, pen, None);
+    if let TagSymbol::Component(t) = style.symbol {
+        crate::tag::draw_symbol_component(d, project, t, (c, 0.0, scale), None, &|text| fields.fill(text));
+    }
+    if style.split {
+        d.line_pen(c - DVec2::X * r, c + DVec2::X * r, LineStyle::Annotation, pen, None);
+    }
+    let texts = [(&style.top, c + DVec2::Y * r * 0.48), (&style.bottom, c - DVec2::Y * r * 0.5)];
+    for (t, at) in texts {
+        let text = fields.fill(&t.text);
+        if !text.is_empty() {
+            d.colored_text(at, text, t.size, (crate::Anchor::Center, 0.0), None, style.color);
+        }
+    }
+    if style.arrow == MarkArrow::Narrow {
+        let arrow = vec![c + look * (r * 1.6), c + side * (r * 0.8), c - side * (r * 0.8)];
+        d.fill(arrow, [ar, ag, ab, 255], None);
+    }
+    // The label below and to the right of the head, clear of the arrow.
+    let label = fields.fill(&style.label.text);
+    if !label.is_empty() {
+        let at = c + DVec2::new(r + r * 0.32, -r - r * 0.2);
+        d.colored_text(at, label, style.label.size, (crate::Anchor::LeftBottom, 0.0), None, style.color);
+    }
 }
 
 /// A piece a plan draws: a mesh with what it shows in plan, or the outline
@@ -347,6 +467,7 @@ fn draw_masses(d: &mut Drawing2D, project: &Project, geom: &ModelGeometry, level
                 anchor: crate::Anchor::Center,
                 angle: 0.0,
                 element: Some(*id),
+                color: None,
             });
         }
     }
@@ -994,24 +1115,17 @@ fn ceiling_grid(d: &mut Drawing2D, boundary: &[DVec2], id: cc_core::ElementId) {
     }
 }
 
-/// Diameter of a section head on paper, millimeters (NBR 6492, A.4.7).
-const SECTION_HEAD_MM: f64 = 12.0;
-/// Pen of a section line: dash-dot, extra wide.
-const SECTION_PEN_MM: f64 = 0.7;
-/// Paper height of the drawing number and of the sheet number, millimeters.
-const SECTION_NUMBER_MM: f64 = 3.5;
-const SECTION_SHEET_MM: f64 = 2.5;
-
-/// The marks of every section in a plan at 1:`scale`, each listed in
-/// `d.sections` to be picked, moved and flipped.
+/// The marks of every section in a plan at 1:`scale`, as their mark types
+/// say, each listed in `d.sections` to be picked, moved and flipped.
 pub(crate) fn section_marks(d: &mut Drawing2D, project: &Project, scale: u32) {
     for v in project.views.values() {
         // A detail view of a section is drawn as a callout in it, not here.
         if let ViewKind::Section { start, end, depth, segments } = v.kind
             && !v.is_detail()
+            && let Some(style) = project.mark_style(v)
         {
-            let (number, sheet) = section_labels(project, v);
-            let handle = section_mark(d, (start, end), depth, segments, scale, (&number, &sheet));
+            let fields = MarkFields::of(project, v);
+            let handle = section_mark(d, project, (start, end), (depth, segments), scale, (&style, &fields));
             d.sections.push(crate::SectionHandle { view: v.id, ..handle });
         }
     }
@@ -1062,40 +1176,32 @@ pub fn section_pieces(start: DVec2, end: DVec2, segments: Option<[f64; 2]>, head
 /// by a horizontal line, the drawing number above it and the sheet number
 /// below, on a filled triangle pointing where the section looks; between
 /// the heads an extra-wide dash-dot line (split with `segments`), and the
-/// far extent dashed. Sizes are on paper at 1:`scale`.
+/// far extent dashed. Sizes are on paper at 1:`scale`. That is the default
+/// style ([`cc_core::view_mark::MarkKind::default_style`]); a mark type's
+/// `style` changes the heads, their texts (`fields`), the ends with one,
+/// the arrow, the line's weight and the color.
 fn section_mark(
     d: &mut Drawing2D,
+    project: &Project,
     (start, end): (DVec2, DVec2),
-    depth: f64,
-    segments: Option<[f64; 2]>,
+    (depth, segments): (f64, Option<[f64; 2]>),
     scale: u32,
-    (number, sheet): (&str, &str),
+    (style, fields): (&MarkStyle, &MarkFields),
 ) -> crate::SectionHandle {
-    let k = f64::from(scale.max(1)) / 1000.0;
-    let r = SECTION_HEAD_MM * 0.5 * k;
+    let r = head_radius(style, scale);
     let dir = (end - start).normalize_or_zero();
     let look = -dir.perp();
     // The triangle's base runs along the line, twice the circle wide.
     let half_base = 2.0 * r;
     let pieces = section_pieces(start, end, segments, half_base);
-    let pen = crate::Pen { weight: Some(SECTION_PEN_MM), ..Default::default() };
+    let pen = crate::Pen { weight: Some(style.line_weight), color: style.color, ..Default::default() };
     for &(a, b) in &pieces {
         d.prims.push(crate::Prim::Line { a, b, style: LineStyle::Center, element: None, pen: Some(pen) });
     }
-    let [ink_r, ink_g, ink_b] = LineStyle::Annotation.pen().1;
-    for c in [start, end] {
-        d.fill(vec![c + dir * half_base, c + look * 1.4 * r, c - dir * half_base], [ink_r, ink_g, ink_b, 255], None);
-        let circle: Vec<DVec2> = (0..32)
-            .map(|i| {
-                let a = f64::from(i) / 32.0 * std::f64::consts::TAU;
-                c + DVec2::new(a.cos(), a.sin()) * r
-            })
-            .collect();
-        d.fill(circle.clone(), [255, 255, 255, 255], None);
-        d.polyline(&circle, true, LineStyle::Annotation, None);
-        d.line(c - DVec2::X * r, c + DVec2::X * r, LineStyle::Annotation, None);
-        d.text_at(c + DVec2::Y * r * 0.48, number, SECTION_NUMBER_MM, crate::Anchor::Center, 0.0);
-        d.text_at(c - DVec2::Y * r * 0.5, sheet, SECTION_SHEET_MM, crate::Anchor::Center, 0.0);
+    for (c, shown) in [(start, style.heads.at_start()), (end, style.heads.at_end())] {
+        if shown {
+            draw_head(d, project, style, fields, (c, look, r), (32, scale));
+        }
     }
     // Far clip extent, dashed.
     d.line(start + look * depth, end + look * depth, LineStyle::Hidden, None);

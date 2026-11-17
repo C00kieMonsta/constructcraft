@@ -3079,6 +3079,7 @@ fn every_dialog_keeps_its_body_inside() {
         ("design options".into(), Box::new(crate::design_options_ui::open)),
         ("browser organization".into(), Box::new(crate::browser_org_dialog::open)),
         ("line styles".into(), Box::new(crate::line_styles_dialog::open)),
+        ("tag types".into(), Box::new(crate::tag_type_ui::open_list)),
         ("fill patterns".into(), Box::new(crate::fill_patterns_dialog::open)),
         ("phases".into(), Box::new(crate::phases_dialog::open)),
         ("filters".into(), Box::new(crate::graphics_dialog::open_filters)),
@@ -3136,6 +3137,18 @@ fn every_dialog_keeps_its_body_inside() {
             Box::new(move |s| {
                 s.dialogs.type_editor = Some(id);
                 s.dialogs.type_layers_open = true;
+            }),
+        ));
+    }
+    // Type Properties of a tag type of each target and of a view mark type of each kind.
+    let tag_kinds = cc_core::tag::TagTarget::ALL.map(|t| ("tag_type_create", "target", t.code()));
+    let mark_kinds = cc_core::view_mark::MarkKind::ALL.map(|k| ("view_mark_type_create", "kind", k.code()));
+    for (command, field, code) in tag_kinds.into_iter().chain(mark_kinds) {
+        opens.push((
+            format!("type {command} {code}"),
+            Box::new(move |s| {
+                let made = s.session.execute(command, serde_json::json!({ field: code })).unwrap();
+                s.dialogs.type_editor = made["id"].as_u64().map(cc_core::ElementTypeId);
             }),
         ));
     }
@@ -5078,4 +5091,211 @@ fn render_window_picture() {
         harness.step();
     }
     harness.render().unwrap().save(path).unwrap();
+}
+
+/// The Tag Types dialog (*Annotate → Tag Types*): New makes a door tag
+/// type and Cancel undoes it; Edit on a target's built-in default makes its
+/// type and opens Type Properties, where a line is added and OK keeps it.
+#[test]
+fn tag_types_dialog_creates_and_edits_types() {
+    use crate::tag_type_ui::{Kind, Pick};
+    use cc_core::tag::TagTarget;
+    let mut state = sample_state();
+    // Doors tagged with no type of their own: the built-in default.
+    let doors: Vec<u64> = state.project().tag_types_of(TagTarget::Door).map(|t| t.id.0).collect();
+    for id in doors {
+        state.session.execute("type_delete", serde_json::json!({"type": id})).unwrap();
+    }
+    crate::commands::run(&mut state, &egui::Context::default(), crate::commands::UiCommand::TagTypes);
+    let mut harness = themed_harness(state, egui::vec2(1100.0, 1000.0), egui::Theme::Light, |ui, state| {
+        crate::dialogs::show(ui.ctx(), state)
+    });
+    let doors = |h: &Harness<'static, AppState>| h.state().project().tag_types_of(TagTarget::Door).count();
+    let pick_door = |h: &mut Harness<'static, AppState>| {
+        h.state_mut().dialogs.tag_types.as_mut().unwrap().selected = Some(Pick::Default(Kind::Tag(TagTarget::Door)));
+        h.run();
+    };
+    assert_eq!(doors(&harness), 0);
+    pick_door(&mut harness);
+    harness.get_by_label(&t!("tag-types-new")).click();
+    harness.run();
+    assert_eq!(doors(&harness), 1);
+    harness.get_by_label(&t!("action-cancel")).click();
+    harness.run();
+    assert!(harness.state().dialogs.tag_types.is_none());
+    assert_eq!(doors(&harness), 0, "Cancel undoes it");
+
+    crate::tag_type_ui::open_list(harness.state_mut());
+    pick_door(&mut harness);
+    harness.get_by_label(&t!("tag-types-edit")).click();
+    harness.run();
+    assert!(harness.state().dialogs.tag_types.is_none());
+    let id = harness.state().dialogs.type_editor.expect("Type Properties of the new type");
+    assert_eq!(doors(&harness), 1);
+    let lines = |h: &Harness<'static, AppState>| match h.state().project().element_type(id).map(|t| &t.data) {
+        Some(cc_core::TypeData::Tag { style, .. }) => style.lines.len(),
+        other => panic!("not a tag type: {other:?}"),
+    };
+    assert_eq!(lines(&harness), 1);
+    // The dialog settles where it stands over a few frames.
+    for _ in 0..8 {
+        harness.step();
+    }
+    harness.get_by_label(&t!("tag-line-add")).click();
+    harness.run();
+    assert_eq!(lines(&harness), 2, "{}", harness.state().message);
+    for _ in 0..8 {
+        harness.step();
+    }
+    harness.get_by_label(&t!("action-ok")).click();
+    harness.run();
+    assert!(harness.state().dialogs.type_editor.is_none());
+    assert_eq!(lines(&harness), 2, "OK keeps it");
+}
+
+/// A door selected in a plan shows its tag's section, whose Reset Tag puts
+/// back a tag moved there; with nothing selected the plan's properties have
+/// a tag type per target, and a section's its mark type.
+#[test]
+fn the_tag_section_adjusts_the_selected_elements_tag() {
+    let mut state = sample_state();
+    let p = state.project();
+    let door = p.elements.values().find(|e| matches!(e.kind, cc_core::ElementKind::Door(_))).unwrap();
+    let (door, level) = (door.id, door.level);
+    let plan = p.views.values().find(|v| v.is_plan() && v.level() == Some(level)).unwrap().id;
+    state.active_view = Some(plan);
+    state.selection = [door].into_iter().collect();
+    let args = serde_json::json!({"view": plan.0, "ids": [door.0], "offset": [1.0, 0.5], "rotation": 30.0});
+    state.session.execute("tag_set", args).unwrap();
+    let mut harness = themed_harness(state, egui::vec2(360.0, 2400.0), egui::Theme::Light, |ui, state| {
+        crate::properties::show(ui, state);
+    });
+    harness.get_by_label(&t!("section-tag"));
+    harness.get_by_label(&t!("action-reset-tag")).click();
+    harness.run();
+    let tags = |h: &Harness<'static, AppState>| h.state().project().view(plan).unwrap().tags.clone();
+    assert!(tags(&harness).is_empty(), "{:?}", tags(&harness));
+    harness.state_mut().selection.clear();
+    harness.run();
+    harness.get_by_label(&t!("section-tag-types"));
+    let section = harness.state().project().views.values().find(|v| v.category() == cc_core::ViewCategory::Section);
+    if let Some(section) = section.map(|v| v.id) {
+        harness.state_mut().active_view = Some(section);
+        harness.run();
+        harness.get_by_label(&t!("section-tag-types"));
+    }
+}
+
+/// In a plan a room's tag is dragged to a new spot (a click on it still
+/// selects the room), turned by the grip of the room selected alone, hidden
+/// from its context menu; a grid's bubble is dragged with an elbow.
+#[test]
+fn tags_and_bubbles_are_dragged_turned_and_hidden_on_the_canvas() {
+    use glam::DVec2;
+    let mut state = sample_state();
+    let p = state.project();
+    let room = p.elements.values().find(|e| matches!(e.kind, cc_core::ElementKind::Room(_))).unwrap();
+    let (room, level) = (room.id, room.level);
+    let plan = p.views.values().find(|v| v.is_plan() && v.level() == Some(level)).unwrap().id;
+    state.active_view = Some(plan);
+    state.set_tool(crate::tools::Tool::Select);
+    /// The view drawn around the first room's point, 20 points a meter.
+    fn xf_of(state: &AppState, rect: egui::Rect) -> crate::paint::Xf {
+        let origin = state
+            .project()
+            .elements
+            .values()
+            .find_map(|e| match &e.kind {
+                cc_core::ElementKind::Room(r) => Some(r.position),
+                _ => None,
+            })
+            .unwrap_or_default();
+        crate::paint::Xf { screen: rect.center(), origin, scale: 20.0 }
+    }
+    let mut harness = themed_harness(state, egui::vec2(600.0, 400.0), egui::Theme::Light, |ui, state| {
+        let (resp, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
+        let xf = xf_of(state, resp.rect);
+        let Some(view) = state.active_view.and_then(|v| state.project().view(v).cloned()) else { return };
+        let Some(drawing) = state.drawing(view.id) else { return };
+        crate::tools::handle(ui, &resp, &painter, state, &view, &xf, &drawing);
+    });
+    harness.run();
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 400.0));
+    let screen = |h: &Harness<'static, AppState>, p: DVec2| xf_of(h.state(), rect).to_screen(p);
+    let handle = |h: &mut Harness<'static, AppState>| {
+        h.state_mut().drawing(plan).unwrap().tags.iter().find(|t| t.element == room).copied().unwrap()
+    };
+    let press = |h: &mut Harness<'static, AppState>, pos: egui::Pos2, button: egui::PointerButton, pressed: bool| {
+        h.input_mut().events.push(egui::Event::PointerMoved(pos));
+        h.input_mut().events.push(egui::Event::PointerButton { pos, button, pressed, modifiers: Default::default() });
+        h.run();
+    };
+    let drag = |h: &mut Harness<'static, AppState>, from: egui::Pos2, by: egui::Vec2| {
+        press(h, from, egui::PointerButton::Primary, true);
+        for k in 1..=4 {
+            h.input_mut().events.push(egui::Event::PointerMoved(from + by * (k as f32 / 4.0)));
+            h.run();
+        }
+        press(h, from + by, egui::PointerButton::Primary, false);
+    };
+    let placement = |h: &Harness<'static, AppState>, id: cc_core::ElementId| {
+        h.state().project().view(plan).unwrap().tags.get(&id).copied().unwrap_or_default()
+    };
+
+    // A click on the room's tag selects the room.
+    let tag = handle(&mut harness);
+    let at = screen(&harness, tag.center);
+    press(&mut harness, at, egui::PointerButton::Primary, true);
+    press(&mut harness, at, egui::PointerButton::Primary, false);
+    assert_eq!(harness.state().selection.iter().copied().collect::<Vec<_>>(), vec![room]);
+    // A drag moves the tag 1 m to the right; the room stays.
+    let position = |h: &Harness<'static, AppState>| match &h.state().project().element(room).unwrap().kind {
+        cc_core::ElementKind::Room(r) => r.position,
+        other => panic!("not a room: {other:?}"),
+    };
+    let before = position(&harness);
+    drag(&mut harness, at, egui::vec2(20.0, 0.0));
+    assert!(
+        (placement(&harness, room).offset - DVec2::new(1.0, 0.0)).length() < 1e-6,
+        "{:?}",
+        placement(&harness, room)
+    );
+    assert_eq!(position(&harness), before);
+    // The grip past its right side turns it a quarter turn.
+    let tag = handle(&mut harness);
+    let grip = screen(&harness, tag.rotate_grip(14.0 / 20.0));
+    let center = screen(&harness, tag.center);
+    drag(&mut harness, grip, (center - grip) + egui::vec2(0.0, -40.0));
+    assert_eq!(placement(&harness, room).rotation_deg, Some(90.0));
+    assert!(handle(&mut harness).rotation > 1.5);
+    // Its context menu hides it.
+    let center = handle(&mut harness).center;
+    let at = screen(&harness, center);
+    press(&mut harness, at, egui::PointerButton::Secondary, true);
+    press(&mut harness, at, egui::PointerButton::Secondary, false);
+    harness.get_by_label(&t!("menu-hide-tag")).click();
+    harness.run();
+    assert!(placement(&harness, room).hidden);
+
+    // A grid's end bubble is dragged off its line.
+    let origin = xf_of(harness.state(), rect).origin;
+    let args = serde_json::json!({
+        "start": (origin + DVec2::new(-6.0, -6.0)).to_array(),
+        "end": (origin + DVec2::new(-6.0, -3.0)).to_array(),
+        "name": "Z",
+        "level": level.0,
+    });
+    let grid =
+        cc_core::ElementId(harness.state_mut().session.execute("grid_create", args).unwrap()["id"].as_u64().unwrap());
+    harness.state_mut().selection.clear();
+    harness.run();
+    let bubble =
+        harness.state_mut().drawing(plan).unwrap().bubbles.iter().find(|b| b.element == grid).copied().unwrap();
+    let at = screen(&harness, bubble.center);
+    drag(&mut harness, at, egui::vec2(-20.0, 0.0));
+    assert!(
+        (placement(&harness, grid).offset - DVec2::new(-1.0, 0.0)).length() < 1e-6,
+        "{:?}",
+        placement(&harness, grid)
+    );
 }

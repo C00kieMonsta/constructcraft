@@ -72,6 +72,12 @@ pub enum Category {
     Connection,
     /// Niches: recesses in one face of a wall, hosted like doors and windows.
     Niche,
+    /// Tag types: what plans write by doors, windows, rooms, columns, beams
+    /// and footings (see [`crate::tag`]); their tags are drawn with their element.
+    Tag,
+    /// View mark types: how plans mark sections and elevations (see
+    /// [`crate::view_mark`]).
+    ViewMark,
 }
 
 impl Category {
@@ -121,14 +127,18 @@ impl Category {
     ];
 
     /// Every category by name: [`Category::ALL`] (the ones views draw and
-    /// filter) and title blocks, whose types sheets use.
-    pub const NAMED: [Category; Category::ALL.len() + 1] = {
-        let mut out = [Category::TitleBlock; Category::ALL.len() + 1];
+    /// filter), title blocks, whose types sheets use, tags, whose types plans
+    /// tag elements with, and view marks, whose types plans mark sections
+    /// and elevations with.
+    pub const NAMED: [Category; Category::ALL.len() + 3] = {
+        let mut out = [Category::TitleBlock; Category::ALL.len() + 3];
         let mut i = 0;
         while i < Category::ALL.len() {
             out[i] = Category::ALL[i];
             i += 1;
         }
+        out[Category::ALL.len() + 1] = Category::Tag;
+        out[Category::ALL.len() + 2] = Category::ViewMark;
         out
     };
 
@@ -213,6 +223,8 @@ impl Category {
             Category::BarTag => "category-bar-tag",
             Category::Pile => "category-pile",
             Category::TitleBlock => "category-title-block",
+            Category::Tag => "category-tag",
+            Category::ViewMark => "category-view-mark",
             Category::Column => "category-column",
             Category::Beam => "category-beam",
             Category::Stair => "category-stair",
@@ -389,9 +401,11 @@ pub enum TypeData {
     },
     /// Rooms have no type parameters yet; the type groups them in schedules.
     Room {},
-    /// Grid line with a bubble of `bubble` paper millimeters.
+    /// Grid line with a bubble of `bubble` paper millimeters, drawn as `style` says.
     Grid {
         bubble: f64,
+        #[serde(default)]
+        style: crate::grid::GridStyle,
     },
     /// Dimensions with text of `text_size` paper millimeters, drawn as `style` says.
     Dimension {
@@ -411,6 +425,18 @@ pub enum TypeData {
     /// Bar tags with text of `text_size` paper millimeters.
     BarTag {
         text_size: f64,
+    },
+    /// Tags of `target` elements in plans, drawn as `style` says.
+    Tag {
+        target: crate::tag::TagTarget,
+        #[serde(default)]
+        style: crate::tag::TagStyle,
+    },
+    /// Marks of sections or elevations in plans, drawn as `style` says.
+    ViewMark {
+        kind: crate::view_mark::MarkKind,
+        #[serde(default)]
+        style: crate::view_mark::MarkStyle,
     },
     LevelMark {
         text_size: f64,
@@ -677,6 +703,8 @@ impl TypeData {
             | TypeData::Text { .. }
             | TypeData::LevelMark { .. }
             | TypeData::BarTag { .. }
+            | TypeData::Tag { .. }
+            | TypeData::ViewMark { .. }
             | TypeData::CadImport {}
             | TypeData::DetailLine {}
             | TypeData::FilledRegion { .. }
@@ -757,6 +785,8 @@ impl TypeData {
             | TypeData::Text { .. }
             | TypeData::LevelMark { .. }
             | TypeData::BarTag { .. }
+            | TypeData::Tag { .. }
+            | TypeData::ViewMark { .. }
             | TypeData::CadImport {}
             | TypeData::DetailLine {}
             | TypeData::FilledRegion { .. }
@@ -984,6 +1014,8 @@ impl ElementType {
             TypeData::Text { .. } => Category::Text,
             TypeData::LevelMark { .. } => Category::LevelMark,
             TypeData::BarTag { .. } => Category::BarTag,
+            TypeData::Tag { .. } => Category::Tag,
+            TypeData::ViewMark { .. } => Category::ViewMark,
             TypeData::Pile { .. } => Category::Pile,
             TypeData::Column { .. } => Category::Column,
             TypeData::Beam { .. } => Category::Beam,
@@ -1178,6 +1210,8 @@ impl ElementType {
             | TypeData::Text { .. }
             | TypeData::LevelMark { .. }
             | TypeData::BarTag { .. }
+            | TypeData::Tag { .. }
+            | TypeData::ViewMark { .. }
             | TypeData::CadImport {}
             | TypeData::DetailLine {}
             | TypeData::FilledRegion { .. }

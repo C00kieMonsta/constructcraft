@@ -406,6 +406,27 @@ Cada barra de armadura tem uma posição que identifica sua forma (mesmo diâmet
 {"command": "bar_length_check", "args": {"max_length": 12}}
 ```
 
+### Etiquetas
+
+As plantas etiquetam sozinhas portas, janelas, ambientes, pilares, vigas, sapatas e blocos sobre estacas. Um tipo de etiqueta (`tag_type_create`, `target` e um `style` parcial) diz o que a etiqueta escreve e como ela é: até 8 linhas (`lines`) de texto com campos `{Campo}` (um campo de tabela pelo nome, como `{Width}`, `{Height}` ou `{Comments}`, ou `{Mark}`, `{TypeName}`, `{Name}`, `{Number}`, `{Area}`, `{Section}`, `{Level}`) e um tamanho em milímetros de papel, um símbolo (`symbol`: `Circle`, `Hexagon`, `Rectangle`, `RoundedRectangle`, `Ellipse`, `Diamond`, `Triangle`, `Underline`, `None`, ou `{"Component": id}` de um componente de detalhe desenhado no tamanho do papel, com os campos dos seus textos preenchidos), sua largura e altura (`width`, `height`; 0 ajusta ao texto), penas, `leader` e `orientation`; `type_set` o altera. O modelo traz um tipo de etiqueta por alvo, no estilo padrão (as etiquetas que as plantas sempre desenharam); um projeto sem tipo de etiqueta para um alvo (um arquivo antigo) desenha as etiquetas nesse mesmo estilo. Cada planta escolhe um tipo de etiqueta por alvo (`view_set` `tag_types`) e ajusta a etiqueta de cada elemento com `tag_set` (`offset` ou `delta`, `rotation`, `type`, `hidden`, `leader`, `reset`; `null` limpa um campo); `tag_get` mostra os ajustes, o tipo e os textos.
+
+```text
+{"command": "tag_type_create", "args": {"target": "door", "name": "Porta com tamanho", "style": {"lines": [{"text": "{Mark}", "size": 2.5}, {"text": "{Width} x {Height}", "size": 2}], "symbol": "Rectangle"}}}
+{"command": "view_set", "args": {"view": "Térreo", "tag_types": {"door": "Porta com tamanho"}}}
+{"command": "tag_set", "args": {"view": "Térreo", "ids": [12, 14], "delta": [0, 0.5], "rotation": 90}}
+{"command": "tag_get", "args": {"view": "Térreo", "id": 12}}
+```
+
+Eixos e as marcas de cortes e elevações seguem a mesma ideia. O `style` de um tipo de eixo (`type_set` `params.style`) define as pontas com bolha (`ends`: `End`, `Start`, `Both`, `None`; o `ends` do próprio eixo, por `element_set` `params`, vem primeiro), o símbolo da bolha (`symbol`: uma forma, ou um componente de detalhe cujos textos escrevem `{Name}`), `text_size`, `pen`, `color` e `line_pattern`. Cada planta, elevação ou corte move as bolhas de um eixo com `tag_set` (`offset` ou `delta` para a bolha do fim, `start_offset` para a do início, cada uma com um cotovelo até a linha) ou as oculta (`hidden`; a linha fica). Um tipo de marca de vista (`view_mark_type_create`, `kind` `section` ou `elevation` e um `style` parcial) desenha as cabeças dos cortes e as marcas das elevações: o tamanho da cabeça (`head`, em milímetros de papel; 0: 0,5 m no modelo, como as marcas de elevação sempre foram), seu `symbol`, uma linha dividindo-a (`split`), os textos `top`, `bottom` e `label` com `{Number}`, `{Sheet}`, `{Name}` e `{Letter}`, a seta (`arrow`), as cabeças do corte (`heads`), a espessura da linha (`line_weight`) e as cores. Um corte ou uma elevação usa o seu próprio tipo (`view_set` `mark_type`), senão o primeiro do projeto do seu tipo (o modelo traz um de cada, no estilo padrão), senão a marca que as plantas sempre desenharam. `mark_move` move a marca de uma elevação em uma planta (`delta`, `offset` ou `reset`).
+
+```text
+{"command": "type_set", "args": {"type": "Eixo 8 mm", "params": {"style": {"ends": "Both", "symbol": "Hexagon", "text_size": 4}}}}
+{"command": "tag_set", "args": {"view": "Térreo", "ids": [30], "offset": [1.5, 0], "start_offset": [-1.5, 0]}}
+{"command": "view_mark_type_create", "args": {"kind": "section", "name": "Cabeça grande", "style": {"head": 16, "top": {"text": "{Letter}", "size": 4}}}}
+{"command": "view_set", "args": {"view": "Corte A", "mark_type": "Cabeça grande"}}
+{"command": "mark_move", "args": {"plan": "Térreo", "view": "Elevação: Sul", "delta": [0, -2]}}
+```
+
 ### Renderização fotorrealista
 
 Uma vista 3D guarda suas configurações de renderização em `render` (`view_get`), mudadas por `view_set` com um patch de mesclagem: amostras por pixel (`samples`), reflexões da luz (`max_depth`), largura e altura da imagem em pixels (`width`, `height`), `fov_deg`, exposição em stops (`exposure`), mapeamento de tons (`tone_map`: `Filmic` ou `Standard`), o limite contra pontos brilhantes (`clamp`), `clay` (toda superfície opaca num mesmo branco fosco, o vidro mantido, sob o mesmo céu e sol) e o ambiente (`environment`: `sky_strength`, `sun_strength`, `ground_color`, `ground_plane`); `null` as remove. O sol é o da vista (`sun`). `view_render` faz o path tracing da vista no processador e grava a imagem (`.png`, `.jpg`, ou `.exr`/`.hdr` em luz linear) com a câmera da vista, como a vista 3D a mostra; `settings` altera as configurações da vista só para essa renderização, e `region` (`[x, y, largura, altura]` em pixels) renderiza só uma parte da imagem. Retorna o tamanho, as amostras, os segundos e os triângulos, e não muda nada no modelo.

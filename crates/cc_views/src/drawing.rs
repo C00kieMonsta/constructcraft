@@ -134,6 +134,9 @@ pub enum Prim {
         angle: f64,
         /// The element the text annotates (hidden with it).
         element: Option<ElementId>,
+        /// The text's own color (`None`: the annotation ink, or what the
+        /// view's graphics give its element).
+        color: Option<[u8; 3]>,
     },
     /// A picture filling the parallelogram from `origin` (its bottom-left
     /// corner) along `u` (its width) and `v` (its height).
@@ -159,13 +162,14 @@ impl Prim {
             Prim::Fill { pts, color, element, cut } => {
                 Prim::Fill { pts: pts.iter().map(|p| f(*p)).collect(), color: *color, element: *element, cut: *cut }
             }
-            Prim::Text { pos, text, size, anchor, angle, element } => Prim::Text {
+            Prim::Text { pos, text, size, anchor, angle, element, color } => Prim::Text {
                 pos: f(*pos),
                 text: text.clone(),
                 size: *size,
                 anchor: *anchor,
                 angle: *angle,
                 element: *element,
+                color: *color,
             },
             Prim::Image { origin, u, v, image, element, faded } => {
                 let o = f(*origin);
@@ -221,6 +225,10 @@ pub struct Drawing2D {
     pub sections: Vec<SectionHandle>,
     /// The marks of callouts drawn in the view: picked, moved and resized there.
     pub callouts: Vec<crate::callout::CalloutHandle>,
+    /// The markers of elevations in a plan: picked and moved there.
+    pub marks: Vec<MarkHandle>,
+    /// The bubbles of grids: picked and moved in the view.
+    pub bubbles: Vec<BubbleHandle>,
     /// Lookups over `prims`, built the first time they are needed (see
     /// [`DrawingIndex`]); a copy of the drawing starts without them.
     pub index: DrawingIndex,
@@ -259,13 +267,59 @@ impl SectionHandle {
     }
 }
 
-/// A tag of an element in a view, as drawn: picked within `half` of
-/// `center`; `offset` is how far the view moved it from its default spot.
+/// A tag of an element in a view, as drawn: its box, `half` its size
+/// along and across the tag around `center`, turned `rotation` radians
+/// counter-clockwise; `offset` is how far the view moved it from its
+/// default spot.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TagHandle {
     pub element: ElementId,
     pub center: DVec2,
     pub half: DVec2,
+    pub rotation: f64,
+    pub offset: DVec2,
+}
+
+impl TagHandle {
+    /// Whether `p` lies in the tag's turned box.
+    pub fn contains(&self, p: DVec2) -> bool {
+        let local = DVec2::from_angle(-self.rotation).rotate(p - self.center);
+        local.abs().cmple(self.half).all()
+    }
+
+    /// The corners of the turned box around `center`, counter-clockwise
+    /// from the bottom left.
+    pub fn corners_at(&self, center: DVec2) -> [DVec2; 4] {
+        let r = DVec2::from_angle(self.rotation);
+        let h = self.half;
+        [DVec2::new(-h.x, -h.y), DVec2::new(h.x, -h.y), h, DVec2::new(-h.x, h.y)].map(|c| center + r.rotate(c))
+    }
+
+    /// Where the grip that turns the tag sits: `gap` meters past the middle
+    /// of the box's right side.
+    pub fn rotate_grip(&self, gap: f64) -> DVec2 {
+        self.center + DVec2::from_angle(self.rotation) * (self.half.x + gap)
+    }
+}
+
+/// The marker of an elevation in a plan, as drawn: picked within `half` of
+/// `center`; `offset` is how far the plan moved it from where it sits.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MarkHandle {
+    pub view: cc_core::ViewId,
+    pub center: DVec2,
+    pub half: DVec2,
+    pub offset: DVec2,
+}
+
+/// A grid's bubble, as drawn: picked within `radius` of `center`; `start`
+/// for the bubble at the grid's start, and `offset` how far the view moved it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BubbleHandle {
+    pub element: ElementId,
+    pub start: bool,
+    pub center: DVec2,
+    pub radius: f64,
     pub offset: DVec2,
 }
 
@@ -311,7 +365,17 @@ impl Drawing2D {
 
     /// The tag at `p` (the last drawn on top), if any.
     pub fn tag_at(&self, p: DVec2) -> Option<TagHandle> {
-        self.tags.iter().rev().find(|t| (p - t.center).abs().cmple(t.half).all()).copied()
+        self.tags.iter().rev().find(|t| t.contains(p)).copied()
+    }
+
+    /// The elevation marker at `p` (the last drawn on top), if any.
+    pub fn mark_at(&self, p: DVec2) -> Option<MarkHandle> {
+        self.marks.iter().rev().find(|m| (p - m.center).abs().cmple(m.half).all()).copied()
+    }
+
+    /// The grid bubble at `p` (the last drawn on top), if any.
+    pub fn bubble_at(&self, p: DVec2) -> Option<BubbleHandle> {
+        self.bubbles.iter().rev().find(|b| b.center.distance(p) <= b.radius).copied()
     }
 }
 
@@ -338,6 +402,23 @@ impl Drawing2D {
         }
     }
 
+    /// [`Self::polyline`] with its own pen.
+    pub fn polyline_pen(
+        &mut self,
+        pts: &[DVec2],
+        closed: bool,
+        style: LineStyle,
+        pen: Option<Pen>,
+        element: Option<ElementId>,
+    ) {
+        for w in pts.windows(2) {
+            self.line_pen(w[0], w[1], style, pen, element);
+        }
+        if closed && pts.len() > 2 {
+            self.line_pen(pts[pts.len() - 1], pts[0], style, pen, element);
+        }
+    }
+
     pub fn fill(&mut self, pts: Vec<DVec2>, color: [u8; 4], element: Option<ElementId>) {
         if pts.len() >= 3 {
             self.prims.push(Prim::Fill { pts, color, element, cut: false });
@@ -356,7 +437,7 @@ impl Drawing2D {
     }
 
     pub fn text_at(&mut self, pos: DVec2, text: impl Into<String>, size: f64, anchor: Anchor, angle: f64) {
-        self.prims.push(Prim::Text { pos, text: text.into(), size, anchor, angle, element: None });
+        self.prims.push(Prim::Text { pos, text: text.into(), size, anchor, angle, element: None, color: None });
     }
 
     /// Text that annotates `element` (a tag, a dimension value…).
@@ -369,7 +450,20 @@ impl Drawing2D {
         angle: f64,
         element: Option<ElementId>,
     ) {
-        self.prims.push(Prim::Text { pos, text: text.into(), size, anchor, angle, element });
+        self.prims.push(Prim::Text { pos, text: text.into(), size, anchor, angle, element, color: None });
+    }
+
+    /// [`Self::tag_text`] in its own `color` (`None`: the annotation ink).
+    pub fn colored_text(
+        &mut self,
+        pos: DVec2,
+        text: impl Into<String>,
+        size: f64,
+        (anchor, angle): (Anchor, f64),
+        element: Option<ElementId>,
+        color: Option<[u8; 3]>,
+    ) {
+        self.prims.push(Prim::Text { pos, text: text.into(), size, anchor, angle, element, color });
     }
 
     /// Circular arc approximated with line segments.
@@ -664,6 +758,7 @@ mod tests {
             anchor: Anchor::LeftBottom,
             angle: 0.0,
             element: Some(ElementId(4)),
+            color: None,
         });
         d.line(v(-50.0, -50.0), v(100.0, 50.0), LineStyle::Thin, Some(ElementId(5)));
         d.background.insert(ElementId(5));
@@ -731,11 +826,18 @@ mod tests {
             element: ElementId(id),
             center: v(x, 0.0),
             half: v(1.0, 0.5),
+            rotation: 0.0,
             offset: DVec2::ZERO,
         };
         d.tags = vec![tag(1, 0.0), tag(2, 1.5)];
         assert_eq!(d.tag_at(v(-0.9, 0.4)).map(|t| t.element.0), Some(1));
         assert_eq!(d.tag_at(v(0.8, 0.0)).map(|t| t.element.0), Some(2), "both boxes: the one on top");
         assert_eq!(d.tag_at(v(0.0, 0.6)), None);
+        // A tag turned a quarter turn is picked in its turned box.
+        d.tags = vec![TagHandle { rotation: std::f64::consts::FRAC_PI_2, ..tag(3, 0.0) }];
+        assert_eq!(d.tag_at(v(0.0, 0.9)).map(|t| t.element.0), Some(3));
+        assert_eq!(d.tag_at(v(0.9, 0.0)), None);
+        let grip = d.tags[0].rotate_grip(0.5);
+        assert!((grip - v(0.0, 1.5)).length() < 1e-12, "{grip:?}");
     }
 }

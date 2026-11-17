@@ -159,11 +159,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         let mut grids_x = Vec::new();
         for (x, name) in [(0.0, "1"), (5.0, "2"), (9.0, "3")] {
-            let grid = Grid { start: DVec2::new(x, -1.5), end: DVec2::new(x, 7.5), name: name.into() };
+            let grid = Grid { start: DVec2::new(x, -1.5), end: DVec2::new(x, 7.5), name: name.into(), ends: None };
             grids_x.push((x, add(e, grid_t, "", ElementKind::Grid(grid))));
         }
         for (y, name) in [(0.0, "A"), (6.0, "B")] {
-            let grid = Grid { start: DVec2::new(-1.5, y), end: DVec2::new(10.5, y), name: name.into() };
+            let grid = Grid { start: DVec2::new(-1.5, y), end: DVec2::new(10.5, y), name: name.into(), ends: None };
             add(e, grid_t, "", ElementKind::Grid(grid));
         }
         let ground_plan = p

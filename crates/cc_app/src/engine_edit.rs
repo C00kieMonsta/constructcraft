@@ -128,6 +128,14 @@ pub fn view(state: &mut AppState, id: ViewId, key: Option<u64>, f: impl FnOnce(&
             .then(|| new.sun.as_ref().map(|sun| cc_engine::commands::sun::sun_arg(state.project(), sun))),
         render: (new.render != old.render).then(|| new.render.as_ref().map(json)),
         shading: (new.shading != old.shading).then(|| json(&new.shading)),
+        tag_types: (new.tag_types != old.tag_types).then(|| {
+            cc_core::tag::TagTarget::ALL
+                .into_iter()
+                .filter(|t| new.tag_types.get(t) != old.tag_types.get(t))
+                .map(|t| (t.code().to_string(), new.tag_types.get(&t).map(|id| Ref::Id(id.0))))
+                .collect()
+        }),
+        mark_type: (new.mark_type != old.mark_type).then(|| new.mark_type.map(|t| Ref::Id(t.0))),
     };
     run(state, key, command)
 }

@@ -376,6 +376,16 @@ impl<'a> EditCtx<'a> {
         self.project.types.get_mut(&id)
     }
 
+    /// Tag, grid and view mark types drawn as a detail component that is
+    /// gone (or no longer a detail component) draw their plain symbol.
+    fn sync_tag_types(&mut self) {
+        for id in crate::tag::stale_symbols(&self.project.types) {
+            if let Some(t) = self.type_mut(id) {
+                crate::tag::reset_symbol(&mut t.data);
+            }
+        }
+    }
+
     /// Remove a type (callers make sure no element uses it).
     pub fn remove_type(&mut self, id: ElementTypeId) {
         if self.project.types.contains_key(&id) {
@@ -551,11 +561,20 @@ impl<'a> EditCtx<'a> {
                 t.graphics.filters.retain(|f| filters.contains_key(&f.filter));
             }
         }
+        let elevations = self.project.elevation_ids();
         let p = &*self.project;
         let changed: Vec<(ViewId, View)> = p
             .views
             .values()
-            .filter(|v| v.template.is_some() || !v.graphics.is_empty() || !v.tag_offsets.is_empty())
+            .filter(|v| {
+                v.template.is_some()
+                    || !v.graphics.is_empty()
+                    || !v.tag_offsets.is_empty()
+                    || !v.tags.is_empty()
+                    || !v.tag_types.is_empty()
+                    || v.mark_type.is_some()
+                    || !v.mark_offsets.is_empty()
+            })
             .filter_map(|v| {
                 let mut new = v.clone();
                 match new.template.map(|t| p.templates.get(&t)) {
@@ -564,8 +583,10 @@ impl<'a> EditCtx<'a> {
                     None => {}
                 }
                 new.graphics.repair(&p.filters, Some(&|id| p.elements.contains_key(&id)));
-                // Tags of deleted elements go.
-                new.tag_offsets.retain(|id, o| p.elements.contains_key(id) && o.is_finite());
+                // Tags of deleted elements and deleted tag types go.
+                crate::tag::repair_view_tags(&mut new, &p.elements, &p.types);
+                // Mark types and moved markers of deleted types and views go.
+                crate::view_mark::repair_view_marks(&mut new, &elevations, &p.types);
                 (new != *v).then_some((v.id, new))
             })
             .collect();
@@ -989,6 +1010,7 @@ impl<'a> EditCtx<'a> {
         self.sync_sketches();
         self.sync_callouts();
         self.sync_sun_ground();
+        self.sync_tag_types();
         self.sync_views();
         let p = &*self.project;
         self.tx.elements.retain(|id, c| {

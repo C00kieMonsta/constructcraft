@@ -137,11 +137,11 @@ impl PaintCache {
                     painter.add(Shape::Mesh(mesh.clone()));
                 }
                 Piece::Text(i) => {
-                    if let Some(Prim::Text { pos, text, size, anchor, angle, .. }) = d.prims.get(*i) {
+                    if let Some(Prim::Text { pos, text, size, anchor, angle, color, .. }) = d.prims.get(*i) {
                         let px = (size * opts.px_per_mm) as f32;
                         let at = painted.to_screen(*pos);
                         if !text_culled(text, px, at, clip) {
-                            paint_text(painter, at, text, px, *anchor, *angle as f32);
+                            paint_text(painter, at, text, px, (*anchor, *angle as f32), *color);
                         }
                     }
                 }

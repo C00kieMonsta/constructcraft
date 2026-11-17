@@ -782,6 +782,9 @@ pub struct Grid {
     pub start: DVec2,
     pub end: DVec2,
     pub name: String,
+    /// The ends with a bubble, instead of its type's (see [`crate::grid::GridStyle`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ends: Option<crate::grid::BubbleEnds>,
 }
 
 /// A text note in one view, in that view's drawing coordinates (like

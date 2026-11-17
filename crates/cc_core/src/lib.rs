@@ -71,6 +71,7 @@ pub mod structural_material;
 pub mod structural_profile;
 pub mod sun;
 pub mod sweep;
+pub mod tag;
 mod template_spec;
 pub use template_spec::Defaults;
 pub mod title_block;
@@ -80,6 +81,7 @@ pub mod truss;
 mod types;
 pub mod units;
 mod view;
+pub mod view_mark;
 pub mod wall_framing;
 pub mod wall_ops;
 

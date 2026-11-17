@@ -392,6 +392,8 @@ impl Tool {
             Category::DetailComponent => Tool::DetailComponent { type_id },
             // Imported, not drawn; bar tags are placed by their command.
             Category::BarTag
+            | Category::Tag
+            | Category::ViewMark
             | Category::CadImport
             | Category::TitleBlock
             | Category::SteelBuilding
@@ -481,6 +483,20 @@ pub enum Drag {
     /// The tag of an element, as drawn when the drag started.
     Tag {
         tag: cc_views::TagHandle,
+        start: DVec2,
+    },
+    /// The grip that turns the tag of a selected element.
+    TagRotate {
+        tag: cc_views::TagHandle,
+    },
+    /// A grid's bubble, as drawn when the drag started.
+    Bubble {
+        bubble: cc_views::BubbleHandle,
+        start: DVec2,
+    },
+    /// An elevation's marker in a floor plan, as drawn when the drag started.
+    Mark {
+        mark: cc_views::MarkHandle,
         start: DVec2,
     },
     /// A section's mark in a plan: the whole mark, an end or a piece of
@@ -607,6 +623,8 @@ pub struct Interaction {
     pub chain: Vec<ChainStep>,
     /// Segments taken back, latest last, for redo.
     pub chain_redo: Vec<ChainStep>,
+    /// The tag (or grid bubbles) a context menu was opened on: the view and the element.
+    pub tag_menu: Option<(ViewId, ElementId)>,
 }
 
 /// Where a chain stands: its anchor, the direction angles are measured
@@ -3934,6 +3952,215 @@ fn resize_cursor(dir: egui::Vec2) -> egui::CursorIcon {
     }
 }
 
+/// The outline of a tag's box around `center`, turned `rotation` radians.
+fn tag_outline(painter: &Painter, xf: &Xf, tag: &cc_views::TagHandle, center: DVec2, rotation: f64) {
+    let turned = cc_views::TagHandle { rotation, ..*tag };
+    let pts: Vec<Pos2> = turned.corners_at(center).iter().map(|p| xf.to_screen(*p)).collect();
+    painter.add(egui::Shape::closed_line(pts, Stroke::new(1.5, PREVIEW)));
+}
+
+/// The angle a tag turned about `center` toward `p` takes, degrees: whole
+/// degrees, or steps of 15 with `shift`.
+fn tag_angle(center: DVec2, p: DVec2, shift: bool) -> f64 {
+    let d = p - center;
+    let deg = d.y.atan2(d.x).to_degrees();
+    let step = if shift { 15.0 } else { 1.0 };
+    ((deg / step).round() * step).rem_euclid(360.0)
+}
+
+/// Whether `pos` (screen) is on an end grip of a selected element.
+fn near_grip(state: &AppState, xf: &Xf, pos: Pos2) -> bool {
+    state.selection.iter().take(50).filter_map(|id| state.project().element(*id)).any(|e| {
+        cc_core::wall_ops::line_of(e).is_some_and(|(a, b)| [a, b].iter().any(|p| xf.to_screen(*p).distance(pos) <= 8.0))
+    })
+}
+
+/// Distance from the tag's box to the grip that turns it, screen points.
+const ROTATE_GRIP_GAP: f64 = 14.0;
+
+/// Tags, grid bubbles and elevation markers under the Select tool: tags of
+/// plans (and the grip that turns the tag of the element selected alone)
+/// and the markers of elevations in floor plans are dragged to a new spot,
+/// the bubbles of grids in plans, elevations and sections; a right click on
+/// a tag or a bubble offers to hide or reset it. Every change runs
+/// `tag_set` or `mark_move`. Returns `true` when it took the pointer (a
+/// click on a tag still selects its element).
+fn annotation_handles(
+    ui: &Ui,
+    resp: &Response,
+    painter: &Painter,
+    state: &mut AppState,
+    movable: bool,
+    xf: &Xf,
+    drawing: &Drawing2D,
+) -> bool {
+    use cc_engine::commands::tags::TagSet;
+    let Some(view_id) = state.active_view else { return false };
+    let Some(view) = state.project().view(view_id) else { return false };
+    let floor_plan = matches!(view.kind, ViewKind::FloorPlan { .. });
+    let projected = cc_core::view_mark::MarkKind::of_view(&view.kind).is_some();
+    let (tags_ok, bubbles_ok, marks_ok) = (movable, movable || projected, movable && floor_plan);
+    let shift = ui.input(|i| i.modifiers.shift);
+    let raw = resp.hover_pos().map(|p| xf.to_world(p));
+    let tag_set = |id: cc_core::ElementId| TagSet { view: Ref::Id(view_id.0), ids: vec![id.0], ..Default::default() };
+
+    // A drag under way: its preview, and the change when it ends.
+    let end = raw.or(state.cursor);
+    let stopped = resp.drag_stopped();
+    match state.interaction.drag.clone() {
+        Some(Drag::Tag { tag, start }) => {
+            if let Some(raw) = raw {
+                tag_outline(painter, xf, &tag, tag.center + (raw - start), tag.rotation);
+            }
+            if stopped {
+                state.interaction.drag = None;
+                if let Some(p) = end
+                    && p.distance(start) > 1e-6
+                {
+                    let delta = Some((p - start).to_array());
+                    crate::actions::run_command(state, TagSet { delta, ..tag_set(tag.element) });
+                }
+            }
+            return true;
+        }
+        Some(Drag::TagRotate { tag }) => {
+            if let Some(raw) = raw {
+                let deg = tag_angle(tag.center, raw, shift);
+                tag_outline(painter, xf, &tag, tag.center, deg.to_radians());
+                label(painter, xf.to_screen(raw), format!("{deg:.0}°"));
+            }
+            if stopped {
+                state.interaction.drag = None;
+                if let Some(p) = end {
+                    let rotation = Some(Some(tag_angle(tag.center, p, shift)));
+                    crate::actions::run_command(state, TagSet { rotation, ..tag_set(tag.element) });
+                }
+            }
+            return true;
+        }
+        Some(Drag::Bubble { bubble, start }) => {
+            if let Some(raw) = raw {
+                let c = xf.to_screen(bubble.center + (raw - start));
+                painter.circle_stroke(c, (bubble.radius * xf.scale) as f32, Stroke::new(1.5, PREVIEW));
+            }
+            if stopped {
+                state.interaction.drag = None;
+                if let Some(p) = end
+                    && p.distance(start) > 1e-6
+                {
+                    let delta = p - start;
+                    let command = if bubble.start {
+                        TagSet {
+                            start_offset: Some(Some((bubble.offset + delta).to_array())),
+                            ..tag_set(bubble.element)
+                        }
+                    } else {
+                        TagSet { delta: Some(delta.to_array()), ..tag_set(bubble.element) }
+                    };
+                    crate::actions::run_command(state, command);
+                }
+            }
+            return true;
+        }
+        Some(Drag::Mark { mark, start }) => {
+            if let Some(raw) = raw {
+                let c = mark.center + (raw - start);
+                let rect = egui::Rect::from_two_pos(xf.to_screen(c - mark.half), xf.to_screen(c + mark.half));
+                painter.rect_stroke(rect, 2.0, Stroke::new(1.5, PREVIEW), egui::StrokeKind::Middle);
+            }
+            if stopped {
+                state.interaction.drag = None;
+                if let Some(p) = end
+                    && p.distance(start) > 1e-6
+                {
+                    let command = cc_engine::commands::view_marks::MarkMove {
+                        plan: Ref::Id(view_id.0),
+                        view: Ref::Id(mark.view.0),
+                        delta: Some((p - start).to_array()),
+                        offset: None,
+                        reset: false,
+                    };
+                    crate::actions::run_command(state, command);
+                }
+            }
+            return true;
+        }
+        Some(_) => return false,
+        None => {}
+    }
+
+    // The grip that turns the tag of the element selected alone.
+    let alone = (state.selection.len() == 1).then(|| state.selection.iter().next().copied()).flatten();
+    let turning = alone.filter(|_| tags_ok).and_then(|id| drawing.tags.iter().find(|t| t.element == id).copied());
+    let grip = turning.map(|t| (t, xf.to_screen(t.rotate_grip(ROTATE_GRIP_GAP / xf.scale))));
+    if let Some((_, at)) = grip {
+        painter.circle(at, 4.5, Color32::WHITE, Stroke::new(1.5, HIGHLIGHT));
+    }
+    let on_grip = |p: Pos2| grip.filter(|(_, at)| at.distance(p) <= 7.0).map(|(t, _)| t);
+    let handle_at = |state: &AppState, p: Pos2| -> Option<Drag> {
+        if near_grip(state, xf, p) {
+            return None;
+        }
+        let w = xf.to_world(p);
+        if tags_ok && let Some(tag) = drawing.tag_at(w) {
+            return Some(Drag::Tag { tag, start: w });
+        }
+        if bubbles_ok && let Some(bubble) = drawing.bubble_at(w) {
+            return Some(Drag::Bubble { bubble, start: w });
+        }
+        if marks_ok && let Some(mark) = drawing.mark_at(w) {
+            return Some(Drag::Mark { mark, start: w });
+        }
+        None
+    };
+    if let Some(p) = resp.hover_pos() {
+        if on_grip(p).is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Alias);
+        } else if handle_at(state, p).is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        }
+    }
+    if resp.drag_started_by(egui::PointerButton::Primary) {
+        let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or_default();
+        let drag = on_grip(origin).map(|tag| Drag::TagRotate { tag }).or_else(|| handle_at(state, origin));
+        if drag.is_some() {
+            state.interaction.drag = drag;
+            return true;
+        }
+    }
+
+    // A right click on a tag or a bubble: hide or reset it.
+    if resp.secondary_clicked() {
+        let picked = raw.and_then(|w| {
+            let tag = drawing.tag_at(w).filter(|_| tags_ok).map(|t| t.element);
+            tag.or_else(|| drawing.bubble_at(w).filter(|_| bubbles_ok).map(|b| b.element))
+        });
+        state.interaction.tag_menu = picked.map(|id| (view_id, id));
+    }
+    if let Some((view, id)) = state.interaction.tag_menu {
+        let mut hide = None;
+        let open = resp.context_menu(|ui| {
+            if ui.button(t!("menu-hide-tag")).clicked() {
+                hide = Some(true);
+                ui.close();
+            }
+            if ui.button(t!("action-reset-tag")).clicked() {
+                hide = Some(false);
+                ui.close();
+            }
+        });
+        if open.is_none() && !resp.secondary_clicked() {
+            state.interaction.tag_menu = None;
+        }
+        match hide {
+            Some(true) => crate::tag_type_ui::hide_tag(state, view, id),
+            Some(false) => crate::tag_type_ui::reset_tag(state, view, id),
+            None => {}
+        }
+    }
+    false
+}
+
 fn select(
     ui: &Ui,
     resp: &Response,
@@ -3952,6 +4179,10 @@ fn select(
     }
     // The grips of selected detail lines, in any view that holds them.
     if crate::detail_ui::grips(ui, resp, painter, state, xf) {
+        return;
+    }
+    // Tags, grid bubbles and elevation markers are dragged on their own.
+    if annotation_handles(ui, resp, painter, state, movable, xf, drawing) {
         return;
     }
     let raw = resp.hover_pos().map(|p| xf.to_world(p));
@@ -4026,19 +4257,11 @@ fn select(
         // The handle moves the arc's middle toward or away from its center.
         let mid = arc.point(arc.length() * 0.5);
         ui.ctx().set_cursor_icon(resize_cursor(xf.to_screen(mid) - xf.to_screen(arc.center)));
-    } else if movable && raw.is_some_and(|p| drawing.tag_at(p).is_some()) {
-        // Tags are dragged to a new spot.
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
 
     if resp.drag_started_by(egui::PointerButton::Primary) {
         let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or_default();
         let w = xf.to_world(origin);
-        // A tag is dragged on its own, away from its element.
-        if movable && let Some(tag) = drawing.tag_at(w) {
-            state.interaction.drag = Some(Drag::Tag { tag, start: w });
-            return;
-        }
         if let Some((id, name, _, z, shape, color)) = spot_at(origin) {
             state.interaction.drag = Some(Drag::Hotspot { id, name, z, shape, color });
             return;
@@ -4160,12 +4383,6 @@ fn select(
             let verb = if *copy { t!("label-copy") } else { t!("label-move") };
             label(painter, xf.to_screen(raw), format!("{verb} {}", format::length(delta.length())));
         }
-        (Some(Drag::Tag { tag, start }), Some(raw)) => {
-            // The tag's box where it would go.
-            let center = tag.center + (raw - *start);
-            let rect = egui::Rect::from_two_pos(xf.to_screen(center - tag.half), xf.to_screen(center + tag.half));
-            painter.rect_stroke(rect.expand(2.0), 2.0, Stroke::new(1.5, PREVIEW), egui::StrokeKind::Middle);
-        }
         (Some(Drag::Box { start }), _) => {
             if let Some(cur) = resp.interact_pointer_pos().or(resp.hover_pos()) {
                 select_box(painter, *start, cur);
@@ -4195,22 +4412,12 @@ fn select(
                 | Drag::Bend { .. }
                 | Drag::Hotspot { .. }
                 | Drag::Section { .. }
-                | Drag::Callout { .. },
+                | Drag::Callout { .. }
+                | Drag::Tag { .. }
+                | Drag::TagRotate { .. }
+                | Drag::Bubble { .. }
+                | Drag::Mark { .. },
             ) => {}
-            Some(Drag::Tag { tag, start }) => {
-                if let (Some(raw), Some(view)) = (raw.or(state.cursor), state.active_view)
-                    && raw.distance(start) > 1e-6
-                {
-                    let command = cc_engine::commands::annotate::TagMove {
-                        view: Ref::Id(view.0),
-                        id: tag.element.0,
-                        delta: Some((raw - start).to_array()),
-                        offset: None,
-                        reset: false,
-                    };
-                    crate::actions::run_command(state, command);
-                }
-            }
             Some(Drag::Box { start }) => {
                 let end = resp.interact_pointer_pos().or(resp.hover_pos()).unwrap_or(start);
                 let (a, b) = (xf.to_world(start), xf.to_world(end));

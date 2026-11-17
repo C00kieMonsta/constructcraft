@@ -10,15 +10,16 @@ use cc_core::dim_style::{DimensionStyle, MAX_AFFIX, MAX_LENGTH_MM, MIN_MARK_MM};
 use cc_core::{ElementType, TypeData};
 use egui::{Response, Ui};
 
-/// What one frame's rows did.
+/// What one frame's rows did: a value changed, and an edit ended (merged
+/// edits stop merging).
 #[derive(Default)]
-struct Edits {
-    changed: bool,
-    done: bool,
+pub(crate) struct Edits {
+    pub(crate) changed: bool,
+    pub(crate) done: bool,
 }
 
 impl Edits {
-    fn add(&mut self, r: &Response) {
+    pub(crate) fn add(&mut self, r: &Response) {
         self.changed |= r.changed();
         self.done |= r.drag_stopped() || r.lost_focus();
     }
@@ -31,7 +32,7 @@ fn mm_row(ui: &mut Ui, edits: &mut Edits, label: &str, value: &mut f64, min: f64
 }
 
 /// An optional value: a checkbox, and the value's editor when checked.
-fn optional_row<T: Copy>(
+pub(crate) fn optional_row<T: Copy>(
     ui: &mut Ui,
     edits: &mut Edits,
     label: &str,
@@ -59,7 +60,7 @@ fn optional_row<T: Copy>(
     edits.add(&r);
 }
 
-fn weight_row(ui: &mut Ui, edits: &mut Edits, label: &str, value: &mut Option<f64>) {
+pub(crate) fn weight_row(ui: &mut Ui, edits: &mut Edits, label: &str, value: &mut Option<f64>) {
     optional_row(ui, edits, label, value, 0.25, |ui, w| {
         ui.add(weight_drag(w).speed(0.01).range(MIN_WEIGHT_MM..=MAX_WEIGHT_MM))
     });

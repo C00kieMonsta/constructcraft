@@ -43,7 +43,7 @@ pub fn category_icon(category: Category) -> Icon {
         Category::Ramp => Icon::Ramp,
         Category::Railing => Icon::Railing,
         Category::Component => Icon::Component,
-        Category::Text | Category::TitleBlock | Category::BarTag => Icon::Text,
+        Category::Text | Category::TitleBlock | Category::BarTag | Category::Tag | Category::ViewMark => Icon::Text,
         Category::LevelMark => Icon::LevelMarkPlan,
         Category::CadImport => Icon::CadImport,
         Category::DetailLine => Icon::DetailLine,
@@ -826,7 +826,9 @@ fn annotate_tab(ui: &mut Ui, state: &mut AppState) {
     group(ui, t!("group-level-marks"), |ui| {
         command_buttons(ui, state, &[UiCommand::LevelMarkPlan, UiCommand::LevelMarkSection]);
     });
-    group(ui, t!("group-tags"), |ui| command_button(ui, state, UiCommand::StructureTags));
+    group(ui, t!("group-tags"), |ui| {
+        command_buttons(ui, state, &[UiCommand::StructureTags, UiCommand::TagTypes]);
+    });
     group(ui, t!("group-selection"), |ui| command_button(ui, state, UiCommand::Select));
 }
 

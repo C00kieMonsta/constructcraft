@@ -492,7 +492,7 @@ pub struct TagMove {
 }
 
 /// Farthest a tag may be moved from its default spot, meters.
-const MAX_TAG_OFFSET: f64 = 1000.0;
+pub(crate) const MAX_TAG_OFFSET: f64 = 1000.0;
 
 impl Command for TagMove {
     const NAME: &'static str = "tag_move";
@@ -504,7 +504,7 @@ impl Command for TagMove {
             return Err(EngineError::invalid("tags are moved in floor and ceiling plans"));
         }
         let id = refs::element(p, self.id)?;
-        let current = p.view(view).and_then(|v| v.tag_offsets.get(&id).copied()).unwrap_or(DVec2::ZERO);
+        let current = p.view(view).and_then(|v| v.tags.get(&id)).map_or(DVec2::ZERO, |t| t.offset);
         let new = match (self.delta, self.offset, self.reset) {
             (Some(d), None, false) => current + point(d)?,
             (None, Some(o), false) => point(o)?,
@@ -516,10 +516,10 @@ impl Command for TagMove {
         }
         edit(s, t!("tx-move-tag"), |e| {
             let v = e.view_mut(view).ok_or_else(|| EngineError::not_found("view"))?;
-            if new == DVec2::ZERO {
-                v.tag_offsets.remove(&id);
-            } else {
-                v.tag_offsets.insert(id, new);
+            let placement = v.tags.entry(id).or_default();
+            placement.offset = new;
+            if placement.is_default() {
+                v.tags.remove(&id);
             }
             Ok(())
         })?;

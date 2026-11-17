@@ -406,6 +406,27 @@ Every reinforcing bar has a mark naming its shape (the same diameter, grade, leg
 {"command": "bar_length_check", "args": {"max_length": 12}}
 ```
 
+### Tags
+
+Plans tag doors, windows, rooms, columns, beams, pad footings and pile caps by themselves. A tag type (`tag_type_create`, `target` and a partial `style`) says what a tag writes and how it looks: up to 8 `lines` of text with `{Field}` placeholders (a schedule field by name, such as `{Width}`, `{Height}` or `{Comments}`, or `{Mark}`, `{TypeName}`, `{Name}`, `{Number}`, `{Area}`, `{Section}`, `{Level}`) and a size in paper millimeters, a `symbol` (`Circle`, `Hexagon`, `Rectangle`, `RoundedRectangle`, `Ellipse`, `Diamond`, `Triangle`, `Underline`, `None`, or `{"Component": id}` of a detail component drawn at paper size, its texts' fields filled in), its `width` and `height` (0 fits the text), pens, `leader` and `orientation`; `type_set` changes it. The template has one tag type per target, of the default style (the tags plans always drew); a project with no tag type of a target (an older file) draws its tags in that style too. Each plan picks a tag type per target (`view_set` `tag_types`) and adjusts the tag of each element with `tag_set` (`offset` or `delta`, `rotation`, `type`, `hidden`, `leader`, `reset`; `null` clears a field); `tag_get` shows the adjustments, the type and the texts.
+
+```text
+{"command": "tag_type_create", "args": {"target": "door", "name": "Door size", "style": {"lines": [{"text": "{Mark}", "size": 2.5}, {"text": "{Width} x {Height}", "size": 2}], "symbol": "Rectangle"}}}
+{"command": "view_set", "args": {"view": "Térreo", "tag_types": {"door": "Door size"}}}
+{"command": "tag_set", "args": {"view": "Térreo", "ids": [12, 14], "delta": [0, 0.5], "rotation": 90}}
+{"command": "tag_get", "args": {"view": "Térreo", "id": 12}}
+```
+
+Grids and the marks of sections and elevations are styled the same way. A grid type's `style` (`type_set` `params.style`) sets the `ends` with a bubble (`End`, `Start`, `Both`, `None`; a grid's own `ends`, through `element_set` `params`, comes first), the bubble's `symbol` (a shape, or a detail component whose texts write `{Name}`), `text_size`, `pen`, `color` and `line_pattern`. Each plan, elevation or section moves a grid's bubbles with `tag_set` (`offset` or `delta` for the end bubble, `start_offset` for the start one, each drawn with an elbow back to the line) or hides them (`hidden`; the line stays). A view mark type (`view_mark_type_create`, `kind` `section` or `elevation` and a partial `style`) draws the heads of sections and the markers of elevations: the `head` size in paper millimeters (0: 0.5 m in the model, as elevation markers always were), its `symbol`, a `split` line, the `top`, `bottom` and `label` texts with `{Number}`, `{Sheet}`, `{Name}` and `{Letter}`, the `arrow`, the section's `heads`, its `line_weight` and the colors. A section or an elevation is marked with its own type (`view_set` `mark_type`), else the project's first of its kind (the template has one of each, of the default style), else as plans always marked it. `mark_move` moves an elevation's marker in one floor plan (`delta`, `offset` or `reset`).
+
+```text
+{"command": "type_set", "args": {"type": "Grid 8 mm", "params": {"style": {"ends": "Both", "symbol": "Hexagon", "text_size": 4}}}}
+{"command": "tag_set", "args": {"view": "Térreo", "ids": [30], "offset": [1.5, 0], "start_offset": [-1.5, 0]}}
+{"command": "view_mark_type_create", "args": {"kind": "section", "name": "Big head", "style": {"head": 16, "top": {"text": "{Letter}", "size": 4}}}}
+{"command": "view_set", "args": {"view": "Section A", "mark_type": "Big head"}}
+{"command": "mark_move", "args": {"plan": "Térreo", "view": "Elevação: Sul", "delta": [0, -2]}}
+```
+
 ### Photorealistic rendering
 
 A 3D view keeps its render settings in `render` (`view_get`), changed by `view_set` with a merge patch: `samples` per pixel, light bounces (`max_depth`), the image's `width` and `height` in pixels, `fov_deg`, `exposure` in stops, `tone_map` (`Filmic` or `Standard`), the firefly `clamp`, `clay` (every opaque surface one white matte, glass kept, under the same sky and sun) and the `environment` (`sky_strength`, `sun_strength`, `ground_color`, `ground_plane`); `null` removes them. The sun is the view's (`sun`). `view_render` path traces the view on the processor and writes the image (`.png`, `.jpg`, or linear `.exr`/`.hdr`) with the view's camera, as the 3D view shows it; `settings` patches the view's settings for that render only, and `region` (`[x, y, width, height]` in pixels) renders only part of the image. It returns the size, the samples, the seconds and the triangles, and changes nothing in the model.

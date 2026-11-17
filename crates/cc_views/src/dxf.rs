@@ -423,7 +423,7 @@ fn entity(w: &mut Writer, prim: &Prim, layer: &str, unit: f64, paper: f64, dash_
                 w.point(11, corners[(i + 1) % 4]);
             }
         }
-        Prim::Text { pos, text, size, anchor, angle, .. } => {
+        Prim::Text { pos, text, size, anchor, angle, color, .. } => {
             let value = text_value(text);
             let p = at(*pos);
             if value.trim().is_empty() || !p.is_finite() || !(size.is_finite() && *size > 0.0) {
@@ -438,7 +438,7 @@ fn entity(w: &mut Writer, prim: &Prim, layer: &str, unit: f64, paper: f64, dash_
             };
             w.pair(0, "TEXT");
             w.pair(8, &layer);
-            w.pair(62, 7);
+            w.pair(62, color.map_or(7, aci));
             w.point(10, p);
             w.pair(40, num(size * paper));
             w.pair(1, value);
@@ -482,6 +482,7 @@ mod tests {
             anchor: Anchor::Center,
             angle: std::f64::consts::FRAC_PI_2,
             element: None,
+            color: None,
         });
         let dxf = to_dxf(&d, DxfScale::model(50), &|p| match p {
             Prim::Fill { .. } => "Wall".into(),
