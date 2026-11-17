@@ -3835,3 +3835,6 @@ wall-profile-too-large = El perfil tiene demasiados puntos.
 wall-profile-not-monotone = Una línea vertical cruza el perfil más de dos veces (marcado): debe ser una línea inferior y una superior a lo largo del muro.
 wall-profile-out-of-bounds = El perfil sobrepasa los extremos del muro, o llega demasiado abajo o arriba de su base (marcado).
 wall-profile-no-area = El perfil no encierra ningún área.
+
+## Wall layer extents
+layer-to-top = Hasta arriba

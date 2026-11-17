@@ -3835,3 +3835,6 @@ wall-profile-too-large = プロファイルの点が多すぎます。
 wall-profile-not-monotone = 垂直線がプロファイルと 3 回以上交差しています（マーク箇所）。プロファイルは壁に沿った下端線と上端線の 1 本ずつでなければなりません。
 wall-profile-out-of-bounds = プロファイルが壁の端を越えているか、基部から下または上に離れすぎています（マーク箇所）。
 wall-profile-no-area = プロファイルが面積を囲んでいません。
+
+## Wall layer extents
+layer-to-top = 上端まで

@@ -20,6 +20,10 @@ fn key(parts: impl Hash) -> u64 {
     h.finish()
 }
 
+/// The dialog's width while a wall type's layers table, with each layer's
+/// base offset and height, is open.
+const WALL_LAYERS_WIDTH: f32 = 780.0;
+
 fn finish(state: &mut AppState, r: &egui::Response) {
     if r.drag_stopped() || r.lost_focus() {
         state.session.doc.break_merge();
@@ -40,7 +44,12 @@ pub fn show(ctx: &Context, state: &mut AppState) {
     crate::dialog::session::begin(state);
     let mut ok = 0;
     let max_height = (ctx.content_rect().height() - 320.0).clamp(240.0, 560.0);
-    let response = crate::dialog::Dialog::new("type-editor", t!("dlg-type")).width(580.0).show(
+    // A wall type's layers table has two more columns (each layer's extent): wider while it is open.
+    let wall_layers = state.dialogs.type_layers_open
+        && matches!(ty.data, TypeData::Wall { curtain: None, .. })
+        && !ty.layers().is_empty();
+    let width = if wall_layers { WALL_LAYERS_WIDTH } else { 580.0 };
+    let response = crate::dialog::Dialog::new("type-editor", t!("dlg-type")).width(width).show(
         ctx,
         |ui| {
             header(ui, state, &ty);
@@ -580,10 +589,13 @@ fn identity(ui: &mut Ui, state: &mut AppState, tid: ElementTypeId, info: &TypeIn
     finish(state, &r);
 }
 
-/// Layers table: function, material and thickness, with reorder and removal.
+/// Layers table: function, material and thickness, with reorder and removal;
+/// a wall type's layers also their own vertical extent (see
+/// [`cc_core::layer_extent`]): a base offset, and a height or up to the top.
 fn layers_editor(ui: &mut Ui, state: &mut AppState, ty: &ElementType) {
     let tid = ty.id;
     let layers = ty.layers().to_vec();
+    let extents = matches!(ty.data, TypeData::Wall { .. });
     let set_layers = |state: &mut AppState, field: &str, layers: Vec<Layer>| {
         update(state, tid, field, |t| match &mut t.data {
             TypeData::Wall { layers: l, .. } | TypeData::Floor { layers: l } | TypeData::Roof { layers: l, .. } => {
@@ -596,8 +608,14 @@ fn layers_editor(ui: &mut Ui, state: &mut AppState, ty: &ElementType) {
         ui.set_width(ui.available_width());
         ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
         ui.label(theme::muted(t!("type-layers")).size(12.0));
-        egui::Grid::new(("layers", tid.0)).num_columns(5).striped(true).spacing([8.0, 4.0]).show(ui, |ui| {
-            for h in ["", "col-function", "prop-material", "prop-thickness", ""] {
+        let columns = if extents { 7 } else { 5 };
+        egui::Grid::new(("layers", tid.0)).num_columns(columns).striped(true).spacing([8.0, 4.0]).show(ui, |ui| {
+            let headers: &[&str] = if extents {
+                &["", "col-function", "prop-material", "prop-thickness", "prop-base-offset", "prop-height", ""]
+            } else {
+                &["", "col-function", "prop-material", "prop-thickness", ""]
+            };
+            for h in headers {
                 ui.label(theme::muted(if h.is_empty() { String::new() } else { tr(h) }).size(11.5));
             }
             ui.end_row();
@@ -633,6 +651,9 @@ fn layers_editor(ui: &mut Ui, state: &mut AppState, ty: &ElementType) {
                     set_layers(state, &format!("lthk{i}"), l);
                 }
                 finish(state, &r);
+                if extents {
+                    extent_cells(ui, state, i, &layers, &set_layers);
+                }
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     let n = layers.len();
@@ -669,6 +690,59 @@ fn layers_editor(ui: &mut Ui, state: &mut AppState, ty: &ElementType) {
             ui.label(theme::muted(total));
         });
     });
+}
+
+/// A wall layer's own extent in the layers table: its base offset from the
+/// wall's bottom, and its height (a checkbox to give it one; without, up to
+/// the wall's top).
+fn extent_cells(
+    ui: &mut Ui,
+    state: &mut AppState,
+    i: usize,
+    layers: &[Layer],
+    set_layers: &dyn Fn(&mut AppState, &str, Vec<Layer>),
+) {
+    use cc_core::layer_extent::{MAX_HEIGHT, MAX_OFFSET, MIN_HEIGHT};
+    let Some(layer) = layers.get(i) else { return };
+    let with = |f: &dyn Fn(&mut Layer)| {
+        let mut l = layers.to_vec();
+        if let Some(x) = l.get_mut(i) {
+            f(x);
+        }
+        l
+    };
+    let mut offset = layer.base_offset;
+    let r = ui.add(crate::properties::length_drag(&mut offset).range(-MAX_OFFSET..=MAX_OFFSET));
+    if r.changed() {
+        set_layers(state, &format!("loff{i}"), with(&|x| x.base_offset = offset));
+    }
+    finish(state, &r);
+    let mut on = layer.height.is_some();
+    // Given a height, a layer starts at the project's storey height, as tall as a wall usually is.
+    let mut height = layer.height.unwrap_or_else(|| state.project().defaults().story);
+    let (toggled, dragged) = ui
+        .horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let toggled = crate::table::checkbox(ui, &mut on).changed();
+            let dragged = if on {
+                Some(ui.add(crate::properties::length_drag(&mut height).range(MIN_HEIGHT..=MAX_HEIGHT)))
+            } else {
+                ui.label(theme::muted(t!("layer-to-top")));
+                None
+            };
+            (toggled, dragged)
+        })
+        .inner;
+    if toggled {
+        set_layers(state, "lheight", with(&|x| x.height = on.then_some(height)));
+        state.session.doc.break_merge();
+    }
+    if let Some(r) = dragged {
+        if r.changed() {
+            set_layers(state, &format!("lh{i}"), with(&|x| x.height = Some(height)));
+        }
+        finish(state, &r);
+    }
 }
 
 /// A pile cap type's piles: the layout (read only), spacing, edge distance,

@@ -3835,3 +3835,6 @@ wall-profile-too-large = 輪廓的點太多。
 wall-profile-not-monotone = 一條垂直線與輪廓相交超過兩次（已標示）：輪廓必須是沿牆的一條底線與一條頂線。
 wall-profile-out-of-bounds = 輪廓超出牆的兩端，或在底部以下或以上太遠（已標示）。
 wall-profile-no-area = 輪廓未圍出任何面積。
+
+## Wall layer extents
+layer-to-top = 至頂部

@@ -819,6 +819,38 @@ fn duplicated_type_keeps_the_typed_name() {
     assert!(harness.state().dialogs.type_editor.is_none());
 }
 
+/// A wall type's layers table gives each layer a base offset and a height
+/// (issue #306): typing a base offset sets that layer's own extent, and the
+/// layers given no height read "To top".
+#[test]
+fn a_wall_layers_base_offset_is_set_in_type_properties() {
+    let mut state = sample_state();
+    let wall = state.project().default_type(cc_core::Category::Wall).unwrap();
+    let layers = |s: &AppState| s.project().element_type(wall).map(|t| t.layers().to_vec()).unwrap_or_default();
+    let unit = state.project().units.length.unit.symbol().to_string();
+    let thickness = format!("{} {unit}", length_text(layers(&state)[0].thickness));
+    state.dialogs.type_editor = Some(wall);
+    state.dialogs.type_layers_open = true;
+    let mut harness = type_dialog_harness(state);
+    harness.run();
+    assert!(harness.query_by_label(&t!("prop-base-offset")).is_some(), "the column's heading");
+    let count = layers(harness.state()).len();
+    assert_eq!(harness.query_all_by_label(&t!("layer-to-top")).count(), count, "every layer reaches the top");
+    // The first layer's base offset: the number field after its thickness.
+    let values: Vec<String> =
+        harness.query_all_by_role(Role::SpinButton).map(|n| n.value().unwrap_or_default()).collect();
+    let at = values.iter().position(|v| *v == thickness).unwrap_or_else(|| panic!("{thickness} in {values:?}")) + 1;
+    harness.query_all_by_role(Role::SpinButton).nth(at).unwrap().focus();
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.query_all_by_role(Role::SpinButton).find(|n| n.is_focused()).unwrap().type_text(&length_text(1.0));
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    let after = layers(harness.state());
+    assert!((after[0].base_offset - 1.0).abs() < 1e-9, "{:?}", after[0]);
+    assert!(after[0].height.is_none() && after[1..].iter().all(|l| l.base_offset == 0.0 && l.height.is_none()));
+}
+
 /// *Edit Component* in Type Properties closes the dialog as it opens the
 /// environment (before, the dialog stayed in front of it).
 #[test]
