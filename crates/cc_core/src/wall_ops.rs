@@ -12,7 +12,7 @@
 use crate::arc::{Arc, MAX_BULGE};
 use crate::sketch::SketchCurve;
 use crate::sketch_edit;
-use crate::{EditCtx, Element, ElementId, ElementKind, Project};
+use crate::{EditCtx, Element, ElementId, ElementKind, Project, Wall};
 use glam::DVec2;
 
 /// Where a linear element runs: a straight line, or an arc (arc walls and arc beams).
@@ -22,8 +22,18 @@ pub enum Path {
     Arc(Arc),
 }
 
-/// The path of a linear element, if it has one.
+/// Whether `e` is a spline wall (see [`crate::wall_spline`]): it has no
+/// [`Path`], so it splits and offsets on its own curve and takes no trim,
+/// extend or align.
+pub fn is_spline(e: &Element) -> bool {
+    e.as_wall().is_some_and(|w| w.spline.is_some())
+}
+
+/// The path of a linear element, if it has one (a spline wall has none).
 pub fn path_of(e: &Element) -> Option<Path> {
+    if is_spline(e) {
+        return None;
+    }
     if let ElementKind::DetailLine(l) = &e.kind {
         return match l.curve {
             SketchCurve::Line { a, b } => Some(Path::Line(a, b)),
@@ -173,6 +183,7 @@ fn circle_circle(c0: DVec2, r0: f64, c1: DVec2, r1: f64) -> Vec<DVec2> {
 pub fn curve_of(e: &Element) -> Option<SketchCurve> {
     match &e.kind {
         ElementKind::DetailLine(l) => Some(l.curve.clone()),
+        ElementKind::Wall(Wall { spline: Some(s), .. }) => Some(SketchCurve::Spline { points: s.control.clone() }),
         ElementKind::Wall(w) if w.bulge != 0.0 => Some(SketchCurve::Arc { a: w.start, b: w.end, bulge: w.bulge }),
         ElementKind::Beam(b) if b.bulge != 0.0 => Some(SketchCurve::Arc { a: b.start, b: b.end, bulge: b.bulge }),
         _ => line_of(e).map(|(a, b)| SketchCurve::Line { a, b }),
@@ -246,6 +257,8 @@ pub enum EditError {
     Degenerate,
     /// The edit needs a straight line and the wall is an arc.
     Curved,
+    /// The edit takes lines and arcs and the wall is a spline.
+    Spline,
 }
 
 fn line(project: &Project, id: ElementId) -> Result<(DVec2, DVec2), EditError> {
@@ -254,7 +267,11 @@ fn line(project: &Project, id: ElementId) -> Result<(DVec2, DVec2), EditError> {
 
 /// The path of an element (line or arc).
 pub fn path(project: &Project, id: ElementId) -> Result<Path, EditError> {
-    project.element(id).and_then(path_of).ok_or(EditError::NotLinear)
+    let e = project.element(id).ok_or(EditError::NotLinear)?;
+    if is_spline(e) {
+        return Err(EditError::Spline);
+    }
+    path_of(e).ok_or(EditError::NotLinear)
 }
 
 /// Hosted openings move back by `shift` along the wall (a moved start) and stay within its new length.
@@ -388,6 +405,20 @@ impl EditCtx<'_> {
             self.set_detail_curve(id, first);
             return self.add_detail_copy(id, second);
         }
+        // A spline wall splits on its own curve, each part keeping its share of it.
+        if let Some(spline) = self.project().element(id).and_then(|e| e.as_wall()).and_then(|w| w.spline.clone()) {
+            let (first, second) = spline.split(at).ok_or(EditError::Degenerate)?;
+            let Some(mut copy) = self.project().element(id).cloned() else { return Err(EditError::NotLinear) };
+            copy.id = ElementId(self.alloc_id());
+            copy.uid = Default::default();
+            if let ElementKind::Wall(w) = &mut copy.kind {
+                w.spline = Some(second);
+            }
+            if let Some(ElementKind::Wall(w)) = self.element_mut(id).map(|e| &mut e.kind) {
+                w.spline = Some(first);
+            }
+            return Ok(self.add_element(copy));
+        }
         let (a, b) = line(self.project(), id)?;
         let dir = (b - a).normalize_or_zero();
         let arc = self.project().element(id).and_then(arc_of);
@@ -488,6 +519,11 @@ impl EditCtx<'_> {
         copy.id = ElementId(self.alloc_id());
         copy.uid = Default::default();
         match &mut copy.kind {
+            // A spline wall's copy follows it at that distance, as near as a spline does.
+            ElementKind::Wall(w) if w.spline.is_some() => {
+                let moved = w.spline.as_ref().and_then(|s| s.offset(distance)).ok_or(EditError::Degenerate)?;
+                w.spline = Some(moved);
+            }
             // An arc wall's copy is concentric (with the same sweep).
             ElementKind::Wall(w) if w.arc().is_some() => {
                 let arc = w.arc().ok_or(EditError::NotLinear)?;

@@ -926,13 +926,16 @@ impl Project {
     /// Length of a wall's body centerline (the location line's length for
     /// straight walls; arc walls measure along the centerline arc).
     pub fn wall_length(&self, element: &Element, wall: &crate::Wall) -> f64 {
+        if wall.spline.is_some() {
+            return self.wall_path(element, wall).map_or(0.0, |p| p.length());
+        }
         let (start, end) = self.wall_axis(element, wall);
         crate::Wall { start, end, ..wall.clone() }.length()
     }
 
     /// Position of a wall's location line across the wall, measured from the
     /// centerline towards the exterior (left) face.
-    fn wall_line_offset(&self, element: &Element, wall: &crate::Wall) -> f64 {
+    pub(crate) fn wall_line_offset(&self, element: &Element, wall: &crate::Wall) -> f64 {
         self.element_type(element.type_id).map_or(0.0, |ty| ty.location_offset(wall.location_line))
     }
 

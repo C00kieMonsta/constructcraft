@@ -86,6 +86,13 @@ impl Element {
             ElementKind::Wall(w) => {
                 p(&mut w.start);
                 p(&mut w.end);
+                // A spline wall's curve goes along, turned the other way under a mirror as its ends are.
+                if let Some(spline) = &mut w.spline {
+                    spline.map(|v| t.apply(v));
+                    if t.mirror {
+                        *spline = spline.reversed();
+                    }
+                }
                 // A mirror would put the exterior (left) face inside: walk the wall the other way.
                 if t.mirror {
                     std::mem::swap(&mut w.start, &mut w.end);
