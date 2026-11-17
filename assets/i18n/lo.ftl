@@ -529,6 +529,7 @@ just-bottom = ດ້ານລຸ່ມ
 prop-unconnected-height = ຄວາມສູງອິດສະຫຼະ
 prop-room-bounding = ຂອບເຂດຫ້ອງ
 prop-structural = ໂຄງສ້າງ
+type-structural-hint = ຝາໃໝ່ຂອງປະເພດນີ້ຖືກສ້າງເປັນໂຄງສ້າງ; ແຕ່ລະຝາຍັງປ່ຽນໄດ້.
 section-strip-beam = ຄານເທິງຖານຮາກ
 prop-strip-beam = ໜ້າຕັດຮູບ T ປີ້ນ
 prop-strip-edge = ຄວາມໜາຢູ່ຂອບ

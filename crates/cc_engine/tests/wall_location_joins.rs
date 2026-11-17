@@ -112,3 +112,63 @@ fn the_type_offset_places_the_body_like_the_wall() {
         }
     }
 }
+
+/// Two rings of walls drawn on the same corners, one wholly below the other (a
+/// foundation wall on its centerline under a parapet on its exterior face): each
+/// ring closes its own corners, as if the other were not there (issue 387).
+#[test]
+fn rings_one_above_the_other_join_each_on_its_own() {
+    let corners = [[0.0, 0.0], [5.0, 0.0], [5.0, -4.0], [0.0, -4.0]];
+    let ring = |s: &mut Session, ty: u64, line: &str, base: f64, height: f64| -> Vec<u64> {
+        (0..4)
+            .map(|i| {
+                let args = json!({"start": corners[i], "end": corners[(i + 1) % 4], "type": ty,
+                                  "location_line": line, "base_offset": base, "height": height});
+                run(s, "wall_create", args)["id"].as_u64().unwrap()
+            })
+            .collect()
+    };
+    let total = |s: &mut Session, walls: &[u64]| walls.iter().map(|&id| volume(s, id)).sum::<f64>();
+    // The volumes of each ring alone.
+    let alone = |line: &str, base: f64, height: f64| {
+        let mut s = Session::default();
+        let ty = layered_type(&mut s);
+        let walls = ring(&mut s, ty, line, base, height);
+        total(&mut s, &walls)
+    };
+    let (low, high) = (alone("Centerline", -1.0, 0.6), alone("FinishExterior", -0.15, 0.17));
+
+    let mut s = Session::default();
+    let ty = layered_type(&mut s);
+    let below = ring(&mut s, ty, "Centerline", -1.0, 0.6);
+    let above = ring(&mut s, ty, "FinishExterior", -0.15, 0.17);
+    assert!((total(&mut s, &below) - low).abs() < 1e-9, "{} != {low}", total(&mut s, &below));
+    assert!((total(&mut s, &above) - high).abs() < 1e-9, "{} != {high}", total(&mut s, &above));
+    // The closed ring of 25 cm walls on the centerline: 5.25 x 4.25 less 4.75 x 3.75.
+    assert!((low - (5.25 * 4.25 - 4.75 * 3.75) * 0.6).abs() < 1e-6, "{low}");
+}
+
+/// A wall type may make its walls structural; `wall_create` takes the type's
+/// value unless told otherwise, and each wall keeps its own (issue 387).
+#[test]
+fn a_wall_type_can_make_its_walls_structural() {
+    let mut s = Session::default();
+    let ty = layered_type(&mut s);
+    let structural =
+        |s: &mut Session, id: u64| run(s, "element_get", json!({"id": id}))["params"]["structural"].clone();
+    let wall = |s: &mut Session, extra: Value| {
+        let mut args = json!({"start": [0, 0], "end": [5, 0], "type": ty});
+        args.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        run(s, "wall_create", args)["id"].as_u64().unwrap()
+    };
+    let plain = wall(&mut s, json!({}));
+    assert_eq!(structural(&mut s, plain), json!(false));
+    run(&mut s, "type_set", json!({"type": ty, "params": {"structural": true}}));
+    assert_eq!(run(&mut s, "type_get", json!({"type": ty}))["params"]["structural"], json!(true));
+    let made = wall(&mut s, json!({}));
+    assert_eq!(structural(&mut s, made), json!(true));
+    let told = wall(&mut s, json!({"structural": false}));
+    assert_eq!(structural(&mut s, told), json!(false));
+    // The walls already made keep their value.
+    assert_eq!(structural(&mut s, plain), json!(false));
+}

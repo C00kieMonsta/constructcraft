@@ -538,6 +538,7 @@ just-bottom = Fundo
 prop-unconnected-height = Altura desconectada
 prop-room-bounding = Delimita ambientes
 prop-structural = Estrutural
+type-structural-hint = Novas paredes deste tipo são criadas estruturais; cada parede pode mudar depois.
 section-strip-beam = Viga sobre a sapata
 prop-strip-beam = Seção em T invertido
 prop-strip-edge = Espessura na borda

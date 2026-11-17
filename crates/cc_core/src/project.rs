@@ -268,7 +268,7 @@ impl Project {
                 layer(&n("tpl-mat-masonry"), core),
                 finish(&n("tpl-mat-plaster"), plaster),
             ];
-            (n(key), TypeData::Wall { layers, function: WallFunction::Exterior, curtain: None })
+            (n(key), TypeData::Wall { layers, function: WallFunction::Exterior, curtain: None, structural: false })
         };
         let column = |key: &str, section: ColumnSection, material: &str| {
             let material = n(material);
@@ -301,6 +301,7 @@ impl Project {
                     layers: vec![layer(&n("tpl-mat-gypsum"), partition_thickness)],
                     function: WallFunction::Interior,
                     curtain: None,
+                    structural: false,
                 },
             ),
         ];

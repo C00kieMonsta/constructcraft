@@ -538,6 +538,7 @@ just-bottom = 底部
 prop-unconnected-height = 无连接高度
 prop-room-bounding = 房间边界
 prop-structural = 结构
+type-structural-hint = 此类型的新墙创建为结构墙；每面墙之后仍可更改。
 section-strip-beam = 基础上的梁
 prop-strip-beam = 倒 T 形截面
 prop-strip-edge = 边缘厚度

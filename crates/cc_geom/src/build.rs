@@ -1,6 +1,6 @@
 use crate::beam::{BeamGeom, BeamInput, ColumnInput, resolve_beams};
 use crate::polygon;
-use crate::wall::{LayerGap, Opening, WallGeom, WallLine, core_through, embedded_in, resolve_join};
+use crate::wall::{EndJoin, LayerGap, Opening, WallGeom, WallLine, core_through, embedded_in, resolve_join};
 use crate::{Ray, Solid};
 use cc_core::{Category, ElementId, ElementKind, Project, RoofShape, TypeData};
 use glam::{DVec2, DVec3};
@@ -1103,12 +1103,28 @@ impl ModelGeometry {
             let mut gaps: Vec<(usize, [DVec2; 2])> = Vec::new();
             let mut layer_gaps: Vec<(usize, LayerGap)> = Vec::new();
             let mut ids = Vec::new();
-            for (i, (e, w)) in walls.iter().enumerate() {
-                let base_z = project.wall_base_z(e, w);
-                let top_z = project.wall_top_z(e, w);
+            let heights: Vec<(f64, f64)> =
+                walls.iter().map(|(e, w)| (project.wall_base_z(e, w), project.wall_top_z(e, w))).collect();
+            for (i, (e, _)) in walls.iter().enumerate() {
+                let (base_z, top_z) = heights.get(i).copied().unwrap_or_default();
                 let ty = project.element_type(e.type_id);
                 let (layers, core) = layered[i].clone();
-                let (start_join, end_join) = (resolve_join(&lines, i, true), resolve_join(&lines, i, false));
+                // Walls meet only those they stand beside at some height: a wall wholly below or
+                // above another (a foundation wall under a parapet on the same lines) joins neither.
+                let near: Vec<usize> = (0..lines.len())
+                    .filter(|&j| j == i || heights.get(j).is_some_and(|&(b, t)| b < top_z - 1e-6 && base_z < t - 1e-6))
+                    .collect();
+                let (start_join, end_join) = if near.len() == lines.len() {
+                    (resolve_join(&lines, i, true), resolve_join(&lines, i, false))
+                } else {
+                    let local: Vec<WallLine> = near.iter().filter_map(|&j| lines.get(j).copied()).collect();
+                    let me = near.iter().position(|&j| j == i).unwrap_or(0);
+                    // Back to indices into every wall of the level.
+                    let global = |join: Option<EndJoin>| {
+                        join.map(|j| EndJoin { host: j.host.and_then(|h| near.get(h).copied()), ..j })
+                    };
+                    (global(resolve_join(&local, me, true)), global(resolve_join(&local, me, false)))
+                };
                 let mut g = WallGeom::new(e.id, lines[i], base_z, top_z, start_join, end_join, layers);
                 g.core = core;
                 // Where this wall meets another in a T, that wall's face opens; its

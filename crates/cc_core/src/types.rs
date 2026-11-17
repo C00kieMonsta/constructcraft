@@ -356,6 +356,9 @@ pub enum TypeData {
         /// A curtain wall type: a grid of panels and mullions instead of layers.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         curtain: Option<crate::curtain::CurtainSystem>,
+        /// Walls made of this type are structural unless told otherwise.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        structural: bool,
     },
     Door {
         width: f64,
@@ -1107,6 +1110,11 @@ impl ElementType {
     }
 
     /// Width/height of an opening type (doors, windows).
+    /// Whether walls of this type are made structural (a wall type's default).
+    pub fn structural_wall(&self) -> bool {
+        matches!(self.data, TypeData::Wall { structural: true, .. })
+    }
+
     pub fn opening_size(&self) -> Option<(f64, f64)> {
         match &self.data {
             TypeData::Door { width, height, .. } | TypeData::Window { width, height, .. } => Some((*width, *height)),

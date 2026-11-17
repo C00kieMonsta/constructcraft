@@ -538,6 +538,7 @@ just-bottom = Низ
 prop-unconnected-height = Висота без прив’язки до верхнього рівня
 prop-room-bounding = Обмеження приміщення
 prop-structural = Несучий елемент
+type-structural-hint = Нові стіни цього типу створюються несучими; кожну стіну можна змінити потім.
 section-strip-beam = Балка на фундаменті
 prop-strip-beam = Переріз перевернутого Т
 prop-strip-edge = Товщина на краю

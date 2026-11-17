@@ -538,6 +538,7 @@ just-bottom = Inferior
 prop-unconnected-height = Altura sin conexión
 prop-room-bounding = Delimitación de habitación
 prop-structural = Estructural
+type-structural-hint = Los muros nuevos de este tipo se crean estructurales; cada muro puede cambiarlo después.
 section-strip-beam = Viga sobre la zapata
 prop-strip-beam = Sección en T invertida
 prop-strip-edge = Espesor en el borde

@@ -88,6 +88,9 @@ pub struct WallCreate {
     /// `FinishExterior`, `FinishInterior`, `CoreExterior` or `CoreInterior`.
     #[serde(default)]
     pub location_line: Option<String>,
+    /// A structural wall (default: as the wall type says).
+    #[serde(default)]
+    pub structural: Option<bool>,
 }
 
 impl Command for WallCreate {
@@ -106,6 +109,9 @@ impl Command for WallCreate {
             None => LocationLine::default(),
         };
         let bulge = arc_bulge(start, end, self.mid, self.bulge, self.radius, self.major_arc)?;
+        let type_id = refs::type_of(p, Category::Wall, self.type_ref.as_ref())?;
+        let structural =
+            self.structural.unwrap_or_else(|| p.element_type(type_id).is_some_and(|t| t.structural_wall()));
         let wall = Wall {
             start,
             end,
@@ -114,9 +120,9 @@ impl Command for WallCreate {
             height: positive(self.height.unwrap_or(p.defaults().story), "height")?,
             top: top(p, self.top_level.as_ref(), self.top_offset)?.unwrap_or(WallTop::Unconnected),
             location_line,
+            structural,
             ..Default::default()
         };
-        let type_id = refs::type_of(p, Category::Wall, self.type_ref.as_ref())?;
         check_arc(p, type_id, &wall)?;
         create(s, t!("tx-create-wall"), level, Category::Wall, self.type_ref.as_ref(), ElementKind::Wall(wall))
     }

@@ -279,6 +279,19 @@ fn parameters(ui: &mut Ui, state: &mut AppState, ty: &ElementType) {
                 });
             }
         }
+        // New walls of the type start structural (each wall keeps its own value).
+        if let TypeData::Wall { structural, .. } = ty.data {
+            let mut on = structural;
+            let r = row(ui, &t!("prop-structural"), |ui| crate::table::checkbox(ui, &mut on))
+                .on_hover_text(t!("type-structural-hint"));
+            if r.changed() {
+                update(state, tid, "structural", |t| {
+                    if let TypeData::Wall { structural, .. } = &mut t.data {
+                        *structural = on;
+                    }
+                });
+            }
+        }
         match ty.data {
             TypeData::Ceiling { thickness, .. } => {
                 size_row(ui, state, &t!("prop-thickness"), tid, "thk", thickness, |d, v| {
