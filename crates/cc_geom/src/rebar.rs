@@ -301,7 +301,8 @@ pub fn build_rebar(
                 crate::slab_rebar::slab_bars(&slab, r, d, other)
             }
             ElementKind::Wall(_) => {
-                let Some(g) = walls.get(&r.host) else { continue };
+                // A spline wall takes no bars yet.
+                let Some(g) = walls.get(&r.host).filter(|g| g.spline.is_none()) else { continue };
                 let all = wall_sets.get(&r.host).map_or(&[][..], |v| v.as_slice());
                 let mut context = wall_context(r, all);
                 if r.lap_at_joins {

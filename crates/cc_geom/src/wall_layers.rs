@@ -320,6 +320,12 @@ impl WallGeom {
     /// Exact plan area of the strip of column `c` between `v_hi` and `v_lo`.
     pub fn strip_area(&self, c: &Column, v_hi: f64, v_lo: f64) -> f64 {
         let (hi, lo) = (self.span_at(c, v_hi), self.span_at(c, v_lo));
+        // A spline wall's strip: the polygon between its chords at the two offsets.
+        if self.spline.is_some() {
+            let mut outline = self.path(lo.0, lo.1, v_lo);
+            outline.extend(self.path(hi.1, hi.0, v_hi));
+            return crate::polygon::area(&outline);
+        }
         match &self.arc {
             Some(a) => {
                 // Green's theorem, as `arc_band_area`: two arcs and the straight ends.
@@ -344,11 +350,11 @@ impl WallGeom {
     }
 
     /// Where along the centerline the centroid of a strip of column `c`
-    /// lies: its middle in an arc wall or a wall of level heights, where it
-    /// makes no difference.
+    /// lies: its middle in an arc wall, a spline wall or a wall of level
+    /// heights, where it makes no difference.
     fn strip_centroid_u(&self, c: &Column, v_hi: f64, v_lo: f64) -> f64 {
         let mid = column_mid(c);
-        if self.arc.is_some() || (self.top_profile.is_empty() && self.bottom_profile.is_empty()) {
+        if self.is_curved() || (self.top_profile.is_empty() && self.bottom_profile.is_empty()) {
             return mid;
         }
         let (hi, lo) = (self.span_at(c, v_hi), self.span_at(c, v_lo));
@@ -515,20 +521,20 @@ impl WallGeom {
     pub(super) fn banded_solid(&self, color: [u8; 3]) -> Solid {
         let mut s = Solid::new(self.element, Category::Wall, color);
         let h = self.half;
-        let curved = self.arc.is_some();
+        let curved = self.is_curved();
         let flat = |v: DVec2| DVec3::new(v.x, v.y, 0.0);
         let bands = self.bands();
         let last_band = bands.len().saturating_sub(1);
         for (ci, c) in self.columns.iter().enumerate() {
-            let n = self.segments(c);
-            let at = |range: (f64, f64), i: usize| range.0 + (range.1 - range.0) * i as f64 / n as f64;
+            let steps = self.steps(c);
+            let at = |range: (f64, f64), (num, den): (f64, f64)| range.0 + (range.1 - range.0) * num / den;
             let lines: Vec<Vec<(Lin, Lin)>> = bands.iter().map(|b| self.extent_lines(c, b.extent)).collect();
             for (j, band) in bands.iter().enumerate() {
                 let (hi_span, lo_span) = (self.span_at(c, band.v_hi), self.span_at(c, band.v_lo));
                 let (v_hi, v_lo) = (band.v_hi, band.v_lo);
-                for i in 0..n {
-                    let (a0, a1) = (at(hi_span, i), at(hi_span, i + 1));
-                    let (b0, b1) = (at(lo_span, i), at(lo_span, i + 1));
+                for step in steps.windows(2) {
+                    let (a0, a1) = (at(hi_span, step[0]), at(hi_span, step[1]));
+                    let (b0, b1) = (at(lo_span, step[0]), at(lo_span, step[1]));
                     let poly = [self.world(b0, v_lo), self.world(b1, v_lo), self.world(a1, v_hi), self.world(a0, v_hi)];
                     let us = [b0, b1, a1, a0];
                     let left_n = flat(self.normal_at((a0 + a1) * 0.5));

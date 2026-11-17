@@ -465,6 +465,7 @@ pub(crate) fn resolve_beams(beams: &[BeamInput], columns: &[ColumnInput]) -> Vec
             join_end: b.join_end && f[1].is_none(),
             bulge: b.bulge,
             drawn: [b.start, b.end],
+            path: None,
         })
         .collect();
     beams
@@ -479,7 +480,7 @@ pub(crate) fn resolve_beams(beams: &[BeamInput], columns: &[ColumnInput]) -> Vec
             let (local, me): (&[WallLine], usize) = if near.len() == lines.len() {
                 (&lines, i)
             } else {
-                copied = near.iter().map(|&j| lines[j]).collect();
+                copied = near.iter().map(|&j| lines[j].clone()).collect();
                 (&copied, near.iter().position(|&j| j == i).unwrap_or(0))
             };
             let resolve = |k: usize, at_start: bool| match framed[i][k] {

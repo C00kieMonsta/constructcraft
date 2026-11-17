@@ -410,6 +410,10 @@ fn flatten(control: &[DVec2], sagitta: f64, max_turn: f64) -> Vec<Station> {
     out
 }
 
+/// A straight frame at one end of a path: the end point, the left normal
+/// there and the distance along the path to it.
+type EndFrame = (DVec2, DVec2, f64);
+
 /// A spline flattened: its points from start to end, the unit left normal
 /// of the true curve at each, the distance along the chords to each and the
 /// curve's signed curvature there. See the module for its `(u, v)` frame.
@@ -523,7 +527,7 @@ impl WallPath {
         Ok((i, if b - a > 1e-12 { ((u - a) / (b - a)).clamp(0.0, 1.0) } else { 0.0 }))
     }
 
-    fn end(&self, at_start: bool) -> (DVec2, DVec2, f64) {
+    fn end(&self, at_start: bool) -> EndFrame {
         let i = if at_start { 0 } else { self.points.len().saturating_sub(1) };
         let n = self.normals.get(i).copied().unwrap_or(DVec2::Y);
         (self.points.get(i).copied().unwrap_or(DVec2::ZERO), n, if at_start { 0.0 } else { self.length() })
@@ -676,6 +680,24 @@ impl WallPath {
     /// The whole line `v` to the left of the path.
     pub fn face(&self, v: f64) -> Vec<DVec2> {
         self.points.iter().zip(&self.normals).map(|(p, n)| *p + *n * v).collect()
+    }
+
+    /// The line `v` to the left of the path within `reach` along it of `u`,
+    /// carried on straight by `extend` past an end of the path it reaches
+    /// (what a wall's face is where another wall meets it).
+    pub fn face_near(&self, v: f64, u: f64, reach: f64, extend: f64) -> Vec<DVec2> {
+        let (lo, hi) = (u - reach, u + reach);
+        let from = self.along.partition_point(|a| *a < lo).saturating_sub(1);
+        let to = self.along.partition_point(|a| *a <= hi).min(self.along.len().saturating_sub(1));
+        let mut pts = Vec::with_capacity(to.saturating_sub(from) + 3);
+        if from == 0 {
+            pts.push(self.at(-extend.abs(), v));
+        }
+        pts.extend((from..=to).filter_map(|i| Some(*self.points.get(i)? + *self.normals.get(i)? * v)));
+        if to + 1 >= self.along.len() {
+            pts.push(self.at(self.length() + extend.abs(), v));
+        }
+        pts
     }
 
     /// Where two segments join in a corner (see [`MAX_KINK_DEG`]).
