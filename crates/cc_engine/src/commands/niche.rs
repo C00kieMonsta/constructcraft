@@ -11,7 +11,6 @@ use crate::registry::{Command, CommandKind};
 use crate::session::Session;
 use crate::t;
 use cc_core::openings::{self, OpeningNames};
-use cc_core::units::INCH;
 use cc_core::{Category, ElementKind, ElementType, ElementTypeId, MeasurementSystem, Project, TypeData};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -20,15 +19,15 @@ use serde_json::{Value, json};
 /// Sizes a niche type may have, meters.
 const SIZE: (f64, f64) = (0.05, 6.0);
 const DEPTH: (f64, f64) = (0.01, 1.0);
-const SILL: (f64, f64) = (0.0, 10.0);
+/// Sills a niche type may have, meters (the app's tools keep the sills they
+/// place in this range too).
+pub const SILL: (f64, f64) = (0.0, 10.0);
 
-/// Width, height, depth and sill of a niche type made with no sizes given.
+/// Width, height, depth and sill of a niche type made with no sizes given:
+/// those of the template's niche type ([`cc_core::Defaults::niche`]).
 fn default_sizes(p: &Project) -> (f64, f64, f64, f64) {
-    if p.measurement_system() == MeasurementSystem::Imperial {
-        (24.0 * INCH, 24.0 * INCH, 4.0 * INCH, 36.0 * INCH)
-    } else {
-        (0.6, 0.6, 0.1, 0.9)
-    }
+    let [width, height, depth, sill] = p.defaults().niche.1;
+    (width, height, depth, sill)
 }
 
 /// Create a niche type: a recess `width` wide, `height` tall and `depth`
@@ -124,8 +123,9 @@ impl Command for NicheTypeCreate {
 /// Place a niche in a wall: a recess in one of its faces, centered on the
 /// wall unless `offset` or `point` is given. It is in the wall's left face
 /// (seen from its start to its end), in the right one with `flip_facing`,
-/// and with `point` in the face on the point's side. A project with no niche
-/// type gets a default one (see `niche_type_create`) in the same undo step.
+/// and with `point` in the face on the point's side. New projects carry a
+/// niche type; a project with none (an older file) gets the same default one
+/// (see `niche_type_create`) in the same undo step.
 /// The wall keeps standing behind the niche: it is not split, and rooms,
 /// joins and framing ignore it. A niche that would overlap a door, a window
 /// or another niche of its wall cuts nothing; `element_get` then shows no

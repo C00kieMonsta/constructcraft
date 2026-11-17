@@ -3,7 +3,7 @@
 // Scripts have no variables: later steps name elements, types and views by id,
 // which a fresh session assigns in order (tests/commands.rs runs this script).
 {"command": "project_info_set", "args": {"name": "Showcase house", "author": "ConstructCraft"}}
-// Existing house (walls 112-116): 9 x 5 m, with an old partition to demolish.
+// Existing house (walls 113-117): 9 x 5 m, with an old partition to demolish.
 {"command": "wall_create", "args": {"start": [0, 0], "end": [9, 0], "type": 3, "height": 2.6}}
 {"command": "wall_create", "args": {"start": [9, 0], "end": [9, 5], "type": 3, "height": 2.6}}
 {"command": "wall_create", "args": {"start": [9, 5], "end": [0, 5], "type": 3, "height": 2.6}}
@@ -19,8 +19,8 @@
 {"command": "wall_create", "args": {"start": [9.5, 5], "end": [9.5, 7.5], "type": 5, "height": 2.6}}
 {"command": "wall_create", "args": {"start": [9.5, 7.5], "end": [12, 7.5], "type": 5, "height": 2.6}}
 // Renovation: the old house is existing, its old partition is demolished.
-{"command": "elements_phase_set", "args": {"ids": [112, 113, 114, 115, 116, 117], "created": 85}}
-{"command": "elements_demolish", "args": {"ids": [117], "phase": 86}}
+{"command": "elements_phase_set", "args": {"ids": [113, 114, 115, 116, 117, 118], "created": 85}}
+{"command": "elements_demolish", "args": {"ids": [118], "phase": 86}}
 // Doors and windows.
 {"command": "door_create", "args": {"point": [1.6, 0.5], "type": 7}}
 {"command": "door_create", "args": {"point": [5, 3.6], "type": 6}}
@@ -38,14 +38,14 @@
 // Floor, hip roof over the L-shaped footprint (its planes come from the straight skeleton).
 {"command": "floor_create", "args": {"boundary": [[-0.075, -0.075], [12.075, -0.075], [12.075, 10.016], [11.742, 10.570], [11.293, 11.034], [10.750, 11.384], [10.142, 11.601], [9.500, 11.675], [8.858, 11.601], [8.250, 11.384], [7.707, 11.034], [7.258, 10.570], [6.925, 10.016], [6.925, 5.075], [-0.075, 5.075]]}}
 {"command": "roof_create", "args": {"boundary": [[-0.075, -0.075], [12.075, -0.075], [12.075, 10.016], [11.742, 10.570], [11.293, 11.034], [10.750, 11.384], [10.142, 11.601], [9.500, 11.675], [8.858, 11.601], [8.250, 11.384], [7.707, 11.034], [7.258, 10.570], [6.925, 10.016], [6.925, 5.075], [-0.075, 5.075]], "overhang": 0.6, "offset": 3.0}}
-{"command": "element_set", "args": {"id": 139, "params": {"shape": {"Hip": {"slope": 0.45}}}}}
+{"command": "element_set", "args": {"id": 140, "params": {"shape": {"Hip": {"slope": 0.45}}}}}
 // Rooms (their tags show in the plans).
 {"command": "room_create", "args": {"point": [2.7, 2.5], "name": "Living room"}}
 {"command": "room_create", "args": {"point": [7.2, 2.5], "name": "Kitchen"}}
 {"command": "room_create", "args": {"point": [10.5, 2.5], "name": "Bedroom"}}
 {"command": "room_create", "args": {"point": [8.5, 9], "name": "Suite"}}
 {"command": "room_create", "args": {"point": [10.7, 6.2], "name": "Bathroom"}}
-// Concrete frame: columns (145-155) at the corners, beams on top of the walls.
+// Concrete frame: columns (146-156) at the corners, beams on top of the walls.
 {"command": "column_create", "args": {"position": [0, 0]}}
 {"command": "column_create", "args": {"position": [5.5, 0]}}
 {"command": "column_create", "args": {"position": [9, 0]}}
@@ -57,21 +57,21 @@
 {"command": "column_create", "args": {"position": [12, 5]}}
 {"command": "column_create", "args": {"position": [12, 10]}}
 {"command": "column_create", "args": {"position": [7, 10]}}
-{"command": "elements_phase_set", "args": {"ids": [145, 146, 147, 149, 150, 152], "created": 85}}
-{"command": "beams_between_columns", "args": {"columns": [145, 146, 147, 148, 153, 154]}}
-{"command": "beams_between_columns", "args": {"columns": [155, 151, 150, 149, 145]}}
-{"command": "beams_between_columns", "args": {"columns": [151, 152, 153]}}
-{"command": "beams_between_columns", "args": {"columns": [147, 152]}}
-{"command": "beams_between_columns", "args": {"columns": [146, 150]}}
+{"command": "elements_phase_set", "args": {"ids": [146, 147, 148, 150, 151, 153], "created": 85}}
+{"command": "beams_between_columns", "args": {"columns": [146, 147, 148, 149, 154, 155]}}
+{"command": "beams_between_columns", "args": {"columns": [156, 152, 151, 150, 146]}}
+{"command": "beams_between_columns", "args": {"columns": [152, 153, 154]}}
+{"command": "beams_between_columns", "args": {"columns": [148, 153]}}
+{"command": "beams_between_columns", "args": {"columns": [147, 151]}}
 {"command": "footings_under_columns", "args": {}}
-{"command": "strip_footings_under_walls", "args": {"walls": [112, 113, 114, 115, 118, 119, 121, 122]}}
+{"command": "strip_footings_under_walls", "args": {"walls": [113, 114, 115, 116, 119, 120, 122, 123]}}
 {"command": "rebar_typical", "args": {}}
 {"command": "structure_number", "args": {}}
 // A steel pergola over the terrace.
 {"command": "floor_create", "args": {"boundary": [[-0.075, -0.075], [5.575, -0.075], [5.575, -3.4], [-0.075, -3.4]], "offset": -0.05}}
 {"command": "column_create", "args": {"position": [0.3, -3.1], "type": 20, "height": 2.8}}
 {"command": "column_create", "args": {"position": [5.2, -3.1], "type": 20, "height": 2.8}}
-{"command": "beams_between_columns", "args": {"columns": [250, 251], "type": 21, "top_offset": 2.8}}
+{"command": "beams_between_columns", "args": {"columns": [251, 252], "type": 21, "top_offset": 2.8}}
 {"command": "beam_create", "args": {"start": [0.3, -3.1], "end": [0.3, -0.075], "type": 21, "top_offset": 2.8}}
 {"command": "beam_create", "args": {"start": [2.75, -3.1], "end": [2.75, -0.075], "type": 21, "top_offset": 2.8}}
 {"command": "beam_create", "args": {"start": [5.2, -3.1], "end": [5.2, -0.075], "type": 21, "top_offset": 2.8}}
@@ -92,36 +92,36 @@
 {"command": "component_place", "args": {"type": 57, "position": [10.4, 6.9]}}
 {"command": "component_place", "args": {"type": 56, "position": [6.4, 4.925]}}
 {"command": "component_place", "args": {"type": 62, "position": [8.925, 4.2], "rotation": -90}}
-// Circuits 271-273 (the project already has cold water 64, hot water 65 and sanitary 66).
+// Circuits 272-274 (the project already has cold water 64, hot water 65 and sanitary 66).
 {"command": "system_create", "args": {"kind": "lighting", "name": "Lighting"}}
 {"command": "system_create", "args": {"kind": "power", "name": "Outlets"}}
 {"command": "system_create", "args": {"kind": "power", "name": "Kitchen and bath outlets"}}
 // Lights and switches (lighting circuit), outlets.
-{"command": "component_place", "args": {"type": 63, "position": [2.75, 2.5], "system": 271}}
-{"command": "component_place", "args": {"type": 63, "position": [7.25, 2.5], "system": 271}}
-{"command": "component_place", "args": {"type": 63, "position": [10.5, 2.5], "system": 271}}
-{"command": "component_place", "args": {"type": 63, "position": [9.5, 8.7], "system": 271}}
-{"command": "component_place", "args": {"type": 63, "position": [10.5, 6.25], "system": 271}}
-{"command": "component_place", "args": {"type": 60, "position": [2.4, 0.075], "rotation": 180, "system": 271}}
-{"command": "component_place", "args": {"type": 60, "position": [5.55, 4.2], "rotation": 90, "system": 271}}
-{"command": "component_place", "args": {"type": 60, "position": [9.075, 1.8], "rotation": 90, "system": 271}}
-{"command": "component_place", "args": {"type": 60, "position": [8.75, 5.075], "rotation": 180, "system": 271}}
-{"command": "component_place", "args": {"type": 60, "position": [9.55, 7.1], "rotation": 90, "system": 271}}
-{"command": "component_place", "args": {"type": 58, "position": [0.075, 1.0], "rotation": 90, "system": 272}}
-{"command": "component_place", "args": {"type": 58, "position": [1.2, 4.925], "system": 272}}
-{"command": "component_place", "args": {"type": 58, "position": [9.075, 3.5], "rotation": 90, "system": 272}}
-{"command": "component_place", "args": {"type": 58, "position": [11.925, 1.0], "rotation": -90, "system": 272}}
-{"command": "component_place", "args": {"type": 58, "position": [7.075, 7.0], "rotation": 90, "system": 272}}
-{"command": "component_place", "args": {"type": 58, "position": [11.925, 9.0], "rotation": -90, "system": 272}}
-{"command": "component_place", "args": {"type": 59, "position": [7.5, 4.925], "system": 273}}
-{"command": "component_place", "args": {"type": 59, "position": [8.925, 3.0], "rotation": -90, "system": 273}}
-{"command": "component_place", "args": {"type": 59, "position": [5.55, 1.0], "rotation": 90, "system": 273}}
-{"command": "component_place", "args": {"type": 59, "position": [11.925, 7.05], "rotation": -90, "system": 273}}
+{"command": "component_place", "args": {"type": 63, "position": [2.75, 2.5], "system": 272}}
+{"command": "component_place", "args": {"type": 63, "position": [7.25, 2.5], "system": 272}}
+{"command": "component_place", "args": {"type": 63, "position": [10.5, 2.5], "system": 272}}
+{"command": "component_place", "args": {"type": 63, "position": [9.5, 8.7], "system": 272}}
+{"command": "component_place", "args": {"type": 63, "position": [10.5, 6.25], "system": 272}}
+{"command": "component_place", "args": {"type": 60, "position": [2.4, 0.075], "rotation": 180, "system": 272}}
+{"command": "component_place", "args": {"type": 60, "position": [5.55, 4.2], "rotation": 90, "system": 272}}
+{"command": "component_place", "args": {"type": 60, "position": [9.075, 1.8], "rotation": 90, "system": 272}}
+{"command": "component_place", "args": {"type": 60, "position": [8.75, 5.075], "rotation": 180, "system": 272}}
+{"command": "component_place", "args": {"type": 60, "position": [9.55, 7.1], "rotation": 90, "system": 272}}
+{"command": "component_place", "args": {"type": 58, "position": [0.075, 1.0], "rotation": 90, "system": 273}}
+{"command": "component_place", "args": {"type": 58, "position": [1.2, 4.925], "system": 273}}
+{"command": "component_place", "args": {"type": 58, "position": [9.075, 3.5], "rotation": 90, "system": 273}}
+{"command": "component_place", "args": {"type": 58, "position": [11.925, 1.0], "rotation": -90, "system": 273}}
+{"command": "component_place", "args": {"type": 58, "position": [7.075, 7.0], "rotation": 90, "system": 273}}
+{"command": "component_place", "args": {"type": 58, "position": [11.925, 9.0], "rotation": -90, "system": 273}}
+{"command": "component_place", "args": {"type": 59, "position": [7.5, 4.925], "system": 274}}
+{"command": "component_place", "args": {"type": 59, "position": [8.925, 3.0], "rotation": -90, "system": 274}}
+{"command": "component_place", "args": {"type": 59, "position": [5.55, 1.0], "rotation": 90, "system": 274}}
+{"command": "component_place", "args": {"type": 59, "position": [11.925, 7.05], "rotation": -90, "system": 274}}
 // Conduits from the board, then a branch from every device to them.
-{"command": "conduit_create", "args": {"start": [2.75, 2.5], "end": [10.5, 2.5], "circuits": [271, 272, 273]}}
-{"command": "conduit_create", "args": {"start": [8.75, 4.2], "end": [8.75, 2.5], "circuits": [271, 272, 273]}}
-{"command": "conduit_create", "args": {"start": [10.5, 2.5], "end": [10.5, 8.7], "circuits": [271, 272, 273]}}
-{"command": "conduit_create", "args": {"start": [10.5, 8.7], "end": [9.5, 8.7], "circuits": [271, 272]}}
+{"command": "conduit_create", "args": {"start": [2.75, 2.5], "end": [10.5, 2.5], "circuits": [272, 273, 274]}}
+{"command": "conduit_create", "args": {"start": [8.75, 4.2], "end": [8.75, 2.5], "circuits": [272, 273, 274]}}
+{"command": "conduit_create", "args": {"start": [10.5, 2.5], "end": [10.5, 8.7], "circuits": [272, 273, 274]}}
+{"command": "conduit_create", "args": {"start": [10.5, 8.7], "end": [9.5, 8.7], "circuits": [272, 273]}}
 // Water supply in the walls and the drains to the sewer, then branches to the fixtures.
 {"command": "pipe_create", "args": {"start": [12.6, 5.0], "end": [6.0, 5.0], "system": 64}}
 {"command": "pipe_create", "args": {"start": [11.85, 5.0], "end": [11.85, 7.35], "system": 64}}
@@ -130,7 +130,7 @@
 {"command": "pipe_create", "args": {"start": [6.4, 4.5], "end": [6.4, -1.0], "system": 66}}
 {"command": "pipe_create", "args": {"start": [6.4, -1.0], "end": [12.8, -1.0], "system": 66}}
 {"command": "pipe_create", "args": {"start": [12.8, -1.0], "end": [13.8, -1.0], "system": 66}}
-{"command": "mep_connect", "args": {"elements": [265, 266, 267, 268, 269, 270, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293]}}
+{"command": "mep_connect", "args": {"elements": [266, 267, 268, 269, 270, 271, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294]}}
 {"command": "mep_size_apply", "args": {}}
 // Dimensions in the ground floor plan (view 69).
 {"command": "dimension_create", "args": {"view": 69, "kind": "linear", "a": [-0.075, -0.075], "b": [-0.075, 5.075], "offset": 1.2}}
@@ -144,38 +144,38 @@
 {"command": "view_graphics_set", "args": {"view": 73, "category": "conduit", "visible": false}}
 {"command": "view_create", "args": {"kind": "plumbing_plan", "level": 1, "name": "Plumbing", "scale": 100}}
 {"command": "view_create", "args": {"kind": "electrical_plan", "level": 1, "name": "Electrical", "scale": 100}}
-{"command": "view_create", "args": {"kind": "panel_diagram", "panel": 270, "name": "Board diagram"}}
+{"command": "view_create", "args": {"kind": "panel_diagram", "panel": 271, "name": "Board diagram"}}
 {"command": "view_create", "args": {"kind": "structural_plan", "level": 1, "name": "Structure", "scale": 100}}
 {"command": "view_create", "args": {"kind": "rebar", "name": "Reinforcement"}}
 {"command": "view_create", "args": {"kind": "analytical", "name": "Analytical model"}}
 {"command": "view_create", "args": {"kind": "section", "start": [10.3, 12.5], "end": [10.3, -4.5], "depth": 11, "name": "Section A"}}
 {"command": "view_duplicate", "args": {"view": 69}}
 {"command": "view_duplicate", "args": {"view": 69}}
-{"command": "view_set", "args": {"view": 357, "phase_filter": 88}}
 {"command": "view_set", "args": {"view": 358, "phase_filter": 88}}
-{"command": "view_set", "args": {"view": 360, "phase_filter": 88}}
-{"command": "view_graphics_set", "args": {"view": 357, "category": "foundation", "visible": false}}
+{"command": "view_set", "args": {"view": 359, "phase_filter": 88}}
+{"command": "view_set", "args": {"view": 361, "phase_filter": 88}}
 {"command": "view_graphics_set", "args": {"view": 358, "category": "foundation", "visible": false}}
+{"command": "view_graphics_set", "args": {"view": 359, "category": "foundation", "visible": false}}
 // The ground floor plan and the 3D view show the finished house; a copy shows the renovation.
 {"command": "view_set", "args": {"view": 69, "phase_filter": 88, "scale": 100}}
 {"command": "view_set", "args": {"view": 73, "phase_filter": 88}}
-{"command": "view_set", "args": {"view": 364, "name": "Renovation", "phase_filter": 87, "scale": 100}}
-// A view filter (366) colors the partitions in another copy.
+{"command": "view_set", "args": {"view": 365, "name": "Renovation", "phase_filter": 87, "scale": 100}}
+// A view filter (367) colors the partitions in another copy.
 {"command": "filter_create", "args": {"name": "Partitions", "categories": ["wall"], "rules": [{"param": "thickness", "op": "less", "value": 0.12}]}}
-{"command": "view_set", "args": {"view": 365, "name": "Wall types", "phase_filter": 88, "scale": 100}}
-{"command": "view_filter_add", "args": {"view": 365, "filter": 366, "overrides": {"cut_lines": {"color": [200, 90, 20], "weight": 0.5}, "cut_fill": {"pattern": "Solid", "color": [245, 160, 80]}}}}
+{"command": "view_set", "args": {"view": 366, "name": "Wall types", "phase_filter": 88, "scale": 100}}
+{"command": "view_filter_add", "args": {"view": 366, "filter": 367, "overrides": {"cut_lines": {"color": [200, 90, 20], "weight": 0.5}, "cut_fill": {"pattern": "Solid", "color": [245, 160, 80]}}}}
 // Sheet A101: the plan, the section and the 3D view.
-{"command": "view_set", "args": {"view": 363, "phase_filter": 88, "scale": 100}}
+{"command": "view_set", "args": {"view": 364, "phase_filter": 88, "scale": 100}}
 {"command": "view_set", "args": {"view": 83, "params": {"viewports": [{"view": 69, "center": [115, 160]}, {"view": 73, "center": [310, 128]}]}}}
-{"command": "sheet_place_view", "args": {"sheet": 83, "view": 363, "center": [305, 240]}}
-// A 3D view (367) from the north-east shows the roof over the arc wall.
+{"command": "sheet_place_view", "args": {"sheet": 83, "view": 364, "center": [305, 240]}}
+// A 3D view (368) from the north-east shows the roof over the arc wall.
 {"command": "view_create", "args": {"kind": "three_d", "name": "3D North-east"}}
-{"command": "view_set", "args": {"view": 367, "phase_filter": 88, "params": {"camera": {"target": [6.5, 5.0, 1.0], "yaw_deg": 215, "pitch_deg": 25, "distance": 24}}}}
-{"command": "view_graphics_set", "args": {"view": 367, "category": "foundation", "visible": false}}
-{"command": "view_graphics_set", "args": {"view": 367, "category": "pipe", "visible": false}}
-{"command": "view_graphics_set", "args": {"view": 367, "category": "conduit", "visible": false}}
-// A second filter (368) fills the exterior walls in the same view.
+{"command": "view_set", "args": {"view": 368, "phase_filter": 88, "params": {"camera": {"target": [6.5, 5.0, 1.0], "yaw_deg": 215, "pitch_deg": 25, "distance": 24}}}}
+{"command": "view_graphics_set", "args": {"view": 368, "category": "foundation", "visible": false}}
+{"command": "view_graphics_set", "args": {"view": 368, "category": "pipe", "visible": false}}
+{"command": "view_graphics_set", "args": {"view": 368, "category": "conduit", "visible": false}}
+// A second filter (369) fills the exterior walls in the same view.
 {"command": "filter_create", "args": {"name": "Exterior walls", "categories": ["wall"], "rules": [{"param": "thickness", "op": "greater", "value": 0.12}]}}
-{"command": "view_filter_add", "args": {"view": 365, "filter": 368, "overrides": {"cut_fill": {"pattern": "Solid", "color": [150, 185, 225]}}}}
+{"command": "view_filter_add", "args": {"view": 366, "filter": 369, "overrides": {"cut_fill": {"pattern": "Solid", "color": [150, 185, 225]}}}}
 // The arc wall's strip footing follows its curve (#22); placed last so the ids above stay put.
-{"command": "strip_footings_under_walls", "args": {"walls": [120]}}
+{"command": "strip_footings_under_walls", "args": {"walls": [121]}}

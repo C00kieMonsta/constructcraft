@@ -553,7 +553,7 @@ No parameters.
 
 ### `niche_create`
 
-*edit* — Place a niche in a wall: a recess in one of its faces, centered on the wall unless `offset` or `point` is given. It is in the wall's left face (seen from its start to its end), in the right one with `flip_facing`, and with `point` in the face on the point's side. A project with no niche type gets a default one (see `niche_type_create`) in the same undo step. The wall keeps standing behind the niche: it is not split, and rooms, joins and framing ignore it. A niche that would overlap a door, a window or another niche of its wall cuts nothing; `element_get` then shows no `volume`.
+*edit* — Place a niche in a wall: a recess in one of its faces, centered on the wall unless `offset` or `point` is given. It is in the wall's left face (seen from its start to its end), in the right one with `flip_facing`, and with `point` in the face on the point's side. New projects carry a niche type; a project with none (an older file) gets the same default one (see `niche_type_create`) in the same undo step. The wall keeps standing behind the niche: it is not split, and rooms, joins and framing ignore it. A niche that would overlap a door, a window or another niche of its wall cuts nothing; `element_get` then shows no `volume`.
 
 | Parameter | Type | | Description |
 |---|---|---|---|

@@ -191,6 +191,10 @@ pub struct AppState {
     pub typed: crate::tools::TypedInput,
     /// Default height for new walls.
     pub wall_height: f64,
+    /// Sill of the windows and niches the hosted tool places, set in the
+    /// options bar (`None`: the type's; issue #304). Changing the tool or
+    /// its type clears it (see [`crate::tools::hosted_sill`]).
+    pub hosted_sill: Option<f64>,
     /// The measurement system the tools' sizes were last set for (see
     /// [`AppState::follow_system`]).
     pub tool_system: cc_core::MeasurementSystem,
@@ -308,6 +312,7 @@ impl AppState {
             key_buffer: String::new(),
             typed: Default::default(),
             wall_height: 3.0,
+            hosted_sill: None,
             tool_system: cc_core::MeasurementSystem::Metric,
             wall_location_line: Default::default(),
             stair_layout: Default::default(),
@@ -538,6 +543,7 @@ impl AppState {
         crate::profiles_dialog::settle_abandoned(self);
         self.detail_draw = None;
         self.tool = tool;
+        self.hosted_sill = None;
         self.interaction = Interaction::default();
         self.typed.clear();
     }

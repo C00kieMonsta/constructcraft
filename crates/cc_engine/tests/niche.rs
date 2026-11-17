@@ -41,12 +41,15 @@ fn a_niche_recesses_one_face_of_its_wall() {
     let whole = volume(&mut s, w);
     let steps = s.doc.undo_depth();
 
-    // With no niche type in the project, the first niche brings the default one: 60 x 60 x 10, sill 90.
-    assert!(run(&mut s, "types_list", json!({"category": "niche"})).as_array().unwrap().is_empty());
+    // A new project carries a niche type, 60 x 60 x 10, sill 90, which the first niche takes.
+    let template = run(&mut s, "types_list", json!({"category": "niche"}));
+    assert_eq!(template.as_array().unwrap().len(), 1, "{template}");
     let niche = id(&run(&mut s, "niche_create", json!({"wall": w, "offset": 1.0})));
-    assert_eq!(s.doc.undo_depth(), steps + 1, "the type and the niche in one undo step");
+    assert_eq!(s.doc.undo_depth(), steps + 1, "one undo step");
     let types = run(&mut s, "types_list", json!({"category": "niche"}));
-    assert_eq!(types.as_array().unwrap().len(), 1);
+    let ids = |v: &Value| v.as_array().unwrap().iter().map(|t| t["id"].clone()).collect::<Vec<_>>();
+    assert_eq!(ids(&types), ids(&template), "no other niche type is made");
+    assert_eq!(types[0]["in_use"], 1);
 
     let got = run(&mut s, "element_get", json!({"id": niche}));
     assert_eq!(got["category"], "niche");
@@ -208,4 +211,70 @@ fn a_new_niche_component_needs_no_pieces() {
     run(&mut other, "component_load", json!({"path": path}));
     let types = run(&mut other, "types_list", json!({"category": "niche"}));
     assert!(types.as_array().unwrap().iter().any(|t| t["name"] == "Nicho X"), "{types}");
+}
+
+/// The niche types of a project, as `(name, width, height, depth, sill)`.
+fn niche_types(s: &Session) -> Vec<(String, f64, f64, f64, f64)> {
+    s.project()
+        .types_of(cc_core::Category::Niche)
+        .map(|t| {
+            let (w, h) = t.opening_size().unwrap();
+            (t.name.clone(), w, h, t.opening_depth().unwrap(), t.default_sill())
+        })
+        .collect()
+}
+
+fn close(a: f64, b: f64) -> bool {
+    (a - b).abs() < 1e-9
+}
+
+/// Issue #304: every new project, metric or imperial, carries one niche
+/// type, so the Niche tool has something to place; `niche_create` with no
+/// type uses it and makes no other.
+#[test]
+fn new_projects_carry_a_niche_type() {
+    use cc_core::units::INCH;
+    let inches = |v: f64| v * INCH;
+    for (template, sizes) in
+        [("metric", (0.6, 0.6, 0.1, 0.9)), ("imperial", (inches(24.0), inches(24.0), inches(4.0), inches(36.0)))]
+    {
+        let mut s = Session::default();
+        run(&mut s, "project_new", json!({ "template": template }));
+        let types = niche_types(&s);
+        assert_eq!(types.len(), 1, "{template}: {types:?}");
+        let (_, w, h, d, sill) = types[0].clone();
+        assert!(close(w, sizes.0) && close(h, sizes.1) && close(d, sizes.2) && close(sill, sizes.3), "{types:?}");
+        // The same sizes `niche_type_create` gives by default.
+        let made = id(&run(&mut s, "niche_type_create", json!({})));
+        let made = s.project().element_type(cc_core::ElementTypeId(made)).unwrap();
+        assert_eq!(made.opening_size(), Some((w, h)), "{template}");
+        assert_eq!((made.opening_depth(), made.default_sill()), (Some(d), sill), "{template}");
+        run(&mut s, "undo", json!({}));
+
+        let w = id(&run(&mut s, "wall_create", json!({"start": [0, 0], "end": [4, 0], "type": 4, "height": 3.0})));
+        let niche = id(&run(&mut s, "niche_create", json!({"wall": w})));
+        assert_eq!(niche_types(&s), types, "{template}: no new type");
+        let ty = s.project().element(ElementId(niche)).unwrap().type_id;
+        assert_eq!(s.project().element_type(ty).unwrap().name, types[0].0);
+        let got = run(&mut s, "element_get", json!({"id": niche}));
+        assert!(close(got["params"]["sill_height"].as_f64().unwrap(), sizes.3), "{got}");
+    }
+}
+
+/// A project with no niche type (an older file) still gets the default
+/// one with its first niche, in the same undo step.
+#[test]
+fn a_project_without_a_niche_type_gets_one() {
+    let mut project = cc_engine::new_project();
+    project.types.retain(|_, t| t.category() != cc_core::Category::Niche);
+    let mut s = Session::new(cc_core::Document::new(project));
+    let w = wall(&mut s);
+    let steps = s.doc.undo_depth();
+    assert!(niche_types(&s).is_empty());
+    run(&mut s, "niche_create", json!({"wall": w, "offset": 1.0}));
+    assert_eq!(s.doc.undo_depth(), steps + 1, "the type and the niche in one undo step");
+    let types = niche_types(&s);
+    assert_eq!(types.len(), 1, "{types:?}");
+    let (_, w, h, d, sill) = types[0].clone();
+    assert!(close(w, 0.6) && close(h, 0.6) && close(d, 0.1) && close(sill, 0.9), "{types:?}");
 }
