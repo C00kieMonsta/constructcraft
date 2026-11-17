@@ -661,7 +661,7 @@ fn layers_editor(ui: &mut Ui, state: &mut AppState, ty: &ElementType) {
             if ui.button(t!("type-add-layer")).clicked() {
                 let mut l = layers.clone();
                 let material = state.project().materials.first().map(|m| m.name.clone()).unwrap_or_default();
-                l.push(Layer { material, thickness: 0.02, function: LayerFunction::Finish });
+                l.push(Layer { material, thickness: 0.02, function: LayerFunction::Finish, ..Default::default() });
                 set_layers(state, "ladd", l);
                 state.session.doc.break_merge();
             }

@@ -1455,12 +1455,12 @@ impl<'a> Importer<'a> {
                     // Outer layers of a multi-layer set are finishes.
                     let function =
                         if n > 2 && (i == 0 || i == n - 1) { LayerFunction::Finish } else { LayerFunction::Structure };
-                    Layer { material, thickness: t, function }
+                    Layer { material, thickness: t, function, ..Default::default() }
                 })
                 .collect();
         }
         let material = self.material(&main.unwrap_or_else(|| "IFC".to_string()), color);
-        vec![Layer { material, thickness, function: LayerFunction::Structure }]
+        vec![Layer { material, thickness, function: LayerFunction::Structure, ..Default::default() }]
     }
 
     /// A type of `category` named `name` whose data satisfies `same`, else a

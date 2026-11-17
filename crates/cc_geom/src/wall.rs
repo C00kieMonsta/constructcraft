@@ -1,9 +1,14 @@
 use crate::polygon::line_intersect;
 use crate::{Face, Solid};
 use cc_core::arc::{ARC_STEP, Arc, segments};
+use cc_core::layer_extent::Extent;
 use cc_core::wall_profile::Chains;
 use cc_core::{Category, ElementId};
 use glam::{DVec2, DVec3};
+
+#[path = "wall_layers.rs"]
+mod layers;
+pub use layers::{Band, Lin};
 
 /// A rectangular hole through a wall, in wall-local coordinates.
 #[derive(Debug, Clone, PartialEq)]
@@ -125,6 +130,10 @@ pub struct WallGeom {
     pub profile: Option<Chains>,
     /// The panels and mullions of a curtain wall (its body instead of layers).
     pub curtain: Option<crate::curtain::CurtainGeom>,
+    /// Each layer's own vertical extent (see [`cc_core::layer_extent`]), in
+    /// the order of `layers`; empty when every layer spans the whole wall.
+    /// With them the body is stepped across the wall ([`Self::bands`]).
+    pub layer_extents: Vec<Extent>,
 }
 
 /// Where the core of a wall met in a T runs through the outer layers of the
@@ -621,6 +630,7 @@ impl WallGeom {
             bottom_profile: Vec::new(),
             profile: None,
             curtain: None,
+            layer_extents: Vec::new(),
         }
     }
 
@@ -674,8 +684,13 @@ impl WallGeom {
     /// The columns as a level plane at `z` cuts them: with an elevation
     /// profile, split where its chains cross `z`, each piece's solid
     /// heights those at its middle, so whether it is solid at `z` holds
-    /// across it; otherwise the columns themselves.
+    /// across it; otherwise the columns themselves. A banded wall's are split
+    /// where any layer's bottom or top crosses `z`, their solid heights the
+    /// layers' union.
     pub fn cut_columns(&self, z: f64) -> Vec<Column> {
+        if self.is_banded() {
+            return self.banded_cut_columns(z);
+        }
         if !self.is_profiled() {
             return self.columns.clone();
         }
@@ -754,8 +769,12 @@ impl WallGeom {
     /// The solid intervals of column `c` at `u`, its top following the
     /// profile (and, with an elevation profile, its base too: the lowest
     /// interval's bottom and the highest's top where they are the chains'
-    /// rather than an opening's).
+    /// rather than an opening's). A banded wall's are the union of its
+    /// layers' (see [`Self::layer_intervals`] for one layer's).
     pub fn intervals_at(&self, c: &Column, u: f64) -> Vec<(f64, f64)> {
+        if self.is_banded() {
+            return self.union_at(c, u);
+        }
         let mut out = c.solid.clone();
         let mid = (c.left.0.max(c.right.0) + c.left.1.min(c.right.1)) * 0.5;
         if !self.is_profiled() {
@@ -1058,8 +1077,12 @@ impl WallGeom {
 
     /// Net volume: each column's plan area times its solid height, less the
     /// recesses. Computed analytically because the body solid omits end caps
-    /// at joins (and meshes arcs with chords).
+    /// at joins (and meshes arcs with chords). A banded wall's is the sum of
+    /// its layers' ([`Self::layer_volumes`]).
     pub fn volume(&self) -> f64 {
+        if self.is_banded() {
+            return self.layer_volumes().iter().sum::<f64>().max(0.0);
+        }
         let body: f64 = self
             .columns
             .iter()
@@ -1156,8 +1179,12 @@ impl WallGeom {
         }
     }
 
-    /// Exterior faces of the wall body (arc faces as smooth facets).
+    /// Exterior faces of the wall body (arc faces as smooth facets). A
+    /// banded wall's is stepped across it (see [`Self::bands`]).
     pub fn to_solid(&self, color: [u8; 3]) -> Solid {
+        if self.is_banded() {
+            return self.banded_solid(color);
+        }
         let mut s = Solid::new(self.element, Category::Wall, color);
         let h = self.half;
         let curved = self.arc.is_some();
@@ -1248,29 +1275,7 @@ impl WallGeom {
                 }
             }
         }
-        // Inside each recess: its back, its two sides, its bottom and its top.
-        for r in &self.recesses {
-            let (face, back) = r.across(h);
-            let (lo, hi) = (face.min(back), face.max(back));
-            let n = match &self.arc {
-                Some(a) => segments((r.u1 - r.u0) / a.radius.max(1e-9), ARC_STEP),
-                None => 1,
-            };
-            for i in 0..n {
-                let at = |i: usize| r.u0 + (r.u1 - r.u0) * i as f64 / n as f64;
-                let (a, b) = (at(i), at(i + 1));
-                let out = flat(self.normal_at((a + b) * 0.5)) * r.side;
-                // Seen from the open side the back runs the way that face of the wall does.
-                let (from, to) = if r.side > 0.0 { (b, a) } else { (a, b) };
-                s.faces.push(side(quad(from, back, to, back, r.z0, r.z1, out)));
-            }
-            s.faces.push(quad(r.u0, lo, r.u0, hi, r.z0, r.z1, flat(self.tangent(r.u0))));
-            s.faces.push(quad(r.u1, hi, r.u1, lo, r.z0, r.z1, -flat(self.tangent(r.u1))));
-            let mut floor = self.path(r.u0, r.u1, lo);
-            floor.extend(self.path(r.u1, r.u0, hi));
-            s.faces.push(Face::new(floor.iter().map(|p| DVec3::new(p.x, p.y, r.z0)).collect(), DVec3::Z));
-            s.faces.push(Face::new(floor.iter().rev().map(|p| DVec3::new(p.x, p.y, r.z1)).collect(), -DVec3::Z));
-        }
+        self.recess_faces(&mut s);
         // End caps, omitted where another wall closes the joint.
         let cap = |s: &mut Solid, col: &Column, (ul, ur): (f64, f64), outward: f64| {
             let e = self.world(ul, h) - self.world(ur, -h);
@@ -1295,6 +1300,49 @@ impl WallGeom {
             cap(&mut s, c, self.end_ext, 1.0);
         }
         s
+    }
+
+    /// Inside each recess: its back, its two sides, its bottom and its top.
+    fn recess_faces(&self, s: &mut Solid) {
+        let h = self.half;
+        let curved = self.arc.is_some();
+        let flat = |v: DVec2| DVec3::new(v.x, v.y, 0.0);
+        let quad = |u0: f64, v0: f64, u1: f64, v1: f64, z0: f64, z1: f64, n: DVec3| {
+            let verts = vec![
+                self.world3(u0, v0, z0),
+                self.world3(u1, v1, z0),
+                self.world3(u1, v1, z1),
+                self.world3(u0, v0, z1),
+            ];
+            Face::new(verts, n)
+        };
+        // Faces of an arc are facets of one smooth surface.
+        let side = |mut f: Face| {
+            f.smooth = curved;
+            f
+        };
+        for r in &self.recesses {
+            let (face, back) = r.across(h);
+            let (lo, hi) = (face.min(back), face.max(back));
+            let n = match &self.arc {
+                Some(a) => segments((r.u1 - r.u0) / a.radius.max(1e-9), ARC_STEP),
+                None => 1,
+            };
+            for i in 0..n {
+                let at = |i: usize| r.u0 + (r.u1 - r.u0) * i as f64 / n as f64;
+                let (a, b) = (at(i), at(i + 1));
+                let out = flat(self.normal_at((a + b) * 0.5)) * r.side;
+                // Seen from the open side the back runs the way that face of the wall does.
+                let (from, to) = if r.side > 0.0 { (b, a) } else { (a, b) };
+                s.faces.push(side(quad(from, back, to, back, r.z0, r.z1, out)));
+            }
+            s.faces.push(quad(r.u0, lo, r.u0, hi, r.z0, r.z1, flat(self.tangent(r.u0))));
+            s.faces.push(quad(r.u1, hi, r.u1, lo, r.z0, r.z1, -flat(self.tangent(r.u1))));
+            let mut floor = self.path(r.u0, r.u1, lo);
+            floor.extend(self.path(r.u1, r.u0, hi));
+            s.faces.push(Face::new(floor.iter().map(|p| DVec3::new(p.x, p.y, r.z0)).collect(), DVec3::Z));
+            s.faces.push(Face::new(floor.iter().rev().map(|p| DVec3::new(p.x, p.y, r.z1)).collect(), -DVec3::Z));
+        }
     }
 }
 #[cfg(test)]

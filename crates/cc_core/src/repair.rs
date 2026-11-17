@@ -171,19 +171,23 @@ impl Project {
                 TypeData::Wall { layers, curtain, .. } => {
                     for layer in layers.iter_mut() {
                         repairs += usize::from(fix_positive(&mut layer.thickness, 0.01));
+                        repairs += crate::layer_extent::repair(layer);
                     }
                     if let Some(c) = curtain {
                         repairs += c.repair(&is_component);
                     }
                 }
+                // Floors and roofs take no layer extents.
                 TypeData::Floor { layers } => {
                     for layer in layers.iter_mut() {
                         repairs += usize::from(fix_positive(&mut layer.thickness, 0.01));
+                        repairs += crate::layer_extent::clear(layer);
                     }
                 }
                 TypeData::Roof { layers, framing, .. } => {
                     for layer in layers.iter_mut() {
                         repairs += usize::from(fix_positive(&mut layer.thickness, 0.01));
+                        repairs += crate::layer_extent::clear(layer);
                     }
                     repairs += framing.repair();
                 }

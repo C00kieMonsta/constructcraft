@@ -32,6 +32,7 @@ pub mod graphics;
 pub mod grid;
 mod ids;
 pub mod level_mark;
+pub mod layer_extent;
 pub mod lightning;
 pub mod mass;
 pub mod material;

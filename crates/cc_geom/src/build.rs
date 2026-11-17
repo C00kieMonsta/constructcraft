@@ -2,6 +2,7 @@ use crate::beam::{BeamGeom, BeamInput, ColumnInput, resolve_beams};
 use crate::polygon;
 use crate::wall::{EndJoin, LayerGap, Opening, WallGeom, WallLine, core_through, embedded_in, resolve_join};
 use crate::{Ray, Solid};
+use cc_core::layer_extent::Extent;
 use cc_core::wall_profile::Chains;
 use cc_core::{Category, ElementId, ElementKind, Project, RoofShape, TypeData};
 use glam::{DVec2, DVec3};
@@ -1026,6 +1027,7 @@ impl ModelGeometry {
             let openings = g.openings.clone();
             g.set_openings(openings.into_iter().filter(|o| o.z1 <= low).collect());
             g.set_top_profile(profile);
+            g.split_bands();
             let found = self.solid_index.get(&self.solids, wall).and_then(|positions| {
                 positions
                     .iter()
@@ -1137,6 +1139,23 @@ impl ModelGeometry {
                     None => (project.wall_base_z(e, w), project.wall_top_z(e, w)),
                 })
                 .collect();
+            // How far below its bottom each wall's lowest layer runs (see `cc_core::layer_extent`),
+            // and the layers' own extents of the walls that have them.
+            let types: Vec<Option<&cc_core::ElementType>> =
+                walls.iter().map(|(e, _)| project.element_type(e.type_id)).collect();
+            let lowest: Vec<f64> = types
+                .iter()
+                .map(|t| t.map_or(0.0, |t| t.layers().iter().map(|l| l.base_offset).fold(0.0, f64::min)))
+                .collect();
+            let extents: Vec<Vec<Extent>> = types
+                .iter()
+                .map(|t| match t.map(|t| t.layers()).filter(|l| cc_core::layer_extent::any(l)) {
+                    Some(layers) => layers.iter().map(Extent::of).collect(),
+                    None => Vec::new(),
+                })
+                .collect();
+            let reach: Vec<(f64, f64)> =
+                heights.iter().zip(&lowest).map(|(&(b, t), below)| (b + below, t)).collect();
             for (i, (e, w)) in walls.iter().enumerate() {
                 let chains = profiles.get(i).cloned().flatten();
                 // A profiled wall keeps its nominal base (sills are measured from it); its top is the profile's highest.
@@ -1151,8 +1170,10 @@ impl ModelGeometry {
                 let (layers, core) = layered[i].clone();
                 // Walls meet only those they stand beside at some height: a wall wholly below or
                 // above another (a foundation wall under a parapet on the same lines) joins neither.
+                // A wall stands as low as its lowest layer.
+                let low = base_z + lowest.get(i).copied().unwrap_or(0.0);
                 let near: Vec<usize> = (0..lines.len())
-                    .filter(|&j| j == i || heights.get(j).is_some_and(|&(b, t)| b < top_z - 1e-6 && base_z < t - 1e-6))
+                    .filter(|&j| j == i || reach.get(j).is_some_and(|&(b, t)| b < top_z - 1e-6 && low < t - 1e-6))
                     .collect();
                 let (start_join, end_join) = if near.len() == lines.len() {
                     (resolve_join(&lines, i, true), resolve_join(&lines, i, false))
@@ -1222,6 +1243,9 @@ impl ModelGeometry {
                 if let Some(c) = chains {
                     g.set_elevation(c);
                 }
+                // Layers with extents of their own step the body across the wall.
+                g.layer_extents = extents.get(i).cloned().unwrap_or_default();
+                g.split_bands();
                 g.set_recesses(recesses);
                 if let Some(system) = curtains[i] {
                     let c = crate::curtain::build(project, e, &g, system);
