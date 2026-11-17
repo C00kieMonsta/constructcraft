@@ -3878,6 +3878,26 @@ fn wall_under(
         .map(|(id, u, v, _)| (id, u, v))
 }
 
+/// Whether the hosted tool of `category` takes a sill in the options bar
+/// (windows and niches; doors stand on the floor).
+pub(crate) fn takes_sill(category: Category) -> bool {
+    matches!(category, Category::Window | Category::Niche)
+}
+
+/// The sills the options bar accepts, meters: those niche types may have,
+/// which `window_create` and `niche_create` both take.
+pub(crate) const SILL_RANGE: std::ops::RangeInclusive<f64> =
+    cc_engine::commands::niche::SILL.0..=cc_engine::commands::niche::SILL.1;
+
+/// The sill the hosted tool places an opening of type `ty` at: the options
+/// bar's `chosen` one for windows and niches (issue #304), else the type's.
+pub(crate) fn hosted_sill(chosen: Option<f64>, category: Category, ty: &cc_core::ElementType) -> f64 {
+    match chosen.filter(|v| v.is_finite() && takes_sill(category)) {
+        Some(v) => v.clamp(*SILL_RANGE.start(), *SILL_RANGE.end()),
+        None => ty.default_sill(),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn hosted_tool(
     ui: &Ui,
@@ -3896,7 +3916,7 @@ fn hosted_tool(
     let project = &state.session.doc.project;
     let Some(ty) = project.element_type(type_id) else { return };
     let Some((width, _)) = ty.opening_size() else { return };
-    let sill = ty.default_sill();
+    let sill = hosted_sill(state.hosted_sill, category, ty);
     // Some reach off the wall, to aim at marks of a drawing beside it (issue #251).
     let Some((host, u, v)) = wall_under(project, state.session.geom(), level, raw, 30.0 / xf.scale) else {
         painter.circle_stroke(xf.to_screen(raw), 4.0, Stroke::new(1.0, Color32::GRAY));
@@ -4007,7 +4027,7 @@ fn create_opening(
 }
 
 /// A door or window tool clicked on `point` of wall `host` in a 3D view: the
-/// opening is centered there (at the type's sill), facing the side clicked.
+/// opening is centered there (at the tool's sill), facing the side clicked.
 pub(crate) fn place_opening_3d(state: &mut AppState, tool: &Tool, host: ElementId, point: DVec2) {
     let Tool::Hosted { category, type_id } = *tool else { return };
     let project = &state.session.doc.project;
@@ -4016,7 +4036,7 @@ pub(crate) fn place_opening_3d(state: &mut AppState, tool: &Tool, host: ElementI
         return;
     };
     let Some((width, _)) = ty.opening_size() else { return };
-    let sill = ty.default_sill();
+    let sill = hosted_sill(state.hosted_sill, category, ty);
     let (u, v) = g.local(point);
     let Some(offset) = opening_offset(g, width, u) else {
         state.message = t!("msg-wall-too-short");

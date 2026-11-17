@@ -372,6 +372,151 @@ fn wall_tool_has_an_arc_mode() {
     assert_eq!(harness.state().wall_mode, WallMode::Line);
 }
 
+/// The options bar of the hosted tool over `state`, 1600 px wide.
+fn options_bar_harness(state: AppState) -> Harness<'static, AppState> {
+    themed_harness(state, egui::vec2(1600.0, 60.0), egui::Theme::Light, |ui, state| {
+        crate::ribbon::options_bar(ui, state)
+    })
+}
+
+/// The text the options bar's sill field shows.
+fn sill_field_text(harness: &Harness<'static, AppState>) -> String {
+    let label = t!("prop-sill");
+    harness.get_by_role_and_label(Role::SpinButton, &label).value().unwrap_or_default()
+}
+
+/// A length as a field shows it, with its unit (feet and inches carry their own marks).
+fn length_with_unit(state: &AppState, meters: f64) -> String {
+    let unit = state.project().units.length.unit;
+    if unit.is_fractional() { length_text(meters) } else { format!("{} {}", length_text(meters), unit.symbol()) }
+}
+
+/// Type `meters` into the options bar's sill field and press Enter.
+fn type_sill(harness: &mut Harness<'static, AppState>, meters: f64) {
+    harness.get_by_role_and_label(Role::SpinButton, &t!("prop-sill")).focus();
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.query_all_by_role(Role::SpinButton).find(|n| n.is_focused()).unwrap().type_text(&length_text(meters));
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+}
+
+/// Pick `name` in the options bar's type list.
+fn pick_tool_type(harness: &mut Harness<'static, AppState>, name: &str) {
+    harness.get_by_role(Role::ComboBox).click();
+    harness.run();
+    harness.get_by_label(name).click();
+    harness.run();
+}
+
+/// Place the tool's opening in the middle of the sample's longest wall
+/// with no door, window or niche there (as a click in a 3D view does) and
+/// return its sill.
+fn place_and_read_sill(state: &mut AppState) -> f64 {
+    state.session.geometry();
+    let clear = |g: &cc_geom::WallGeom| {
+        let mid = g.length * 0.5;
+        let busy = g.openings.iter().map(|o| (o.u0, o.u1)).chain(g.recesses.iter().map(|r| (r.u0, r.u1)));
+        g.curtain.is_none() && g.length > 2.5 && busy.into_iter().all(|(u0, u1)| u1 < mid - 1.0 || u0 > mid + 1.0)
+    };
+    let walls = state.session.geom().walls.iter().filter(|(_, g)| clear(g));
+    let (wall, g) = walls.max_by(|a, b| a.1.length.total_cmp(&b.1.length)).unwrap();
+    let (wall, point) = (*wall, g.world(g.length * 0.5, g.half));
+    let tool = state.tool.clone();
+    let before = state.project().elements.len();
+    crate::tools::place_opening_3d(state, &tool, wall, point);
+    assert_eq!(state.project().elements.len(), before + 1, "{}", state.message);
+    let placed = state.selection.iter().next().copied().unwrap();
+    state.project().element(placed).and_then(|e| e.as_hosted()).map(|h| h.sill_height).unwrap()
+}
+
+/// Issue #304: the window tool's options bar shows the sill of the type,
+/// a typed sill is the one windows are placed at, and another type (or
+/// another tool) brings the type's own sill back.
+#[test]
+fn the_window_tool_takes_a_sill() {
+    use cc_core::Category;
+    let mut state = sample_state();
+    let windows: Vec<(cc_core::ElementTypeId, String, f64)> =
+        state.project().types_of(Category::Window).map(|t| (t.id, t.name.clone(), t.default_sill())).collect();
+    let first = windows[0].clone();
+    let other = windows.iter().find(|w| (w.2 - first.2).abs() > 1e-6).unwrap().clone();
+    state.set_tool(crate::tools::Tool::Hosted { category: Category::Window, type_id: first.0 });
+    let mut harness = options_bar_harness(state);
+    assert_eq!(sill_field_text(&harness), length_with_unit(harness.state(), first.2));
+
+    type_sill(&mut harness, 1.5);
+    assert_eq!(harness.state().hosted_sill, Some(1.5));
+    assert_eq!(sill_field_text(&harness), length_with_unit(harness.state(), 1.5));
+    let sill = place_and_read_sill(harness.state_mut());
+    assert!((sill - 1.5).abs() < 1e-9, "placed at {sill}");
+
+    // Another type: the field follows it again.
+    pick_tool_type(&mut harness, &other.1);
+    assert!(matches!(harness.state().tool, crate::tools::Tool::Hosted { type_id, .. } if type_id == other.0));
+    assert_eq!(harness.state().hosted_sill, None);
+    assert_eq!(sill_field_text(&harness), length_with_unit(harness.state(), other.2));
+    let sill = place_and_read_sill(harness.state_mut());
+    assert!((sill - other.2).abs() < 1e-9, "placed at {sill}");
+
+    // Out of range is kept in range; another tool forgets the sill.
+    type_sill(&mut harness, 50.0);
+    assert_eq!(harness.state().hosted_sill, Some(*crate::tools::SILL_RANGE.end()));
+    harness.state_mut().set_tool(crate::tools::Tool::Select);
+    harness.state_mut().set_tool(crate::tools::Tool::Hosted { category: Category::Window, type_id: other.0 });
+    harness.run();
+    assert_eq!(harness.state().hosted_sill, None);
+    assert_eq!(sill_field_text(&harness), length_with_unit(harness.state(), other.2));
+}
+
+/// Issue #304: the niche tool takes a sill the same way; the door tool has none.
+#[test]
+fn the_niche_tool_takes_a_sill_and_the_door_tool_none() {
+    use cc_core::Category;
+    let mut state = sample_state();
+    crate::actions::activate_category_tool(&mut state, Category::Niche);
+    let niche = state.project().default_type(Category::Niche).unwrap();
+    let niche_sill = state.project().element_type(niche).unwrap().default_sill();
+    let shelf = cc_engine::commands::niche::NicheTypeCreate {
+        name: Some("Shelf".into()),
+        sill: Some(0.2),
+        ..Default::default()
+    };
+    crate::actions::run_command(&mut state, shelf);
+    let mut harness = options_bar_harness(state);
+    assert_eq!(sill_field_text(&harness), length_with_unit(harness.state(), niche_sill));
+    type_sill(&mut harness, 0.4);
+    assert_eq!(harness.state().hosted_sill, Some(0.4));
+    let sill = place_and_read_sill(harness.state_mut());
+    assert!((sill - 0.4).abs() < 1e-9, "placed at {sill}");
+    pick_tool_type(&mut harness, "Shelf");
+    assert_eq!(harness.state().hosted_sill, None);
+    assert_eq!(sill_field_text(&harness), length_with_unit(harness.state(), 0.2));
+
+    // Doors stand on the floor: no sill in their options.
+    let door = harness.state().project().default_type(Category::Door).unwrap();
+    harness.state_mut().set_tool(crate::tools::Tool::Hosted { category: Category::Door, type_id: door });
+    harness.run();
+    assert!(harness.query_by_label(&t!("prop-sill")).is_none());
+    assert!(harness.query_by_label(&t!("prop-flip-hand")).is_some(), "the door's options are there");
+}
+
+/// The options bar of the window and niche tools, written as PNG files to
+/// the folder `CC_RENDER_SILL_OPTION` names, for review.
+#[test]
+fn render_sill_option() {
+    let Some(dir) = std::env::var_os("CC_RENDER_SILL_OPTION") else { return };
+    let dir = std::path::PathBuf::from(dir);
+    for category in [cc_core::Category::Window, cc_core::Category::Niche] {
+        let mut state = sample_state();
+        crate::actions::activate_category_tool(&mut state, category);
+        let mut harness = options_bar_harness(state);
+        harness.run();
+        let name = format!("sill_option_{}.png", format!("{category:?}").to_lowercase());
+        harness.render().unwrap().save(dir.join(name)).unwrap();
+    }
+}
+
 /// A structural wall's palette offers its reinforcement: the typical button
 /// makes horizontal and vertical bars near both faces, listed with their
 /// spacing (#281).

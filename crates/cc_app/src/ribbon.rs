@@ -1154,6 +1154,28 @@ fn device_options(ui: &mut Ui, state: &mut AppState, type_id: cc_core::ElementTy
     ui.label(theme::muted(hint));
 }
 
+/// The sill of the windows or niches the hosted tool places (issue #304):
+/// the type's until a value is typed or dragged here, which then holds for
+/// this tool and type (see [`crate::tools::hosted_sill`]).
+fn hosted_sill_field(ui: &mut Ui, state: &mut AppState, category: Category, type_id: cc_core::ElementTypeId) {
+    let Some(ty) = state.project().element_type(type_id) else { return };
+    let mut sill = crate::tools::hosted_sill(state.hosted_sill, category, ty);
+    let label = t!("prop-sill");
+    let caption = ui.label(&label);
+    let response = ui
+        .add(crate::properties::length_drag(&mut sill).speed(0.01).range(crate::tools::SILL_RANGE))
+        .labelled_by(caption.id);
+    // Named for the accessibility tree (and the interface tests), keeping the number.
+    response.widget_info(|| {
+        let mut info = egui::WidgetInfo::drag_value(true, sill);
+        info.label = Some(label.clone());
+        info
+    });
+    if response.changed() && sill.is_finite() {
+        state.hosted_sill = Some(sill.clamp(*crate::tools::SILL_RANGE.start(), *crate::tools::SILL_RANGE.end()));
+    }
+}
+
 pub fn options_bar(ui: &mut Ui, state: &mut AppState) {
     ui.horizontal(|ui| {
         egui::Frame::new()
@@ -1191,6 +1213,8 @@ pub fn options_bar(ui: &mut Ui, state: &mut AppState) {
             }
             if selected != type_id {
                 state.tool = state.tool.with_type(selected);
+                // Another type: its own sill again.
+                state.hosted_sill = None;
             }
             if ui.button(t!("props-edit-type")).clicked() {
                 state.dialogs.type_editor = Some(type_id);
@@ -1254,7 +1278,11 @@ pub fn options_bar(ui: &mut Ui, state: &mut AppState) {
                 };
                 ui.label(theme::muted(hint));
             }
-            Tool::Hosted { .. } => {
+            Tool::Hosted { category, type_id } => {
+                if crate::tools::takes_sill(category) {
+                    hosted_sill_field(ui, state, category, type_id);
+                    ui.separator();
+                }
                 ui.checkbox(&mut state.interaction.flip_hand, t!("prop-flip-hand"));
                 ui.label(theme::muted(t!("hint-hosted")));
                 ui.label(theme::muted(t!("hint-hosted-distance")));
