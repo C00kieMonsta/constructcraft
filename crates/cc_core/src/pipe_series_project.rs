@@ -6,7 +6,7 @@ use crate::{ElementType, ElementTypeId, MeasurementSystem, Project, TypeData, Ui
 use std::collections::BTreeSet;
 
 /// How far an old template pipe type's diameter may be from the template's
-/// for format 29 to link it to its series row, m.
+/// for a file before format 30 to link it to its series row, m.
 const LINK_TOLERANCE: f64 = 0.001;
 
 /// What a pipe type's diameter should become, and whether it keeps its
@@ -128,7 +128,7 @@ impl Project {
         linked
     }
 
-    /// Link the pipe types of a file older than format 29 that are the
+    /// Link the pipe types of a file older than format 30 that are the
     /// template's (by name, in either system, through `translate` or the
     /// Portuguese defaults, and by diameter). Returns the number linked.
     pub(crate) fn link_old_template_pipes(&mut self, translate: &dyn Fn(&str) -> Option<String>) -> usize {
