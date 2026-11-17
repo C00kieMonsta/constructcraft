@@ -738,7 +738,7 @@ impl<'a> EditCtx<'a> {
             let Some(w) = e.as_wall() else { continue };
             let Some(profile) = &w.profile else { continue };
             let curtain = p.element_type(e.type_id).is_some_and(|t| t.curtain().is_some());
-            let fitted = if curtain || w.bulge != 0.0 {
+            let fitted = if curtain || w.bulge != 0.0 || w.spline.is_some() {
                 None
             } else {
                 match before.filter(|b| b.profile == w.profile && b.bulge == 0.0) {

@@ -112,14 +112,16 @@ impl std::fmt::Display for SplineError {
 }
 
 impl WallSpline {
-    /// The spline through the `fit` points (see [`spline::interpolate`]);
-    /// `None` with fewer than two distinct points.
+    /// The spline through the `fit` points (see [`spline::interpolate`]:
+    /// points repeated in a row count once); `None` with fewer than two
+    /// distinct points or more than [`MAX_SEGMENTS`] + 1.
     pub fn through(fit: &[DVec2]) -> Option<Self> {
-        if fit.len() > MAX_SEGMENTS + 1 || !fit.iter().all(|p| p.is_finite()) {
+        // (A bound before any work: twice the most a spline holds, for repeated points.)
+        if fit.len() > 2 * (MAX_SEGMENTS + 1) || !fit.iter().all(|p| p.is_finite()) {
             return None;
         }
-        let control = spline::interpolate(fit, false);
-        (!control.is_empty()).then_some(Self { control })
+        let made = Self { control: spline::interpolate(fit, false) };
+        made.is_valid().then_some(made)
     }
 
     /// The control points of a spline: finite, within [`MAX_COORD`], a
@@ -343,7 +345,7 @@ fn direction(seg: [DVec2; 4], t: f64) -> DVec2 {
 fn station(seg: [DVec2; 4], index: usize, t: f64) -> Station {
     let d1 = spline::derivative(seg, t);
     let speed = d1.length();
-    // No speed: a cusp, or a handle on its knot; either way no radius to rely on.
+    // No speed: a cusp, or a handle on its knot (where the curve's radius shrinks to nothing).
     let curvature = if speed > 1e-9 { d1.perp_dot(second(seg, t)) / (speed * speed * speed) } else { f64::INFINITY };
     Station {
         point: spline::point(seg, t),
@@ -920,6 +922,9 @@ mod tests {
         .unwrap();
         assert!(hairpin.check(0.1, -0.1).is_ok(), "{:?}", hairpin.check(0.1, -0.1));
         assert!(matches!(hairpin.check(1.6, -1.6), Err(SplineError::Tight(_) | SplineError::Crossing(_))));
+        // A handle on its knot: the curve's radius shrinks to nothing there.
+        let hooked = WallSpline { control: vec![DVec2::ZERO, DVec2::ZERO, DVec2::new(2.0, 1.0), DVec2::new(4.0, 1.0)] };
+        assert_eq!(hooked.check(0.1, -0.1), Err(SplineError::Tight(DVec2::ZERO)));
         // A cusp: both handles past each other.
         let cusp = WallSpline {
             control: vec![DVec2::ZERO, DVec2::new(3.0, 0.0), DVec2::new(-2.0, 0.0), DVec2::new(1.0, 0.0)],

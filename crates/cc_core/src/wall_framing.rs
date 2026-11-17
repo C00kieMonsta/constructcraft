@@ -285,7 +285,7 @@ impl WallFraming {
     fn frame(&self, project: &Project) -> Option<(Frame, Vec<Opening>)> {
         let e = project.element(self.wall)?;
         let w = e.as_wall()?;
-        if w.arc().is_some() {
+        if w.is_curved() {
             return None;
         }
         let (a, b) = project.wall_axis(e, w);

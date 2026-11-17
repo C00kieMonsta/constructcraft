@@ -1,6 +1,6 @@
 //! Spline walls (see [`cc_core::wall_spline`]): a wall whose location line
 //! is a smooth free-form curve, a chain of cubic Bézier segments.
-//! `wall_create` draws one `through` points or by its `control` points,
+//! `wall_create` draws one from `start` `through` points to `end`, or by its `control` points,
 //! `element_get` shows the control points in `params.spline` (and the
 //! curve's figures in `derived.spline`) and `element_set` patches them.
 //!
@@ -13,6 +13,7 @@ use crate::error::{EngineError, Result};
 use crate::refs::{Point, points};
 use cc_core::wall_spline::{SplineError, WallSpline};
 use cc_core::{Element, ElementId, ElementTypeId, Project, Wall};
+use glam::DVec2;
 use serde_json::{Value, json};
 
 /// A spline's error as a command error.
@@ -20,18 +21,42 @@ pub(crate) fn spline_error(e: SplineError) -> EngineError {
     EngineError::invalid(e.to_string())
 }
 
-/// The spline the `through` points or the `control` points draw, when
-/// either is given.
-pub(crate) fn spline_arg(through: Option<&[Point]>, control: Option<&[Point]>) -> Result<Option<WallSpline>> {
+/// The spline from `start` to `end` that the `through` points between them
+/// or the `control` points draw, when either is given. The ends may be
+/// repeated among the points through (points repeated in a row count
+/// once); the control points start at `start` and end at `end`.
+pub(crate) fn spline_arg(
+    start: DVec2,
+    end: DVec2,
+    through: Option<&[Point]>,
+    control: Option<&[Point]>,
+) -> Result<Option<WallSpline>> {
     match (through, control) {
         (None, None) => Ok(None),
-        (Some(fit), None) => WallSpline::through(&points(fit)?).map(Some).ok_or_else(|| {
-            EngineError::invalid(format!(
-                "a spline wall passes `through` 2 to {} distinct points",
-                cc_core::wall_spline::MAX_SEGMENTS + 1
-            ))
-        }),
-        (None, Some(control)) => Ok(Some(WallSpline { control: points(control)? })),
+        (Some(between), None) => {
+            let mut fit = vec![start];
+            fit.extend(points(between)?);
+            fit.push(end);
+            WallSpline::through(&fit).map(Some).ok_or_else(|| {
+                EngineError::invalid(format!(
+                    "a spline wall passes `through` at most {} points between its ends",
+                    cc_core::wall_spline::MAX_SEGMENTS - 1
+                ))
+            })
+        }
+        (None, Some(control)) => {
+            let control = points(control)?;
+            let ends = control.first().zip(control.last());
+            if cc_core::spline::segment_count(&control).is_none() {
+                return Err(spline_error(SplineError::Points));
+            }
+            if !ends.is_some_and(|(a, b)| a.distance(start) < 1e-6 && b.distance(end) < 1e-6) {
+                return Err(EngineError::invalid(
+                    "a spline wall's `control` points run from `start` to `end`: its first and last points are those",
+                ));
+            }
+            Ok(Some(WallSpline { control }))
+        }
         (Some(_), Some(_)) => {
             Err(EngineError::invalid("give a spline wall's `through` points or its `control` points, not both"))
         }

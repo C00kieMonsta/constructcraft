@@ -43,27 +43,27 @@ pub(crate) fn create(
 
 /// Create a wall from `start` to `end` on a level: straight, or an arc
 /// through `mid` (or with a `bulge` or a `radius`); or a spline wall, a smooth
-/// free-form curve `through` points or by its `control` points. Its top is
-/// `height` above its base, or attached to `top_level` (plus `top_offset`).
-/// A spline wall takes no doors, windows, niches, profile, attached top,
-/// reinforcement or framing yet, and no curtain wall type.
+/// free-form curve from `start` `through` points to `end`, or by its
+/// `control` points. Its top is `height` above its base, or attached to
+/// `top_level` (plus `top_offset`). A spline wall takes no doors, windows,
+/// niches, profile, attached top, reinforcement or framing yet, and no
+/// curtain wall type.
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct WallCreate {
-    /// Start point of the wall line (not given for a spline wall, which starts where its curve does).
-    #[serde(default)]
+    /// Start point of the wall line.
     pub start: Point,
-    /// End point of the wall line (not given for a spline wall, which ends where its curve does).
-    #[serde(default)]
+    /// End point of the wall line.
     pub end: Point,
-    /// Spline walls: the points `[x, y]` the wall line passes through, in order, from its start to
-    /// its end (2 to 65 of them): a smooth curve through them, whose bends leave the face inside
-    /// them a radius of 5 cm at least.
+    /// Spline walls: the points `[x, y]` the wall line passes through between `start` and `end`, in
+    /// order (at most 63; none makes a straight spline): a smooth curve through them all, whose
+    /// bends must leave the face inside them a radius of 5 cm at least.
     #[serde(default)]
     pub through: Option<Vec<Point>>,
     /// Spline walls: the control points of the cubic Bézier segments of the wall line (`p0, c1, c2,
     /// p1, c1, c2, p2…`, 3n + 1 of them for n segments, at most 64; as `element_get` shows them in
-    /// `params.spline.control`), its direction carrying on where segments join. Instead of `through`.
+    /// `params.spline.control`), from `start` (`p0`) to `end` (the last), its direction carrying on
+    /// where segments join. Instead of `through`.
     #[serde(default)]
     pub control: Option<Vec<Point>>,
     /// A point on the arc between the ends: makes an arc wall through the three points.
@@ -117,19 +117,16 @@ impl Command for WallCreate {
     const KIND: CommandKind = CommandKind::Edit;
     fn run(self, s: &mut Session) -> Result<Value> {
         let p = s.project();
-        // A spline wall starts and ends where its curve does.
-        let spline = super::wall_spline::spline_arg(self.through.as_deref(), self.control.as_deref())?;
+        let (start, end) = (point(self.start)?, point(self.end)?);
+        if start.distance(end) < 1e-3 {
+            return Err(EngineError::invalid("the wall has no length"));
+        }
+        // A spline wall's curve runs from `start` to `end`.
+        let spline = super::wall_spline::spline_arg(start, end, self.through.as_deref(), self.control.as_deref())?;
         if spline.is_some() && (self.mid.is_some() || self.bulge.is_some() || self.radius.is_some()) {
             return Err(EngineError::invalid(
                 "a wall is an arc (`mid`, `bulge` or `radius`) or a spline (`through` or `control`), not both",
             ));
-        }
-        let (start, end) = match spline.as_ref().and_then(|s| s.ends()) {
-            Some(ends) => ends,
-            None => (point(self.start)?, point(self.end)?),
-        };
-        if start.distance(end) < 1e-3 {
-            return Err(EngineError::invalid("the wall has no length"));
         }
         let level = refs::level_or_first(p, self.level.as_ref())?;
         let location_line = match self.location_line {

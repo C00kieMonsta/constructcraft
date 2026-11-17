@@ -33,13 +33,13 @@ fn point(v: &Value) -> DVec2 {
     DVec2::new(num(&v[0]), num(&v[1]))
 }
 
-/// A gentle S through four points, 9 m end to end.
+/// The points between the ends of a gentle S from [0, 0] to [9, 0.5].
 fn fit() -> Value {
-    json!([[0, 0], [3, 1.5], [6, -1], [9, 0.5]])
+    json!([[3, 1.5], [6, -1]])
 }
 
 fn spline_wall(s: &mut Session) -> u64 {
-    id(&run(s, "wall_create", json!({"through": fit(), "height": 3.0})))
+    id(&run(s, "wall_create", json!({"start": [0, 0], "end": [9, 0.5], "through": fit(), "height": 3.0})))
 }
 
 fn get(s: &mut Session, id: u64) -> Value {
@@ -58,7 +58,7 @@ fn plan(s: &mut Session) -> u64 {
 fn wall_create_takes_fit_points_or_control_points() {
     let mut s = Session::default();
     let steps = s.doc.undo_depth();
-    let out = run(&mut s, "wall_create", json!({"through": fit(), "height": 3.0}));
+    let out = run(&mut s, "wall_create", json!({"start": [0, 0], "end": [9, 0.5], "through": fit(), "height": 3.0}));
     assert_eq!(s.doc.undo_depth(), steps + 1, "one undo step");
     let a = id(&out);
     // The curve in `params`: its control points, and the ends it starts and ends at.
@@ -79,8 +79,13 @@ fn wall_create_takes_fit_points_or_control_points() {
     let thickness = num(&d["thickness"]);
     assert!((num(&d["volume"]) / (length * thickness * 3.0) - 1.0).abs() < 1e-3);
     // The same wall by its control points.
-    let b = id(&run(&mut s, "wall_create", json!({"control": control, "height": 3.0, "base_offset": 4.0})));
+    let b = id(&run(
+        &mut s,
+        "wall_create",
+        json!({"start": [0, 0], "end": [9, 0.5], "control": control, "height": 3.0, "base_offset": 4.0}),
+    ));
     assert_eq!(wall(&s, a).spline, wall(&s, b).spline);
+
     let other = get(&mut s, b);
     assert!((num(&other["derived"]["length"]) - length).abs() < 1e-12);
     assert!((num(&other["derived"]["volume"]) - num(&d["volume"])).abs() < 1e-9);
@@ -89,11 +94,15 @@ fn wall_create_takes_fit_points_or_control_points() {
     assert!(s.project().element(ElementId(b)).is_none());
     run(&mut s, "redo", json!({}));
     assert_eq!(wall(&s, b).spline, wall(&s, a).spline);
+    // The ends may be repeated among the points through.
+    let again = json!({"start": [0, 0], "end": [9, 0.5], "through": [[0, 0], [3, 1.5], [6, -1], [9, 0.5]], "base_offset": 20.0});
+    let again = id(&run(&mut s, "wall_create", again));
+    assert_eq!(wall(&s, a).spline, wall(&s, again).spline);
     // A location line on a face moves the body, not the curve.
     let c = id(&run(
         &mut s,
         "wall_create",
-        json!({"through": fit(), "location_line": "FinishExterior", "base_offset": 8.0}),
+        json!({"start": [0, 0], "end": [9, 0.5], "through": fit(), "location_line": "FinishExterior", "base_offset": 8.0}),
     ));
     assert_eq!(wall(&s, c).spline, wall(&s, a).spline);
     let moved = num(&get(&mut s, c)["derived"]["length"]);
@@ -112,28 +121,41 @@ fn wall_create_refuses_what_makes_no_spline_wall() {
         assert_eq!(code, ErrorCode::InvalidArguments, "{message}");
         assert!(message.contains(word), "'{word}' in: {message}");
     };
-    invalid(&mut s, json!({"through": fit(), "control": [[0, 0], [1, 0], [2, 0], [3, 0]]}), "not both");
-    invalid(&mut s, json!({"through": [[1, 1]]}), "2 to 65");
-    invalid(&mut s, json!({"through": [[1, 1], [1, 1]]}), "2 to 65");
-    invalid(&mut s, json!({"control": [[0, 0], [1, 0], [2, 0]]}), "3n + 1");
-    invalid(&mut s, json!({"through": fit(), "bulge": 0.5}), "not both");
-    invalid(&mut s, json!({"through": fit(), "mid": [4, 4]}), "not both");
+    let ends = |mut args: Value, end: [f64; 2]| {
+        args["start"] = json!([0, 0]);
+        args["end"] = json!(end);
+        args
+    };
+    invalid(
+        &mut s,
+        ends(json!({"through": fit(), "control": [[0, 0], [1, 0], [2, 0], [3, 0]]}), [3.0, 0.0]),
+        "not both",
+    );
+    let many: Vec<[f64; 2]> = (1..=80).map(|i| [i as f64, (i % 2) as f64]).collect();
+    invalid(&mut s, ends(json!({"through": many}), [81.0, 0.0]), "at most 63");
+    invalid(&mut s, ends(json!({"control": [[0, 0], [1, 0], [3, 0]]}), [3.0, 0.0]), "3n + 1");
+    // The control points start and end where the wall does.
+    invalid(&mut s, ends(json!({"control": [[0, 0], [1, 0], [2, 0], [3, 0]]}), [4.0, 0.0]), "from `start` to `end`");
+    // The ends are the wall's own: always given.
+    invalid(&mut s, json!({"through": fit()}), "missing field");
+    invalid(&mut s, json!({"start": [0, 0], "end": [9, 0.5], "through": fit(), "bulge": 0.5}), "not both");
+    invalid(&mut s, json!({"start": [0, 0], "end": [9, 0.5], "through": fit(), "mid": [4, 4]}), "not both");
     // A corner where two segments join.
     let corner = json!([[0, 0], [1, 0], [2, 0], [3, 0], [3, 1], [3, 2], [3, 3]]);
-    invalid(&mut s, json!({"control": corner}), "corner");
+    invalid(&mut s, ends(json!({"control": corner}), [3.0, 3.0]), "corner");
     // A bend of 10 cm radius: too tight for any wall type of the template.
     let tight = json!([[0, 0], [0.0552, 0], [0.1, 0.0448], [0.1, 0.1]]);
-    invalid(&mut s, json!({"control": tight}), "too tightly");
+    invalid(&mut s, ends(json!({"control": tight}), [0.1, 0.1]), "too tightly");
     // A loop.
-    invalid(&mut s, json!({"control": [[0, 0], [6, 4], [-2, 4], [4, 0]]}), "cross itself");
+    invalid(&mut s, ends(json!({"control": [[0, 0], [6, 4], [-2, 4], [4, 0]]}), [4.0, 0.0]), "cross itself");
     // Closed.
-    invalid(&mut s, json!({"through": [[0, 0], [4, 0], [2, 3], [0, 0.01]]}), "ends meet");
+    invalid(&mut s, ends(json!({"through": [[4, 0], [2, 3]]}), [0.0, 0.01]), "ends meet");
     // An elevation profile.
     let profile = json!([{"kind": "rectangle", "corner": [0, 0], "opposite": [5, 2]}]);
-    invalid(&mut s, json!({"through": fit(), "profile": profile}), "straight walls");
+    invalid(&mut s, json!({"start": [0, 0], "end": [9, 0.5], "through": fit(), "profile": profile}), "straight walls");
     // A curtain wall type.
     let curtain = run(&mut s, "curtain_type_create", json!({"name": "Glazing"}));
-    invalid(&mut s, json!({"through": fit(), "type": curtain["id"]}), "curtain wall");
+    invalid(&mut s, json!({"start": [0, 0], "end": [9, 0.5], "through": fit(), "type": curtain["id"]}), "curtain wall");
     assert_eq!(s.project().walls().count(), 0);
     assert_eq!(s.doc.undo_depth(), 1, "only the curtain type was made");
 }
@@ -422,6 +444,25 @@ fn elevations_sections_and_3d_views_show_the_curved_body() {
             assert!((hi.y - lo.y - 3.0).abs() < 1e-6, "view {view}: {lo} {hi}");
         }
     }
+    // A section through the wall cuts it: a region of its thickness (more where it crosses on
+    // the slant), 3 m high.
+    let across =
+        id(&run(&mut s, "view_create", json!({"kind": "section", "start": [4.5, -3], "end": [4.5, 3], "depth": 8.0})));
+    let d = s.drawing(ViewId(across)).unwrap();
+    let cut: Vec<&Vec<DVec2>> = d
+        .prims
+        .iter()
+        .filter_map(|p| match p {
+            Prim::Fill { pts, element: Some(e), cut: true, .. } if e.0 == w => Some(pts),
+            _ => None,
+        })
+        .collect();
+    assert!(!cut.is_empty(), "the section cuts the wall");
+    let (lo, hi) = cut
+        .iter()
+        .flat_map(|pts| pts.iter())
+        .fold((DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+    assert!((hi.y - lo.y - 3.0).abs() < 1e-6 && hi.x - lo.x >= 2.0 * g.half - 1e-6 && hi.x - lo.x < 6.0 * g.half);
     // Smooth facets draw no seams: of the wall's upright lines only its ends and silhouettes.
     let d = s.drawing(ViewId(elevation)).unwrap();
     let seams = d
@@ -440,7 +481,7 @@ fn rooms_tags_dimensions_and_schedules_work() {
         run(&mut s, "wall_create", json!({"start": a, "end": b}));
     }
     let control = json!([[0, 4], [1, 4], [2, 5], [3, 4], [4, 3], [5, 4], [6, 4]]);
-    let w = id(&run(&mut s, "wall_create", json!({"control": control})));
+    let w = id(&run(&mut s, "wall_create", json!({"start": [0, 4], "end": [6, 4], "control": control})));
     let room = id(&run(&mut s, "room_create", json!({"point": [3, 2], "name": "Hall"})));
     let area = cc_geom::polygon::area(&s.geometry().rooms[&ElementId(room)]);
     // Close to the rectangle between the faces: the curve gives as much as it takes.
@@ -491,9 +532,21 @@ fn rooms_tags_dimensions_and_schedules_work() {
 fn a_file_with_bad_splines_is_repaired_on_opening() {
     let mut s = Session::default();
     let good = spline_wall(&mut s);
-    let nan = id(&run(&mut s, "wall_create", json!({"through": fit(), "base_offset": 4.0})));
-    let tight = id(&run(&mut s, "wall_create", json!({"through": fit(), "base_offset": 8.0})));
-    let stale = id(&run(&mut s, "wall_create", json!({"through": fit(), "base_offset": 12.0})));
+    let nan = id(&run(
+        &mut s,
+        "wall_create",
+        json!({"start": [0, 0], "end": [9, 0.5], "through": fit(), "base_offset": 4.0}),
+    ));
+    let tight = id(&run(
+        &mut s,
+        "wall_create",
+        json!({"start": [0, 0], "end": [9, 0.5], "through": fit(), "base_offset": 8.0}),
+    ));
+    let stale = id(&run(
+        &mut s,
+        "wall_create",
+        json!({"start": [0, 0], "end": [9, 0.5], "through": fit(), "base_offset": 12.0}),
+    ));
     let hosting = id(&run(&mut s, "wall_create", json!({"start": [0, 9], "end": [9, 9]})));
     let door = id(&run(&mut s, "door_create", json!({"wall": hosting, "offset": 3.0})));
     let mut p = s.doc.project.clone();
@@ -582,7 +635,9 @@ fn random_smooth_splines_never_panic() {
         }
         let through: Vec<[f64; 2]> = points.iter().map(|p| p.to_array()).collect();
         let line = lines[round % lines.len()];
-        let created = s.execute("wall_create", json!({"through": through, "location_line": line}));
+        let ends = (points[0].to_array(), points[count - 1].to_array());
+        let args = json!({"start": ends.0, "end": ends.1, "through": through, "location_line": line});
+        let created = s.execute("wall_create", args);
         let Ok(created) = created else {
             // Too tight or self-crossing: refused with a reason, nothing made.
             assert_eq!(s.project().walls().count(), 0);
@@ -671,4 +726,32 @@ fn random_smooth_splines_never_panic() {
     let after = p.walls().filter(|(_, w)| w.spline.is_some()).count();
     assert!(after < before && after >= 1, "{before} -> {after}");
     assert_eq!(p.repairs_needed(), 0);
+}
+
+/// A wall type that grows too thick for the curve of a wall of it, or turns
+/// into a curtain wall type, is stopped: the edit would leave the model
+/// needing repair.
+#[test]
+fn a_type_change_that_breaks_a_spline_wall_is_refused() {
+    let mut s = Session::default();
+    let w = spline_wall(&mut s);
+    let ty = s.project().element(ElementId(w)).unwrap().type_id.0;
+    let before = run(&mut s, "type_get", json!({"type": ty}));
+    let mut layers = before["params"]["layers"].clone();
+    layers[1]["thickness"] = json!(4.0);
+    let steps = s.doc.undo_depth();
+    let (code, message) = fails(&mut s, "type_set", json!({"type": ty, "params": {"layers": layers}}));
+    assert_eq!(code, ErrorCode::Rejected, "{message}");
+    assert!(message.contains("invalid"), "{message}");
+    assert_eq!(s.doc.undo_depth(), steps);
+    assert_eq!(run(&mut s, "type_get", json!({"type": ty}))["params"], before["params"]);
+    assert!(wall(&s, w).spline.is_some());
+    // A little thicker is fine: the body follows.
+    layers[1]["thickness"] = json!(0.2);
+    run(&mut s, "type_set", json!({"type": ty, "params": {"layers": layers}}));
+    assert!(wall(&s, w).spline.is_some());
+    assert!(
+        (s.geometry().walls[&ElementId(w)].half * 2.0 - num(&get(&mut s, w)["derived"]["thickness"])).abs() < 1e-12
+    );
+    assert_eq!(s.project().repairs_needed(), 0);
 }

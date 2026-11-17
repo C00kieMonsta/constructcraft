@@ -1047,9 +1047,11 @@ fn model_snaps(project: &Project, geom: &ModelGeometry, level: Option<LevelId>) 
         if let Some(w) = e.as_wall() {
             ends.extend([w.start, w.end]);
             mids.push(w.point_at(w.length() * 0.5));
-            match w.arc() {
-                Some(a) => arcs.push(a),
-                None => lines.push((w.start, w.end)),
+            match (w.spline_path(), w.arc()) {
+                // A spline wall's location line: its chords.
+                (Some(path), _) => lines.extend(path.points().windows(2).map(|c| (c[0], c[1]))),
+                (None, Some(a)) => arcs.push(a),
+                (None, None) => lines.push((w.start, w.end)),
             }
         } else if let ElementKind::Beam(b) = &e.kind
             && let Some(a) = b.arc()
@@ -1114,7 +1116,7 @@ fn model_snaps(project: &Project, geom: &ModelGeometry, level: Option<LevelId>) 
         }
         // Outlines as the plan draws them: corners are endpoints, edges lines.
         let outlines: Vec<Vec<DVec2>> = match (&e.kind, project.element_type(e.type_id).map(|t| &t.data)) {
-            (ElementKind::Wall(_), _) => geom.walls.get(&e.id).filter(|w| w.arc.is_none()).map(|w| vec![w.footprint()]),
+            (ElementKind::Wall(_), _) => geom.walls.get(&e.id).filter(|w| !w.is_curved()).map(|w| vec![w.footprint()]),
             // Corners of the section without its radii (round sections have none).
             (ElementKind::Column(c), Some(data @ cc_core::TypeData::Column { .. })) => {
                 project.type_section_without_radii(data).filter(|s| !s.curved).map(|s| {
