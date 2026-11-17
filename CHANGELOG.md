@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Splines in sketches (#376). The *Spline* tool draws a smooth curve through the points clicked, open or closed, in the component environment and in plan sketches. Grips sit on the points it passes through and on their handles. Masses, floors, detail lines, title block strokes and component pieces take splines (`CurveArg::Spline` with `through` or `control`, and `ProfilePoint::bezier`), and areas and volumes follow the true curve.
+- Sun shadows in 2D views and a grey *Shaded* style (#377). *Shaded* is now hidden line with grey shading by the light, plus the sun's shadows, in 2D views and in the 3D view. Plans, elevations and sections draw exact shadow polygons by drafting convention: floor plans cast from the whole model, above the cut too, but leave covered indoor spaces unshadowed; sections apply the same rule beyond the cut; elevations cast on everything. A conventional 45° sun (`view_set` `sun` `mode: "conventional"`) is the default when an elevation or section gets a sun. *Ambient light* and *Shadow intensity* are set per view (`view_set` `shading`). The curved surfaces of component pieces are smooth, so their facet edges are no longer drawn.
+- A type mark row in the properties palette (#374): a model element shows its type's mark, read only, under its own mark.
+- A wall type can make its walls structural (#387). Type Properties has a *Structural* checkbox. New walls made by the wall tool, `wall_create` and `mass_walls_create` take its value unless told otherwise (`wall_create` `structural`). Existing walls keep their own.
+- An API reference on the site (#386), generated from the doc comments by `cargo run -p api_doc`, with an overview in English and Portuguese.
+
+### Changed
+
+- Trusses are laid out as they are built (#384). Each chord is one beam per straight run instead of one per panel. Posts are turned and cut to sit on the chords or inside a channel. Where a truss ends on a post, the chords run on to the post's far face. Steel trusses get their default channels laid on their sides. The analytical model still meets at the panel points. An older truss gets continuous chords the next time it regenerates.
+- A new generic component starts with no pieces, and the last piece of any component can be deleted (#375). Placing a component with no pieces is refused, and *Finish* keeps an empty new component without picking its tool.
+- Schedules with *One row per element* off and no sorting gather the elements alike in every column shown, except the count and totaled columns (#374). They used to gather all the elements into one row of `<varies>`.
+
+### Fixed
+
+- Walls on the same corners at heights that do not overlap, such as a foundation wall under a parapet, lost their corner joins (#387). Each wall now joins only the walls of its level that overlap it in height.
+- Floor plans drew the pieces of a component through each other, and curves traced twice zigzagged (#378). Edges covered by a piece above them are now hidden, except in the wireframe style.
+- A niche component with no pieces could not be created, and one saved to a `.ccomp` file did not load (#373).
+- Type Properties stayed in front of the component environment after *Edit Component* (#385).
+
 ## [0.12.0] - 2026-11-14
 
 ### Added
