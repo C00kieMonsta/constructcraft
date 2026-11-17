@@ -1,9 +1,9 @@
 # Spline walls: notes for the next tasks (#307)
 
 Stage 1 (model, geometry, plans, commands, refusals, IFC export) is on
-`feat/spline-walls`, stacked on `feat/wall-profiles`. These notes are for the
-app task (the wall tool's Spline mode) and for the later stages (openings,
-the other hosts, IFC).
+`feat/spline-walls`, stacked on `feat/wall-profiles`, and so is the app task
+(the wall tool's Spline mode, see *The app*). These notes are for the later
+stages (openings, the other hosts, IFC).
 
 ## The representation
 
@@ -141,7 +141,7 @@ the command fails with a message; repair neutralizes it in a file.
 | IFC `wall_body`, `wall_axis`, `layer_bodies`, openings | n/a | not reached for a spline wall |
 | IFC import | fallback | a component with mesh pieces, class `IfcWall` |
 | app `model_snaps` | supported | the location line's chords snap as lines; curved outlines are not snapped |
-| app properties (sweep row), arc grips, `axis_of`, wall tool | app task | see below |
+| app properties (sweep row), arc grips, `axis_of`, wall tool | done (app) | see *The app* below |
 
 ## Joins (what was achieved)
 
@@ -190,38 +190,63 @@ there (the plan itself uses the exact stations). `layer_outlines` and IFC
 - `cc_engine::commands::wall_spline` (crate-private helpers): `spline_arg`,
   `check_wall`, `refuse`, `derived`.
 
-## For the app task (wall tool Spline mode)
+## The app (wall tool Spline mode) — done
 
-- **Create**: run `WallCreate { start, end, through: Some(points_between),
-  ..Default::default() }` (passing every clicked point in `through` works
-  too), or `control`; it is one undo step and returns the element.
-- **Preview while drawing**: `WallSpline::through(&fit)` then
-  `project.check_wall_spline(type_id, location_line, &spline)` →
-  `Ok(WallPath)` (the location line) or `Err(SplineError)`. For the body:
-  `let (left, right) = project.wall_faces(type_id, location_line)` and
-  `path.face(left)` / `path.face(right)` are the two faces as polylines
-  (`path.points()` the location line). No geometry build is needed.
-- **Too-tight curvature**: `SplineError::Tight(p)` — `key()` is
-  `wall-spline-tight` (all 12 languages have `wall-spline-points`, `-short`,
-  `-corner`, `-tight`, `-crossing`), `point()` is where to mark it; the same
-  check runs in `wall_create`, so a preview that passes creates.
-  `path.face_radius(left, right)` gives the margin live (≥ `MIN_FACE_RADIUS`).
-- **Grips**: `WallSpline::knots()` are the points the curve passes through
-  (`control[3k]`), `control[3k ± 1]` their handles. Moving a knot by its
-  fit point: rebuild with `WallSpline::through(&moved_knots)` (loses hand-set
-  handles) or move `control[3k-1..=3k+1]` together (keeps them, as sketch
-  grips do — see `sketch_mode::curve_grips`/`moved`); write with
-  `engine_edit::element` setting `w.spline` (drag with a merge key). End
-  grips can keep using `move_endpoint`: the sync moves the end knot and its
-  handle. Keep handles collinear at a knot or the check answers `Corner`.
-- **Existing app code that still thinks "straight"** (harmless, but worth
-  doing): the *Sweep* row of a wall's properties shows 0° and its edit is
-  refused; the curvature handle (`tools.rs` `bendable`) gives none; `modify::axis_of`
-  mirrors about the chord; the door/window tools preview on a spline wall
-  and the command then refuses (grey the wall out or show the reason:
-  `hosted_at`'s message); snapping to a spline wall's faces is off (only its
-  location line's chords and ends snap).
-- `msg-spline-wall` is the status text for trim/extend/align on one.
+- **Drawing**: `tools::WallMode` (`AppState::wall_mode`: *Line*, *Arc*,
+  *Spline* in the options bar) replaces the old `wall_arc` flag.
+  `spline_wall_tool` keeps the points clicked in `Interaction::points`
+  (snapped as any wall point, `snap_at` with the last point as anchor; a
+  typed length + Enter places the next one, `typing_segment` covers it).
+  A click on the last point again (a double-click does that) or Enter runs
+  `finish_spline_wall`: the curve is checked first with
+  `Project::check_wall_spline`, a failure goes to the status bar as its
+  `key()` and the points stay; otherwise `WallCreate { through, ..
+  wall_command(..) }` (the same level, type, height, top and location line
+  as line walls) in one undo step, recorded with `chain_placed` so
+  Backspace after it undoes the wall. Backspace pops a point
+  (`chain_back`), Esc drops the wall in progress (the interaction reset).
+  Switching into Spline mid-chain starts the spline at the chain's anchor.
+- **Preview**: `paint_wall_spline` draws the location line and the faces
+  (`wall_faces`, `path.face`), or the curve in `PALETTE.danger` with a
+  circle at `SplineError::point()`; the cursor label shows the length or the
+  error's text.
+- **Grips**: a selected spline wall gets a square grip on each inner knot
+  (the ends keep the end grips, which run `element_move_end`; their drag now
+  previews the curve moved with `WallSpline::move_end` and refuses a curve
+  that fails the check). `Drag::Knot` moves `control[3k-1..=3k+1]` through
+  `sketch_mode::spline_moved` (made `pub(crate)`), previews and checks it,
+  and writes it on release with `engine_edit::element` (one command, so one
+  undo step without a merge key; a failing curve is not sent, its reason
+  goes to the status bar). `bendable` already gives none (`arc()` is None).
+- **Palette**: the arc angle row and the *Profile* section are left out
+  (`wall_profile_ui` reads `is_curved`); the length row was already right.
+- **Refusals**: the door/window/niche tool over a spline wall shows
+  `msg-spline-wall-hosts` and places nothing; trim/extend/align reach the
+  status bar with `msg-spline-wall` (tested).
+- **Straight assumptions fixed**: `modify::axis_of` gives a spline wall as a
+  mirror axis only when it is straight; Split marks and cuts at the point of
+  the curve nearest the pointer (`WallPath::locate`); Offset previews the
+  offset curve on the pointer's side (`WallPath::offset`).
+- **Tests** (`ui_tests.rs`): `the_wall_tool_draws_spline_walls`,
+  `a_spline_wall_too_tight_is_refused_with_the_reason`,
+  `a_spline_walls_knot_grip_reshapes_it`,
+  `the_door_tool_places_no_door_in_a_spline_wall`,
+  `a_spline_walls_palette_shows_its_length_only`,
+  `trimming_a_spline_wall_says_why_not`.
+
+### Left for later (app)
+
+- No grips on the handles (tangents) and no way to add or remove a point of
+  an existing spline wall in the canvas (`element_set` `params.spline` can).
+- Snapping to a spline wall's faces (only its location line's chords and
+  ends snap).
+- The knot drag previews only; the model changes on release.
+- The warning color is the theme's `danger`, lighter in the dark theme on
+  the white paper (as the sketch's errors).
+- The engine's `elements_mirror` `axis_element` still takes a curved spline
+  wall's chord; the app no longer offers it.
+- Multi-selection summaries and the 3D view's modify tools were not
+  reviewed for spline walls.
 
 ## For the later stages
 
@@ -255,9 +280,8 @@ there (the plan itself uses the exact stations). `layer_outlines` and IFC
   import rebuilds the wall; a polygonal extrusion (`IfcArbitraryClosedProfileDef`
   of the footprint, extruded) is a lighter body than the shell, and
   `POLYGONAL` the matching predefined type. The fixture
-  `crates/cc_ifc/tests/fixtures/spline_walls.ccad` is ready to be added to
-  the CI's IfcOpenShell validation list (not added in this task: it cannot
-  be run locally).
+  `crates/cc_ifc/tests/fixtures/spline_walls.ccad` is in the CI's IfcOpenShell
+  validation list (added with the app task; not run locally).
 - **Closed splines** (a ring wall as one element) are refused (`Short`):
   `start == end` breaks the wall's line everywhere.
 
