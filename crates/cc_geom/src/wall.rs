@@ -330,11 +330,7 @@ impl WallLine {
     /// wall's direction at its end).
     fn end_ray(&self, at_start: bool) -> (DVec2, DVec2) {
         if let Some(path) = &self.path {
-            return if at_start {
-                (self.start, path.tangent(0.0))
-            } else {
-                (self.end, -path.tangent(path.length()))
-            };
+            return if at_start { (self.start, path.tangent(0.0)) } else { (self.end, -path.tangent(path.length())) };
         }
         match (self.arc(), at_start) {
             (Some(a), true) => (self.start, a.tangent(0.0)),
@@ -1286,6 +1282,19 @@ impl WallGeom {
         }
     }
 
+    /// The left normal of the facet of the line `v` to the left of the
+    /// centerline between `u0` and `u1`: the wall's normal at its middle (a
+    /// chord of an arc is square to it), or the chord's own in a spline
+    /// wall, whose chords are not.
+    pub(crate) fn facet_normal(&self, u0: f64, u1: f64, v: f64) -> DVec2 {
+        if self.spline.is_some()
+            && let Some(d) = (self.world(u1, v) - self.world(u0, v)).try_normalize()
+        {
+            return if u1 >= u0 { d.perp() } else { -d.perp() };
+        }
+        self.normal_at((u0 + u1) * 0.5)
+    }
+
     /// Where a column is split along the wall to mesh it, as fractions
     /// `(numerator, denominator)` of the way along it, from 0 to 1: its two
     /// ends for a straight wall, even steps of an arc, and for a spline
@@ -1370,8 +1379,8 @@ impl WallGeom {
                         poly.iter().zip(bottoms).rev().map(|(p, z)| DVec3::new(p.x, p.y, z)).collect();
                     let down = (lower[1] - lower[0]).cross(lower[2] - lower[0]).try_normalize().unwrap_or(-DVec3::Z);
                     s.faces.push(Face::new(lower, down));
-                    let right_n = -flat(self.normal_at((r0 + r1) * 0.5));
-                    let left_n = flat(self.normal_at((l0 + l1) * 0.5));
+                    let right_n = -flat(self.facet_normal(r0, r1, -h));
+                    let left_n = flat(self.facet_normal(l0, l1, h));
                     // The faces, open where a recess is.
                     let right = self.face_pieces(-1.0, (r0, r1), (bottoms[0], bottoms[1]), (tops[0], tops[1]));
                     for [a, b, ba, bb, ta, tb] in right {

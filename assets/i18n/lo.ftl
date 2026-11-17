@@ -3864,3 +3864,11 @@ section-wall-profile = ໂປຣໄຟລ໌
 prop-wall-profile = ໂປຣໄຟລ໌
 wall-profile-rectangular = ສີ່ຫຼ່ຽມ
 wall-profile-custom = ກຳນົດເອງ
+
+## Spline walls
+msg-spline-wall = ຝາເສັ້ນໂຄ້ງ Spline ຍັງບໍ່ສາມາດຕັດ, ຕໍ່ ຫຼື ຈັດແນວໄດ້
+wall-spline-points = ຝາເສັ້ນໂຄ້ງ Spline ຕ້ອງການຈຸດຄວບຄຸມຂອງສ່ວນເສັ້ນໂຄ້ງ 1 ຫາ 64 ສ່ວນ.
+wall-spline-short = ເສັ້ນໂຄ້ງ Spline ສັ້ນເກີນໄປ, ຫຼື ປາຍທັງສອງບັນຈົບກັນ.
+wall-spline-corner = ເສັ້ນໂຄ້ງ Spline ມີມຸມ (ໝາຍໄວ້): ທິດທາງຕ້ອງຕໍ່ເນື່ອງບ່ອນທີ່ສ່ວນຕ່າງໆເຊື່ອມກັນ.
+wall-spline-tight = ເສັ້ນໂຄ້ງ Spline ໂຄ້ງແຄບເກີນໄປສຳລັບຄວາມໜາຂອງຝາ (ໝາຍໄວ້).
+wall-spline-crossing = ຝາຈະຕັດກັບຕົວມັນເອງ (ໝາຍໄວ້).

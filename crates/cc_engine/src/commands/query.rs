@@ -247,6 +247,10 @@ pub(crate) fn element_json(s: &mut Session, id: ElementId) -> Option<Value> {
                 derived.insert("radius".into(), json!(arc.radius));
                 derived.insert("sweep".into(), json!(arc.sweep.to_degrees()));
             }
+            // A spline wall's curve: segments, least radii, knots (`length` is its centerline's).
+            if let Some(spline) = super::wall_spline::derived(p, &e, w) {
+                derived.insert("spline".into(), spline);
+            }
             derived.insert("height".into(), json!(p.wall_height(&e, w)));
             derived.insert("thickness".into(), json!(p.thickness_of(&e)));
             // The face of its elevation profile: area, lowest and highest points above its base, span.

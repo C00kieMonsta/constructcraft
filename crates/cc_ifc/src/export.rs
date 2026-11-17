@@ -2352,6 +2352,38 @@ impl<'a> Exporter<'a> {
             self.write_curtain_wall(e, wall, g, c, placement, storey, level_z);
             return;
         }
+        // A spline wall: no sweep describes it, so its body is a closed shell of facets (its
+        // chords, both ends capped) in the storey's frame, with no axis; its layers are its
+        // type's material layer set.
+        if g.spline.is_some() {
+            let placement = self.local_placement(Some(storey), Frame::at(DVec3::ZERO));
+            let mut closed = g.clone();
+            closed.start_joined = false;
+            closed.end_joined = false;
+            closed.face_gaps.clear();
+            // Each face wound counter-clockwise seen from outside, as a shell's faces are.
+            let mut faces = closed.to_solid([0; 3]).faces;
+            for f in &mut faces {
+                let around = (0..f.verts.len())
+                    .fold(DVec3::ZERO, |sum, i| sum + f.verts[i].cross(f.verts[(i + 1) % f.verts.len()]));
+                if around.dot(f.normal) < 0.0 {
+                    f.verts.reverse();
+                }
+            }
+            let body = self.faceted_brep(&faces, level_z);
+            if let Some(ty) = project.element_type(e.type_id) {
+                let style = self.material_style(ty.main_material());
+                self.styled(body, style);
+            }
+            let shape = self.shape_of_type(vec![body], None, "Brep");
+            let mut attrs = self.element_args(e, placement, shape);
+            attrs.push(Value::Enum("NOTDEFINED"));
+            let product = self.w.add("IFCWALL", attrs);
+            self.products.insert(e.id, product);
+            self.register(e, product);
+            self.write_wall_rest(e, wall, g, placement, product);
+            return;
+        }
 
         // Swept solids, or clipped where a profiled wall meets another in a mitered end.
         let mut kind = "SweptSolid";
@@ -2529,8 +2561,11 @@ impl<'a> Exporter<'a> {
     fn write_wall_rest(&mut self, e: &Element, wall: &cc_core::Wall, g: &WallGeom, placement: Id, product: Id) {
         let project = self.project;
         let h = g.half;
-        // Layers are listed from the left face (+Y) towards the right.
-        self.layer_usage(e.type_id, product, "AXIS2", h);
+        // Layers are listed from the left face (+Y) towards the right (a spline wall has no
+        // axis to place them from: its type's layer set stands for it).
+        if g.spline.is_none() {
+            self.layer_usage(e.type_id, product, "AXIS2", h);
+        }
 
         let ty = project.element_type(e.type_id);
         let mut props = vec![

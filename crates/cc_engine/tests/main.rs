@@ -58,6 +58,7 @@ mod section_marks;
 mod shaft;
 mod skp;
 mod slab_rebar;
+mod spline_walls;
 mod splines;
 mod steel_building;
 mod structure_materials;

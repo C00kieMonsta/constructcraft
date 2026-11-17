@@ -45,7 +45,6 @@ fn control(points: &[(f64, f64)]) -> ElementKind {
     ElementKind::Wall(Wall { spline: Some(WallSpline { control: pts(points) }), ..Default::default() })
 }
 
-
 /// The volume of the closed mesh of a wall's body.
 fn mesh_volume(g: &ModelGeometry, id: ElementId) -> f64 {
     g.body_of(id).map(crate::Solid::volume).sum()
@@ -105,7 +104,12 @@ fn a_spline_along_a_circle_approaches_the_arc_wall() {
     let arc = add(
         &mut doc,
         Category::Wall,
-        ElementKind::Wall(Wall { start: DVec2::new(r, 0.0), end: DVec2::new(-r, 0.0), bulge: 1.0, ..Default::default() }),
+        ElementKind::Wall(Wall {
+            start: DVec2::new(r, 0.0),
+            end: DVec2::new(-r, 0.0),
+            bulge: 1.0,
+            ..Default::default()
+        }),
     );
     // The usual Bézier quarters: a circle to 0.03 %.
     let exact = add(&mut doc, Category::Wall, control(&half_circle(r)));
@@ -187,15 +191,11 @@ fn a_spline_wall_meets_straight_walls_at_its_ends() {
     let mut doc = Document::new(Project::from_template());
     // An L at its start (a wall running down from the same point) and a T at
     // its end (which stops on the face of a wall passing by).
-    let curve = add(&mut doc, Category::Wall, control(&[
-        (0.0, 0.0),
-        (1.0, 0.0),
-        (2.0, 1.0),
-        (3.0, 0.0),
-        (4.0, -1.0),
-        (5.0, 0.0),
-        (6.0, 0.0),
-    ]));
+    let curve = add(
+        &mut doc,
+        Category::Wall,
+        control(&[(0.0, 0.0), (1.0, 0.0), (2.0, 1.0), (3.0, 0.0), (4.0, -1.0), (5.0, 0.0), (6.0, 0.0)]),
+    );
     let corner = add(&mut doc, Category::Wall, straight((0.0, 0.0), (0.0, -3.0)));
     let through_wall = add(&mut doc, Category::Wall, straight((6.0, -2.0), (6.0, 2.0)));
     let g = ModelGeometry::build(&doc.project);
@@ -222,15 +222,11 @@ fn a_spline_wall_meets_straight_walls_at_its_ends() {
     // Volumes: what the footprints hold, the joints shared without overlap.
     let free = {
         let mut alone = Document::new(Project::from_template());
-        let id = add(&mut alone, Category::Wall, control(&[
-            (0.0, 0.0),
-            (1.0, 0.0),
-            (2.0, 1.0),
-            (3.0, 0.0),
-            (4.0, -1.0),
-            (5.0, 0.0),
-            (6.0, 0.0),
-        ]));
+        let id = add(
+            &mut alone,
+            Category::Wall,
+            control(&[(0.0, 0.0), (1.0, 0.0), (2.0, 1.0), (3.0, 0.0), (4.0, -1.0), (5.0, 0.0), (6.0, 0.0)]),
+        );
         ModelGeometry::build(&alone.project).volume(id)
     };
     let joined = g.volume(curve);
@@ -288,7 +284,12 @@ fn spline_walls_meet_each_other_and_arcs() {
     let arc = add(
         &mut doc,
         Category::Wall,
-        ElementKind::Wall(Wall { start: DVec2::new(0.0, 0.0), end: DVec2::new(-2.0, -2.0), bulge: 0.4, ..Default::default() }),
+        ElementKind::Wall(Wall {
+            start: DVec2::new(0.0, 0.0),
+            end: DVec2::new(-2.0, -2.0),
+            bulge: 0.4,
+            ..Default::default()
+        }),
     );
     let g = ModelGeometry::build(&doc.project);
     finite(&g);
@@ -320,7 +321,12 @@ fn rooms_are_bounded_by_a_spline_wall() {
     let room = add(
         &mut doc,
         Category::Room,
-        ElementKind::Room(cc_core::Room { position: DVec2::new(3.0, 2.0), number: "1".into(), name: "R".into(), height: 3.0 }),
+        ElementKind::Room(cc_core::Room {
+            position: DVec2::new(3.0, 2.0),
+            number: "1".into(),
+            name: "R".into(),
+            height: 3.0,
+        }),
     );
     let g = ModelGeometry::build(&doc.project);
     finite(&g);
@@ -340,7 +346,8 @@ fn rooms_are_bounded_by_a_spline_wall() {
         if let Some(a) = prev {
             // The trapezoid under a → q, clipped to the room's width.
             let (x0, x1) = (a.x.clamp(h, 6.0 - h), q.x.clamp(h, 6.0 - h));
-            let y_at = |x: f64| if (q.x - a.x).abs() > 1e-12 { a.y + (q.y - a.y) * (x - a.x) / (q.x - a.x) } else { a.y };
+            let y_at =
+                |x: f64| if (q.x - a.x).abs() > 1e-12 { a.y + (q.y - a.y) * (x - a.x) / (q.x - a.x) } else { a.y };
             area += (x1 - x0) * ((y_at(x0) + y_at(x1)) * 0.5 - h);
         }
         prev = Some(q);
@@ -451,13 +458,23 @@ fn an_unrepaired_spline_wall_builds_without_panicking() {
     };
     let tight = push(&mut p, wall_t, wall(&[(0.0, 0.0), (0.05, 0.0), (0.1, 0.05), (0.1, 0.1)]));
     push(&mut p, wall_t, wall(&[(0.0, 10.0), (6.0, 14.0), (-2.0, 14.0), (4.0, 10.0)]));
-    push(&mut p, wall_t, wall(&[(0.0, 20.0), (1.0, 20.0), (2.0, 20.0), (3.0, 20.0), (3.0, 21.0), (3.0, 22.0), (3.0, 23.0)]));
+    push(
+        &mut p,
+        wall_t,
+        wall(&[(0.0, 20.0), (1.0, 20.0), (2.0, 20.0), (3.0, 20.0), (3.0, 21.0), (3.0, 22.0), (3.0, 23.0)]),
+    );
     push(&mut p, wall_t, wall(&[(0.0, 30.0), (f64::NAN, 30.0), (2.0, 31.0), (3.0, 30.0)]));
     let host = push(&mut p, wall_t, wall(&[(0.0, 40.0), (2.0, 41.0), (4.0, 39.0), (6.0, 40.0)]));
     push(
         &mut p,
         door_t,
-        ElementKind::Door(cc_core::Hosted { host, offset: 3.0, sill_height: 0.0, flip_facing: false, flip_hand: false }),
+        ElementKind::Door(cc_core::Hosted {
+            host,
+            offset: 3.0,
+            sill_height: 0.0,
+            flip_facing: false,
+            flip_hand: false,
+        }),
     );
     let g = ModelGeometry::build(&p);
     finite(&g);
@@ -470,4 +487,50 @@ fn an_unrepaired_spline_wall_builds_without_panicking() {
     assert_eq!(p.walls().filter(|(_, w)| w.spline.is_some()).count(), 1);
     assert_eq!(p.hosted_by(host).count(), 0);
     finite(&ModelGeometry::build(&p));
+}
+
+/// The body of a spline wall mitered at both ends, capped: a closed shell
+/// (every edge shared by two faces) that holds exactly the volume the
+/// quantities give, its facets carrying their own normals.
+#[test]
+fn a_mitered_spline_wall_is_a_closed_shell_of_its_volume() {
+    let mut doc = Document::new(Project::from_template());
+    add(&mut doc, Category::Wall, straight((0.0, 4.0), (0.0, 0.0)));
+    add(&mut doc, Category::Wall, straight((6.0, 0.0), (6.0, 4.0)));
+    let ctrl = [(0.0, 4.0), (1.0, 4.0), (2.0, 5.0), (3.0, 4.0), (4.0, 3.0), (5.0, 4.0), (6.0, 4.0)];
+    let id = add(&mut doc, Category::Wall, control(&ctrl));
+    let g = ModelGeometry::build(&doc.project);
+    let w = &g.walls[&id];
+    assert!(w.start_joined && w.end_joined && (w.start_ext.0 - w.start_ext.1).abs() > 0.1);
+    let mut closed = w.clone();
+    closed.start_joined = false;
+    closed.end_joined = false;
+    let solid = closed.to_solid([0; 3]);
+    assert!((solid.volume() - w.volume()).abs() < 1e-9, "{} vs {}", solid.volume(), w.volume());
+    let top: f64 = solid
+        .faces
+        .iter()
+        .filter(|f| f.normal.z > 0.5)
+        .map(|f| polygon::area(&f.verts.iter().map(|v| v.truncate()).collect::<Vec<_>>()))
+        .sum();
+    assert!((top - polygon::area(&w.footprint())).abs() < 1e-9);
+    // Every edge is shared by exactly two faces.
+    let key = |v: glam::DVec3| ((v.x * 1e7).round() as i64, (v.y * 1e7).round() as i64, (v.z * 1e7).round() as i64);
+    let mut edges = std::collections::HashMap::new();
+    for f in &solid.faces {
+        for i in 0..f.verts.len() {
+            let (a, b) = (key(f.verts[i]), key(f.verts[(i + 1) % f.verts.len()]));
+            *edges.entry((a.min(b), a.max(b))).or_insert(0) += 1;
+        }
+    }
+    assert!(
+        edges.values().all(|n| *n == 2),
+        "{:?}",
+        edges.iter().filter(|(_, n)| **n != 2).take(5).collect::<Vec<_>>()
+    );
+    // Each facet of the faces is square to its own normal.
+    for f in solid.faces.iter().filter(|f| f.smooth) {
+        let edge = (f.verts[1] - f.verts[0]).truncate();
+        assert!(edge.dot(f.normal.truncate()).abs() < 1e-9 * edge.length().max(1e-6));
+    }
 }

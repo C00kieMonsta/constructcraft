@@ -42,15 +42,30 @@ pub(crate) fn create(
 }
 
 /// Create a wall from `start` to `end` on a level: straight, or an arc
-/// through `mid` (or with a `bulge` or a `radius`). Its top is `height` above its base,
-/// or attached to `top_level` (plus `top_offset`).
+/// through `mid` (or with a `bulge` or a `radius`); or a spline wall, a smooth
+/// free-form curve `through` points or by its `control` points. Its top is
+/// `height` above its base, or attached to `top_level` (plus `top_offset`).
+/// A spline wall takes no doors, windows, niches, profile, attached top,
+/// reinforcement or framing yet, and no curtain wall type.
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct WallCreate {
-    /// Start point of the wall line.
+    /// Start point of the wall line (not given for a spline wall, which starts where its curve does).
+    #[serde(default)]
     pub start: Point,
-    /// End point of the wall line.
+    /// End point of the wall line (not given for a spline wall, which ends where its curve does).
+    #[serde(default)]
     pub end: Point,
+    /// Spline walls: the points `[x, y]` the wall line passes through, in order, from its start to
+    /// its end (2 to 65 of them): a smooth curve through them, whose bends leave the face inside
+    /// them a radius of 5 cm at least.
+    #[serde(default)]
+    pub through: Option<Vec<Point>>,
+    /// Spline walls: the control points of the cubic Bézier segments of the wall line (`p0, c1, c2,
+    /// p1, c1, c2, p2…`, 3n + 1 of them for n segments, at most 64; as `element_get` shows them in
+    /// `params.spline.control`), its direction carrying on where segments join. Instead of `through`.
+    #[serde(default)]
+    pub control: Option<Vec<Point>>,
     /// A point on the arc between the ends: makes an arc wall through the three points.
     #[serde(default)]
     pub mid: Option<Point>,
@@ -102,7 +117,17 @@ impl Command for WallCreate {
     const KIND: CommandKind = CommandKind::Edit;
     fn run(self, s: &mut Session) -> Result<Value> {
         let p = s.project();
-        let (start, end) = (point(self.start)?, point(self.end)?);
+        // A spline wall starts and ends where its curve does.
+        let spline = super::wall_spline::spline_arg(self.through.as_deref(), self.control.as_deref())?;
+        if spline.is_some() && (self.mid.is_some() || self.bulge.is_some() || self.radius.is_some()) {
+            return Err(EngineError::invalid(
+                "a wall is an arc (`mid`, `bulge` or `radius`) or a spline (`through` or `control`), not both",
+            ));
+        }
+        let (start, end) = match spline.as_ref().and_then(|s| s.ends()) {
+            Some(ends) => ends,
+            None => (point(self.start)?, point(self.end)?),
+        };
         if start.distance(end) < 1e-3 {
             return Err(EngineError::invalid("the wall has no length"));
         }
@@ -125,11 +150,13 @@ impl Command for WallCreate {
             top: top(p, self.top_level.as_ref(), self.top_offset)?.unwrap_or(WallTop::Unconnected),
             location_line,
             structural,
+            spline,
             ..Default::default()
         };
         check_arc(p, type_id, &wall)?;
+        super::wall_spline::check_wall(p, None, type_id, &wall)?;
         if let Some(curves) = &self.profile {
-            if wall.arc().is_some() {
+            if wall.is_curved() {
                 return Err(EngineError::invalid("only straight walls take an elevation profile"));
             }
             if p.element_type(type_id).is_some_and(|t| t.curtain().is_some()) {
@@ -257,6 +284,7 @@ pub(crate) fn hosted_at(p: &Project, a: &HostedArgs, ty: &cc_core::ElementType) 
     };
     let host_el = p.element(host).ok_or_else(|| EngineError::not_found("wall"))?;
     let wall = host_el.as_wall().ok_or_else(|| EngineError::invalid(format!("element {} is not a wall", host.0)))?;
+    super::wall_spline::refuse(p, host, "doors, windows and niches are not placed in spline walls yet")?;
     let (width, _) = ty.opening_size().ok_or_else(|| EngineError::invalid("the type has no opening"))?;
     let default_sill = ty.default_sill();
     // Openings are placed along the body centerline (an arc for arc walls).
@@ -287,13 +315,17 @@ fn nearest_wall(p: &Project, q: DVec2) -> Result<cc_core::ElementId> {
     p.walls()
         .map(|(e, w)| {
             let (a, b) = p.wall_axis(e, w);
-            let distance = match w.arc() {
-                Some(_) => {
+            let distance = match (p.wall_path(e, w), w.arc()) {
+                (Some(path), _) => {
+                    let (u, v) = path.locate(q);
+                    if (0.0..=path.length()).contains(&u) { v.abs() } else { f64::INFINITY }
+                }
+                (None, Some(_)) => {
                     let axis = Wall { start: a, end: b, ..w.clone() };
                     let (u, v) = axis.project(q);
                     if (0.0..=axis.length()).contains(&u) { v.abs() } else { f64::INFINITY }
                 }
-                None => polygon::closest_on_segment(a, b, q).0.distance(q),
+                (None, None) => polygon::closest_on_segment(a, b, q).0.distance(q),
             };
             (e.id, distance, p.thickness_of(e))
         })

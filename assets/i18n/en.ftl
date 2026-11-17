@@ -3862,3 +3862,11 @@ section-wall-profile = Profile
 prop-wall-profile = Profile
 wall-profile-rectangular = Rectangular
 wall-profile-custom = Custom
+
+## Spline walls
+msg-spline-wall = Spline walls are not trimmed, extended or aligned yet
+wall-spline-points = A spline wall takes the control points of 1 to 64 curve segments.
+wall-spline-short = The spline is too short, or its ends meet.
+wall-spline-corner = The spline has a corner (marked): its direction must carry on where segments join.
+wall-spline-tight = The spline bends too tightly for the thickness of the wall (marked).
+wall-spline-crossing = The wall would cross itself (marked).

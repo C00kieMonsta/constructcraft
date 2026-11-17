@@ -3862,3 +3862,11 @@ section-wall-profile = Profil
 prop-wall-profile = Profil
 wall-profile-rectangular = Prostokątny
 wall-profile-custom = Własny
+
+## Spline walls
+msg-spline-wall = Ścian splajnowych nie można jeszcze przycinać, wydłużać ani wyrównywać
+wall-spline-points = Ściana splajnowa przyjmuje punkty kontrolne od 1 do 64 segmentów krzywej.
+wall-spline-short = Splajn jest za krótki albo jego końce się stykają.
+wall-spline-corner = Splajn ma narożnik (zaznaczony): jego kierunek musi być kontynuowany na styku segmentów.
+wall-spline-tight = Splajn jest zbyt mocno zakrzywiony dla grubości ściany (zaznaczono).
+wall-spline-crossing = Ściana przecinałaby samą siebie (zaznaczono).

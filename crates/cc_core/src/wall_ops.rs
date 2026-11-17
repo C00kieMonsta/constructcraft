@@ -519,9 +519,13 @@ impl EditCtx<'_> {
         copy.id = ElementId(self.alloc_id());
         copy.uid = Default::default();
         match &mut copy.kind {
-            // A spline wall's copy follows it at that distance, as near as a spline does.
+            // A spline wall's copy follows it at that distance, as near as a spline does
+            // (none where the copy would bend too tightly for the wall).
             ElementKind::Wall(w) if w.spline.is_some() => {
                 let moved = w.spline.as_ref().and_then(|s| s.offset(distance)).ok_or(EditError::Degenerate)?;
+                if self.project().check_wall_spline(copy.type_id, w.location_line, &moved).is_err() {
+                    return Err(EditError::Degenerate);
+                }
                 w.spline = Some(moved);
             }
             // An arc wall's copy is concentric (with the same sweep).

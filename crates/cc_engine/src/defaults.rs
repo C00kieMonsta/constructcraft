@@ -253,11 +253,12 @@ fn mid_point(line: &[DVec2]) -> DVec2 {
 }
 
 /// Points of a wall's location line after its first end (`forward`: from
-/// start to end): its other end, preceded by points along an arc.
+/// start to end): its other end, preceded by points along an arc or a spline.
 fn along(w: &Wall, forward: bool) -> Vec<DVec2> {
-    let mut pts = match w.arc() {
-        Some(a) => a.points(0.0, a.length(), 0.0, cc_core::arc::ARC_STEP),
-        None => vec![w.start, w.end],
+    let mut pts = match (w.spline_path(), w.arc()) {
+        (Some(path), _) => path.points().to_vec(),
+        (None, Some(a)) => a.points(0.0, a.length(), 0.0, cc_core::arc::ARC_STEP),
+        (None, None) => vec![w.start, w.end],
     };
     if !forward {
         pts.reverse();

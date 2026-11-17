@@ -28,6 +28,9 @@ pub(crate) fn profile_error(e: ProfileError) -> EngineError {
 /// (`curtain`: its type is one), not attached to a roof.
 pub(crate) fn check_takes_profile(p: &Project, e: &Element, wall: &Wall) -> Result<()> {
     let id = e.id.0;
+    if wall.spline.is_some() {
+        return Err(EngineError::invalid(format!("wall {id} is a spline wall: it takes no elevation profile yet")));
+    }
     if wall.arc().is_some() {
         return Err(EngineError::invalid(format!(
             "wall {id} is curved: only straight walls take an elevation profile"

@@ -537,8 +537,8 @@ impl WallGeom {
                     let (b0, b1) = (at(lo_span, step[0]), at(lo_span, step[1]));
                     let poly = [self.world(b0, v_lo), self.world(b1, v_lo), self.world(a1, v_hi), self.world(a0, v_hi)];
                     let us = [b0, b1, a1, a0];
-                    let left_n = flat(self.normal_at((a0 + a1) * 0.5));
-                    let right_n = -flat(self.normal_at((b0 + b1) * 0.5));
+                    let left_n = flat(self.facet_normal(a0, a1, v_hi));
+                    let right_n = -flat(self.facet_normal(b0, b1, v_lo));
                     for &(lo, hi) in &lines[j] {
                         let upper: Vec<DVec3> = poly.iter().zip(us).map(|(p, u)| p.extend(hi.at(u))).collect();
                         let up = (upper[1] - upper[0]).cross(upper[2] - upper[0]).try_normalize().unwrap_or(DVec3::Z);
@@ -573,7 +573,8 @@ impl WallGeom {
                     // The step to the next band, where only one of them is solid.
                     if let Some(next) = lines.get(j + 1) {
                         let um = (b0 + b1) * 0.5;
-                        let (down_n, up_n) = (-flat(self.normal_at(um)), flat(self.normal_at(um)));
+                        let step_n = self.facet_normal(b0, b1, v_lo);
+                        let (down_n, up_n) = (-flat(step_n), flat(step_n));
                         for (lo, hi) in exposed(&lines[j], next, um) {
                             let (bot, top) = ((lo.at(b0), lo.at(b1)), (hi.at(b0), hi.at(b1)));
                             s.faces.extend(self.slanted_face((b0, v_lo), (b1, v_lo), bot, top, down_n, curved));

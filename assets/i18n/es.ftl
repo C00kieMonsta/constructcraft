@@ -3862,3 +3862,11 @@ section-wall-profile = Perfil
 prop-wall-profile = Perfil
 wall-profile-rectangular = Rectangular
 wall-profile-custom = Personalizado
+
+## Spline walls
+msg-spline-wall = Los muros en spline aún no se recortan, extienden ni alinean
+wall-spline-points = Un muro en spline recibe los puntos de control de 1 a 64 segmentos de curva.
+wall-spline-short = La spline es demasiado corta, o sus extremos se encuentran.
+wall-spline-corner = La spline tiene una esquina (marcada): su dirección debe continuar donde se unen los segmentos.
+wall-spline-tight = La spline se curva demasiado para el espesor del muro (marcado).
+wall-spline-crossing = El muro se cruzaría consigo mismo (marcado).

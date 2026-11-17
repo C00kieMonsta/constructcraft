@@ -115,7 +115,7 @@ impl Command for WallFramingCreate {
             let Some((e, w)) = p.element(id).and_then(|e| e.as_wall().map(|w| (e, w))) else {
                 return Err(EngineError::invalid(format!("element {raw} is not a wall")));
             };
-            if w.arc().is_some() {
+            if w.is_curved() {
                 return Err(EngineError::invalid(format!("wall {raw} is curved: only straight walls are framed")));
             }
             if w.profile.is_some() {

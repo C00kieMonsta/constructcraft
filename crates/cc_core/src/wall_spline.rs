@@ -395,9 +395,8 @@ fn flatten(control: &[DVec2], sagitta: f64, max_turn: f64) -> Vec<Station> {
             let tm = (t0 + t1) * 0.5;
             let (a, b) = (spline::point(seg, t0), spline::point(seg, t1));
             let (da, dm, db) = (direction(seg, t0), direction(seg, tm), direction(seg, t1));
-            let strays = [0.25, 0.5, 0.75]
-                .iter()
-                .any(|k| off_chord(spline::point(seg, t0 + (t1 - t0) * k), a, b) > sagitta);
+            let strays =
+                [0.25, 0.5, 0.75].iter().any(|k| off_chord(spline::point(seg, t0 + (t1 - t0) * k), a, b) > sagitta);
             let turns = turn(da, dm) + turn(dm, db) > max_turn;
             if depth < MAX_DEPTH && (strays || turns) {
                 stack.push((tm, t1, depth + 1));
@@ -700,6 +699,21 @@ impl WallPath {
         pts
     }
 
+    /// The least radius left to a face inside a bend, for faces `left` and
+    /// `right` of the path (signed distances to the left): what
+    /// [`MIN_FACE_RADIUS`] bounds. Infinite for a straight path, negative
+    /// where a face would fold over.
+    pub fn face_radius(&self, left: f64, right: f64) -> f64 {
+        self.curvature.iter().fold(f64::INFINITY, |least, k| {
+            if k.abs() < 1e-12 {
+                return least;
+            }
+            // The face on the side the curve turns to.
+            let inside = if *k > 0.0 { left.max(right) } else { -left.min(right) };
+            least.min(1.0 / k.abs() - inside)
+        })
+    }
+
     /// Where two segments join in a corner (see [`MAX_KINK_DEG`]).
     pub fn corner(&self) -> Option<DVec2> {
         let i = self.kinks.iter().position(|k| *k > MAX_KINK_DEG)?;
@@ -778,9 +792,7 @@ mod tests {
     /// A quarter circle of radius `r` around the origin, as one Bézier segment.
     fn quarter(r: f64) -> WallSpline {
         let k = 0.552_284_749_8 * r;
-        WallSpline {
-            control: vec![DVec2::new(r, 0.0), DVec2::new(r, k), DVec2::new(k, r), DVec2::new(0.0, r)],
-        }
+        WallSpline { control: vec![DVec2::new(r, 0.0), DVec2::new(r, k), DVec2::new(k, r), DVec2::new(0.0, r)] }
     }
 
     #[test]
@@ -871,7 +883,10 @@ mod tests {
         // Closed, and too short.
         let closed = spline::interpolate(&[DVec2::ZERO, DVec2::new(4.0, 0.0), DVec2::new(2.0, 3.0)], true);
         assert_eq!(bad(closed), Err(SplineError::Short));
-        assert_eq!(WallSpline::through(&[DVec2::ZERO, DVec2::new(0.01, 0.0)]).unwrap().check(0.1, -0.1), Err(SplineError::Short));
+        assert_eq!(
+            WallSpline::through(&[DVec2::ZERO, DVec2::new(0.01, 0.0)]).unwrap().check(0.1, -0.1),
+            Err(SplineError::Short)
+        );
         // A corner between two straight segments.
         let corner = vec![
             DVec2::new(0.0, 0.0),
@@ -890,8 +905,9 @@ mod tests {
         assert!(matches!(quarter(0.3).check(0.3, 0.0), Err(SplineError::Tight(_))));
         assert!(quarter(0.3).check(0.0, -0.3).is_ok());
         // A loop that crosses itself.
-        let looped =
-            WallSpline { control: vec![DVec2::ZERO, DVec2::new(6.0, 4.0), DVec2::new(-2.0, 4.0), DVec2::new(4.0, 0.0)] };
+        let looped = WallSpline {
+            control: vec![DVec2::ZERO, DVec2::new(6.0, 4.0), DVec2::new(-2.0, 4.0), DVec2::new(4.0, 0.0)],
+        };
         assert!(matches!(looped.check(0.1, -0.1), Err(SplineError::Crossing(_))), "{:?}", looped.check(0.1, -0.1));
         // A hairpin whose passes lie closer than the wall is thick.
         let hairpin = WallSpline::through(&[
@@ -924,6 +940,228 @@ mod tests {
         assert!(p.points().len() <= MAX_CHORDS + 1, "{}", p.points().len());
         assert!(p.length().is_finite() && p.length() > 1000.0);
         assert!(WallSpline::through(&vec![DVec2::X; MAX_SEGMENTS + 2]).is_none());
+    }
+
+    use crate::{Category, Document, Element, ElementId, ElementKind, PlanTransform, Project, Wall};
+
+    fn add(doc: &mut Document, category: Category, kind: ElementKind) -> ElementId {
+        doc.edit("add", |e| {
+            let level = e.project().levels[0].id;
+            let type_id = e.project().default_type(category).unwrap();
+            let id = ElementId(e.alloc_id());
+            e.add_element(Element {
+                id,
+                level,
+                type_id,
+                mark: String::new(),
+                comments: String::new(),
+                kind,
+                uid: Default::default(),
+                phase_created: Default::default(),
+                phase_demolished: None,
+                design_option: None,
+                paints: Vec::new(),
+            })
+        })
+    }
+
+    fn the_wall(doc: &Document, id: ElementId) -> Wall {
+        doc.project.element(id).and_then(|e| e.as_wall()).cloned().unwrap()
+    }
+
+    fn spline_wall(doc: &mut Document) -> ElementId {
+        // Its stored ends are stale on purpose: the edit puts them on the curve.
+        let wall = Wall { spline: Some(wave()), bulge: 0.3, ..Default::default() };
+        add(doc, Category::Wall, ElementKind::Wall(wall))
+    }
+
+    #[test]
+    fn the_ends_follow_the_curve_in_every_edit() {
+        let mut doc = Document::new(Project::from_template());
+        let id = spline_wall(&mut doc);
+        let w = the_wall(&doc, id);
+        assert_eq!((w.start, w.end, w.bulge), (DVec2::new(0.0, 0.0), DVec2::new(9.0, 0.5), 0.0));
+        assert!(w.arc().is_none() && w.is_curved());
+        assert_eq!(doc.project.repairs_needed(), 0);
+        // The wall's own measures are the curve's.
+        let path = wave().path().unwrap();
+        assert_eq!(w.length(), path.length());
+        assert!(w.at(2.0, 0.1).distance(path.at(2.0, 0.1)) < 1e-12);
+        assert!(w.tangent_at(2.0).distance(path.tangent(2.0)) < 1e-12);
+        let (u, v) = w.project(path.at(3.0, -0.2));
+        assert!((u - 3.0).abs() < 1e-6 && (v + 0.2).abs() < 1e-6);
+        // New control points: the ends go with them.
+        doc.edit("curve", |e| {
+            if let Some(ElementKind::Wall(w)) = e.element_mut(id).map(|x| &mut x.kind) {
+                w.spline = WallSpline::through(&[DVec2::new(1.0, 1.0), DVec2::new(4.0, 2.0), DVec2::new(8.0, 1.0)]);
+            }
+        });
+        let w = the_wall(&doc, id);
+        assert_eq!((w.start, w.end), (DVec2::new(1.0, 1.0), DVec2::new(8.0, 1.0)));
+        // An end moved alone (a grip, a moved corner): its knot and handle follow.
+        let before = w.spline.clone().unwrap();
+        doc.edit("end", |e| {
+            if let Some(ElementKind::Wall(w)) = e.element_mut(id).map(|x| &mut x.kind) {
+                w.end += DVec2::new(1.0, -1.0);
+            }
+        });
+        let w = the_wall(&doc, id);
+        let after = w.spline.clone().unwrap();
+        assert_eq!(w.end, DVec2::new(9.0, 0.0));
+        assert_eq!(after.control[6], DVec2::new(9.0, 0.0));
+        assert_eq!(after.control[5], before.control[5] + DVec2::new(1.0, -1.0));
+        assert_eq!(after.control[..5], before.control[..5]);
+        // Both ends moved alike: the whole curve moves.
+        doc.edit("both", |e| {
+            if let Some(ElementKind::Wall(w)) = e.element_mut(id).map(|x| &mut x.kind) {
+                w.start += DVec2::new(0.0, 2.0);
+                w.end += DVec2::new(0.0, 2.0);
+            }
+        });
+        let moved = the_wall(&doc, id).spline.unwrap();
+        for (a, b) in moved.control.iter().zip(&after.control) {
+            assert_eq!(*a, *b + DVec2::new(0.0, 2.0));
+        }
+        // Undo steps back through each of them.
+        doc.undo();
+        assert_eq!(the_wall(&doc, id).spline.unwrap(), after);
+        doc.undo();
+        doc.undo();
+        assert_eq!(the_wall(&doc, id).spline.unwrap(), wave());
+    }
+
+    #[test]
+    fn moves_turns_mirrors_and_copies_take_the_curve_along() {
+        let mut doc = Document::new(Project::from_template());
+        let id = spline_wall(&mut doc);
+        let length = the_wall(&doc, id).length();
+        let was = wave().path().unwrap();
+        // A quarter turn about the origin, then a move.
+        let turn = PlanTransform::rotate_about(DVec2::ZERO, FRAC_PI_2);
+        doc.edit("turn", |e| e.transform_elements(&[id], &turn));
+        doc.edit("move", |e| e.transform_elements(&[id], &PlanTransform::translate(DVec2::new(3.0, 0.0))));
+        let w = the_wall(&doc, id);
+        assert!(w.start.distance(DVec2::new(3.0, 0.0)) < 1e-12 && w.end.distance(DVec2::new(2.5, 9.0)) < 1e-12);
+        assert_eq!(w.spline.as_ref().unwrap().ends().unwrap(), (w.start, w.end));
+        assert!((w.length() - length).abs() < 1e-9);
+        let now = w.spline_path().unwrap();
+        let p = was.at(4.0, 0.2);
+        assert!(now.at(4.0, 0.2).distance(DVec2::new(3.0 - p.y, p.x)) < 1e-9);
+        doc.undo();
+        doc.undo();
+        // A mirror walks the wall the other way, so its left stays its left.
+        let mirror = PlanTransform::mirror_across(DVec2::ZERO, DVec2::Y);
+        doc.edit("mirror", |e| e.transform_elements(&[id], &mirror));
+        let w = the_wall(&doc, id);
+        assert!(w.start.distance(DVec2::new(-9.0, 0.5)) < 1e-12 && w.end.distance(DVec2::ZERO) < 1e-12);
+        assert_eq!(w.spline.as_ref().unwrap().ends().unwrap(), (w.start, w.end));
+        let now = w.spline_path().unwrap();
+        let p = was.at(4.0, 0.2);
+        assert!(now.at(length - 4.0, 0.2).distance(DVec2::new(-p.x, p.y)) < 1e-9);
+        assert_eq!(doc.project.repairs_needed(), 0);
+        // A copy has the curve too, moved.
+        let copies = doc.edit("copy", |e| e.copy_elements(&[id], &[PlanTransform::translate(DVec2::new(0.0, 4.0))]));
+        let copy = the_wall(&doc, copies[0]);
+        assert!(copy.start.distance(w.start + DVec2::new(0.0, 4.0)) < 1e-12);
+        assert_eq!(copy.spline.unwrap().control.len(), 10);
+        // Deleting takes it away.
+        doc.edit("delete", |e| e.remove_element(id));
+        assert!(doc.project.element(id).is_none());
+    }
+
+    #[test]
+    fn repair_straightens_hostile_spline_walls() {
+        let mut p = Project::from_template();
+        let level = p.levels[0].id;
+        let wall_t = p.default_type(Category::Wall).unwrap();
+        let door_t = p.default_type(Category::Door).unwrap();
+        let mut next = 7000;
+        let mut push = |p: &mut Project, type_id, kind| {
+            next += 1;
+            let id = ElementId(next);
+            let e = Element {
+                id,
+                level,
+                type_id,
+                mark: String::new(),
+                comments: String::new(),
+                kind,
+                uid: Default::default(),
+                phase_created: Default::default(),
+                phase_demolished: None,
+                design_option: None,
+                paints: Vec::new(),
+            };
+            p.elements.insert(id, e);
+            id
+        };
+        let from = DVec2::new(0.0, 0.0);
+        let to = DVec2::new(6.0, 1.0);
+        let wall = |control: Vec<DVec2>| {
+            ElementKind::Wall(Wall { start: from, end: to, spline: Some(WallSpline { control }), ..Default::default() })
+        };
+        let hostile = [
+            // Not a number, a single point, a hundred thousand points.
+            vec![from, DVec2::new(2.0, f64::NAN), DVec2::new(4.0, 1.0), to],
+            vec![from],
+            vec![DVec2::new(1.0, 2.0); 100_000],
+            // Touching itself: a loop.
+            vec![from, DVec2::new(8.0, 5.0), DVec2::new(-2.0, 5.0), to],
+            // A bend of 5 cm radius.
+            vec![from, DVec2::new(0.0276, 0.0), DVec2::new(0.05, 0.0224), DVec2::new(0.05, 0.05)],
+            // A corner.
+            vec![from, DVec2::X, DVec2::X * 2.0, DVec2::X * 3.0, DVec2::new(3.0, 1.0), DVec2::new(3.0, 2.0), to],
+            // Closed.
+            spline::interpolate(&[from, DVec2::new(4.0, 0.0), DVec2::new(2.0, 3.0)], true),
+        ];
+        let ids: Vec<ElementId> = hostile.into_iter().map(|c| push(&mut p, wall_t, wall(c))).collect();
+        // A good one whose stored ends, bulge, profile and top are stale, and a door in it.
+        let good = push(
+            &mut p,
+            wall_t,
+            ElementKind::Wall(Wall {
+                start: DVec2::new(50.0, 50.0),
+                end: DVec2::new(60.0, 50.0),
+                bulge: 0.5,
+                attach_top: Some(ElementId(1)),
+                profile: crate::wall_profile::WallProfile::sloped(10.0, (0.0, 0.0), (3.0, 2.0)).ok(),
+                spline: Some(wave()),
+                ..Default::default()
+            }),
+        );
+        let door = push(
+            &mut p,
+            door_t,
+            ElementKind::Door(crate::Hosted {
+                host: good,
+                offset: 3.0,
+                sill_height: 0.0,
+                flip_facing: false,
+                flip_hand: false,
+            }),
+        );
+        let repairs = p.repair();
+        assert!(repairs >= 12, "{repairs}");
+        for id in ids {
+            let w = p.element(id).and_then(|e| e.as_wall()).unwrap();
+            // The straight wall between the ends the file had.
+            assert!(w.spline.is_none(), "{id:?}");
+            assert_eq!((w.start, w.end, w.bulge), (from, to, 0.0));
+        }
+        let w = p.element(good).and_then(|e| e.as_wall()).unwrap();
+        assert_eq!(w.spline, Some(wave()));
+        assert_eq!((w.start, w.end, w.bulge), (DVec2::new(0.0, 0.0), DVec2::new(9.0, 0.5), 0.0));
+        assert!(w.profile.is_none() && w.attach_top.is_none());
+        assert!(p.element(door).is_none(), "a spline wall hosts no doors yet");
+        // Once is enough.
+        assert_eq!(p.repair(), 0);
+        // A wall type that grows too thick for the curve straightens it; a curtain type too.
+        let mut thick = p.clone();
+        if let Some(crate::TypeData::Wall { layers, .. }) = thick.types.get_mut(&wall_t).map(|t| &mut t.data) {
+            layers[1].thickness = 4.0;
+        }
+        assert!(thick.repair() >= 1);
+        assert!(thick.element(good).and_then(|e| e.as_wall()).is_some_and(|w| w.spline.is_none()));
     }
 
     #[test]

@@ -3862,3 +3862,11 @@ section-wall-profile = 轮廓
 prop-wall-profile = 轮廓
 wall-profile-rectangular = 矩形
 wall-profile-custom = 自定义
+
+## Spline walls
+msg-spline-wall = 样条曲线墙暂不支持修剪、延伸或对齐
+wall-spline-points = 样条曲线墙需要 1 至 64 段曲线的控制点。
+wall-spline-short = 样条曲线太短，或其两端重合。
+wall-spline-corner = 样条曲线有尖角（已标记）：各段连接处方向必须连续。
+wall-spline-tight = 样条曲线对于墙的厚度弯曲过急（已标记）。
+wall-spline-crossing = 墙体会与自身相交（已标记）。

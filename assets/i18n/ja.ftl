@@ -3862,3 +3862,11 @@ section-wall-profile = プロファイル
 prop-wall-profile = プロファイル
 wall-profile-rectangular = 長方形
 wall-profile-custom = カスタム
+
+## Spline walls
+msg-spline-wall = スプライン壁はまだトリム、延長、位置合わせできません
+wall-spline-points = スプライン壁には 1～64 個の曲線セグメントの制御点が必要です。
+wall-spline-short = スプラインが短すぎるか、両端が一致しています。
+wall-spline-corner = スプラインに角があります（マーク箇所）。セグメントの接続部で方向が連続している必要があります。
+wall-spline-tight = スプラインの曲がりが壁の厚さに対してきつすぎます（マーク箇所）。
+wall-spline-crossing = 壁が自身と交差します（マーク箇所）。

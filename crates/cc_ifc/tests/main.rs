@@ -9,6 +9,7 @@ mod classes;
 mod connections;
 mod rebar;
 mod round_trip;
+mod spline_walls;
 mod tank;
 mod wall_profiles;
 
