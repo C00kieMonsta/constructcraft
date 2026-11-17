@@ -3766,3 +3766,25 @@ pipe-region-us = Estados Unidos
 tx-pipe-series-import = Importar serie de tubos
 tx-pipe-series-delete = Eliminar serie de tubos
 tx-pipe-type-create = Crear tipo de tubo
+
+## Macro editor: checking and stepping
+macro-check-json = JSON no válido: { $detail }
+macro-check-not-object = Cada paso debe ser un objeto JSON.
+macro-check-no-command = El paso no tiene "command".
+macro-check-too-long = La macro tiene más de { $max } líneas; el resto no se leyó.
+macro-check-ignored-key = "{ $key }" se ignora: un paso solo tiene "command" y "args".
+macro-check-unknown-command = Comando desconocido: { $command }
+macro-check-args-object = "args" debe ser un objeto JSON.
+macro-check-unknown-arg = { $command } no tiene el argumento "{ $name }".
+macro-check-missing-arg = { $command } necesita el argumento "{ $name }".
+macro-check-deep = Los argumentos están anidados a demasiada profundidad.
+macro-check-step-number = "$step" debe ser un número de paso.
+macro-check-step-zero = Los pasos se cuentan desde 1: "$step": 0 no indica ningún paso.
+macro-check-step-beyond = "$step": { $n } está más allá de la macro, que tiene { $count } pasos.
+macro-check-step-later = "$step": { $n } no es un paso anterior.
+macro-check-path = "path" debe ser un puntero JSON, como "/id".
+macro-check-level = "$level" debe ser "active".
+macro-step-at-start = No hay ningún paso que retroceder: la macro está al inicio.
+macro-step-not-undoable = Este paso cambió el historial de deshacer y no se puede retroceder.
+macro-step-changed = El modelo cambió después de este paso; no se puede retroceder.
+macro-step-done = La macro no tiene más pasos.

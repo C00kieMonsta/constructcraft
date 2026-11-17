@@ -3766,3 +3766,25 @@ pipe-region-us = USA
 tx-pipe-series-import = Rohrreihe importieren
 tx-pipe-series-delete = Rohrreihe löschen
 tx-pipe-type-create = Rohrtyp erstellen
+
+## Macro editor: checking and stepping
+macro-check-json = Ungültiges JSON: { $detail }
+macro-check-not-object = Jeder Schritt muss ein JSON-Objekt sein.
+macro-check-no-command = Der Schritt hat kein "command".
+macro-check-too-long = Das Makro hat mehr als { $max } Zeilen; der Rest wurde nicht gelesen.
+macro-check-ignored-key = "{ $key }" wird ignoriert: Ein Schritt hat nur "command" und "args".
+macro-check-unknown-command = Unbekannter Befehl: { $command }
+macro-check-args-object = "args" muss ein JSON-Objekt sein.
+macro-check-unknown-arg = { $command } hat kein Argument "{ $name }".
+macro-check-missing-arg = { $command } benötigt das Argument "{ $name }".
+macro-check-deep = Die Argumente sind zu tief verschachtelt.
+macro-check-step-number = "$step" muss eine Schrittnummer sein.
+macro-check-step-zero = Schritte werden ab 1 gezählt: "$step": 0 bezeichnet keinen Schritt.
+macro-check-step-beyond = "$step": { $n } liegt hinter dem Ende des Makros, das { $count } Schritte hat.
+macro-check-step-later = "$step": { $n } ist kein früherer Schritt.
+macro-check-path = "path" muss ein JSON-Zeiger wie "/id" sein.
+macro-check-level = "$level" muss "active" sein.
+macro-step-at-start = Kein Schritt zum Zurückgehen: Das Makro steht am Anfang.
+macro-step-not-undoable = Dieser Schritt hat den Rückgängig-Verlauf verändert und kann nicht zurückgenommen werden.
+macro-step-changed = Das Modell wurde nach diesem Schritt geändert; er kann nicht zurückgenommen werden.
+macro-step-done = Das Makro hat keine weiteren Schritte.

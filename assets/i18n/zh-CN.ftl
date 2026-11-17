@@ -3766,3 +3766,25 @@ pipe-region-us = 美国
 tx-pipe-series-import = 导入管道系列
 tx-pipe-series-delete = 删除管道系列
 tx-pipe-type-create = 创建管道类型
+
+## Macro editor: checking and stepping
+macro-check-json = 无效的 JSON：{ $detail }
+macro-check-not-object = 每个步骤都必须是 JSON 对象。
+macro-check-no-command = 该步骤没有 "command"。
+macro-check-too-long = 宏超过 { $max } 行；其余部分未读取。
+macro-check-ignored-key = "{ $key }" 将被忽略：步骤只有 "command" 和 "args"。
+macro-check-unknown-command = 未知命令：{ $command }
+macro-check-args-object = "args" 必须是 JSON 对象。
+macro-check-unknown-arg = { $command } 没有参数 "{ $name }"。
+macro-check-missing-arg = { $command } 需要参数 "{ $name }"。
+macro-check-deep = 参数嵌套层级过深。
+macro-check-step-number = "$step" 必须是步骤编号。
+macro-check-step-zero = 步骤从 1 开始计数："$step": 0 不指向任何步骤。
+macro-check-step-beyond = "$step": { $n } 超出宏的范围，该宏共有 { $count } 个步骤。
+macro-check-step-later = "$step": { $n } 不是之前的步骤。
+macro-check-path = "path" 必须是 JSON 指针，例如 "/id"。
+macro-check-level = "$level" 必须是 "active"。
+macro-step-at-start = 没有可后退的步骤：宏位于开头。
+macro-step-not-undoable = 此步骤更改了撤销历史，无法后退。
+macro-step-changed = 此步骤之后模型已更改，无法后退。
+macro-step-done = 宏没有更多步骤。

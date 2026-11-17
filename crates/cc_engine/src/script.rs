@@ -97,22 +97,473 @@ pub struct StepError {
     pub error: EngineError,
 }
 
-/// Run the steps in order, stopping at the first error; returns each
-/// completed step's result. Placeholders in the arguments are resolved first
-/// (see the module documentation).
+/// Run the steps in order, each one undo step, stopping at the first error;
+/// returns each completed step's result. Placeholders in the arguments are
+/// resolved first (see the module documentation).
 pub fn run(session: &mut Session, steps: &[Step]) -> std::result::Result<Vec<Value>, (Vec<Value>, StepError)> {
-    let mut results = Vec::with_capacity(steps.len());
-    for (index, step) in steps.iter().enumerate() {
-        let args = match active_level(session, &step.args).and_then(|l| resolve(&step.args, &results, l, 0)) {
-            Ok(args) => args,
-            Err(error) => return Err((results, StepError { index, command: step.command.clone(), error })),
-        };
-        match session.execute(&step.command, args) {
-            Ok(out) => results.push(out),
-            Err(error) => return Err((results, StepError { index, command: step.command.clone(), error })),
+    let mut stepper = Stepper::new(steps.to_vec());
+    match stepper.run_to(session, steps.len()) {
+        Ok(()) => Ok(stepper.into_results()),
+        Err(error) => Err((stepper.into_results(), error)),
+    }
+}
+
+/// Most lines (or array items) of a script read line by line or checked.
+pub const MAX_LINES: usize = 100_000;
+
+/// What one line of a script is (see [`parse_lines`]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum LineItem {
+    Blank,
+    /// A `//` line.
+    Comment,
+    /// A step: its number (from 1, counting only the lines that are steps),
+    /// the step, and the keys of its object other than `command` and `args`,
+    /// which running it ignores.
+    Step {
+        number: usize,
+        step: Step,
+        ignored: Vec<String>,
+    },
+    Error(LineError),
+}
+
+/// Why a line is not a step.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LineError {
+    /// Not JSON (the parser's message).
+    Json(String),
+    /// JSON, but not an object.
+    NotObject,
+    /// An object with no `"command"` text.
+    NoCommand,
+    /// Past [`MAX_LINES`]: the rest of the script was not read.
+    TooLong,
+}
+
+impl LineError {
+    /// The message for the user, in the active language.
+    pub fn message(&self) -> String {
+        match self {
+            LineError::Json(detail) => crate::t!("macro-check-json", "detail" => detail),
+            LineError::NotObject => crate::t!("macro-check-not-object"),
+            LineError::NoCommand => crate::t!("macro-check-no-command"),
+            LineError::TooLong => crate::t!("macro-check-too-long", "max" => MAX_LINES),
         }
     }
-    Ok(results)
+}
+
+/// One line of a script (see [`parse_lines`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScriptLine {
+    /// Its line number, from 1; `None` for the items of the array format.
+    pub line: Option<usize>,
+    pub item: LineItem,
+}
+
+/// Read a script line by line without stopping at a bad line: in the line
+/// format, an entry per source line (blank, comment, step or error), so an
+/// editor can show what each line is; lines that are not steps get no step
+/// number, so the numbers are those [`parse`] gives when every line is good.
+/// The array format is one JSON value, not lines: its steps (and items that
+/// are not steps) come with no line number, and JSON that does not parse is
+/// one error at the line the parser stopped at. At most [`MAX_LINES`] lines
+/// or items are read; a [`LineError::TooLong`] entry stands for the rest.
+/// [`parse`] keeps its own behaviour (all or nothing).
+pub fn parse_lines(text: &str) -> Vec<ScriptLine> {
+    let mut number = 0;
+    let mut step_item = |item: &Value| -> LineItem {
+        match step_of(item) {
+            Ok((step, ignored)) => {
+                number += 1;
+                LineItem::Step { number, step, ignored }
+            }
+            Err(e) => LineItem::Error(e),
+        }
+    };
+    if text.trim_start().starts_with('[') {
+        let items: Vec<Value> = match serde_json::from_str(text) {
+            Ok(items) => items,
+            Err(e) => return vec![ScriptLine { line: Some(e.line().max(1)), item: LineItem::Error(json_error(&e)) }],
+        };
+        let mut out: Vec<ScriptLine> =
+            items.iter().take(MAX_LINES).map(|v| ScriptLine { line: None, item: step_item(v) }).collect();
+        if items.len() > MAX_LINES {
+            out.push(ScriptLine { line: None, item: LineItem::Error(LineError::TooLong) });
+        }
+        return out;
+    }
+    let mut out = Vec::new();
+    for (i, l) in text.lines().enumerate() {
+        if i >= MAX_LINES {
+            out.push(ScriptLine { line: Some(i + 1), item: LineItem::Error(LineError::TooLong) });
+            break;
+        }
+        let t = l.trim();
+        let item = if t.is_empty() {
+            LineItem::Blank
+        } else if t.starts_with("//") {
+            LineItem::Comment
+        } else {
+            match serde_json::from_str::<Value>(l) {
+                Ok(v) => step_item(&v),
+                Err(e) => LineItem::Error(json_error(&e)),
+            }
+        };
+        out.push(ScriptLine { line: Some(i + 1), item });
+    }
+    out
+}
+
+fn json_error(e: &serde_json::Error) -> LineError {
+    LineError::Json(e.to_string())
+}
+
+/// The step a JSON value is, with the keys it ignores.
+fn step_of(item: &Value) -> std::result::Result<(Step, Vec<String>), LineError> {
+    let Value::Object(m) = item else { return Err(LineError::NotObject) };
+    let command = m.get("command").and_then(Value::as_str).ok_or(LineError::NoCommand)?;
+    let ignored = m.keys().filter(|k| *k != "command" && *k != "args").cloned().collect();
+    Ok((Step { command: command.to_string(), args: m.get("args").cloned().unwrap_or(json!({})) }, ignored))
+}
+
+/// How bad a [`Diagnostic`] is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Severity {
+    /// The step cannot run as written (or the script cannot be read).
+    Error,
+    /// It runs, but probably not as meant.
+    Warning,
+}
+
+/// A problem [`check`] found.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Diagnostic {
+    /// The line, from 1 (`None` for a step of the array format).
+    pub line: Option<usize>,
+    /// The step, from 1, when the problem is in one.
+    pub step: Option<usize>,
+    pub severity: Severity,
+    /// In the active language.
+    pub message: String,
+}
+
+/// Check a script without running it, in the order of its lines: lines
+/// that are not steps (see [`parse_lines`]), commands the session does not
+/// have (plugin commands count), `args` that is not an object, keys of a
+/// step that running it ignores (warnings), argument names the command's
+/// schema refuses (when it allows no others) and required arguments left
+/// out, and placeholders that cannot resolve (`$step` that is not an
+/// earlier step of the script or whose `path` is not a JSON pointer,
+/// `$level` other than `"active"`). Values are not checked against the
+/// schema, nor `$step` paths against what the steps will return. Nothing
+/// runs and the document is not touched.
+pub fn check(session: &Session, text: &str) -> Vec<Diagnostic> {
+    let lines = parse_lines(text);
+    let count = lines.iter().filter(|l| matches!(l.item, LineItem::Step { .. })).count();
+    let catalog: std::collections::HashMap<String, Value> =
+        session.commands().into_iter().map(|c| (c.name, c.input_schema)).collect();
+    let mut out = Vec::new();
+    for l in &lines {
+        let mut add = |step: Option<usize>, severity: Severity, message: String| {
+            out.push(Diagnostic { line: l.line, step, severity, message });
+        };
+        let (number, step, ignored) = match &l.item {
+            LineItem::Blank | LineItem::Comment => continue,
+            LineItem::Error(e) => {
+                add(None, Severity::Error, e.message());
+                continue;
+            }
+            LineItem::Step { number, step, ignored } => (*number, step, ignored),
+        };
+        let at = Some(number);
+        for key in ignored {
+            add(at, Severity::Warning, crate::t!("macro-check-ignored-key", "key" => key));
+        }
+        match catalog.get(&step.command) {
+            None => add(at, Severity::Error, crate::t!("macro-check-unknown-command", "command" => step.command)),
+            Some(schema) => {
+                for message in check_args(&step.command, &step.args, schema) {
+                    add(at, Severity::Error, message);
+                }
+            }
+        }
+        let mut problems = Vec::new();
+        check_placeholders(&step.args, number, count, &mut problems, 0);
+        for message in problems {
+            add(at, Severity::Error, message);
+        }
+    }
+    out
+}
+
+/// What the top level of a command's schema plainly refuses in `args`.
+fn check_args(command: &str, args: &Value, schema: &Value) -> Vec<String> {
+    let empty = Map::new();
+    let args = match args {
+        Value::Object(m) => m,
+        // Commands read `null` as no arguments.
+        Value::Null => &empty,
+        _ => return vec![crate::t!("macro-check-args-object")],
+    };
+    let mut out = Vec::new();
+    if let Some(props) = schema.get("properties").and_then(Value::as_object)
+        && schema.get("additionalProperties") == Some(&Value::Bool(false))
+    {
+        for name in args.keys().filter(|k| !props.contains_key(*k)) {
+            out.push(crate::t!("macro-check-unknown-arg", "command" => command, "name" => name));
+        }
+    }
+    for name in schema.get("required").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+        if !args.contains_key(name) {
+            out.push(crate::t!("macro-check-missing-arg", "command" => command, "name" => name));
+        }
+    }
+    out
+}
+
+/// The placeholders in the arguments of step `number` (of `count`) that
+/// cannot resolve, as [`resolve`] reads them.
+fn check_placeholders(v: &Value, number: usize, count: usize, out: &mut Vec<String>, depth: usize) {
+    if depth > MAX_DEPTH {
+        out.push(crate::t!("macro-check-deep"));
+        return;
+    }
+    match v {
+        Value::Object(m) if m.contains_key(STEP_KEY) => {
+            match m.get(STEP_KEY).and_then(Value::as_u64) {
+                None => out.push(crate::t!("macro-check-step-number")),
+                Some(0) => out.push(crate::t!("macro-check-step-zero")),
+                Some(n) if usize::try_from(n).map_or(true, |n| n > count) => {
+                    out.push(crate::t!("macro-check-step-beyond", "n" => n, "count" => count));
+                }
+                Some(n) if usize::try_from(n).map_or(true, |n| n >= number) => {
+                    out.push(crate::t!("macro-check-step-later", "n" => n));
+                }
+                Some(_) => {}
+            }
+            match m.get("path") {
+                None => {}
+                Some(Value::String(p)) if p.is_empty() || p.starts_with('/') => {}
+                Some(_) => out.push(crate::t!("macro-check-path")),
+            }
+        }
+        Value::Object(m) if m.contains_key(LEVEL_KEY) => {
+            if m.get(LEVEL_KEY).and_then(Value::as_str) != Some("active") {
+                out.push(crate::t!("macro-check-level"));
+            }
+        }
+        Value::Object(m) => m.values().for_each(|v| check_placeholders(v, number, count, out, depth + 1)),
+        Value::Array(a) => a.iter().for_each(|v| check_placeholders(v, number, count, out, depth + 1)),
+        _ => {}
+    }
+}
+
+/// A script rewritten with one step per line in the form [`to_text`]
+/// writes, keeping comments and blank lines where they are and lines that
+/// are not steps as they are. A script in the array format becomes the line
+/// format; one that does not read is refused. The text ends with a newline
+/// when it has any line.
+pub fn format(text: &str) -> Result<String> {
+    if text.trim_start().starts_with('[') {
+        return parse(text).map(|steps| to_text(&steps));
+    }
+    if text.lines().nth(MAX_LINES).is_some() {
+        return Err(EngineError::invalid(LineError::TooLong.message()));
+    }
+    let mut out = String::with_capacity(text.len());
+    for (source, line) in text.lines().zip(parse_lines(text)) {
+        match line.item {
+            LineItem::Step { step, .. } => out.push_str(&step.to_json().to_string()),
+            LineItem::Blank => {}
+            LineItem::Comment => out.push_str(source.trim()),
+            LineItem::Error(_) => out.push_str(source),
+        }
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+/// Whether a step left an undo step that stepping back can undo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Undo {
+    /// It left nothing to undo (a query, or an edit that changed nothing).
+    Nothing,
+    /// It left one step on top of the undo history: the history's depth
+    /// below it and its identity ([`cc_core::Document::undo_top_id`]).
+    Step { depth: usize, id: u64 },
+    /// It changed the undo history otherwise (it undid, or replaced the
+    /// document): it cannot be stepped back.
+    Unknown,
+}
+
+/// The undo history's depth and top step.
+fn history(session: &Session) -> (usize, Option<u64>) {
+    (session.doc.undo_depth(), session.doc.undo_top_id())
+}
+
+/// What a step left, from the history before and after it ran.
+fn undo_left(before: (usize, Option<u64>), after: (usize, Option<u64>)) -> Undo {
+    match (after.0.checked_sub(before.0), after.1) {
+        (Some(0), _) if after.1 == before.1 => Undo::Nothing,
+        (Some(1), Some(id)) => Undo::Step { depth: before.0, id },
+        _ => Undo::Unknown,
+    }
+}
+
+/// What was run in one go and steps back at once: one step, or a run of
+/// steps squashed into one undo step.
+#[derive(Debug, Clone)]
+struct Ran {
+    steps: usize,
+    undo: Undo,
+}
+
+/// Runs a script step by step (the macro editor's stepping): each step's
+/// placeholders are resolved against the results so far, and each step run
+/// is one undo step that [`Stepper::back`] undoes again, as long as nothing
+/// else changed the model since.
+#[derive(Debug, Clone, Default)]
+pub struct Stepper {
+    steps: Vec<Step>,
+    results: Vec<Value>,
+    ran: Vec<Ran>,
+}
+
+impl Stepper {
+    pub fn new(steps: Vec<Step>) -> Self {
+        Self { steps, results: Vec::new(), ran: Vec::new() }
+    }
+
+    pub fn steps(&self) -> &[Step] {
+        &self.steps
+    }
+
+    /// How many steps have run (the index of the next one).
+    pub fn position(&self) -> usize {
+        self.results.len()
+    }
+
+    /// The results of the steps run, in order.
+    pub fn results(&self) -> &[Value] {
+        &self.results
+    }
+
+    pub fn into_results(self) -> Vec<Value> {
+        self.results
+    }
+
+    /// Whether every step has run.
+    pub fn is_done(&self) -> bool {
+        self.position() >= self.steps.len()
+    }
+
+    /// Run the next step as one undo step; returns its result. A step that
+    /// fails leaves the position where it is (it may be tried again).
+    pub fn next(&mut self, session: &mut Session) -> std::result::Result<Value, StepError> {
+        let before = history(session);
+        let out = self.execute(session)?;
+        self.ran.push(Ran { steps: 1, undo: undo_left(before, history(session)) });
+        Ok(out)
+    }
+
+    /// Run the steps up to `count` steps from the start (at most all of
+    /// them), one at a time, stopping at the first error.
+    pub fn run_to(&mut self, session: &mut Session, count: usize) -> std::result::Result<(), StepError> {
+        while self.position() < count.min(self.steps.len()) {
+            self.next(session)?;
+        }
+        Ok(())
+    }
+
+    /// Run the remaining steps as a single undo step named `name`, which
+    /// [`Stepper::back`] steps back whole. At an error it stops, and the
+    /// steps that ran before it are that one undo step. If one of them
+    /// changed the undo history otherwise (an `undo` command), they stay one
+    /// step each.
+    pub fn run_squashed(&mut self, session: &mut Session, name: &str) -> std::result::Result<(), StepError> {
+        let start = self.position();
+        let before = history(session);
+        // The run is one step of its own: nothing earlier merges into it.
+        session.doc.break_merge();
+        let mut each = Vec::new();
+        let mut outcome = Ok(());
+        while !self.is_done() {
+            let step_before = history(session);
+            if let Err(e) = self.execute(session) {
+                outcome = Err(e);
+                break;
+            }
+            each.push(undo_left(step_before, history(session)));
+        }
+        if each.contains(&Undo::Unknown) {
+            self.ran.extend(each.into_iter().map(|undo| Ran { steps: 1, undo }));
+        } else if self.position() > start {
+            let undo = if session.doc.squash_since(before.0, name) {
+                undo_left(before, history(session))
+            } else {
+                Undo::Nothing
+            };
+            self.ran.push(Ran { steps: self.position() - start, undo });
+        }
+        outcome
+    }
+
+    /// Step back over the last step run (or squashed run): undo its undo
+    /// step, which must still be the top of the undo history, unchanged. A
+    /// step that left nothing to undo (a query) steps back without undoing
+    /// anything. When something else changed the model since (or the step
+    /// changed the undo history otherwise), it refuses and changes nothing.
+    pub fn back(&mut self, session: &mut Session) -> Result<()> {
+        let Some(last) = self.ran.last() else {
+            return Err(EngineError::invalid(crate::t!("macro-step-at-start")));
+        };
+        match last.undo {
+            Undo::Nothing => {}
+            Undo::Unknown => return Err(EngineError::rejected(crate::t!("macro-step-not-undoable"))),
+            Undo::Step { depth, id } => {
+                if history(session) != (depth + 1, Some(id)) {
+                    return Err(EngineError::rejected(crate::t!("macro-step-changed")));
+                }
+                session.undo_to(depth);
+            }
+        }
+        let steps = last.steps;
+        self.ran.pop();
+        self.results.truncate(self.results.len().saturating_sub(steps));
+        Ok(())
+    }
+
+    /// Step back to the start while that is possible: `Ok` with how many
+    /// steps were stepped back, or `Err` with that count and why it stopped
+    /// ([`Stepper::position`] tells where).
+    pub fn restart(&mut self, session: &mut Session) -> std::result::Result<usize, (usize, EngineError)> {
+        let start = self.position();
+        while self.position() > 0 {
+            if let Err(e) = self.back(session) {
+                return Err((start - self.position(), e));
+            }
+        }
+        Ok(start)
+    }
+
+    /// Run the next step and keep its result (no stepping-back record).
+    fn execute(&mut self, session: &mut Session) -> std::result::Result<Value, StepError> {
+        let index = self.position();
+        let Some(step) = self.steps.get(index) else {
+            return Err(StepError {
+                index,
+                command: String::new(),
+                error: EngineError::invalid(crate::t!("macro-step-done")),
+            });
+        };
+        let fail = |error| StepError { index, command: step.command.clone(), error };
+        let args = active_level(session, &step.args).and_then(|l| resolve(&step.args, &self.results, l, 0));
+        let out = session.execute(&step.command, args.map_err(fail)?).map_err(fail)?;
+        self.results.push(out.clone());
+        Ok(out)
+    }
 }
 
 /// What a recorded step made: the ids allocated while it ran (ids are shared

@@ -18,6 +18,7 @@ Every command runs the same way from the desktop app, `ccad run` / `ccad script`
 - **Phases**: [`phases_list`](#phases_list), [`phase_create`](#phase_create), [`phase_set`](#phase_set), [`phase_delete`](#phase_delete), [`elements_phase_set`](#elements_phase_set), [`elements_demolish`](#elements_demolish), [`phase_creation_set`](#phase_creation_set), [`phase_filters_list`](#phase_filters_list), [`phase_filter_create`](#phase_filter_create), [`phase_filter_set`](#phase_filter_set), [`phase_filter_delete`](#phase_filter_delete), [`phase_graphics_get`](#phase_graphics_get), [`phase_graphics_set`](#phase_graphics_set)
 - **Design options**: [`options_list`](#options_list), [`option_set_create`](#option_set_create), [`option_set_rename`](#option_set_rename), [`option_set_delete`](#option_set_delete), [`option_create`](#option_create), [`option_set`](#option_set), [`option_delete`](#option_delete), [`option_accept_primary`](#option_accept_primary), [`elements_option_set`](#elements_option_set), [`view_options_set`](#view_options_set), [`option_active_set`](#option_active_set)
 - **Visual programming**: [`graph_run`](#graph_run), [`graph_check`](#graph_check), [`graph_nodes`](#graph_nodes), [`graph_elements`](#graph_elements), [`graph_release`](#graph_release)
+- **Macros**: [`macro_check`](#macro_check), [`macro_format`](#macro_format)
 
 ## Project and files
 
@@ -3880,3 +3881,22 @@ No parameters.
 |---|---|---|---|
 | `graph` | string | required | The graph's uid. |
 | `elements` | [id, …] | optional | Ids of the elements to release (default: all of the graph's). |
+
+## Macros
+
+### `macro_check`
+
+*query* — Check a macro without running it: lines that are not steps, commands this session does not have, argument names a command refuses and required arguments left out, and `$step`/`$level` placeholders that cannot resolve. Returns the number of steps and the problems found, each with its line (from 1; null for the array format), its step (from 1) and its severity (`error`, or `warning` for what runs but is likely a mistake). Nothing runs.
+
+| Parameter | Type | | Description |
+|---|---|---|---|
+| `path` | string | optional | Path of a macro file, instead of `text`. |
+| `text` | string | optional | The macro itself: one `{"command": ..., "args": {...}}` object per line (`//` lines are comments), or a JSON array of them. |
+
+### `macro_format`
+
+*query* — Write a macro in its canonical form: one step per line, as compact JSON the way recorded macros are saved, with comments and blank lines kept where they are and lines that are not steps kept as they are. A macro in the array format becomes one step per line. Returns `{text}`.
+
+| Parameter | Type | | Description |
+|---|---|---|---|
+| `text` | string | required | The macro to format. |

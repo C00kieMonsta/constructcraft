@@ -3766,3 +3766,25 @@ pipe-region-us = United States
 tx-pipe-series-import = Import pipe series
 tx-pipe-series-delete = Delete pipe series
 tx-pipe-type-create = Create pipe type
+
+## Macro editor: checking and stepping
+macro-check-json = Invalid JSON: { $detail }
+macro-check-not-object = Each step must be a JSON object.
+macro-check-no-command = The step has no "command".
+macro-check-too-long = The macro has more than { $max } lines; the rest was not read.
+macro-check-ignored-key = "{ $key }" is ignored: a step has only "command" and "args".
+macro-check-unknown-command = Unknown command: { $command }
+macro-check-args-object = "args" must be a JSON object.
+macro-check-unknown-arg = { $command } has no argument "{ $name }".
+macro-check-missing-arg = { $command } needs the argument "{ $name }".
+macro-check-deep = The arguments are nested too deeply.
+macro-check-step-number = "$step" must be a step number.
+macro-check-step-zero = Steps count from 1: "$step": 0 refers to no step.
+macro-check-step-beyond = "$step": { $n } is beyond the macro, which has { $count } steps.
+macro-check-step-later = "$step": { $n } is not an earlier step.
+macro-check-path = "path" must be a JSON pointer such as "/id".
+macro-check-level = "$level" must be "active".
+macro-step-at-start = There is no step to go back over: the macro is at its start.
+macro-step-not-undoable = This step changed the undo history and cannot be stepped back.
+macro-step-changed = The model changed after this step; it cannot be stepped back.
+macro-step-done = The macro has no more steps.

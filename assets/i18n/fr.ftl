@@ -3766,3 +3766,25 @@ pipe-region-us = États-Unis
 tx-pipe-series-import = Importer une série de tubes
 tx-pipe-series-delete = Supprimer une série de tubes
 tx-pipe-type-create = Créer un type de tube
+
+## Macro editor: checking and stepping
+macro-check-json = JSON non valide : { $detail }
+macro-check-not-object = Chaque étape doit être un objet JSON.
+macro-check-no-command = L’étape n’a pas de "command".
+macro-check-too-long = La macro a plus de { $max } lignes ; la suite n’a pas été lue.
+macro-check-ignored-key = "{ $key }" est ignoré : une étape n’a que "command" et "args".
+macro-check-unknown-command = Commande inconnue : { $command }
+macro-check-args-object = "args" doit être un objet JSON.
+macro-check-unknown-arg = { $command } n’a pas d’argument "{ $name }".
+macro-check-missing-arg = { $command } a besoin de l’argument "{ $name }".
+macro-check-deep = Les arguments sont imbriqués trop profondément.
+macro-check-step-number = "$step" doit être un numéro d’étape.
+macro-check-step-zero = Les étapes se comptent à partir de 1 : "$step": 0 ne désigne aucune étape.
+macro-check-step-beyond = "$step": { $n } est au-delà de la macro, qui a { $count } étapes.
+macro-check-step-later = "$step": { $n } n’est pas une étape antérieure.
+macro-check-path = "path" doit être un pointeur JSON, comme "/id".
+macro-check-level = "$level" doit valoir "active".
+macro-step-at-start = Aucune étape sur laquelle revenir : la macro est à son début.
+macro-step-not-undoable = Cette étape a modifié l’historique d’annulation ; on ne peut pas revenir dessus.
+macro-step-changed = Le modèle a changé après cette étape ; on ne peut pas revenir dessus.
+macro-step-done = La macro n’a plus d’étapes.

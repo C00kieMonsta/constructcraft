@@ -3767,3 +3767,25 @@ pipe-region-us = США
 tx-pipe-series-import = Імпортувати серію труб
 tx-pipe-series-delete = Видалити серію труб
 tx-pipe-type-create = Створити тип труби
+
+## Macro editor: checking and stepping
+macro-check-json = Недійсний JSON: { $detail }
+macro-check-not-object = Кожен крок має бути об’єктом JSON.
+macro-check-no-command = Крок не має "command".
+macro-check-too-long = Макрос має понад { $max } рядків; решту не прочитано.
+macro-check-ignored-key = "{ $key }" ігнорується: крок має лише "command" і "args".
+macro-check-unknown-command = Невідома команда: { $command }
+macro-check-args-object = "args" має бути об’єктом JSON.
+macro-check-unknown-arg = { $command } не має аргументу "{ $name }".
+macro-check-missing-arg = { $command } потребує аргументу "{ $name }".
+macro-check-deep = Аргументи вкладені занадто глибоко.
+macro-check-step-number = "$step" має бути номером кроку.
+macro-check-step-zero = Кроки рахуються з 1: "$step": 0 не вказує на жоден крок.
+macro-check-step-beyond = "$step": { $n } виходить за межі макросу, який має { $count } кроків.
+macro-check-step-later = "$step": { $n } не є попереднім кроком.
+macro-check-path = "path" має бути вказівником JSON, наприклад "/id".
+macro-check-level = "$level" має бути "active".
+macro-step-at-start = Немає кроку, щоб повернутися: макрос на початку.
+macro-step-not-undoable = Цей крок змінив історію скасувань, тому його не можна повернути.
+macro-step-changed = Модель змінилася після цього кроку; його не можна повернути.
+macro-step-done = У макросі більше немає кроків.

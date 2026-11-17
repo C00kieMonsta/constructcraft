@@ -3766,3 +3766,25 @@ pipe-region-us = Stany Zjednoczone
 tx-pipe-series-import = Importuj serię rur
 tx-pipe-series-delete = Usuń serię rur
 tx-pipe-type-create = Utwórz typ rury
+
+## Macro editor: checking and stepping
+macro-check-json = Nieprawidłowy JSON: { $detail }
+macro-check-not-object = Każdy krok musi być obiektem JSON.
+macro-check-no-command = Krok nie ma "command".
+macro-check-too-long = Makro ma więcej niż { $max } wierszy; reszta nie została odczytana.
+macro-check-ignored-key = "{ $key }" jest pomijany: krok ma tylko "command" i "args".
+macro-check-unknown-command = Nieznane polecenie: { $command }
+macro-check-args-object = "args" musi być obiektem JSON.
+macro-check-unknown-arg = { $command } nie ma argumentu "{ $name }".
+macro-check-missing-arg = { $command } wymaga argumentu "{ $name }".
+macro-check-deep = Argumenty są zagnieżdżone zbyt głęboko.
+macro-check-step-number = "$step" musi być numerem kroku.
+macro-check-step-zero = Kroki liczy się od 1: "$step": 0 nie wskazuje żadnego kroku.
+macro-check-step-beyond = "$step": { $n } wykracza poza makro, które ma { $count } kroków.
+macro-check-step-later = "$step": { $n } nie jest wcześniejszym krokiem.
+macro-check-path = "path" musi być wskaźnikiem JSON, np. "/id".
+macro-check-level = "$level" musi mieć wartość "active".
+macro-step-at-start = Nie ma kroku do cofnięcia: makro jest na początku.
+macro-step-not-undoable = Ten krok zmienił historię cofania i nie można go cofnąć.
+macro-step-changed = Model zmienił się po tym kroku; nie można go cofnąć.
+macro-step-done = Makro nie ma więcej kroków.

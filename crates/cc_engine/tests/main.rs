@@ -36,6 +36,7 @@ mod imperial_text;
 mod level_heights;
 mod level_rename;
 mod lightning_cabling;
+mod macro_editor;
 mod macros;
 mod mep_trays_valves;
 mod multi_edit;

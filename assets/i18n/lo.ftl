@@ -3768,3 +3768,25 @@ pipe-region-us = ສະຫະລັດອາເມລິກາ
 tx-pipe-series-import = ນຳເຂົ້າຊຸດທໍ່
 tx-pipe-series-delete = ລຶບຊຸດທໍ່
 tx-pipe-type-create = ສ້າງປະເພດທໍ່
+
+## Macro editor: checking and stepping
+macro-check-json = JSON ບໍ່ຖືກຕ້ອງ: { $detail }
+macro-check-not-object = ແຕ່ລະຂັ້ນຕອນຕ້ອງເປັນອອບເຈັກ JSON.
+macro-check-no-command = ຂັ້ນຕອນນີ້ບໍ່ມີ "command".
+macro-check-too-long = ມາໂຄຣມີຫຼາຍກວ່າ { $max } ແຖວ; ສ່ວນທີ່ເຫຼືອບໍ່ໄດ້ຖືກອ່ານ.
+macro-check-ignored-key = "{ $key }" ຖືກລະເລີຍ: ຂັ້ນຕອນມີພຽງ "command" ແລະ "args".
+macro-check-unknown-command = ຄຳສັ່ງທີ່ບໍ່ຮູ້ຈັກ: { $command }
+macro-check-args-object = "args" ຕ້ອງເປັນອອບເຈັກ JSON.
+macro-check-unknown-arg = { $command } ບໍ່ມີອາກິວເມັນ "{ $name }".
+macro-check-missing-arg = { $command } ຕ້ອງການອາກິວເມັນ "{ $name }".
+macro-check-deep = ອາກິວເມັນຊ້ອນກັນເລິກເກີນໄປ.
+macro-check-step-number = "$step" ຕ້ອງເປັນເລກຂັ້ນຕອນ.
+macro-check-step-zero = ຂັ້ນຕອນນັບແຕ່ 1: "$step": 0 ບໍ່ໄດ້ຊີ້ໄປຫາຂັ້ນຕອນໃດ.
+macro-check-step-beyond = "$step": { $n } ເກີນມາໂຄຣ, ເຊິ່ງມີ { $count } ຂັ້ນຕອນ.
+macro-check-step-later = "$step": { $n } ບໍ່ແມ່ນຂັ້ນຕອນກ່ອນໜ້າ.
+macro-check-path = "path" ຕ້ອງເປັນຕົວຊີ້ JSON ເຊັ່ນ "/id".
+macro-check-level = "$level" ຕ້ອງເປັນ "active".
+macro-step-at-start = ບໍ່ມີຂັ້ນຕອນໃຫ້ຖອຍກັບ: ມາໂຄຣຢູ່ທີ່ຈຸດເລີ່ມຕົ້ນ.
+macro-step-not-undoable = ຂັ້ນຕອນນີ້ໄດ້ປ່ຽນປະຫວັດການຍົກເລີກ ແລະ ບໍ່ສາມາດຖອຍກັບໄດ້.
+macro-step-changed = ແບບຈຳລອງຖືກປ່ຽນຫຼັງຈາກຂັ້ນຕອນນີ້; ບໍ່ສາມາດຖອຍກັບໄດ້.
+macro-step-done = ມາໂຄຣບໍ່ມີຂັ້ນຕອນອີກແລ້ວ.

@@ -3766,3 +3766,25 @@ pipe-region-us = 美國
 tx-pipe-series-import = 匯入管道系列
 tx-pipe-series-delete = 刪除管道系列
 tx-pipe-type-create = 建立管道類型
+
+## Macro editor: checking and stepping
+macro-check-json = 無效的 JSON：{ $detail }
+macro-check-not-object = 每個步驟都必須是 JSON 物件。
+macro-check-no-command = 此步驟沒有 "command"。
+macro-check-too-long = 巨集超過 { $max } 行；其餘部分未讀取。
+macro-check-ignored-key = "{ $key }" 會被忽略：步驟只有 "command" 和 "args"。
+macro-check-unknown-command = 未知的命令：{ $command }
+macro-check-args-object = "args" 必須是 JSON 物件。
+macro-check-unknown-arg = { $command } 沒有引數 "{ $name }"。
+macro-check-missing-arg = { $command } 需要引數 "{ $name }"。
+macro-check-deep = 引數巢狀層數過深。
+macro-check-step-number = "$step" 必須是步驟編號。
+macro-check-step-zero = 步驟從 1 開始計算："$step": 0 不指向任何步驟。
+macro-check-step-beyond = "$step": { $n } 超出巨集範圍，巨集共有 { $count } 個步驟。
+macro-check-step-later = "$step": { $n } 不是先前的步驟。
+macro-check-path = "path" 必須是 JSON 指標，例如 "/id"。
+macro-check-level = "$level" 必須是 "active"。
+macro-step-at-start = 沒有可退回的步驟：巨集位於開頭。
+macro-step-not-undoable = 此步驟變更了復原歷程，無法退回。
+macro-step-changed = 此步驟之後模型已變更，無法退回。
+macro-step-done = 巨集沒有更多步驟。

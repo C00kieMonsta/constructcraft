@@ -3766,3 +3766,25 @@ pipe-region-us = アメリカ合衆国
 tx-pipe-series-import = 配管シリーズを読み込み
 tx-pipe-series-delete = 配管シリーズを削除
 tx-pipe-type-create = 配管タイプを作成
+
+## Macro editor: checking and stepping
+macro-check-json = 無効な JSON です: { $detail }
+macro-check-not-object = 各ステップは JSON オブジェクトである必要があります。
+macro-check-no-command = このステップには "command" がありません。
+macro-check-too-long = マクロが { $max } 行を超えています。残りは読み込まれていません。
+macro-check-ignored-key = "{ $key }" は無視されます。ステップには "command" と "args" しかありません。
+macro-check-unknown-command = 不明なコマンド: { $command }
+macro-check-args-object = "args" は JSON オブジェクトである必要があります。
+macro-check-unknown-arg = { $command } に引数 "{ $name }" はありません。
+macro-check-missing-arg = { $command } には引数 "{ $name }" が必要です。
+macro-check-deep = 引数の入れ子が深すぎます。
+macro-check-step-number = "$step" はステップ番号である必要があります。
+macro-check-step-zero = ステップは 1 から数えます: "$step": 0 はどのステップも指しません。
+macro-check-step-beyond = "$step": { $n } はマクロの範囲外です。マクロのステップ数は { $count } です。
+macro-check-step-later = "$step": { $n } は前のステップではありません。
+macro-check-path = "path" は "/id" のような JSON ポインターである必要があります。
+macro-check-level = "$level" は "active" である必要があります。
+macro-step-at-start = 戻るステップがありません。マクロは先頭にあります。
+macro-step-not-undoable = このステップは元に戻す履歴を変更したため、戻せません。
+macro-step-changed = このステップの後にモデルが変更されたため、戻せません。
+macro-step-done = マクロにこれ以上ステップはありません。

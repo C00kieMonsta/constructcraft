@@ -3766,3 +3766,25 @@ pipe-region-us = Stati Uniti
 tx-pipe-series-import = Importa serie di tubi
 tx-pipe-series-delete = Elimina serie di tubi
 tx-pipe-type-create = Crea tipo di tubo
+
+## Macro editor: checking and stepping
+macro-check-json = JSON non valido: { $detail }
+macro-check-not-object = Ogni passo deve essere un oggetto JSON.
+macro-check-no-command = Il passo non ha "command".
+macro-check-too-long = La macro ha più di { $max } righe; il resto non è stato letto.
+macro-check-ignored-key = "{ $key }" viene ignorato: un passo ha solo "command" e "args".
+macro-check-unknown-command = Comando sconosciuto: { $command }
+macro-check-args-object = "args" deve essere un oggetto JSON.
+macro-check-unknown-arg = { $command } non ha l’argomento "{ $name }".
+macro-check-missing-arg = { $command } richiede l’argomento "{ $name }".
+macro-check-deep = Gli argomenti sono annidati troppo in profondità.
+macro-check-step-number = "$step" deve essere un numero di passo.
+macro-check-step-zero = I passi si contano da 1: "$step": 0 non indica alcun passo.
+macro-check-step-beyond = "$step": { $n } va oltre la macro, che ha { $count } passi.
+macro-check-step-later = "$step": { $n } non è un passo precedente.
+macro-check-path = "path" deve essere un puntatore JSON, come "/id".
+macro-check-level = "$level" deve essere "active".
+macro-step-at-start = Nessun passo su cui tornare indietro: la macro è all’inizio.
+macro-step-not-undoable = Questo passo ha modificato la cronologia degli annullamenti e non si può tornare indietro.
+macro-step-changed = Il modello è cambiato dopo questo passo; non si può tornare indietro.
+macro-step-done = La macro non ha altri passi.

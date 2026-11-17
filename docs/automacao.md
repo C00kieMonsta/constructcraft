@@ -688,6 +688,16 @@ Um material citado por um parâmetro conta como usado: não pode ser excluído, 
 - Elementos, tipos, vistas e níveis criados durante a gravação são escritos como [referências](#scripts) ao passo que os criou (`{"$step": n}`), de modo que a macro usa o que ela mesma cria a cada execução. O nível da planta em que você grava é escrito como `{"$level": "active"}`: a macro roda no nível da planta ativa quando você a executa (os outros níveis ficam como gravados).
 - Os demais passos se referem a elementos pelo id. No projeto em que foi gravada (ou numa cópia dele como estava no início da gravação), a macro reproduz as mesmas alterações; em outro projeto, passos que indicam elementos existentes pelo id podem falhar ou atingir outros elementos.
 
+### Verificar e formatar macros
+
+`macro_check` (com o `text` da macro ou o `path` de um arquivo) lê uma macro sem executá-la e devolve o número de passos e os problemas encontrados, cada um com sua linha, passo e gravidade: linhas que não são passos (JSON inválido, sem `"command"`), comandos que a sessão não tem (comandos de plugins contam), nomes de argumentos que um comando não aceita, argumentos obrigatórios ausentes (um marcador conta como dado), referências `$step` a um passo que não é anterior e valores de `$level` diferentes de `"active"` são erros; chaves de um passo além de `command` e `args`, que a execução ignora, são avisos. `macro_format` reescreve uma macro com um passo por linha na forma compacta em que as macros gravadas são salvas, mantendo comentários e linhas em branco onde estão e as linhas que não são passos como estão.
+
+```sh
+ccad run macro_check path=examples/small_house.ccmacro
+```
+
+Para a execução passo a passo do aplicativo, `cc_engine::script::Stepper` executa uma macro um passo por vez, cada passo uma etapa de desfazer, e volta sobre o último enquanto nada mais tiver alterado o modelo desde então (uma consulta volta sem desfazer nada); os passos restantes também podem rodar como uma única etapa de desfazer.
+
 ## Paleta de comandos no aplicativo
 
 **Ctrl+Shift+P** (ou a lupa no fim das abas do ribbon) abre a paleta de comandos. Ela encontra comandos da interface, vistas para abrir ou criar e os comandos do motor pelo nome, pela descrição ou pelo atalho, sem diferenciar acentos nem maiúsculas. Comandos do motor abrem um formulário com os argumentos em JSON, já com os campos obrigatórios; **Executar** (Ctrl+Enter) os roda no projeto aberto, como um passo de desfazer, e mostra o resultado. Os comandos de arquivo (`project_open`, `ifc_export`…) ficam na aba *Arquivo*.
