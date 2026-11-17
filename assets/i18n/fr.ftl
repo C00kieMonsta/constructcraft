@@ -350,6 +350,11 @@ wall-mode-line = Droite
 wall-mode-arc = Arc
 hint-wall-arc = Cliquez le début et la fin de l'arc, puis un point de l'arc · Échap termine · Retour arrière ou Ctrl+Z annule le dernier segment
 hint-wall-arc-point = Cliquez un point de l'arc, ou tapez le rayon et appuyez sur Entrée
+wall-mode-spline = Spline
+hint-wall-spline = Cliquez le premier point par lequel passe le mur · Échap termine
+hint-wall-spline-next = Cliquez le point suivant · de nouveau le dernier (double-clic) ou Entrée crée le mur · Retour arrière retire le dernier point · Échap annule
+msg-wall-spline-two-points = Un mur en spline demande au moins deux points
+msg-spline-wall-hosts = Les portes, fenêtres et niches ne sont pas encore placées dans les murs en spline
 hint-hosted = Survolez un mur et cliquez · Espace retourne l'ouverture
 hint-hosted-distance = Tapez la distance du centre au début du mur · Tab : à sa fin · Entrée place
 hint-sketch = Cliquez les sommets · cliquez le premier point ou appuyez sur Entrée pour terminer · Retour arrière supprime le dernier
@@ -3862,3 +3867,11 @@ section-wall-profile = Profil
 prop-wall-profile = Profil
 wall-profile-rectangular = Rectangulaire
 wall-profile-custom = Personnalisé
+
+## Spline walls
+msg-spline-wall = Les murs en spline ne sont pas encore ajustés, prolongés ni alignés
+wall-spline-points = Un mur en spline reçoit les points de contrôle de 1 à 64 segments de courbe.
+wall-spline-short = La spline est trop courte, ou ses extrémités se rejoignent.
+wall-spline-corner = La spline présente un angle (marqué) : sa direction doit se poursuivre à la jonction des segments.
+wall-spline-tight = La spline est trop courbée pour l’épaisseur du mur (marqué).
+wall-spline-crossing = Le mur se croiserait lui-même (marqué).

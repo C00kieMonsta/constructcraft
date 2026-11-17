@@ -309,6 +309,11 @@ impl Command for StripFootingsUnderWalls {
             let ElementKind::Wall(w) = &e.kind else {
                 return Err(EngineError::invalid(format!("element {} is not a wall", id.0)));
             };
+            // A strip follows lines and arcs: a spline wall gets none yet.
+            if w.spline.is_some() {
+                skipped += 1;
+                continue;
+            }
             // Along the body's centerline: concentric with an arc wall's location line, with its bulge.
             let (start, end) = p.wall_axis(e, w);
             let bulge = if w.arc().is_some() { w.bulge } else { 0.0 };

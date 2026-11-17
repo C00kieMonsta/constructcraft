@@ -48,6 +48,10 @@ impl Command for ElementSet {
         let level = self.level.as_ref().map(|l| refs::level(p, l)).transpose()?;
         let type_id = self.type_ref.as_ref().map(|t| refs::type_of(p, element.category(), Some(t))).transpose()?;
         let kind = self.params.as_ref().map(|patch| patched(p, &element, patch, type_id)).transpose()?;
+        // A spline wall given another type alone: the curve must fit the new thickness.
+        if let (Some(t), None, cc_core::ElementKind::Wall(w)) = (type_id, &kind, &element.kind) {
+            super::wall_spline::check_wall(p, Some(id), t, w)?;
+        }
         let hosted: Vec<_> = p.hosted_by(id).map(|h| h.id).collect();
         edit(s, t!("tx-modify"), |e| {
             if let Some(level) = level {
@@ -124,6 +128,11 @@ fn patched(
         cc_core::ElementKind::Wall(w) => {
             super::create::check_bulge(w.bulge)?;
             super::create::check_arc(p, type_id.unwrap_or(element.type_id), w)?;
+            super::wall_spline::check_wall(p, Some(element.id), type_id.unwrap_or(element.type_id), w)?;
+        }
+        // Doors, windows and niches stay out of spline walls.
+        cc_core::ElementKind::Door(h) | cc_core::ElementKind::Window(h) | cc_core::ElementKind::Niche(h) => {
+            super::wall_spline::refuse(p, h.host, "doors, windows and niches are not placed in spline walls yet")?;
         }
         cc_core::ElementKind::Beam(b) => {
             super::create::check_bulge(b.bulge)?;

@@ -51,7 +51,7 @@ pub fn selected_wall(state: &AppState) -> Option<ElementId> {
 
 /// Why wall `e` takes no profile (the engine's reasons), or `None` when it does.
 pub fn why_not(project: &Project, e: &Element, w: &Wall) -> Option<String> {
-    if w.arc().is_some() {
+    if w.is_curved() {
         Some(t!("why-wall-profile-arc"))
     } else if project.element_type(e.type_id).is_some_and(|t| t.curtain().is_some()) {
         Some(t!("why-wall-profile-curtain"))
@@ -325,7 +325,7 @@ pub fn paint_error(painter: &Painter, xf: &Xf, s: &Session, c: &Context) {
 /// profile, and the buttons that edit and remove it.
 pub fn palette_rows(ui: &mut Ui, state: &mut AppState, el: &Element, w: &Wall) {
     let curtain = state.project().element_type(el.type_id).is_some_and(|t| t.curtain().is_some());
-    if w.arc().is_some() || curtain {
+    if w.is_curved() || curtain {
         return;
     }
     section(ui, "wall-profile", t!("section-wall-profile"), |ui| {

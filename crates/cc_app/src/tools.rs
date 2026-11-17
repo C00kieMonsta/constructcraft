@@ -469,6 +469,12 @@ pub enum Drag {
         id: ElementId,
         which: u8,
     },
+    /// A point a spline wall passes through (its `knot`-th, between its
+    /// ends): it moves with its handles.
+    Knot {
+        id: ElementId,
+        knot: usize,
+    },
     /// The curvature handle of an arc wall from `a` to `b`: the arc passes through the cursor.
     Bend {
         id: ElementId,
@@ -1047,9 +1053,11 @@ fn model_snaps(project: &Project, geom: &ModelGeometry, level: Option<LevelId>) 
         if let Some(w) = e.as_wall() {
             ends.extend([w.start, w.end]);
             mids.push(w.point_at(w.length() * 0.5));
-            match w.arc() {
-                Some(a) => arcs.push(a),
-                None => lines.push((w.start, w.end)),
+            match (w.spline_path(), w.arc()) {
+                // A spline wall's location line: its chords.
+                (Some(path), _) => lines.extend(path.points().windows(2).map(|c| (c[0], c[1]))),
+                (None, Some(a)) => arcs.push(a),
+                (None, None) => lines.push((w.start, w.end)),
             }
         } else if let ElementKind::Beam(b) = &e.kind
             && let Some(a) = b.arc()
@@ -1114,7 +1122,7 @@ fn model_snaps(project: &Project, geom: &ModelGeometry, level: Option<LevelId>) 
         }
         // Outlines as the plan draws them: corners are endpoints, edges lines.
         let outlines: Vec<Vec<DVec2>> = match (&e.kind, project.element_type(e.type_id).map(|t| &t.data)) {
-            (ElementKind::Wall(_), _) => geom.walls.get(&e.id).filter(|w| w.arc.is_none()).map(|w| vec![w.footprint()]),
+            (ElementKind::Wall(_), _) => geom.walls.get(&e.id).filter(|w| !w.is_curved()).map(|w| vec![w.footprint()]),
             // Corners of the section without its radii (round sections have none).
             (ElementKind::Column(c), Some(data @ cc_core::TypeData::Column { .. })) => {
                 project.type_section_without_radii(data).filter(|s| !s.curved).map(|s| {
@@ -3510,6 +3518,11 @@ fn wall_tool(
     type_id: ElementTypeId,
     xf: &Xf,
 ) {
+    if state.wall_mode == WallMode::Spline {
+        spline_wall_tool(ui, resp, painter, state, level, type_id, xf);
+        return;
+    }
+    let arc_mode = state.wall_mode == WallMode::Arc;
     let Some(raw) = resp.hover_pos().map(|p| xf.to_world(p)) else { return };
     let shift = ui.input(|i| i.modifiers.shift);
     let anchor = state.interaction.anchor;
@@ -3523,7 +3536,7 @@ fn wall_tool(
     let center = -ty.map_or(0.0, |t| t.location_offset(state.wall_location_line));
     // Arc mode: after the start and the end, the third point is on the arc,
     // or a typed radius gives the arc on the cursor's side.
-    let arc_end = state.interaction.points.first().copied().filter(|_| state.wall_arc);
+    let arc_end = state.interaction.points.first().copied().filter(|_| arc_mode);
     if let (Some(a), Some(b)) = (anchor, arc_end) {
         let radius = state.typed.length_value();
         let bulge = match radius {
@@ -3572,7 +3585,7 @@ fn wall_tool(
         if !state.typed.is_empty() {
             p = state.typed.apply(a, p, state.interaction.prev_dir);
         }
-        if state.wall_arc {
+        if arc_mode {
             painter.line_segment([xf.to_screen(a), xf.to_screen(p)], Stroke::new(1.0, PREVIEW));
         } else {
             paint_wall_preview(painter, xf, a, p, center, half);
@@ -3585,7 +3598,7 @@ fn wall_tool(
     if resp.clicked() || enter {
         match anchor {
             None => state.interaction.anchor = Some(p),
-            Some(a) if a.distance(p) > 0.01 && state.wall_arc => {
+            Some(a) if a.distance(p) > 0.01 && arc_mode => {
                 // The end of the arc; the next click places a point on it.
                 state.interaction.points = vec![p];
                 state.message = t!("hint-wall-arc-point");
@@ -3620,22 +3633,201 @@ fn bulge_with_radius(a: DVec2, b: DVec2, p: DVec2, radius: f64) -> Option<f64> {
         .min_by(|x, y| gap(x).total_cmp(&gap(y)))
 }
 
+/// What the wall tool draws.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WallMode {
+    /// Straight walls from point to point.
+    #[default]
+    Line,
+    /// Arcs: the start, the end, then a point on the arc.
+    Arc,
+    /// A smooth curve through the points clicked (see [`cc_core::wall_spline`]).
+    Spline,
+}
+
+/// The wall tool's Spline mode: each click adds a point the wall passes
+/// through; a click on the last point again (a double-click) or Enter
+/// makes the wall. While drawing, the preview shows the wall's faces, or
+/// why the curve makes no wall (marked where it happens); then the wall
+/// is not made and the reason goes to the status bar.
+fn spline_wall_tool(
+    ui: &Ui,
+    resp: &Response,
+    painter: &Painter,
+    state: &mut AppState,
+    level: LevelId,
+    type_id: ElementTypeId,
+    xf: &Xf,
+) {
+    let picks = state.interaction.points.clone();
+    let enter = ui.input(|i| i.key_pressed(Key::Enter));
+    // Enter with nothing typed ends the wall where it is.
+    if enter && state.typed.is_empty() && !picks.is_empty() {
+        finish_spline_wall(state, level, type_id);
+        return;
+    }
+    let line = state.wall_location_line;
+    for q in &picks {
+        painter.circle_stroke(xf.to_screen(*q), 3.0, Stroke::new(1.2, PREVIEW));
+    }
+    let Some(raw) = resp.hover_pos().map(|p| xf.to_world(p)) else {
+        spline_wall_preview(painter, xf, state.project(), type_id, line, &picks);
+        return;
+    };
+    let shift = ui.input(|i| i.modifiers.shift);
+    let last = picks.last().copied();
+    let s = snap_at(state, Some(level), raw, last, &picks, xf.scale, shift);
+    draw_snap(painter, xf, s);
+    let mut p = s.point;
+    if let Some(a) = last
+        && !state.typed.is_empty()
+    {
+        p = state.typed.apply(a, p, state.interaction.prev_dir);
+        temp_dimension(painter, xf, a, p, state.interaction.prev_dir, Some(&state.typed), 0.0);
+    }
+    // A click on the last point again ends the wall (a double-click does).
+    let on_last = picks.len() >= 2 && last.is_some_and(|l| xf.to_screen(l).distance(xf.to_screen(p)) <= 6.0);
+    let mut fit = picks.clone();
+    if !on_last {
+        fit.push(p);
+    }
+    match spline_wall_preview(painter, xf, state.project(), type_id, line, &fit) {
+        Some(Ok(length)) => label(painter, xf.to_screen(p), format::length(length)),
+        Some(Err(e)) => label(painter, xf.to_screen(p), crate::i18n::tr(e.key())),
+        None => {}
+    }
+    let click = resp.clicked() || (enter && !state.typed.is_empty());
+    if !click {
+        return;
+    }
+    if on_last || (resp.double_clicked() && picks.len() >= 2) {
+        finish_spline_wall(state, level, type_id);
+    } else if picks.len() <= cc_core::wall_spline::MAX_SEGMENTS && last.is_none_or(|l| l.distance(p) > 1e-3) {
+        if let Some(a) = last {
+            state.interaction.prev_dir = Some(a - p);
+        }
+        state.interaction.points.push(p);
+        state.typed.clear();
+    }
+}
+
+/// The spline wall through `fit` previewed: its location line and faces,
+/// or the curve in the warning color with the trouble marked. Its length,
+/// or why it makes no wall; `None` before two points.
+fn spline_wall_preview(
+    painter: &Painter,
+    xf: &Xf,
+    project: &Project,
+    type_id: ElementTypeId,
+    line: cc_core::LocationLine,
+    fit: &[DVec2],
+) -> Option<Result<f64, cc_core::wall_spline::SplineError>> {
+    if fit.len() < 2 {
+        return None;
+    }
+    let spline = cc_core::wall_spline::WallSpline::through(fit);
+    Some(paint_wall_spline(painter, xf, project, type_id, line, spline.as_ref(), fit))
+}
+
+/// The type, location line and curve of spline wall `id`.
+fn spline_wall_of(
+    project: &Project,
+    id: ElementId,
+) -> Option<(ElementTypeId, cc_core::LocationLine, cc_core::wall_spline::WallSpline)> {
+    let e = project.element(id)?;
+    let w = e.as_wall()?;
+    Some((e.type_id, w.location_line, w.spline.clone()?))
+}
+
+/// A spline wall of type `type_id` drawn on `line` along `spline`: its
+/// location line and faces, or, when it makes no wall, the curve (else the
+/// `fallback` polyline) in the warning color with the trouble marked. Its
+/// length, or why it makes no wall.
+fn paint_wall_spline(
+    painter: &Painter,
+    xf: &Xf,
+    project: &Project,
+    type_id: ElementTypeId,
+    line: cc_core::LocationLine,
+    spline: Option<&cc_core::wall_spline::WallSpline>,
+    fallback: &[DVec2],
+) -> Result<f64, cc_core::wall_spline::SplineError> {
+    use cc_core::wall_spline::SplineError;
+    let polyline = |pts: &[DVec2], stroke: Stroke| {
+        painter.add(egui::Shape::line(pts.iter().map(|q| xf.to_screen(*q)).collect(), stroke));
+    };
+    let checked = spline.ok_or(SplineError::Points).and_then(|s| project.check_wall_spline(type_id, line, s));
+    match checked {
+        Ok(path) => {
+            polyline(path.points(), Stroke::new(1.0, PREVIEW));
+            let (left, right) = project.wall_faces(type_id, line);
+            for v in [left, right] {
+                polyline(&path.face(v), Stroke::new(1.5, PREVIEW));
+            }
+            Ok(path.length())
+        }
+        Err(e) => {
+            let warn = crate::theme::PALETTE.danger;
+            match spline.and_then(|s| s.path()) {
+                Some(path) => polyline(path.points(), Stroke::new(1.5, warn)),
+                None => polyline(fallback, Stroke::new(1.5, warn)),
+            }
+            if let Some(q) = e.point() {
+                painter.circle_stroke(xf.to_screen(q), 7.0, Stroke::new(2.0, warn));
+            }
+            Err(e)
+        }
+    }
+}
+
+/// Make the spline wall through the points clicked, or say why not (the
+/// points stay, to be changed).
+fn finish_spline_wall(state: &mut AppState, level: LevelId, type_id: ElementTypeId) {
+    use cc_core::wall_spline::{SplineError, WallSpline};
+    let fit = state.interaction.points.clone();
+    let (Some(&a), Some(&b)) = (fit.first(), fit.last()) else { return };
+    if fit.len() < 2 {
+        state.message = t!("msg-wall-spline-two-points");
+        return;
+    }
+    let line = state.wall_location_line;
+    let spline = WallSpline::through(&fit).ok_or(SplineError::Points);
+    if let Err(e) = spline.and_then(|s| state.project().check_wall_spline(type_id, line, &s)) {
+        state.message = crate::i18n::tr(e.key());
+        return;
+    }
+    let (before, depth) = (chain_at(state), state.session.doc.undo_depth());
+    let through = fit.get(1..fit.len() - 1).unwrap_or_default().iter().map(|q| q.to_array()).collect();
+    let command = create::WallCreate { through: Some(through), ..wall_command(state, level, type_id, a, b) };
+    if run_create(state, command).is_some() {
+        state.interaction.points.clear();
+        state.interaction.prev_dir = None;
+        state.typed.clear();
+        chain_placed(state, before, depth);
+    }
+}
+
 /// Create a wall from `a` to `b` (an arc when `bulge` is not 0) with the tool options.
 fn create_wall(state: &mut AppState, level: LevelId, type_id: ElementTypeId, a: DVec2, b: DVec2, bulge: f64) {
+    let command =
+        create::WallCreate { bulge: (bulge != 0.0).then_some(bulge), ..wall_command(state, level, type_id, a, b) };
+    run_create(state, command);
+}
+
+/// The command for a straight wall from `a` to `b` with the tool options.
+fn wall_command(state: &AppState, level: LevelId, type_id: ElementTypeId, a: DVec2, b: DVec2) -> create::WallCreate {
     let location_line =
         serde_json::to_value(state.wall_location_line).ok().and_then(|v| v.as_str().map(str::to_string));
-    let command = create::WallCreate {
+    create::WallCreate {
         start: a.to_array(),
         end: b.to_array(),
-        bulge: (bulge != 0.0).then_some(bulge),
         level: Some(Ref::Id(level.0)),
         type_ref: Some(Ref::Id(type_id.0)),
         height: Some(state.wall_height),
         top_level: state.wall_top_level.map(|l| Ref::Id(l.0)),
         location_line,
         ..Default::default()
-    };
-    run_create(state, command);
+    }
 }
 
 /// Preview of a straight wall drawn from `a` to `b`: its location line and
@@ -3710,6 +3902,15 @@ fn hosted_tool(
         painter.circle_stroke(xf.to_screen(raw), 4.0, Stroke::new(1.0, Color32::GRAY));
         return;
     };
+    // Spline walls host nothing yet: say so rather than preview a refusal.
+    if project.element(host).and_then(|e| e.as_wall()).is_some_and(|w| w.spline.is_some()) {
+        painter.circle_stroke(xf.to_screen(raw), 4.0, Stroke::new(1.0, Color32::GRAY));
+        label(painter, xf.to_screen(raw), t!("msg-spline-wall-hosts"));
+        if resp.clicked() {
+            state.message = t!("msg-spline-wall-hosts");
+        }
+        return;
+    }
     let r = SNAP_PX / xf.scale;
     let features = cad_snap(state, raw, width * 0.5 + 2.0 * r);
     let Some(g) = state.session.geom().walls.get(&host) else { return };
@@ -4232,7 +4433,32 @@ fn select(
     } else {
         Vec::new()
     };
+    // The points a selected spline wall passes through, between its ends (the end grips move those).
+    let knots: Vec<(ElementId, usize, DVec2)> = if movable && state.interaction.drag.is_none() {
+        state
+            .selection
+            .iter()
+            .take(50)
+            .filter(|id| !state.project().is_pinned(**id))
+            .filter_map(|id| Some((*id, state.project().element(*id)?.as_wall()?.spline.as_ref()?)))
+            .flat_map(|(id, s)| {
+                let n = s.knots().count();
+                s.knots().enumerate().filter(move |(k, _)| *k > 0 && *k + 1 < n).map(move |(k, at)| (id, k, at))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let grip_at = |p: Pos2| grips.iter().find(|g| xf.to_screen(g.2).distance(p) <= 7.0).copied();
+    let knot_at = |p: Pos2| knots.iter().find(|k| xf.to_screen(k.2).distance(p) <= 7.0).copied();
+    for (.., at) in &knots {
+        let r = egui::Rect::from_center_size(xf.to_screen(*at), egui::vec2(9.0, 9.0));
+        painter.rect_filled(r, 1.5, Color32::WHITE);
+        painter.rect_stroke(r, 1.5, Stroke::new(1.5, HIGHLIGHT), egui::StrokeKind::Middle);
+    }
+    if resp.hover_pos().and_then(knot_at).is_some() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
+    }
     // Hotspots of selected scripted components.
     let spots = if movable && state.interaction.drag.is_none() { selected_hotspots(state) } else { Vec::new() };
     let spot_at = |p: Pos2| spots.iter().find(|s| xf.to_screen(s.2).distance(p) <= 7.0).cloned();
@@ -4268,6 +4494,10 @@ fn select(
         }
         if let Some((id, at_start, _, fixed)) = grip_at(origin) {
             state.interaction.drag = Some(Drag::Grip { id, at_start, fixed });
+            return;
+        }
+        if let Some((id, knot, _)) = knot_at(origin) {
+            state.interaction.drag = Some(Drag::Knot { id, knot });
             return;
         }
         if let Some((id, a, b, _)) = bend_at(origin) {
@@ -4312,18 +4542,70 @@ fn select(
         draw_snap(painter, xf, s);
         // An arc wall keeps its bulge: the arc stretches with the end.
         let bulge = state.project().element(id).and_then(|e| e.as_wall()).map_or(0.0, |w| w.bulge);
-        if bulge != 0.0 {
+        // A spline wall's end moves with its handle (as the engine moves it).
+        let spline = spline_wall_of(state.project(), id).map(|(type_id, line, mut spline)| {
+            let old = if at_start { spline.ends().map(|e| e.0) } else { spline.ends().map(|e| e.1) };
+            spline.move_end(at_start, s.point - old.unwrap_or(s.point));
+            let checked = paint_wall_spline(painter, xf, state.project(), type_id, line, Some(&spline), &[]);
+            if let Err(e) = checked {
+                label(painter, xf.to_screen(raw), crate::i18n::tr(e.key()));
+            }
+            checked
+        });
+        if spline.is_some() {
+            // Drawn above.
+        } else if bulge != 0.0 {
             let (a, b) = if at_start { (s.point, fixed) } else { (fixed, s.point) };
             arc_preview(painter, xf, a, b, bulge, 0.0, 0.0);
         } else {
             painter.line_segment([xf.to_screen(fixed), xf.to_screen(s.point)], Stroke::new(2.0, PREVIEW));
         }
-        temp_dimension(painter, xf, fixed, s.point, None, None, 0.0);
+        if spline.is_none() {
+            temp_dimension(painter, xf, fixed, s.point, None, None, 0.0);
+        }
         if resp.drag_stopped() {
             state.interaction.drag = None;
+            if let Some(Err(e)) = spline {
+                state.message = crate::i18n::tr(e.key());
+                return;
+            }
             let end = if at_start { "start" } else { "end" };
             let command = modify_cmd::ElementMoveEnd { id: id.0, end: end.into(), point: s.point.to_array() };
             crate::actions::run_command(state, command);
+        }
+        return;
+    }
+
+    // Dragging a point of a spline wall: its handles go along, so the curve
+    // keeps its tangent there; a curve that makes no wall is not kept.
+    if let (Some(Drag::Knot { id, knot }), Some(raw)) = (state.interaction.drag.clone(), raw) {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
+        let level = state.project().element(id).map(|e| e.level);
+        let s = snap_at(state, level, raw, None, &[], xf.scale, shift);
+        draw_snap(painter, xf, s);
+        let moved = spline_wall_of(state.project(), id).map(|(type_id, line, spline)| {
+            let control = crate::sketch_mode::spline_moved(&spline.control, false, 3 * knot, s.point);
+            let moved = cc_core::wall_spline::WallSpline { control };
+            let checked = paint_wall_spline(painter, xf, state.project(), type_id, line, Some(&moved), &[]);
+            match checked {
+                Ok(length) => label(painter, xf.to_screen(raw), format::length(length)),
+                Err(e) => label(painter, xf.to_screen(raw), crate::i18n::tr(e.key())),
+            }
+            checked.map(|_| moved)
+        });
+        if resp.drag_stopped() {
+            state.interaction.drag = None;
+            match moved {
+                Some(Ok(moved)) => {
+                    crate::engine_edit::element(state, id, None, |e| {
+                        if let ElementKind::Wall(w) = &mut e.kind {
+                            w.spline = Some(moved);
+                        }
+                    });
+                }
+                Some(Err(e)) => state.message = crate::i18n::tr(e.key()),
+                None => {}
+            }
         }
         return;
     }
@@ -4410,6 +4692,7 @@ fn select(
                 Drag::Grip { .. }
                 | Drag::DetailGrip { .. }
                 | Drag::Bend { .. }
+                | Drag::Knot { .. }
                 | Drag::Hotspot { .. }
                 | Drag::Section { .. }
                 | Drag::Callout { .. }

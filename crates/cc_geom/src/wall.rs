@@ -3,8 +3,10 @@ use crate::{Face, Solid};
 use cc_core::arc::{ARC_STEP, Arc, segments};
 use cc_core::layer_extent::Extent;
 use cc_core::wall_profile::Chains;
+use cc_core::wall_spline::WallPath;
 use cc_core::{Category, ElementId};
 use glam::{DVec2, DVec3};
+use std::sync::Arc as Shared;
 
 #[path = "wall_layers.rs"]
 mod layers;
@@ -78,7 +80,10 @@ impl Column {
 /// from its start, and `v`, the distance to its left. A straight wall's
 /// frame is `origin`, `dir` and `normal`; an arc wall's centerline is `arc`
 /// (`dir` and `normal` are then its frame at the start), and its faces and
-/// layer boundaries are concentric arcs.
+/// layer boundaries are concentric arcs; a spline wall's centerline is
+/// `spline`, a flattened curve (see [`cc_core::wall_spline`]: `u` runs
+/// along its chords), and its faces and layer boundaries are the polylines
+/// through the offsets of its stations.
 #[derive(Debug, Clone)]
 pub struct WallGeom {
     pub element: ElementId,
@@ -115,6 +120,8 @@ pub struct WallGeom {
     pub layer_gaps: Vec<LayerGap>,
     /// The body centerline of an arc wall.
     pub arc: Option<Arc>,
+    /// The body centerline of a spline wall, flattened.
+    pub spline: Option<Shared<WallPath>>,
     /// A top that follows what the wall is attached to, or its elevation
     /// profile's top chain: segments `(u0, u1, z0, z1)` along the
     /// centerline, the top running straight from `z0` to `z1` (empty: the
@@ -176,7 +183,7 @@ pub(crate) struct EndJoin {
 }
 
 /// Minimal wall description used while resolving joins.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct WallLine {
     pub start: DVec2,
     pub end: DVec2,
@@ -190,10 +197,13 @@ pub(crate) struct WallLine {
     /// meet where these coincide, even when the body centerlines, shifted
     /// across by the location line, do not.
     pub drawn: [DVec2; 2],
+    /// The flattened centerline of a spline wall (`start` and `end` are its
+    /// ends, and there is no bulge).
+    pub path: Option<Shared<WallPath>>,
 }
 
 /// A wall face (or any line parallel to a wall's centerline) in plan.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum Curve {
     /// Through `p` along the unit direction `d`.
     Line {
@@ -204,18 +214,64 @@ enum Curve {
         c: DVec2,
         r: f64,
     },
+    /// The chords of a spline wall's face around where walls meet.
+    Poly(Vec<DVec2>),
+}
+
+/// Where the segment `a`–`b` crosses the segment `c`–`d`.
+fn chords_cross(a: DVec2, b: DVec2, c: DVec2, d: DVec2) -> Option<DVec2> {
+    let (e, f) = (b - a, d - c);
+    let den = e.perp_dot(f);
+    if den.abs() < 1e-15 {
+        return None;
+    }
+    let w = c - a;
+    let (t, s) = (w.perp_dot(f) / den, w.perp_dot(e) / den);
+    let on = |x: f64| (-1e-9..=1.0 + 1e-9).contains(&x);
+    (on(t) && on(s)).then(|| a + e * t)
 }
 
 /// Where two curves cross: the crossing nearest `near`.
-fn meet(a: Curve, b: Curve, near: DVec2) -> Option<DVec2> {
+fn meet(a: &Curve, b: &Curve, near: DVec2) -> Option<DVec2> {
     let nearest = |pts: [DVec2; 2]| {
         pts.into_iter().filter(|p| p.is_finite()).min_by(|x, y| x.distance(near).total_cmp(&y.distance(near)))
     };
+    // The nearest of the crossings of every chord of a polyline.
+    let nearest_of = |found: &mut dyn Iterator<Item = DVec2>| {
+        found.filter(|p| p.is_finite()).min_by(|x, y| x.distance(near).total_cmp(&y.distance(near)))
+    };
     match (a, b) {
+        (Curve::Poly(pts), Curve::Line { p, d }) | (Curve::Line { p, d }, Curve::Poly(pts)) => {
+            nearest_of(&mut pts.windows(2).filter_map(|w| {
+                let e = w[1] - w[0];
+                let s = line_intersect(w[0], e, *p, *d)?;
+                (-1e-9..=1.0 + 1e-9).contains(&s).then(|| w[0] + e * s)
+            }))
+        }
+        (Curve::Poly(pts), Curve::Circle { c, r }) | (Curve::Circle { c, r }, Curve::Poly(pts)) => {
+            nearest_of(&mut pts.windows(2).flat_map(|w| {
+                // |w0 + s e - c|² = r².
+                let e = w[1] - w[0];
+                let (len2, q) = (e.length_squared(), w[0] - *c);
+                let (half_b, k) = (e.dot(q), q.length_squared() - r * r);
+                let disc = half_b * half_b - len2 * k;
+                let roots = if len2 > 1e-24 && disc >= 0.0 {
+                    let s = disc.sqrt();
+                    [(-half_b - s) / len2, (-half_b + s) / len2]
+                } else {
+                    [f64::NAN; 2]
+                };
+                roots.into_iter().filter(|s| (-1e-9..=1.0 + 1e-9).contains(s)).map(move |s| w[0] + e * s)
+            }))
+        }
+        (Curve::Poly(x), Curve::Poly(y)) => nearest_of(
+            &mut x.windows(2).flat_map(|w| y.windows(2).filter_map(|v| chords_cross(w[0], w[1], v[0], v[1]))),
+        ),
         (Curve::Line { p: p1, d: d1 }, Curve::Line { p: p2, d: d2 }) => {
-            line_intersect(p1, d1, p2, d2).map(|t| p1 + d1 * t).filter(|p| p.is_finite())
+            line_intersect(*p1, *d1, *p2, *d2).map(|t| *p1 + *d1 * t).filter(|p| p.is_finite())
         }
         (Curve::Line { p, d }, Curve::Circle { c, r }) | (Curve::Circle { c, r }, Curve::Line { p, d }) => {
+            let (p, d, c, r) = (*p, *d, *c, *r);
             // |p + t d - c|² = r² with |d| = 1.
             let w = p - c;
             let b = d.dot(w);
@@ -227,6 +283,7 @@ fn meet(a: Curve, b: Curve, near: DVec2) -> Option<DVec2> {
             nearest([p + d * (-b - s), p + d * (-b + s)])
         }
         (Curve::Circle { c: c1, r: r1 }, Curve::Circle { c: c2, r: r2 }) => {
+            let (c1, r1, c2, r2) = (*c1, *r1, *c2, *r2);
             let d = c2 - c1;
             let dist = d.length();
             if dist < 1e-9 {
@@ -247,7 +304,15 @@ fn meet(a: Curve, b: Curve, near: DVec2) -> Option<DVec2> {
 impl WallLine {
     /// The centerline arc, when the wall bulges and both faces keep a positive radius.
     pub(crate) fn arc(&self) -> Option<Arc> {
+        if self.path.is_some() {
+            return None;
+        }
         Arc::from_bulge(self.start, self.end, self.bulge).filter(|a| a.radius - self.half > 1e-3)
+    }
+
+    /// Whether the centerline is an arc or a spline.
+    fn is_curved(&self) -> bool {
+        self.path.is_some() || self.arc().is_some()
     }
 
     fn chord_dir(&self) -> DVec2 {
@@ -255,11 +320,18 @@ impl WallLine {
     }
 
     fn length(&self) -> f64 {
+        if let Some(path) = &self.path {
+            return path.length();
+        }
         self.arc().map_or(self.start.distance(self.end), |a| a.length())
     }
 
-    /// The end point and the unit direction into the wall there.
+    /// The end point and the unit direction into the wall there (a spline
+    /// wall's direction at its end).
     fn end_ray(&self, at_start: bool) -> (DVec2, DVec2) {
+        if let Some(path) = &self.path {
+            return if at_start { (self.start, path.tangent(0.0)) } else { (self.end, -path.tangent(path.length())) };
+        }
         match (self.arc(), at_start) {
             (Some(a), true) => (self.start, a.tangent(0.0)),
             (Some(a), false) => (self.end, -a.tangent(a.length())),
@@ -270,6 +342,9 @@ impl WallLine {
 
     /// `(u, v)` of `p`: along the centerline from the start and to its left.
     fn locate(&self, p: DVec2) -> (f64, f64) {
+        if let Some(path) = &self.path {
+            return path.locate(p);
+        }
         match self.arc() {
             Some(a) => a.locate(p),
             None => {
@@ -280,11 +355,20 @@ impl WallLine {
     }
 
     fn tangent_at(&self, u: f64) -> DVec2 {
+        if let Some(path) = &self.path {
+            return path.tangent(u);
+        }
         self.arc().map_or(self.chord_dir(), |a| a.tangent(u))
     }
 
-    /// The curve `v` to the left of the centerline.
-    fn face(&self, v: f64) -> Curve {
+    /// The curve `v` to the left of the centerline (of a spline wall, its
+    /// chords around `near`, carried on straight past an end of the wall).
+    fn face(&self, v: f64, near: DVec2) -> Curve {
+        if let Some(path) = &self.path {
+            // As far as any join reaches, and more.
+            let reach = FACE_REACH.max(40.0 * self.half);
+            return Curve::Poly(path.face_near(v, path.locate(near).0, reach, reach));
+        }
         match self.arc() {
             Some(a) => Curve::Circle { c: a.center, r: a.radius_at(v) },
             None => {
@@ -309,6 +393,9 @@ impl WallLine {
 
 const JOIN_TOL: f64 = 0.01;
 
+/// How far along a spline wall from where walls meet its face is looked at, meters.
+const FACE_REACH: f64 = 5.0;
+
 /// How far short of another wall's face an end may stop and still join it.
 const GAP_TOL: f64 = 0.05;
 
@@ -320,12 +407,12 @@ fn face_depth(
     a: &WallLine,
     at_start: bool,
     va: f64,
-    face: Curve,
+    face: &Curve,
     fallback: (DVec2, DVec2),
     p: DVec2,
     da: DVec2,
 ) -> Option<f64> {
-    if let Some(x) = meet(a.face(va), face, p) {
+    if let Some(x) = meet(&a.face(va, p), face, p) {
         return Some(a.depth(at_start, x));
     }
     // The face of `a` along its tangent at the end, measured along the ray.
@@ -336,8 +423,8 @@ fn face_depth(
 /// The end of `walls[me]` (`at_start` selects it) meeting the face of
 /// `walls[host]`: a T-join cut along that face.
 fn t_join(walls: &[WallLine], me: usize, at_start: bool, host: usize) -> Option<EndJoin> {
-    let a = walls[me];
-    let b = walls[host];
+    let a = walls.get(me)?;
+    let b = walls.get(host)?;
     let (p, da) = a.end_ray(at_start);
     let max_ext = 10.0 * a.half.max(0.05);
     let clamp = |t: f64| t.clamp(-max_ext, max_ext);
@@ -346,11 +433,11 @@ fn t_join(walls: &[WallLine], me: usize, at_start: bool, host: usize) -> Option<
     let nb = db.perp();
     // The face on the side this wall comes from.
     let side = if da.dot(nb) >= 0.0 { 1.0 } else { -1.0 };
-    let face = b.face(side * b.half);
+    let face = b.face(side * b.half, p);
     let fallback = (b.locate_point(ub, side * b.half), db);
     let (vl, vr) = a.ray_faces(at_start);
-    let left = face_depth(&a, at_start, vl, face, fallback, p, da)?;
-    let right = face_depth(&a, at_start, vr, face, fallback, p, da)?;
+    let left = face_depth(a, at_start, vl, &face, fallback, p, da)?;
+    let right = face_depth(a, at_start, vr, &face, fallback, p, da)?;
     Some(EndJoin { ray_left: clamp(left), ray_right: clamp(right), host: Some(host) })
 }
 
@@ -366,8 +453,8 @@ pub(crate) fn core_through(
     core: (f64, f64),
     host_core: (f64, f64),
 ) -> Option<((f64, f64), LayerGap)> {
-    let a = *walls.get(me)?;
-    let b = *walls.get(host)?;
+    let a = walls.get(me)?;
+    let b = walls.get(host)?;
     let (p, da) = a.end_ray(at_start);
     let max_ext = 10.0 * a.half.max(0.05);
     let (ub, _) = b.locate(p);
@@ -380,7 +467,7 @@ pub(crate) fn core_through(
     }
     let depth = |va: f64, vb: f64| {
         let fallback = (b.locate_point(ub, vb), db);
-        face_depth(&a, at_start, va, b.face(vb), fallback, p, da).filter(|d| d.abs() <= max_ext)
+        face_depth(a, at_start, va, &b.face(vb, p), fallback, p, da).filter(|d| d.abs() <= max_ext)
     };
     let (core_l, core_r) = (depth(core.0, v_core)?, depth(core.1, v_core)?);
     let (face_l, face_r) = (depth(core.0, v_face)?, depth(core.1, v_face)?);
@@ -404,6 +491,9 @@ pub(crate) fn core_through(
 impl WallLine {
     /// The point `u` along the centerline and `v` to its left.
     fn locate_point(&self, u: f64, v: f64) -> DVec2 {
+        if let Some(path) = &self.path {
+            return path.at(u, v);
+        }
         match self.arc() {
             Some(a) => a.at(u, v),
             None => {
@@ -418,7 +508,7 @@ impl WallLine {
 /// wall `host`, parallel to it and within its faces: the span `(u0, u1)`
 /// along the host it takes up.
 pub(crate) fn embedded_in(wall: &WallLine, host: &WallLine) -> Option<(f64, f64)> {
-    if wall.arc().is_some() || host.arc().is_some() || wall.chord_dir().perp_dot(host.chord_dir()).abs() > 1e-6 {
+    if wall.is_curved() || host.is_curved() || wall.chord_dir().perp_dot(host.chord_dir()).abs() > 1e-6 {
         return None;
     }
     let (a, b) = (host.locate(wall.start), host.locate(wall.end));
@@ -432,7 +522,7 @@ pub(crate) fn embedded_in(wall: &WallLine, host: &WallLine) -> Option<(f64, f64)
 /// Faces of arc walls are their true circles; where two faces do not cross
 /// the end is cut along the tangent of the arc at the end instead.
 pub(crate) fn resolve_join(walls: &[WallLine], me: usize, at_start: bool) -> Option<EndJoin> {
-    let a = walls[me];
+    let a = walls.get(me)?;
     if !(if at_start { a.join_start } else { a.join_end }) {
         return None;
     }
@@ -461,7 +551,7 @@ pub(crate) fn resolve_join(walls: &[WallLine], me: usize, at_start: bool) -> Opt
     // L-join: exactly one other wall ends here.
     if ends.len() == 1 {
         let (bi, db, b_start) = ends[0];
-        let b = walls[bi];
+        let b = walls.get(bi)?;
         if da.perp_dot(db).abs() < 1e-6 {
             // Collinear (or tangent): a seamless butt when the thicknesses match.
             return if (a.half - b.half).abs() < 1e-4 && da.dot(db) < 0.0 { square() } else { None };
@@ -472,8 +562,8 @@ pub(crate) fn resolve_join(walls: &[WallLine], me: usize, at_start: bool) -> Opt
         // Pair this wall's ray-left face with the neighbor's ray-right face, and vice versa.
         let (vl, vr) = a.ray_faces(at_start);
         let (bl, br) = b.ray_faces(b_start);
-        let left = face_depth(&a, at_start, vl, b.face(br), (pb - nb * b.half, db), p, da)?;
-        let right = face_depth(&a, at_start, vr, b.face(bl), (pb + nb * b.half, db), p, da)?;
+        let left = face_depth(a, at_start, vl, &b.face(br, p), (pb - nb * b.half, db), p, da)?;
+        let right = face_depth(a, at_start, vr, &b.face(bl, p), (pb + nb * b.half, db), p, da)?;
         return Some(EndJoin { ray_left: clamp(left), ray_right: clamp(right), host: None });
     }
 
@@ -598,6 +688,7 @@ impl WallGeom {
         layers: Vec<(f64, f64, String)>,
     ) -> Self {
         let arc = line.arc();
+        let spline = line.path.clone();
         let (_, dir) = line.end_ray(true);
         let length = line.length();
         // At the start the ray runs along +u and ray-left is the wall's left;
@@ -626,6 +717,7 @@ impl WallGeom {
             core_ends: [None, None],
             layer_gaps: Vec::new(),
             arc,
+            spline,
             top_profile: Vec::new(),
             bottom_profile: Vec::new(),
             profile: None,
@@ -801,25 +893,35 @@ impl WallGeom {
         out
     }
 
+    /// Whether the centerline is an arc or a spline: its faces are curved.
+    pub fn is_curved(&self) -> bool {
+        self.arc.is_some() || self.spline.is_some()
+    }
+
     /// World plan position of wall-local `(u, v)`.
     pub fn world(&self, u: f64, v: f64) -> DVec2 {
-        match &self.arc {
-            Some(a) => a.at(u, v),
-            None => self.origin + self.dir * u + self.normal * v,
+        match (&self.spline, &self.arc) {
+            (Some(p), _) => p.at(u, v),
+            (None, Some(a)) => a.at(u, v),
+            (None, None) => self.origin + self.dir * u + self.normal * v,
         }
     }
 
     /// Wall-local `(u, v)` of a plan point (arc walls: along the arc, the
     /// distance from its start measured to the nearer side of its gap).
     pub fn local(&self, p: DVec2) -> (f64, f64) {
-        match &self.arc {
-            Some(a) => a.locate(p),
-            None => ((p - self.origin).dot(self.dir), (p - self.origin).dot(self.normal)),
+        match (&self.spline, &self.arc) {
+            (Some(path), _) => path.locate(p),
+            (None, Some(a)) => a.locate(p),
+            (None, None) => ((p - self.origin).dot(self.dir), (p - self.origin).dot(self.normal)),
         }
     }
 
     /// Direction of the centerline at `u`.
     pub fn tangent(&self, u: f64) -> DVec2 {
+        if let Some(path) = &self.spline {
+            return path.tangent(u);
+        }
         self.arc.map_or(self.dir, |a| a.tangent(u))
     }
 
@@ -830,23 +932,23 @@ impl WallGeom {
 
     /// A straight frame `(origin, dir, normal)` matching the wall at `u`:
     /// `origin + dir * x + normal * y` is the wall point `(x, y)` for `x`
-    /// near `u` (exact for straight walls; the tangent frame for arcs).
+    /// near `u` (exact for straight walls; the tangent frame for arcs and splines).
     pub fn frame_at(&self, u: f64) -> (DVec2, DVec2, DVec2) {
-        match &self.arc {
-            None => (self.origin, self.dir, self.normal),
-            Some(_) => {
-                let t = self.tangent(u);
-                (self.world(u, 0.0) - t * u, t, t.perp())
-            }
+        if !self.is_curved() {
+            return (self.origin, self.dir, self.normal);
         }
+        let t = self.tangent(u);
+        (self.world(u, 0.0) - t * u, t, t.perp())
     }
 
     /// The line `v` to the left of the centerline between `u0` and `u1`,
-    /// as a polyline (two points for straight walls, short chords of the arc otherwise).
+    /// as a polyline (two points for straight walls, short chords of the
+    /// arc, the chords of a spline wall through its stations).
     pub fn path(&self, u0: f64, u1: f64, v: f64) -> Vec<DVec2> {
-        match &self.arc {
-            Some(a) => a.points(u0, u1, v, ARC_STEP),
-            None => vec![self.world(u0, v), self.world(u1, v)],
+        match (&self.spline, &self.arc) {
+            (Some(p), _) => p.line(u0, u1, v),
+            (None, Some(a)) => a.points(u0, u1, v, ARC_STEP),
+            (None, None) => vec![self.world(u0, v), self.world(u1, v)],
         }
     }
 
@@ -962,11 +1064,12 @@ impl WallGeom {
         pts
     }
 
-    /// Exact plan area of [`Self::outline`] (arcs included).
+    /// Exact plan area of [`Self::outline`] (arcs included; a spline wall's
+    /// is that of its chords).
     pub fn outline_area(&self, left: (f64, f64), right: (f64, f64)) -> f64 {
         match &self.arc {
-            Some(a) => arc_band_area(a, self.half, left, right),
-            None => crate::polygon::area(&self.outline(left, right)),
+            Some(a) if self.spline.is_none() => arc_band_area(a, self.half, left, right),
+            _ => crate::polygon::area(&self.outline(left, right)),
         }
     }
 
@@ -1148,7 +1251,7 @@ impl WallGeom {
     /// (its middle in an arc wall, whose heights are level).
     fn centroid_u(&self, c: &Column) -> f64 {
         let mid = (c.left.0.max(c.right.0) + c.left.1.min(c.right.1)) * 0.5;
-        if self.arc.is_some() || (self.top_profile.is_empty() && self.bottom_profile.is_empty()) {
+        if self.is_curved() || (self.top_profile.is_empty() && self.bottom_profile.is_empty()) {
             return mid;
         }
         let h = self.half;
@@ -1179,6 +1282,42 @@ impl WallGeom {
         }
     }
 
+    /// The left normal of the facet of the line `v` to the left of the
+    /// centerline between `u0` and `u1`: the wall's normal at its middle (a
+    /// chord of an arc is square to it), or the chord's own in a spline
+    /// wall, whose chords are not.
+    pub(crate) fn facet_normal(&self, u0: f64, u1: f64, v: f64) -> DVec2 {
+        if self.spline.is_some()
+            && let Some(d) = (self.world(u1, v) - self.world(u0, v)).try_normalize()
+        {
+            return if u1 >= u0 { d.perp() } else { -d.perp() };
+        }
+        self.normal_at((u0 + u1) * 0.5)
+    }
+
+    /// Where a column is split along the wall to mesh it, as fractions
+    /// `(numerator, denominator)` of the way along it, from 0 to 1: its two
+    /// ends for a straight wall, even steps of an arc, and for a spline
+    /// wall every station of its centerline on either face (an end column's
+    /// faces span different stretches when its end is mitered, so each
+    /// station is taken on both).
+    pub(crate) fn steps(&self, c: &Column) -> Vec<(f64, f64)> {
+        let Some(path) = &self.spline else {
+            let n = self.segments(c);
+            return (0..=n).map(|i| (i as f64, n as f64)).collect();
+        };
+        let mut fractions = vec![0.0, 1.0];
+        for (u0, u1) in [c.left, c.right] {
+            let span = u1 - u0;
+            if span > 1e-9 {
+                fractions.extend(path.stations_between(u0, u1).map(|u| (u - u0) / span));
+            }
+        }
+        fractions.sort_by(f64::total_cmp);
+        fractions.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+        fractions.into_iter().map(|f| (f, 1.0)).collect()
+    }
+
     /// Exterior faces of the wall body (arc faces as smooth facets). A
     /// banded wall's is stepped across it (see [`Self::bands`]).
     pub fn to_solid(&self, color: [u8; 3]) -> Solid {
@@ -1187,7 +1326,7 @@ impl WallGeom {
         }
         let mut s = Solid::new(self.element, Category::Wall, color);
         let h = self.half;
-        let curved = self.arc.is_some();
+        let curved = self.is_curved();
         let flat = |v: DVec2| DVec3::new(v.x, v.y, 0.0);
         let quad = |u0: f64, v0: f64, u1: f64, v1: f64, z0: f64, z1: f64, n: DVec3| {
             let verts = vec![
@@ -1198,7 +1337,7 @@ impl WallGeom {
             ];
             Face::new(verts, n)
         };
-        // Faces of an arc are facets of one smooth surface.
+        // Faces of an arc or a spline are facets of one smooth surface.
         let side = |mut f: Face| {
             f.smooth = curved;
             f
@@ -1220,16 +1359,16 @@ impl WallGeom {
             (verts.len() >= 3).then(|| Face::new(verts, n))
         };
         for (ci, c) in self.columns.iter().enumerate() {
-            let n = self.segments(c);
-            let at = |range: (f64, f64), i: usize| range.0 + (range.1 - range.0) * i as f64 / n as f64;
+            let steps = self.steps(c);
+            let at = |range: (f64, f64), (num, den): (f64, f64)| range.0 + (range.1 - range.0) * num / den;
             let last = c.solid.len().saturating_sub(1);
             for (k, &(z0, z1)) in c.solid.iter().enumerate() {
                 // The top interval follows the profile, the bottom one an elevation profile's base; others are level.
                 let top = |u: f64| if k == last { self.intervals_at(c, u).last().map_or(z1, |iv| iv.1) } else { z1 };
                 let bottom = |u: f64| if k == 0 { self.intervals_at(c, u).first().map_or(z0, |iv| iv.0) } else { z0 };
-                for i in 0..n {
-                    let (l0, l1) = (at(c.left, i), at(c.left, i + 1));
-                    let (r0, r1) = (at(c.right, i), at(c.right, i + 1));
+                for step in steps.windows(2) {
+                    let (l0, l1) = (at(c.left, step[0]), at(c.left, step[1]));
+                    let (r0, r1) = (at(c.right, step[0]), at(c.right, step[1]));
                     let poly = [self.world(r0, -h), self.world(r1, -h), self.world(l1, h), self.world(l0, h)];
                     let tops = [top(r0), top(r1), top(l1), top(l0)];
                     let bottoms = [bottom(r0), bottom(r1), bottom(l1), bottom(l0)];
@@ -1240,8 +1379,8 @@ impl WallGeom {
                         poly.iter().zip(bottoms).rev().map(|(p, z)| DVec3::new(p.x, p.y, z)).collect();
                     let down = (lower[1] - lower[0]).cross(lower[2] - lower[0]).try_normalize().unwrap_or(-DVec3::Z);
                     s.faces.push(Face::new(lower, down));
-                    let right_n = -flat(self.normal_at((r0 + r1) * 0.5));
-                    let left_n = flat(self.normal_at((l0 + l1) * 0.5));
+                    let right_n = -flat(self.facet_normal(r0, r1, -h));
+                    let left_n = flat(self.facet_normal(l0, l1, h));
                     // The faces, open where a recess is.
                     let right = self.face_pieces(-1.0, (r0, r1), (bottoms[0], bottoms[1]), (tops[0], tops[1]));
                     for [a, b, ba, bb, ta, tb] in right {
@@ -1305,7 +1444,7 @@ impl WallGeom {
     /// Inside each recess: its back, its two sides, its bottom and its top.
     fn recess_faces(&self, s: &mut Solid) {
         let h = self.half;
-        let curved = self.arc.is_some();
+        let curved = self.is_curved();
         let flat = |v: DVec2| DVec3::new(v.x, v.y, 0.0);
         let quad = |u0: f64, v0: f64, u1: f64, v1: f64, z0: f64, z1: f64, n: DVec3| {
             let verts = vec![
@@ -1358,13 +1497,14 @@ mod tests {
             join_end: true,
             bulge: 0.0,
             drawn: [DVec2::new(a.0, a.1), DVec2::new(b.0, b.1)],
+            path: None,
         }
     }
 
     fn geom(walls: &[WallLine], i: usize) -> WallGeom {
         let s = resolve_join(walls, i, true);
         let e = resolve_join(walls, i, false);
-        let mut g = WallGeom::new(ElementId(i as u64), walls[i], 0.0, 3.0, s, e, vec![]);
+        let mut g = WallGeom::new(ElementId(i as u64), walls[i].clone(), 0.0, 3.0, s, e, vec![]);
         g.set_openings(vec![]);
         g
     }

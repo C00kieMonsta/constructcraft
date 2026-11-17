@@ -939,7 +939,7 @@ impl ModelGeometry {
     fn attach_wall_tops(&mut self, project: &Project) {
         let attached: Vec<(ElementId, ElementId)> = project
             .walls()
-            .filter(|(_, w)| w.bulge.abs() < 1e-9 && w.profile.is_none())
+            .filter(|(_, w)| w.bulge.abs() < 1e-9 && w.profile.is_none() && w.spline.is_none())
             .filter_map(|(e, w)| Some((e.id, w.attach_top?)))
             .collect();
         if attached.is_empty() {
@@ -1063,14 +1063,19 @@ impl ModelGeometry {
                 .iter()
                 .map(|(e, w)| {
                     let (start, end) = project.wall_axis(e, w);
+                    // A spline wall's centerline, flattened (a curtain wall takes none: it stands
+                    // straight between its ends).
+                    let curtain = project.element_type(e.type_id).is_some_and(|t| t.curtain().is_some());
+                    let path = if curtain { None } else { project.wall_path(e, w).map(std::sync::Arc::new) };
                     WallLine {
                         start,
                         end,
                         half: project.thickness_of(e) * 0.5,
                         join_start: w.join_start,
                         join_end: w.join_end,
-                        bulge: w.bulge,
+                        bulge: if path.is_some() { 0.0 } else { w.bulge },
                         drawn: [w.start, w.end],
+                        path,
                     }
                 })
                 .collect();
@@ -1097,7 +1102,7 @@ impl ModelGeometry {
                 .iter()
                 .enumerate()
                 .map(|(i, (e, w))| {
-                    if curtains[i].is_some() || w.bulge != 0.0 {
+                    if curtains[i].is_some() || w.bulge != 0.0 || w.spline.is_some() {
                         return None;
                     }
                     let chains = w.profile.as_ref()?.chains()?;
@@ -1177,7 +1182,7 @@ impl ModelGeometry {
                 let (start_join, end_join) = if near.len() == lines.len() {
                     (resolve_join(&lines, i, true), resolve_join(&lines, i, false))
                 } else {
-                    let local: Vec<WallLine> = near.iter().filter_map(|&j| lines.get(j).copied()).collect();
+                    let local: Vec<WallLine> = near.iter().filter_map(|&j| lines.get(j).cloned()).collect();
                     let me = near.iter().position(|&j| j == i).unwrap_or(0);
                     // Back to indices into every wall of the level.
                     let global = |join: Option<EndJoin>| {
@@ -1185,7 +1190,7 @@ impl ModelGeometry {
                     };
                     (global(resolve_join(&local, me, true)), global(resolve_join(&local, me, false)))
                 };
-                let mut g = WallGeom::new(e.id, lines[i], base_z, top_z, start_join, end_join, layers);
+                let mut g = WallGeom::new(e.id, lines[i].clone(), base_z, top_z, start_join, end_join, layers);
                 // A profile short of an end: the body ends square where it does.
                 if let Some(c) = &chains {
                     let (a, b) = c.span();
@@ -1212,8 +1217,14 @@ impl ModelGeometry {
                         layer_gaps.push((host, gap));
                     }
                 }
-                // Curtain walls host no doors or windows: their panels are the openings.
-                let hosted = hosted_by.get(&e.id).into_iter().flatten().copied().filter(|_| curtains[i].is_none());
+                // Curtain walls host no doors or windows: their panels are the openings. Spline
+                // walls host none yet.
+                let hosted = hosted_by
+                    .get(&e.id)
+                    .into_iter()
+                    .flatten()
+                    .copied()
+                    .filter(|_| curtains[i].is_none() && g.spline.is_none());
                 // Doors and windows open the wall through; niches recess one face.
                 let mut openings: Vec<Opening> = Vec::new();
                 let mut recesses: Vec<crate::wall::Recess> = Vec::new();

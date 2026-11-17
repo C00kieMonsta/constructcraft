@@ -431,7 +431,7 @@ No parameters.
 
 ### `wall_create`
 
-*edit* — Create a wall from `start` to `end` on a level: straight, or an arc through `mid` (or with a `bulge` or a `radius`). Its top is `height` above its base, or attached to `top_level` (plus `top_offset`).
+*edit* — Create a wall from `start` to `end` on a level: straight, or an arc through `mid` (or with a `bulge` or a `radius`); or a spline wall, a smooth free-form curve from `start` `through` points to `end`, or by its `control` points. Its top is `height` above its base, or attached to `top_level` (plus `top_offset`). A spline wall takes no doors, windows, niches, profile, attached top, reinforcement or framing yet, and no curtain wall type.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -439,6 +439,7 @@ No parameters.
 | `start` | [x, y] | required | Start point of the wall line. |
 | `base_offset` | number | optional | Base offset from the level, meters. |
 | `bulge` | number | optional | Arc walls: tan(sweep / 4), positive when the arc turns counter-clockwise from `start` to `end` (1 is a half circle; at most 10 either way). Ignored when `mid` is given. |
+| `control` | [[x, y], …] | optional | Spline walls: the control points of the cubic Bézier segments of the wall line (`p0, c1, c2, p1, c1, c2, p2…`, 3n + 1 of them for n segments, at most 64; as `element_get` shows them in `params.spline.control`), from `start` (`p0`) to `end` (the last), its direction carrying on where segments join. Instead of `through`. |
 | `height` | number | optional | Unconnected height in meters (default 3; 10'-0" in imperial projects). |
 | `level` | id or name | optional | Level id or name (default: the lowest level). |
 | `location_line` | string | optional | Which line of the wall `start`-`end` is: `Centerline` (default), `CoreCenter`, `FinishExterior`, `FinishInterior`, `CoreExterior` or `CoreInterior`. |
@@ -447,6 +448,7 @@ No parameters.
 | `profile` | [JSON, …] | optional | An elevation profile (see `wall_profile_set`): the outline of the wall's face as curves in its elevation frame, `[u, z]` meters along `start`→`end` and above its base. Straight walls only. |
 | `radius` | number | optional | Arc walls: the radius in meters, positive when the arc turns counter-clockwise from `start` to `end`, negative clockwise; at least half the distance between the ends. Ignored when `mid` or `bulge` is given. |
 | `structural` | boolean | optional | A structural wall (default: as the wall type says). |
+| `through` | [[x, y], …] | optional | Spline walls: the points `[x, y]` the wall line passes through between `start` and `end`, in order (at most 63; none makes a straight spline): a smooth curve through them all, whose bends must leave the face inside them a radius of 5 cm at least. |
 | `top_level` | id or name | optional | Level the top is attached to, instead of a height. |
 | `top_offset` | number | optional | Offset of the top from `top_level`, meters. |
 | `type` | id or name | optional | Wall type id or name (default: the default wall type). |

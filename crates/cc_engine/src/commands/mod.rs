@@ -76,6 +76,7 @@ pub mod views;
 pub mod wall_framing;
 pub mod wall_profile;
 pub mod wall_rebar;
+pub(crate) mod wall_spline;
 
 use crate::error::{EngineError, Result};
 use crate::session::Session;

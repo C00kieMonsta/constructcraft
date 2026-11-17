@@ -738,7 +738,7 @@ impl<'a> EditCtx<'a> {
             let Some(w) = e.as_wall() else { continue };
             let Some(profile) = &w.profile else { continue };
             let curtain = p.element_type(e.type_id).is_some_and(|t| t.curtain().is_some());
-            let fitted = if curtain || w.bulge != 0.0 {
+            let fitted = if curtain || w.bulge != 0.0 || w.spline.is_some() {
                 None
             } else {
                 match before.filter(|b| b.profile == w.profile && b.bulge == 0.0) {
@@ -761,6 +761,39 @@ impl<'a> EditCtx<'a> {
             }
             if let Some(crate::ElementKind::Wall(w)) = self.element_mut(id).map(|e| &mut e.kind) {
                 w.profile = fitted;
+            }
+        }
+    }
+
+    /// Spline walls (see [`crate::wall_spline`]) start and end where their
+    /// curves do and have no bulge. An edit that moved a wall's ends and
+    /// left its curve alone takes the curve along: the whole of it when
+    /// both ends moved alike, else each end's knot with its handle.
+    fn sync_wall_splines(&mut self) {
+        let changed: Vec<(ElementId, Option<crate::Wall>)> = self
+            .element_changes()
+            .into_iter()
+            .map(|(id, before)| (id, before.and_then(|e| e.as_wall().cloned())))
+            .collect();
+        for (id, before) in changed {
+            let Some(w) = self.project.elements.get(&id).and_then(|e| e.as_wall()) else { continue };
+            let Some(mut spline) = w.spline.clone() else { continue };
+            if let Some(b) = before.filter(|b| b.spline.as_ref() == Some(&spline)) {
+                let (at_start, at_end) = (w.start - b.start, w.end - b.end);
+                if at_start.distance(at_end) < 1e-12 {
+                    spline.map(|p| p + at_start);
+                } else {
+                    spline.move_end(true, at_start);
+                    spline.move_end(false, at_end);
+                }
+            }
+            let Some((start, end)) = spline.ends() else { continue };
+            if w.spline.as_ref() == Some(&spline) && w.start == start && w.end == end && w.bulge == 0.0 {
+                continue;
+            }
+            if let Some(crate::ElementKind::Wall(w)) = self.element_mut(id).map(|e| &mut e.kind) {
+                (w.start, w.end, w.bulge) = (start, end, 0.0);
+                w.spline = Some(spline);
             }
         }
     }
@@ -1085,6 +1118,7 @@ impl<'a> EditCtx<'a> {
         self.sync_pads();
         self.sync_piles();
         self.sync_attachments();
+        self.sync_wall_splines();
         self.sync_wall_profiles();
         self.sync_dimensions();
         self.sync_phases();

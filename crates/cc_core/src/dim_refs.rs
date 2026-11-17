@@ -140,7 +140,7 @@ impl Project {
         let e = self.element(id)?;
         let anchor = match &e.kind {
             // Arc walls measure along the arc and across it.
-            ElementKind::Wall(w) if w.arc().is_some() => {
+            ElementKind::Wall(w) if w.is_curved() => {
                 let (along, across) = w.project(p);
                 let length = w.length();
                 let from_end = p.distance(w.end) < p.distance(w.start);
@@ -196,7 +196,7 @@ impl Project {
     pub fn resolve_dim_ref(&self, r: &DimRef) -> Option<DVec2> {
         let e = self.element(r.element()?)?;
         let p = match (r.anchor, &e.kind) {
-            (RefAnchor::Line { from_end, along, across }, ElementKind::Wall(w)) if w.arc().is_some() => {
+            (RefAnchor::Line { from_end, along, across }, ElementKind::Wall(w)) if w.is_curved() => {
                 w.at(if from_end { w.length() - along } else { along }, across)
             }
             (RefAnchor::Line { from_end, along, across }, _) => {
@@ -240,7 +240,7 @@ impl Project {
     /// position or its opening's center).
     fn base_point(&self, e: &Element) -> Option<DVec2> {
         match &e.kind {
-            ElementKind::Wall(w) if w.arc().is_some() => Some(w.point_at(w.length() / 2.0)),
+            ElementKind::Wall(w) if w.is_curved() => Some(w.point_at(w.length() / 2.0)),
             ElementKind::Wall(_) | ElementKind::Beam(_) | ElementKind::Grid(_) => {
                 crate::wall_ops::line_of(e).map(|(a, b)| (a + b) / 2.0)
             }

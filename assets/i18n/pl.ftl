@@ -350,6 +350,11 @@ wall-mode-line = Prosta
 wall-mode-arc = Łuk
 hint-wall-arc = Kliknij początek i koniec łuku, a potem punkt na łuku · Esc kończy · Backspace lub Ctrl+Z cofa ostatni odcinek
 hint-wall-arc-point = Kliknij punkt na łuku albo wpisz promień i naciśnij Enter
+wall-mode-spline = Splajn
+hint-wall-spline = Kliknij pierwszy punkt, przez który przechodzi ściana · Esc kończy
+hint-wall-spline-next = Kliknij następny punkt · ponownie ostatni (dwuklik) lub Enter tworzy ścianę · Backspace usuwa ostatni punkt · Esc anuluje
+msg-wall-spline-two-points = Ściana splajnowa wymaga co najmniej dwóch punktów
+msg-spline-wall-hosts = Drzwi, okien i nisz nie można jeszcze umieszczać w ścianach splajnowych
 hint-hosted = Najedź na ścianę i kliknij · Spacja odwraca otwór
 hint-hosted-distance = Wpisz odległość od środka do początku ściany · Tab: do końca · Enter wstawia
 hint-sketch = Kliknij wierzchołki · kliknij pierwszy punkt lub naciśnij Enter, aby zakończyć · Backspace usuwa ostatni
@@ -3862,3 +3867,11 @@ section-wall-profile = Profil
 prop-wall-profile = Profil
 wall-profile-rectangular = Prostokątny
 wall-profile-custom = Własny
+
+## Spline walls
+msg-spline-wall = Ścian splajnowych nie można jeszcze przycinać, wydłużać ani wyrównywać
+wall-spline-points = Ściana splajnowa przyjmuje punkty kontrolne od 1 do 64 segmentów krzywej.
+wall-spline-short = Splajn jest za krótki albo jego końce się stykają.
+wall-spline-corner = Splajn ma narożnik (zaznaczony): jego kierunek musi być kontynuowany na styku segmentów.
+wall-spline-tight = Splajn jest zbyt mocno zakrzywiony dla grubości ściany (zaznaczono).
+wall-spline-crossing = Ściana przecinałaby samą siebie (zaznaczono).

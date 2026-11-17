@@ -528,6 +528,7 @@ impl Command for RebarCopy {
             if id == from {
                 return Err(EngineError::invalid("a host cannot be copied to itself"));
             }
+            super::wall_spline::refuse(p, id, "it takes no reinforcement yet")?;
             if host_kind(e) != Some(kind) || !same_section(p, source, e) {
                 return Err(EngineError::invalid(format!(
                     "element {} is not a host of the same kind and section as {}",

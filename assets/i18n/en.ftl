@@ -350,6 +350,11 @@ wall-mode-line = Line
 wall-mode-arc = Arc
 hint-wall-arc = Click the start and end of the arc, then a point on it · Esc ends · Backspace or Ctrl+Z takes back the last segment
 hint-wall-arc-point = Click a point on the arc, or type the radius and press Enter
+wall-mode-spline = Spline
+hint-wall-spline = Click the first point the wall passes through · Esc ends
+hint-wall-spline-next = Click the next point · the last one again (double-click) or Enter makes the wall · Backspace removes the last point · Esc cancels
+msg-wall-spline-two-points = A spline wall needs at least two points
+msg-spline-wall-hosts = Doors, windows and niches are not placed in spline walls yet
 hint-hosted = Hover over a wall and click · Space flips the opening
 hint-hosted-distance = Type the distance from the center to the wall's start · Tab: to its end · Enter places
 hint-sketch = Click the vertices · click the first point or press Enter to finish · Backspace removes the last one
@@ -3862,3 +3867,11 @@ section-wall-profile = Profile
 prop-wall-profile = Profile
 wall-profile-rectangular = Rectangular
 wall-profile-custom = Custom
+
+## Spline walls
+msg-spline-wall = Spline walls are not trimmed, extended or aligned yet
+wall-spline-points = A spline wall takes the control points of 1 to 64 curve segments.
+wall-spline-short = The spline is too short, or its ends meet.
+wall-spline-corner = The spline has a corner (marked): its direction must carry on where segments join.
+wall-spline-tight = The spline bends too tightly for the thickness of the wall (marked).
+wall-spline-crossing = The wall would cross itself (marked).

@@ -315,6 +315,11 @@ pub(crate) fn axis_of(state: &AppState, id: ElementId) -> Option<(DVec2, DVec2)>
             let arc = w.arc()?;
             Some((arc.center, arc.point(arc.length() / 2.0)))
         }
+        // A spline wall is an axis only when it runs straight (its chord would mislead).
+        ElementKind::Wall(w) if w.spline.is_some() => {
+            let straight = w.spline_path()?.min_radius().is_infinite();
+            straight.then(|| state.project().wall_axis(e, w))
+        }
         ElementKind::Wall(w) => Some(state.project().wall_axis(e, w)),
         ElementKind::Grid(g) => Some((g.start, g.end)),
         ElementKind::Beam(b) => Some((b.start, b.end)),
@@ -377,6 +382,11 @@ pub(crate) fn apply_mirror(state: &mut AppState, targets: &BTreeSet<ElementId>, 
     let copy = state.modify.mirror_copy;
     let result = crate::tools::mirror_elements(state, &ids, a, b, copy);
     finish(state, if copy { result } else { ids });
+}
+
+/// The location line of spline wall `id`, flattened.
+fn spline_path(state: &AppState, id: ElementId) -> Option<cc_core::wall_spline::WallPath> {
+    state.project().element(id)?.as_wall()?.spline_path()
 }
 
 /// The linear element (wall, beam, grid) or detail line under the
@@ -651,11 +661,21 @@ fn pick_tool(resp: &Response, painter: &Painter, state: &mut AppState, xf: &Xf, 
             if crate::detail_ui::split_pick(painter, xf, state, id, raw, clicked) {
                 return;
             }
-            let dir = (b - a).normalize_or_zero();
-            let p = a + dir * (raw - a).dot(dir);
-            let n = dir.perp() * (8.0 / xf.scale);
+            // A spline wall splits at the point of its curve nearest the pointer.
+            let (p, n, along) = match spline_path(state, id) {
+                Some(path) => {
+                    let u = path.locate(raw).0.clamp(0.0, path.length());
+                    (path.at(u, 0.0), path.normal(u), u)
+                }
+                None => {
+                    let dir = (b - a).normalize_or_zero();
+                    let p = a + dir * (raw - a).dot(dir);
+                    (p, dir.perp(), a.distance(p))
+                }
+            };
+            let n = n * (8.0 / xf.scale);
             painter.line_segment([xf.to_screen(p - n), xf.to_screen(p + n)], Stroke::new(2.0, PREVIEW));
-            label(painter, xf.to_screen(p), format::length(a.distance(p)));
+            label(painter, xf.to_screen(p), format::length(along));
             if clicked {
                 report(state, cmd::ElementSplit { id: id.0, point: p.to_array() });
             }
@@ -681,16 +701,22 @@ fn pick_tool(resp: &Response, painter: &Painter, state: &mut AppState, xf: &Xf, 
             if crate::detail_ui::offset_pick(painter, xf, state, id, raw, distance, clicked) {
                 return;
             }
-            let n = (b - a).normalize_or_zero().perp();
-            let side = if (raw - a).dot(n) >= 0.0 { 1.0 } else { -1.0 };
-            let d = state.modify.offset.abs() * side;
-            let (oa, ob) = (a + n * d, b + n * d);
-            painter.extend(egui::Shape::dashed_line(
-                &[xf.to_screen(oa), xf.to_screen(ob)],
-                Stroke::new(1.5, PREVIEW),
-                8.0,
-                4.0,
-            ));
+            // A spline wall's copy follows its curve, on the side of the pointer.
+            let (d, line) = match spline_path(state, id) {
+                Some(path) => {
+                    let side = if path.locate(raw).1 >= 0.0 { 1.0 } else { -1.0 };
+                    let d = state.modify.offset.abs() * side;
+                    (d, path.offset(d).map(|o| o.points().to_vec()).unwrap_or_default())
+                }
+                None => {
+                    let n = (b - a).normalize_or_zero().perp();
+                    let side = if (raw - a).dot(n) >= 0.0 { 1.0 } else { -1.0 };
+                    let d = state.modify.offset.abs() * side;
+                    (d, vec![a + n * d, b + n * d])
+                }
+            };
+            let line: Vec<egui::Pos2> = line.iter().map(|q| xf.to_screen(*q)).collect();
+            painter.extend(egui::Shape::dashed_line(&line, Stroke::new(1.5, PREVIEW), 8.0, 4.0));
             if clicked {
                 report(state, cmd::ElementOffset { id: id.0, distance: d });
             }

@@ -49,6 +49,8 @@ mod wall_layers_tests;
 #[cfg(test)]
 mod wall_profile_tests;
 mod wall_rebar;
+#[cfg(test)]
+mod wall_spline_tests;
 
 pub use beam::{BeamEnd, BeamGeom};
 pub use build::{

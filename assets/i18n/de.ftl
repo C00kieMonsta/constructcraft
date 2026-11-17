@@ -350,6 +350,11 @@ wall-mode-line = Linie
 wall-mode-arc = Bogen
 hint-wall-arc = Anfang und Ende des Bogens klicken, dann einen Punkt auf dem Bogen · Esc beendet · Rücktaste oder Strg+Z nimmt das letzte Segment zurück
 hint-wall-arc-point = Einen Punkt auf dem Bogen klicken oder den Radius eingeben und Enter drücken
+wall-mode-spline = Spline
+hint-wall-spline = Den ersten Punkt klicken, durch den die Wand verläuft · Esc beendet
+hint-wall-spline-next = Den nächsten Punkt klicken · den letzten erneut (Doppelklick) oder Enter erstellt die Wand · Rücktaste entfernt den letzten Punkt · Esc bricht ab
+msg-wall-spline-two-points = Eine Spline-Wand braucht mindestens zwei Punkte
+msg-spline-wall-hosts = Türen, Fenster und Nischen werden noch nicht in Spline-Wände gesetzt
 hint-hosted = Über eine Wand fahren und klicken · Leertaste spiegelt die Öffnung
 hint-hosted-distance = Abstand von der Mitte zum Wandanfang eingeben · Tab: zum Ende · Eingabe setzt
 hint-sketch = Die Eckpunkte klicken · zum Abschließen den ersten Punkt klicken oder Enter drücken · Rücktaste entfernt den letzten
@@ -3862,3 +3867,11 @@ section-wall-profile = Profil
 prop-wall-profile = Profil
 wall-profile-rectangular = Rechteckig
 wall-profile-custom = Benutzerdefiniert
+
+## Spline walls
+msg-spline-wall = Spline-Wände werden noch nicht gestutzt, gedehnt oder ausgerichtet
+wall-spline-points = Eine Spline-Wand erhält die Kontrollpunkte von 1 bis 64 Kurvensegmenten.
+wall-spline-short = Der Spline ist zu kurz, oder seine Enden treffen sich.
+wall-spline-corner = Der Spline hat eine Ecke (markiert): Seine Richtung muss sich an den Segmentübergängen fortsetzen.
+wall-spline-tight = Der Spline ist für die Wanddicke zu stark gekrümmt (markiert).
+wall-spline-crossing = Die Wand würde sich selbst kreuzen (markiert).

@@ -350,6 +350,11 @@ wall-mode-line = 直线
 wall-mode-arc = 圆弧
 hint-wall-arc = 单击圆弧的起点和终点，再单击圆弧上的一点 · Esc 结束 · Backspace 或 Ctrl+Z 撤销上一段
 hint-wall-arc-point = 单击圆弧上的一点，或输入半径后按 Enter
+wall-mode-spline = 样条曲线
+hint-wall-spline = 单击墙经过的第一点 · Esc 结束
+hint-wall-spline-next = 单击下一点 · 再次单击最后一点（双击）或按 Enter 创建墙 · Backspace 删除最后一点 · Esc 取消
+msg-wall-spline-two-points = 样条曲线墙至少需要两个点
+msg-spline-wall-hosts = 暂不支持在样条曲线墙中放置门、窗和壁龛
 hint-hosted = 将光标移到墙上并单击 · 空格键翻转洞口
 hint-hosted-distance = 输入中心到墙起点的距离 · Tab：到终点 · Enter 放置
 hint-sketch = 单击各顶点 · 单击第一个点或按 Enter 完成 · Backspace 删除最后一个点
@@ -3862,3 +3867,11 @@ section-wall-profile = 轮廓
 prop-wall-profile = 轮廓
 wall-profile-rectangular = 矩形
 wall-profile-custom = 自定义
+
+## Spline walls
+msg-spline-wall = 样条曲线墙暂不支持修剪、延伸或对齐
+wall-spline-points = 样条曲线墙需要 1 至 64 段曲线的控制点。
+wall-spline-short = 样条曲线太短，或其两端重合。
+wall-spline-corner = 样条曲线有尖角（已标记）：各段连接处方向必须连续。
+wall-spline-tight = 样条曲线对于墙的厚度弯曲过急（已标记）。
+wall-spline-crossing = 墙体会与自身相交（已标记）。

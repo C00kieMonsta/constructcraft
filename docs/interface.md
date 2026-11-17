@@ -268,7 +268,15 @@ A straight wall's face can be drawn in its own elevation, so its base and top ne
 - **Edit Wall Profile** (*Modify → Sketch*, or the *Profile* section of a wall's properties) opens the selected wall's profile in a sketch that takes the place of the views: u runs along the wall from its start (at the left), z up from its base. A wall without a profile opens on its rectangle. The wall's ends, base and top are drawn as reference lines, the levels near it as dashed lines with their names, and its doors, windows and niches faintly, since the outline must hold them; points snap to all of them, to the sketch's own points and to millimeters. The sketch draws lines, rectangles and arcs, with the usual Modify tools, grips and undo.
 - **Finish** gives the wall the profile in one undo step; an outline that is open, runs past the wall's ends or that a vertical line crosses more than twice is refused, with the place marked, and the sketch stays open. When doors, windows or niches no longer fit inside it, the status bar says how many: they stay in the model but cut nothing. *Cancel* leaves the wall as it was.
 - **Reset Wall Profile** takes the profile off: the base and top are level again. The *Profile* section shows *Rectangular* or *Custom*.
-- Arc walls, curtain walls, walls whose top is attached to a roof and framed walls take no profile: the commands are disabled and their tooltips say why. Double-clicking a wall does what it did before.
+- Arc and spline walls, curtain walls, walls whose top is attached to a roof and framed walls take no profile: the commands are disabled and their tooltips say why. Double-clicking a wall does what it did before.
+
+## Spline walls
+
+The wall tool (*Architecture → Build → Wall*, `WA`) has three modes in the options bar: *Line* chains straight walls, *Arc* takes the start, the end and then a point on the arc (or a typed radius + Enter), and *Spline* draws one wall along a smooth curve through the points clicked.
+
+- **Drawing**: click the points the wall passes through (they snap like any wall point; after the first one a typed length + Enter places the next). Click the last point again, double-click or press Enter to make the wall, in one undo step; Backspace takes back the last point and Esc drops the wall in progress. The tool stays on for the next wall. While drawing, the preview shows the wall's faces and its length; a curve that bends too tightly for the wall's thickness, has a corner or crosses itself is drawn in red with the place marked and the reason beside the cursor, and Enter then leaves the wall unmade and says why in the status bar.
+- **Editing**: a selected spline wall has a grip on each point it passes through; dragging one moves it with its handles (the curve keeps its direction there), in one undo step, and a curve that would make no wall is refused with the reason. The end grips stretch the curve's ends. Split cuts the curve where it is clicked and Offset copies it along the curve; the properties show its length (no arc angle).
+- Doors, windows and niches are not placed in spline walls yet (their tools say so over one), and trim, extend, align, an elevation profile and an attached top refuse them. A curved spline wall is no mirror axis.
 
 ## Strip footings and ground beams
 

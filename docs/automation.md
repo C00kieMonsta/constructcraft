@@ -269,6 +269,22 @@ Each layer of a wall type may have a vertical extent of its own: `base_offset`, 
   {"material": "Plaster", "thickness": 0.02, "function": "Finish", "height": 2.4}]}}}
 ```
 
+### Spline walls
+
+A wall may follow a spline, a smooth free-form curve, instead of a line or an arc (first stage of the feature). `wall_create` draws one from `start` to `end` `through` the points given between them (at most 63: the curve passes through each, its tangents taken from the neighbours), or by the `control` points of its cubic Bézier segments (`p0, c1, c2, p1, c1, c2, p2…`, 3n + 1 points for n segments, at most 64, the first being `start` and the last `end`), as `element_get` shows them in `params.spline.control`. The curve is the wall's location line, so `location_line` moves the body across it as for other walls. It must be open and at least 5 cm long, keep its direction where segments join (a corner takes two walls), leave the face inside every bend a radius of 5 cm at least (a curve cannot bend tighter than half the wall, measured from its location line, plus that) and not cross itself; a curve that does not is refused with the reason and the point.
+
+`element_get` gives `derived.length` along the body centerline, and in `derived.spline` the number of `segments`, the least radius of curvature of the location line (`min_radius`), the least radius left to a face inside a bend (`face_radius`) and the `knots` the segments join at. `element_set` patches `params.spline.control` (`"spline": null` makes the wall straight between its ends, and a straight wall takes a spline); moving one end alone (`params.end`) takes that end's knot and handle along. Move, rotate, mirror, copy and delete work as for any wall; `element_split` splits the curve where picked and `element_offset` makes a spline wall alongside (as near as a spline follows another).
+
+The body follows the curve as chords no more than 0.5 mm off it: plans draw the cut with its layers along it at every detail level, elevations, sections and 3D views show the curved faces, rooms are bounded by it, dimensions hold on to its faces, and schedules give its length, area and volume. Its ends join other walls as a straight wall with its direction there would (corners and T joints, exact on the curved faces), and other walls may end on its curved side.
+
+Not there yet, and refused by the commands: doors, windows and niches in a spline wall, an attached top (`wall_attach`), an elevation profile, a curtain wall type, reinforcement, framing, and trim, extend and align (to it or of it); `strip_footings_under_walls` leaves it out. IFC export writes a spline wall as an `IfcWall` whose body is a closed shell of facets, with its type's material layer set and no axis; importing that file brings it back as a component of the same shape.
+
+```text
+{"command": "wall_create", "args": {"start": [0, 0], "end": [9, 0.5], "through": [[3, 1.5], [6, -1]], "height": 2.8}}
+{"command": "wall_create", "args": {"start": [0, 4], "end": [6, 4], "control": [[0, 4], [1, 4], [2, 5], [3, 4], [4, 3], [5, 4], [6, 4]]}}
+{"command": "element_set", "args": {"id": 14, "params": {"spline": {"control": [[0, 0], [2, 2], [5, 2], [7, 0]]}}}}
+```
+
 ### Cable trays and valves
 
 `cable_tray_create` draws a cable tray run like `conduit_create` (with `circuits`, `offset`, `end_offset`); a project without a cable tray type gets one (200 × 100 mm, ladder), and `cable_tray_type_create` makes others (`width`, `height`, `style`: `ladder`, `solid_bottom` or `perforated`). Trays join only other trays, and their elbows and tees are listed by `mep_fittings`. `valve_place` puts a valve on a pipe at a `point` near it or a `distance` along it, of a `type` or a `kind` (`gate`, `ball`, `check`, `globe`; a type of that kind is made when there is none); `valve_type_create` makes types of several `kinds` at once. A valve takes its pipe's diameter and system, is a node of its network and follows the pipe; `element_get` shows its `derived.point`, `kind` and `diameter`, and `element_set` moves it along the pipe (`params.at`).

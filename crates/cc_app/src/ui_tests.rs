@@ -350,22 +350,26 @@ fn ribbon_buttons_are_accessible() {
     }
 }
 
-/// The wall tool switches between straight and arc walls in the options bar.
+/// The wall tool switches between straight, arc and spline walls in the options bar.
 #[test]
 fn wall_tool_has_an_arc_mode() {
+    use crate::tools::WallMode;
     let mut state = sample_state();
     let wall_type = state.project().default_type(cc_core::Category::Wall).unwrap();
     state.tool = crate::tools::Tool::Wall { type_id: wall_type };
     let mut harness = themed_harness(state, egui::vec2(1600.0, 60.0), egui::Theme::Light, |ui, state| {
         crate::ribbon::options_bar(ui, state)
     });
-    assert!(!harness.state().wall_arc);
+    assert_eq!(harness.state().wall_mode, WallMode::Line);
     harness.get_by_label(&t!("wall-mode-arc")).click();
     harness.run();
-    assert!(harness.state().wall_arc);
+    assert_eq!(harness.state().wall_mode, WallMode::Arc);
+    harness.get_by_label(&t!("wall-mode-spline")).click();
+    harness.run();
+    assert_eq!(harness.state().wall_mode, WallMode::Spline);
     harness.get_by_label(&t!("wall-mode-line")).click();
     harness.run();
-    assert!(!harness.state().wall_arc);
+    assert_eq!(harness.state().wall_mode, WallMode::Line);
 }
 
 /// A structural wall's palette offers its reinforcement: the typical button
@@ -435,7 +439,11 @@ fn beam_tool_has_an_arc_mode() {
     assert!(!harness.state().beam_arc);
     harness.get_by_label(&t!("wall-mode-arc")).click();
     harness.run();
-    assert!(harness.state().beam_arc && !harness.state().wall_arc && !harness.state().strip_arc);
+    assert!(
+        harness.state().beam_arc
+            && (harness.state().wall_mode != crate::tools::WallMode::Arc)
+            && !harness.state().strip_arc
+    );
     harness.get_by_label(&t!("wall-mode-line")).click();
     harness.run();
     assert!(!harness.state().beam_arc);
@@ -456,7 +464,7 @@ fn strip_footing_tool_has_an_arc_mode() {
     assert!(!harness.state().strip_arc);
     harness.get_by_label(&t!("wall-mode-arc")).click();
     harness.run();
-    assert!(harness.state().strip_arc && !harness.state().wall_arc);
+    assert!(harness.state().strip_arc && (harness.state().wall_mode != crate::tools::WallMode::Arc));
     harness.get_by_label(&t!("wall-mode-line")).click();
     harness.run();
     assert!(!harness.state().strip_arc);
@@ -5709,4 +5717,223 @@ fn a_wall_profile_that_leaves_a_door_out_warns() {
     // What the geometry leaves out is what the warning counts.
     let door = state.project().hosted_by(wall).map(|e| e.id).next().unwrap();
     assert!(state.session.geometry().walls.get(&wall).unwrap().openings.iter().all(|o| o.element != door));
+}
+
+/// Where the spline wall tests draw: far from the sample house, so its
+/// snaps stay out of the way, 100 points a meter.
+const SPLINE_ORIGIN: glam::DVec2 = glam::DVec2::new(200.0, 200.0);
+
+/// The sample house's first plan, active, with the wall tool in Spline mode.
+fn spline_state() -> AppState {
+    let mut state = sample_state();
+    let level = state.project().levels[0].id;
+    let plan = state.project().views.values().find(|v| v.is_plan() && v.level() == Some(level)).unwrap().id;
+    state.active_view = Some(plan);
+    let wall_type = state.project().default_type(cc_core::Category::Wall).unwrap();
+    state.set_tool(crate::tools::Tool::Wall { type_id: wall_type });
+    state.wall_mode = crate::tools::WallMode::Spline;
+    state
+}
+
+/// The active plan's canvas around [`SPLINE_ORIGIN`] (with the app's keys),
+/// in `theme`.
+fn spline_canvas(state: AppState, theme: egui::Theme) -> Harness<'static, AppState> {
+    themed_harness(state, egui::vec2(600.0, 400.0), theme, |ui, state| {
+        crate::app::shortcuts(ui.ctx(), state);
+        let (resp, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
+        let xf = crate::paint::Xf { screen: resp.rect.center(), origin: SPLINE_ORIGIN, scale: 100.0 };
+        let Some(view) = state.active_view.and_then(|v| state.project().view(v).cloned()) else { return };
+        let Some(drawing) = state.drawing(view.id) else { return };
+        crate::tools::handle(ui, &resp, &painter, state, &view, &xf, &drawing);
+    })
+}
+
+/// The screen point of `p` (meters from [`SPLINE_ORIGIN`]) in [`spline_canvas`].
+fn spline_screen(p: [f64; 2]) -> egui::Pos2 {
+    let xf = crate::paint::Xf { screen: egui::pos2(300.0, 200.0), origin: SPLINE_ORIGIN, scale: 100.0 };
+    xf.to_screen(SPLINE_ORIGIN + glam::DVec2::from(p))
+}
+
+fn spline_press(h: &mut Harness<'static, AppState>, pos: egui::Pos2, pressed: bool) {
+    h.input_mut().events.push(egui::Event::PointerMoved(pos));
+    let (button, modifiers) = (egui::PointerButton::Primary, egui::Modifiers::NONE);
+    h.input_mut().events.push(egui::Event::PointerButton { pos, button, pressed, modifiers });
+    h.run();
+}
+
+fn spline_click(h: &mut Harness<'static, AppState>, p: [f64; 2]) {
+    spline_press(h, spline_screen(p), true);
+    spline_press(h, spline_screen(p), false);
+}
+
+fn spline_hover(h: &mut Harness<'static, AppState>, p: [f64; 2]) {
+    h.input_mut().events.push(egui::Event::PointerMoved(spline_screen(p)));
+    h.run();
+}
+
+fn walls_of(state: &AppState) -> Vec<cc_core::Element> {
+    state.project().elements.values().filter(|e| e.as_wall().is_some()).cloned().collect()
+}
+
+/// Issue #307: the wall tool's Spline mode makes one wall through the
+/// points clicked when Enter is pressed, in one undo step; Backspace takes
+/// back the last point, and the tool stays for the next wall.
+#[test]
+fn the_wall_tool_draws_spline_walls() {
+    let mut harness = spline_canvas(spline_state(), egui::Theme::Light);
+    let (walls, depth) = (walls_of(harness.state()).len(), harness.state().session.doc.undo_depth());
+    for p in [[-1.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.5, 0.5]] {
+        spline_click(&mut harness, p);
+    }
+    assert_eq!(harness.state().interaction.points.len(), 4);
+    harness.key_press(egui::Key::Backspace);
+    harness.run();
+    assert_eq!(harness.state().interaction.points.len(), 3, "Backspace takes back the last point");
+    // The points as snapped (to lengths and angles), near those clicked.
+    let picked = harness.state().interaction.points.clone();
+    for (q, p) in picked.iter().zip([[-1.0, 0.0], [0.0, 1.0], [1.0, 0.0]]) {
+        assert!(q.distance(SPLINE_ORIGIN + glam::DVec2::from(p)) < 0.05, "{q}");
+    }
+    spline_hover(&mut harness, [2.0, -1.0]);
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    let state = harness.state();
+    assert!(state.message.is_empty(), "{}", state.message);
+    let new = walls_of(state);
+    assert_eq!(new.len(), walls + 1);
+    let wall = new.iter().find(|e| e.as_wall().unwrap().spline.is_some()).expect("a spline wall");
+    let spline = wall.as_wall().unwrap().spline.clone().unwrap();
+    let knots: Vec<glam::DVec2> = spline.knots().collect();
+    assert_eq!(knots, picked, "through the points picked");
+    assert_eq!(state.session.doc.undo_depth(), depth + 1, "one undo step");
+    assert!(matches!(state.tool, crate::tools::Tool::Wall { .. }));
+    assert!(state.interaction.points.is_empty(), "ready for the next wall");
+    // Escape drops a wall in progress.
+    spline_click(&mut harness, [2.5, 0.0]);
+    assert_eq!(harness.state().interaction.points.len(), 1);
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(harness.state().interaction.points.is_empty());
+    assert_eq!(walls_of(harness.state()).len(), walls + 1);
+}
+
+/// A spline too tight for the wall's thickness is not made: the status bar
+/// says why, and the points stay to be changed.
+#[test]
+fn a_spline_wall_too_tight_is_refused_with_the_reason() {
+    let state = spline_state();
+    let points = [[-0.2, 0.0], [0.0, 0.2], [0.2, 0.0]];
+    let fit: Vec<glam::DVec2> = points.iter().map(|p| SPLINE_ORIGIN + glam::DVec2::from(*p)).collect();
+    let spline = cc_core::wall_spline::WallSpline::through(&fit).unwrap();
+    let ty = state.tool.type_id().unwrap();
+    let check = state.project().check_wall_spline(ty, state.wall_location_line, &spline);
+    assert!(matches!(check, Err(cc_core::wall_spline::SplineError::Tight(_))), "{check:?}");
+    let mut harness = spline_canvas(state, egui::Theme::Light);
+    let (walls, depth) = (walls_of(harness.state()).len(), harness.state().session.doc.undo_depth());
+    for p in points {
+        spline_click(&mut harness, p);
+    }
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    let state = harness.state();
+    assert_eq!(state.message, crate::i18n::tr("wall-spline-tight"));
+    assert_eq!(walls_of(state).len(), walls);
+    assert_eq!(state.session.doc.undo_depth(), depth);
+    assert_eq!(state.interaction.points.len(), 3);
+}
+
+/// A spline wall made with the engine, from [`SPLINE_ORIGIN`].
+fn spline_wall(state: &mut AppState) -> cc_core::ElementId {
+    let at = |x: f64, y: f64| (SPLINE_ORIGIN + glam::DVec2::new(x, y)).to_array();
+    let args = serde_json::json!({"start": at(-1.0, 0.0), "end": at(1.0, 0.0), "through": [at(0.0, 0.6)]});
+    cc_core::ElementId(state.session.execute("wall_create", args).unwrap()["id"].as_u64().unwrap())
+}
+
+/// The Select tool shows a grip on each point a selected spline wall passes
+/// through; dragging one moves it with its handles, in one undo step.
+#[test]
+fn a_spline_walls_knot_grip_reshapes_it() {
+    let mut state = spline_state();
+    let wall = spline_wall(&mut state);
+    state.set_tool(crate::tools::Tool::Select);
+    state.selection = [wall].into_iter().collect();
+    let mut harness = spline_canvas(state, egui::Theme::Light);
+    let control = |h: &Harness<'static, AppState>| {
+        h.state().project().element(wall).unwrap().as_wall().unwrap().spline.clone().unwrap().control
+    };
+    let (before, depth) = (control(&harness), harness.state().session.doc.undo_depth());
+    let from = spline_screen([0.0, 0.6]);
+    spline_press(&mut harness, from, true);
+    for k in 1..=4 {
+        harness.input_mut().events.push(egui::Event::PointerMoved(from + egui::vec2(0.0, 5.0 * k as f32)));
+        harness.run();
+    }
+    spline_press(&mut harness, from + egui::vec2(0.0, 20.0), false);
+    let after = control(&harness);
+    assert!(harness.state().message.is_empty(), "{}", harness.state().message);
+    let shift = after[3] - before[3];
+    assert!((shift - glam::DVec2::new(0.0, -0.2)).length() < 1e-6, "{shift}");
+    for i in [2, 4] {
+        assert!((after[i] - before[i] - shift).length() < 1e-9, "handle {i} goes along");
+    }
+    assert_eq!((after[0], after[6]), (before[0], before[6]), "the ends stay");
+    assert_eq!(harness.state().session.doc.undo_depth(), depth + 1);
+}
+
+/// The door tool says spline walls take no doors yet, and places none.
+#[test]
+fn the_door_tool_places_no_door_in_a_spline_wall() {
+    let mut state = spline_state();
+    spline_wall(&mut state);
+    let door = state.project().default_type(cc_core::Category::Door).unwrap();
+    state.set_tool(crate::tools::Tool::Hosted { category: cc_core::Category::Door, type_id: door });
+    let doors =
+        |s: &AppState| s.project().elements.values().filter(|e| e.category() == cc_core::Category::Door).count();
+    let (count, depth) = (doors(&state), state.session.doc.undo_depth());
+    let mut harness = spline_canvas(state, egui::Theme::Light);
+    spline_click(&mut harness, [0.0, 0.6]);
+    assert_eq!(harness.state().message, t!("msg-spline-wall-hosts"));
+    assert_eq!(doors(harness.state()), count);
+    assert_eq!(harness.state().session.doc.undo_depth(), depth);
+}
+
+/// A spline wall's properties show its length, but no arc angle and no
+/// elevation profile (it takes neither).
+#[test]
+fn a_spline_walls_palette_shows_its_length_only() {
+    let mut state = spline_state();
+    let wall = spline_wall(&mut state);
+    // A straight wall of the same type, beside it.
+    let at = |x: f64, y: f64| (SPLINE_ORIGIN + glam::DVec2::new(x, y)).to_array();
+    let args = serde_json::json!({"start": at(-1.0, -2.0), "end": at(1.0, -2.0)});
+    let straight = cc_core::ElementId(state.session.execute("wall_create", args).unwrap()["id"].as_u64().unwrap());
+    state.set_tool(crate::tools::Tool::Select);
+    state.selection = [straight].into_iter().collect();
+    let length = {
+        let e = state.project().element(wall).unwrap();
+        cc_views::format::length(state.project().wall_length(e, e.as_wall().unwrap()))
+    };
+    let mut harness = wall_palette_harness(state);
+    harness.run();
+    let spins = |h: &Harness<'static, AppState>| h.query_all_by_role(Role::SpinButton).count();
+    let straight_spins = spins(&harness);
+    assert!(harness.query_by_label(&t!("section-wall-profile")).is_some());
+    harness.state_mut().selection = [wall].into_iter().collect();
+    harness.run();
+    assert!(harness.query_by_label(&length).is_some(), "{length}");
+    assert_eq!(spins(&harness), straight_spins - 1, "no arc angle");
+    assert!(harness.query_by_label(&t!("section-wall-profile")).is_none());
+}
+
+/// Trim/extend refuses a spline wall with the localized reason in the status bar.
+#[test]
+fn trimming_a_spline_wall_says_why_not() {
+    let mut state = spline_state();
+    let wall = spline_wall(&mut state);
+    let at = |x: f64, y: f64| (SPLINE_ORIGIN + glam::DVec2::new(x, y)).to_array();
+    let args = serde_json::json!({"start": at(3.0, -2.0), "end": at(3.0, 2.0)});
+    let line = state.session.execute("wall_create", args).unwrap()["id"].as_u64().unwrap();
+    let command = cc_engine::commands::modify::TrimExtend { id: wall.0, pick: at(0.0, 1.0), reference: line };
+    assert!(crate::actions::run_command(&mut state, command).is_none());
+    assert_eq!(state.message, t!("msg-spline-wall"));
 }

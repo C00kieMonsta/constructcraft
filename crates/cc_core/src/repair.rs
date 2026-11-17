@@ -445,6 +445,9 @@ impl Project {
             }
         }
 
+        // Spline walls: a curve that makes no wall goes (the wall is straight between its ends).
+        repairs += self.repair_wall_splines();
+
         // Elements: repeat until stable, since removing a wall orphans what it hosts.
         loop {
             let invalid: Vec<_> = self
@@ -454,13 +457,14 @@ impl Project {
                     let type_ok = self.element_type(e.type_id).is_some_and(|t| t.category() == e.category());
                     let level_ok = self.level(e.level).is_some();
                     let host_ok = match &e.kind {
+                        // A spline wall hosts none yet.
                         ElementKind::Door(h) | ElementKind::Window(h) | ElementKind::Niche(h) => {
-                            self.element(h.host).is_some_and(|w| w.as_wall().is_some())
+                            self.element(h.host).and_then(|w| w.as_wall()).is_some_and(|w| w.spline.is_none())
                         }
                         // Wall bars in walls, slab bars in floors and foundation
                         // slabs, the other layouts in beams and columns.
                         ElementKind::Rebar(r) => self.element(r.host).is_some_and(|h| match &h.kind {
-                            ElementKind::Wall(_) => r.layout.in_wall(),
+                            ElementKind::Wall(w) => r.layout.in_wall() && w.spline.is_none(),
                             ElementKind::Floor(_) => r.layout.in_slab(),
                             ElementKind::Foundation(f) => match f.shape {
                                 crate::FoundationShape::Slab { .. } => r.layout.in_slab(),
@@ -498,7 +502,9 @@ impl Project {
                         ElementKind::Valve(v) => {
                             self.element(v.host).is_some_and(|h| matches!(h.kind, ElementKind::Pipe(_)))
                         }
-                        ElementKind::WallFraming(f) => self.element(f.wall).is_some_and(|w| w.as_wall().is_some()),
+                        ElementKind::WallFraming(f) => {
+                            self.element(f.wall).and_then(|w| w.as_wall()).is_some_and(|w| w.spline.is_none())
+                        }
                         ElementKind::Connection(c) => self.element(c.member).is_some_and(|m| c.fits(&m.kind)),
                         _ => true,
                     };

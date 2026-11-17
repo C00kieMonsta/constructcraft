@@ -118,6 +118,7 @@ impl From<cc_core::wall_ops::EditError> for EngineError {
             E::Parallel => crate::t!("msg-parallel"),
             E::Degenerate => crate::t!("msg-degenerate"),
             E::Curved => crate::t!("msg-curved-wall"),
+            E::Spline => crate::t!("msg-spline-wall"),
         })
     }
 }

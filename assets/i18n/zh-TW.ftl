@@ -350,6 +350,11 @@ wall-mode-line = 直線
 wall-mode-arc = 弧線
 hint-wall-arc = 按一下弧線的起點和終點，再按一下弧線上的一點 · 按 Esc 結束 · Backspace 或 Ctrl+Z 復原上一段
 hint-wall-arc-point = 按一下弧線上的一點，或輸入半徑後按 Enter
+wall-mode-spline = 雲形線
+hint-wall-spline = 按一下牆經過的第一點 · 按 Esc 結束
+hint-wall-spline-next = 按一下下一點 · 再次按一下最後一點（按兩下）或按 Enter 建立牆 · Backspace 移除最後一點 · 按 Esc 取消
+msg-wall-spline-two-points = 雲形線牆至少需要兩個點
+msg-spline-wall-hosts = 尚不支援在雲形線牆中放置門、窗和壁龕
 hint-hosted = 將游標移至牆上並按一下 · 按空白鍵可反轉開口方向
 hint-hosted-distance = 輸入中心到牆起點的距離 · Tab：到終點 · Enter 放置
 hint-sketch = 按一下各頂點 · 按一下起點或按 Enter 結束 · 按 Backspace 移除最後一個頂點
@@ -3862,3 +3867,11 @@ section-wall-profile = 輪廓
 prop-wall-profile = 輪廓
 wall-profile-rectangular = 矩形
 wall-profile-custom = 自訂
+
+## Spline walls
+msg-spline-wall = 雲形線牆尚不支援修剪、延伸或對齊
+wall-spline-points = 雲形線牆需要 1 至 64 段曲線的控制點。
+wall-spline-short = 雲形線太短，或其兩端重合。
+wall-spline-corner = 雲形線有尖角（已標示）：各段連接處方向必須連續。
+wall-spline-tight = 雲形線對於牆的厚度彎曲過急（已標示）。
+wall-spline-crossing = 牆體會與自身相交（已標示）。

@@ -350,6 +350,11 @@ wall-mode-line = 直線
 wall-mode-arc = 円弧
 hint-wall-arc = 円弧の始点と終点をクリックし、円弧上のポイントをクリック · Esc で終了 · Backspace または Ctrl+Z で最後のセグメントを取り消し
 hint-wall-arc-point = 円弧上のポイントをクリックするか、半径を入力して Enter キーを押します
+wall-mode-spline = スプライン
+hint-wall-spline = 壁が通る最初の点をクリック · Esc で終了
+hint-wall-spline-next = 次の点をクリック · 最後の点をもう一度（ダブルクリック）または Enter で壁を作成 · Backspace で最後の点を削除 · Esc でキャンセル
+msg-wall-spline-two-points = スプライン壁には少なくとも 2 点が必要です
+msg-spline-wall-hosts = スプライン壁にはまだドア、窓、ニッチを配置できません
 hint-hosted = 壁にマウスオーバーしてクリック · スペースキーで開口部を反転
 hint-hosted-distance = 中心から壁の始点までの距離を入力 · Tab：終点まで · Enter で配置
 hint-sketch = 頂点をクリック · 最初のポイントをクリックするか Enter で完了 · Backspace で最後のポイントを削除
@@ -3862,3 +3867,11 @@ section-wall-profile = プロファイル
 prop-wall-profile = プロファイル
 wall-profile-rectangular = 長方形
 wall-profile-custom = カスタム
+
+## Spline walls
+msg-spline-wall = スプライン壁はまだトリム、延長、位置合わせできません
+wall-spline-points = スプライン壁には 1～64 個の曲線セグメントの制御点が必要です。
+wall-spline-short = スプラインが短すぎるか、両端が一致しています。
+wall-spline-corner = スプラインに角があります（マーク箇所）。セグメントの接続部で方向が連続している必要があります。
+wall-spline-tight = スプラインの曲がりが壁の厚さに対してきつすぎます（マーク箇所）。
+wall-spline-crossing = 壁が自身と交差します（マーク箇所）。

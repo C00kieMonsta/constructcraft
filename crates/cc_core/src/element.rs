@@ -342,6 +342,9 @@ impl Element {
             ElementKind::Wall(w) => {
                 w.start += delta;
                 w.end += delta;
+                if let Some(spline) = &mut w.spline {
+                    spline.map(|p| p + delta);
+                }
             }
             ElementKind::Floor(f) => {
                 f.boundary.iter_mut().chain(f.openings.iter_mut().flatten()).for_each(|p| *p += delta)
@@ -522,6 +525,11 @@ pub struct Wall {
     /// top is not level (straight walls only; see [`crate::wall_profile`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<crate::wall_profile::WallProfile>,
+    /// A spline wall: its location line as a smooth free-form curve from
+    /// `start` to `end`, which every edit keeps at the curve's ends (see
+    /// [`crate::wall_spline`]); the wall then has no bulge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spline: Option<crate::wall_spline::WallSpline>,
 }
 
 impl Default for Wall {
@@ -541,25 +549,46 @@ impl Default for Wall {
             attach_top: None,
             curtain: Default::default(),
             profile: None,
+            spline: None,
         }
     }
 }
 
 impl Wall {
-    /// The arc of the location line (`None` for a straight wall).
+    /// The arc of the location line (`None` for a straight wall and for a
+    /// spline wall).
     pub fn arc(&self) -> Option<crate::arc::Arc> {
+        if self.spline.is_some() {
+            return None;
+        }
         crate::arc::Arc::from_bulge(self.start, self.end, self.bulge)
     }
 
-    /// Length of the location line (along the arc for arc walls).
+    /// The flattened location line of a spline wall (`None` for the others,
+    /// and for a spline that makes no curve).
+    pub fn spline_path(&self) -> Option<crate::wall_spline::WallPath> {
+        self.spline.as_ref()?.path()
+    }
+
+    /// Whether the location line is an arc or a spline.
+    pub fn is_curved(&self) -> bool {
+        self.spline.is_some() || self.arc().is_some()
+    }
+
+    /// Length of the location line (along the arc for arc walls, along the
+    /// flattened curve for spline walls).
     pub fn length(&self) -> f64 {
+        if let Some(path) = self.spline_path() {
+            return path.length();
+        }
         match self.arc() {
             Some(a) => a.length(),
             None => self.start.distance(self.end),
         }
     }
 
-    /// Unit direction from start to end (X axis if degenerate): the chord of an arc wall.
+    /// Unit direction from start to end (X axis if degenerate): the chord
+    /// of an arc wall or a spline wall.
     pub fn direction(&self) -> DVec2 {
         (self.end - self.start).try_normalize().unwrap_or(DVec2::X)
     }
@@ -571,6 +600,9 @@ impl Wall {
 
     /// Direction of the location line `distance` along it.
     pub fn tangent_at(&self, distance: f64) -> DVec2 {
+        if let Some(path) = self.spline_path() {
+            return path.tangent(distance);
+        }
         match self.arc() {
             Some(a) => a.tangent(distance),
             None => self.direction(),
@@ -588,6 +620,9 @@ impl Wall {
 
     /// The point `along` the location line and `across` to its left.
     pub fn at(&self, along: f64, across: f64) -> DVec2 {
+        if let Some(path) = self.spline_path() {
+            return path.at(along, across);
+        }
         match self.arc() {
             Some(a) => a.at(along, across),
             None => self.start + self.direction() * along + self.normal() * across,
@@ -597,6 +632,9 @@ impl Wall {
     /// Distance along the wall of the projection of `p`, and the signed
     /// perpendicular distance (positive on the left).
     pub fn project(&self, p: DVec2) -> (f64, f64) {
+        if let Some(path) = self.spline_path() {
+            return path.locate(p);
+        }
         if let Some(a) = self.arc() {
             return a.locate(p);
         }
@@ -605,7 +643,8 @@ impl Wall {
     }
 
     /// The location line moved `distance` to its left (concentric for arc
-    /// walls, which keep their bulge).
+    /// walls, which keep their bulge; the ends of the offset curve for
+    /// spline walls).
     pub fn offset_line(&self, distance: f64) -> (DVec2, DVec2) {
         (self.at(0.0, distance), self.at(self.length(), distance))
     }

@@ -514,6 +514,10 @@ pub struct TrimExtend {
 fn path(s: &Session, id: u64) -> Result<cc_core::wall_ops::Path> {
     let p = s.project();
     let e = p.element(refs::element(p, id)?).ok_or_else(|| EngineError::not_found("element"))?;
+    // A spline wall is no boundary to trim to yet.
+    if cc_core::wall_ops::is_spline(e) {
+        return Err(cc_core::wall_ops::EditError::Spline.into());
+    }
     cc_core::wall_ops::path_of(e).ok_or_else(|| EngineError::invalid(format!("element {id} has no line")))
 }
 
@@ -656,6 +660,10 @@ impl Command for ElementAlign {
         let reference_id = refs::element(s.project(), self.reference)?;
         let pick = self.pick.map(point).transpose()?;
         let reference_pick = self.reference_pick.map(point).transpose()?;
+        // Spline walls are neither aligned nor aligned to.
+        if [id, reference_id].iter().any(|x| s.project().element(*x).is_some_and(cc_core::wall_ops::is_spline)) {
+            return Err(EditError::Spline.into());
+        }
         s.geometry();
         let (project, geom) = (&s.doc.project, s.geom());
         let reference = align_line(project, geom, reference_id, reference_pick).ok_or_else(|| {
@@ -1021,6 +1029,12 @@ impl Command for WallAttach {
         for id in &self.ids {
             let id = refs::element(p, *id)?;
             match p.element(id).map(|e| &e.kind) {
+                Some(ElementKind::Wall(w)) if w.spline.is_some() && target.is_some() => {
+                    return Err(EngineError::invalid(format!(
+                        "wall {} is a spline wall: its top is not attached to a roof, ceiling or floor yet",
+                        id.0
+                    )));
+                }
                 Some(ElementKind::Wall(w)) if w.profile.is_some() && target.is_some() => {
                     return Err(EngineError::invalid(format!(
                         "wall {} has an elevation profile, which sets its top: remove it (wall_profile_remove) to attach the top",

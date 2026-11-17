@@ -341,6 +341,11 @@ wall-mode-line = ເສັ້ນຊື່
 wall-mode-arc = ເສັ້ນໂຄ້ງ
 hint-wall-arc = ຄລິກຈຸດເລີ່ມຕົ້ນ ແລະ ຈຸດສຸດທ້າຍຂອງເສັ້ນໂຄ້ງ ແລ້ວຄລິກຈຸດເທິງເສັ້ນໂຄ້ງ · Esc ເພື່ອສິ້ນສຸດ · Backspace ຫຼື Ctrl+Z ຍົກເລີກທ່ອນສຸດທ້າຍ
 hint-wall-arc-point = ຄລິກຈຸດເທິງເສັ້ນໂຄ້ງ ຫຼື ພິມຄ່າລັດສະໝີແລ້ວກົດ Enter
+wall-mode-spline = ເສັ້ນໂຄ້ງ Spline
+hint-wall-spline = ຄລິກຈຸດທຳອິດທີ່ຝາຜ່ານ · Esc ເພື່ອສິ້ນສຸດ
+hint-wall-spline-next = ຄລິກຈຸດຕໍ່ໄປ · ຈຸດສຸດທ້າຍອີກຄັ້ງ (ຄລິກສອງເທື່ອ) ຫຼື Enter ເພື່ອສ້າງຝາ · Backspace ລຶບຈຸດສຸດທ້າຍ · Esc ຍົກເລີກ
+msg-wall-spline-two-points = ຝາເສັ້ນໂຄ້ງ Spline ຕ້ອງມີຢ່າງໜ້ອຍສອງຈຸດ
+msg-spline-wall-hosts = ຍັງບໍ່ສາມາດວາງປະຕູ, ປ່ອງຢ້ຽມ ແລະ ຊ່ອງໃນຝາເສັ້ນໂຄ້ງ Spline ໄດ້
 hint-hosted = ຊີ້ເມົ້າໃສ່ເທິງຝາແລ້ວຄລິກ · Spacebar ເພື່ອພິກດ້ານຊ່ອງເປີດ
 hint-hosted-distance = ພິມໄລຍະຈາກກາງຫາຕົ້ນຝາ · Tab: ຫາທ້າຍຝາ · Enter ວາງ
 hint-sketch = ຄລິກຈຸດມຸມຕ່າງໆ · ຄລິກຈຸດທຳອິດ ຫຼື ກົດ Enter ເພື່ອສຳເລັດ · Backspace ເພື່ອລຶບຈຸດຫຼ້າສຸດອອກ
@@ -3864,3 +3869,11 @@ section-wall-profile = ໂປຣໄຟລ໌
 prop-wall-profile = ໂປຣໄຟລ໌
 wall-profile-rectangular = ສີ່ຫຼ່ຽມ
 wall-profile-custom = ກຳນົດເອງ
+
+## Spline walls
+msg-spline-wall = ຝາເສັ້ນໂຄ້ງ Spline ຍັງບໍ່ສາມາດຕັດ, ຕໍ່ ຫຼື ຈັດແນວໄດ້
+wall-spline-points = ຝາເສັ້ນໂຄ້ງ Spline ຕ້ອງການຈຸດຄວບຄຸມຂອງສ່ວນເສັ້ນໂຄ້ງ 1 ຫາ 64 ສ່ວນ.
+wall-spline-short = ເສັ້ນໂຄ້ງ Spline ສັ້ນເກີນໄປ, ຫຼື ປາຍທັງສອງບັນຈົບກັນ.
+wall-spline-corner = ເສັ້ນໂຄ້ງ Spline ມີມຸມ (ໝາຍໄວ້): ທິດທາງຕ້ອງຕໍ່ເນື່ອງບ່ອນທີ່ສ່ວນຕ່າງໆເຊື່ອມກັນ.
+wall-spline-tight = ເສັ້ນໂຄ້ງ Spline ໂຄ້ງແຄບເກີນໄປສຳລັບຄວາມໜາຂອງຝາ (ໝາຍໄວ້).
+wall-spline-crossing = ຝາຈະຕັດກັບຕົວມັນເອງ (ໝາຍໄວ້).

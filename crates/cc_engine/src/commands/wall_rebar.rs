@@ -192,14 +192,19 @@ fn end(arg: Option<EndArg>, what: &str) -> Result<BarEnd> {
     Ok(end)
 }
 
-/// The walls to reinforce: those given (each a wall with a body of its own),
-/// or the structural walls of the level or project; and how many were left out.
+/// The walls to reinforce: those given (each a wall with a body of its own
+/// that is no spline wall), or the structural walls of the level or project
+/// (spline walls left out); and how many were left out.
 fn hosts(p: &Project, ids: &[u64], level: Option<&Ref>) -> Result<(Vec<(ElementId, LevelId)>, usize)> {
-    let layered = |e: &cc_core::Element| p.element_type(e.type_id).is_some_and(|t| !t.layers().is_empty());
+    let layered = |e: &cc_core::Element| {
+        p.element_type(e.type_id).is_some_and(|t| !t.layers().is_empty())
+            && e.as_wall().is_some_and(|w| w.spline.is_none())
+    };
     if !ids.is_empty() {
         let mut out = Vec::new();
         for id in ids {
             let id = refs::element(p, *id)?;
+            super::wall_spline::refuse(p, id, "it takes no reinforcement yet")?;
             match p.element(id) {
                 Some(e) if e.as_wall().is_some() && layered(e) => out.push((id, e.level)),
                 Some(e) if e.as_wall().is_some() => {
