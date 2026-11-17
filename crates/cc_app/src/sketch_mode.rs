@@ -497,7 +497,7 @@ const SPLINE_GRIP: usize = 10;
 /// A spline with its control point `k` moved to `p`: a point it passes
 /// through takes its handles along; a handle keeps the curve smooth there,
 /// turning the other handle of its point to stay in line.
-fn spline_moved(points: &[DVec2], closed: bool, k: usize, p: DVec2) -> Vec<DVec2> {
+pub(crate) fn spline_moved(points: &[DVec2], closed: bool, k: usize, p: DVec2) -> Vec<DVec2> {
     let mut out = points.to_vec();
     let last = out.len().saturating_sub(1);
     let Some(&old) = out.get(k) else { return out };

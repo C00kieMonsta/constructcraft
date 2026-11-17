@@ -204,8 +204,9 @@ pub struct AppState {
     pub railing_host: crate::tools::RailingHostOptions,
     /// Plan layout for new ramps (shape, turn, slope, landing, radius).
     pub ramp_layout: cc_core::RampLayout,
-    /// The wall tool draws arcs (start, end, then a point on the arc).
-    pub wall_arc: bool,
+    /// What the wall tool draws: lines, arcs (start, end, then a point on
+    /// the arc) or splines (the points the wall passes through).
+    pub wall_mode: crate::tools::WallMode,
     /// The footing tool, with a strip type, draws arc strips as the wall tool draws arcs.
     pub strip_arc: bool,
     /// The beam tool draws arc beams the same way.
@@ -313,7 +314,7 @@ impl AppState {
             sweep: Default::default(),
             railing_host: Default::default(),
             ramp_layout: Default::default(),
-            wall_arc: false,
+            wall_mode: Default::default(),
             strip_arc: false,
             beam_arc: false,
             wall_top_level: None,
@@ -502,7 +503,11 @@ impl AppState {
             self.tool,
             Tool::Wall { .. } | Tool::Grid { .. } | Tool::Move | Tool::Copy | Tool::Array | Tool::PushPull
         ) && self.interaction.anchor.is_some();
-        segment || self.typing_two_lengths()
+        // A spline wall's next point, from the last one.
+        let spline = matches!(self.tool, Tool::Wall { .. })
+            && self.wall_mode == crate::tools::WallMode::Spline
+            && !self.interaction.points.is_empty();
+        segment || spline || self.typing_two_lengths()
     }
 
     /// The tool takes two typed lengths (Tab switches between them): a door

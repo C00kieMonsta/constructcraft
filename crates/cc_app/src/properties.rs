@@ -577,18 +577,21 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
                         }
                     });
                 }
-                // Arc walls: the angle the arc turns (0 for a straight wall).
-                let mut sweep = (4.0 * w.bulge.atan()).to_degrees();
-                let drag = DragValue::new(&mut sweep).speed(1.0).range(-337.0..=337.0).suffix("°");
-                let r = row(ui, &t!("prop-arc-angle"), |ui| ui.add(drag));
-                if r.changed() {
-                    modify(state, id, "sweep", |el| {
-                        if let ElementKind::Wall(w) = &mut el.kind {
-                            w.bulge = if sweep.abs() < 0.01 { 0.0 } else { (sweep.to_radians() / 4.0).tan() };
-                        }
-                    });
+                // Arc walls: the angle the arc turns (0 for a straight wall;
+                // a spline wall is shaped by its points, not by an angle).
+                if w.spline.is_none() {
+                    let mut sweep = (4.0 * w.bulge.atan()).to_degrees();
+                    let drag = DragValue::new(&mut sweep).speed(1.0).range(-337.0..=337.0).suffix("°");
+                    let r = row(ui, &t!("prop-arc-angle"), |ui| ui.add(drag));
+                    if r.changed() {
+                        modify(state, id, "sweep", |el| {
+                            if let ElementKind::Wall(w) = &mut el.kind {
+                                w.bulge = if sweep.abs() < 0.01 { 0.0 } else { (sweep.to_radians() / 4.0).tan() };
+                            }
+                        });
+                    }
+                    finish(state, &r);
                 }
-                finish(state, &r);
             });
             section(ui, "dimensions", t!("section-dimensions"), |ui| {
                 readonly_row(ui, &t!("prop-length"), format::length(state.project().wall_length(&el, w)));

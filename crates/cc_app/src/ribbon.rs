@@ -1202,13 +1202,21 @@ pub fn options_bar(ui: &mut Ui, state: &mut AppState) {
                 ui.label(theme::muted(t!("hint-select")));
             }
             Tool::Wall { .. } => {
-                // Straight walls, or arcs through a third point.
-                let mut arc = state.wall_arc;
-                ui.selectable_value(&mut arc, false, t!("wall-mode-line")).on_hover_text(t!("hint-wall"));
-                ui.selectable_value(&mut arc, true, t!("wall-mode-arc")).on_hover_text(t!("hint-wall-arc"));
-                if arc != state.wall_arc {
-                    state.wall_arc = arc;
+                // Straight walls, arcs through a third point, or splines through the points clicked.
+                use crate::tools::WallMode;
+                let mut mode = state.wall_mode;
+                ui.selectable_value(&mut mode, WallMode::Line, t!("wall-mode-line")).on_hover_text(t!("hint-wall"));
+                ui.selectable_value(&mut mode, WallMode::Arc, t!("wall-mode-arc")).on_hover_text(t!("hint-wall-arc"));
+                ui.selectable_value(&mut mode, WallMode::Spline, t!("wall-mode-spline"))
+                    .on_hover_text(t!("hint-wall-spline"));
+                if mode != state.wall_mode {
+                    state.wall_mode = mode;
                     state.interaction.points.clear();
+                    // A spline goes on from where a chain stands; other modes start afresh after one.
+                    if mode == WallMode::Spline {
+                        state.interaction.points.extend(state.interaction.anchor.take());
+                    }
+                    state.interaction.prev_dir = None;
                 }
                 ui.separator();
                 ui.label(t!("prop-top-constraint"));
@@ -1238,7 +1246,13 @@ pub fn options_bar(ui: &mut Ui, state: &mut AppState) {
                         }
                     });
                 ui.separator();
-                ui.label(theme::muted(if state.wall_arc { t!("hint-wall-arc") } else { t!("hint-wall") }));
+                let hint = match state.wall_mode {
+                    WallMode::Line => t!("hint-wall"),
+                    WallMode::Arc => t!("hint-wall-arc"),
+                    WallMode::Spline if state.interaction.points.is_empty() => t!("hint-wall-spline"),
+                    WallMode::Spline => t!("hint-wall-spline-next"),
+                };
+                ui.label(theme::muted(hint));
             }
             Tool::Hosted { .. } => {
                 ui.checkbox(&mut state.interaction.flip_hand, t!("prop-flip-hand"));
