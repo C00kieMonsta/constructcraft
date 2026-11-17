@@ -269,6 +269,22 @@ Cada camada de um tipo de parede pode ter uma extensão vertical própria: `base
   {"material": "Reboco", "thickness": 0.02, "function": "Finish", "height": 2.4}]}}}
 ```
 
+### Paredes em spline
+
+Uma parede pode seguir uma spline, uma curva suave de forma livre, em vez de uma reta ou de um arco (primeira etapa do recurso). `wall_create` desenha uma de `start` a `end` passando pelos pontos de `through` entre eles (no máximo 63: a curva passa por cada um, com as tangentes tiradas dos vizinhos), ou pelos pontos de controle (`control`) dos seus segmentos de Bézier cúbicos (`p0, c1, c2, p1, c1, c2, p2…`, 3n + 1 pontos para n segmentos, no máximo 64, o primeiro sendo `start` e o último `end`), como `element_get` os mostra em `params.spline.control`. A curva é a linha de localização da parede, então `location_line` desloca o corpo em relação a ela como nas outras paredes. Ela precisa ser aberta e ter pelo menos 5 cm, manter a direção onde os segmentos se unem (um canto pede duas paredes), deixar à face de dentro de cada curva um raio de pelo menos 5 cm (a curva não pode fechar mais do que meia parede, medida a partir da linha de localização, mais isso) e não cruzar a si mesma; uma curva que não atende é recusada com o motivo e o ponto.
+
+`element_get` dá `derived.length` ao longo do eixo do corpo e, em `derived.spline`, o número de segmentos (`segments`), o menor raio de curvatura da linha de localização (`min_radius`), o menor raio que sobra para uma face por dentro de uma curva (`face_radius`) e os nós (`knots`) onde os segmentos se unem. `element_set` altera `params.spline.control` (`"spline": null` deixa a parede reta entre as extremidades, e uma parede reta aceita uma spline); mover só uma extremidade (`params.end`) leva junto o nó e a alça dessa extremidade. Mover, girar, espelhar, copiar e excluir funcionam como em qualquer parede; `element_split` divide a curva no ponto indicado e `element_offset` cria uma parede em spline ao lado (tão próxima quanto uma spline acompanha outra).
+
+O corpo segue a curva em cordas a no máximo 0,5 mm dela: as plantas desenham o corte com as camadas ao longo dela em todos os níveis de detalhe, elevações, cortes e vistas 3D mostram as faces curvas, os ambientes são delimitados por ela, as cotas se prendem às suas faces e as tabelas dão comprimento, área e volume. As extremidades se unem a outras paredes como as de uma parede reta com a direção que a curva tem ali (cantos e encontros em T, exatos nas faces curvas), e outras paredes podem terminar no seu lado curvo.
+
+Ainda não há, e os comandos recusam: portas, janelas e nichos em parede em spline, topo anexado (`wall_attach`), perfil de elevação, tipo de parede cortina, armadura, estrutura (framing), e aparar, estender e alinhar (a ela ou ela mesma); `strip_footings_under_walls` a deixa de fora. A exportação IFC grava a parede em spline como um `IfcWall` cujo corpo é uma casca fechada de facetas, com o conjunto de camadas do seu tipo e sem eixo; ao importar esse arquivo ela volta como um componente com a mesma forma.
+
+```text
+{"command": "wall_create", "args": {"start": [0, 0], "end": [9, 0.5], "through": [[3, 1.5], [6, -1]], "height": 2.8}}
+{"command": "wall_create", "args": {"start": [0, 4], "end": [6, 4], "control": [[0, 4], [1, 4], [2, 5], [3, 4], [4, 3], [5, 4], [6, 4]]}}
+{"command": "element_set", "args": {"id": 14, "params": {"spline": {"control": [[0, 0], [2, 2], [5, 2], [7, 0]]}}}}
+```
+
 ### Eletrocalhas e registros
 
 `cable_tray_create` desenha um trecho de eletrocalha como `conduit_create` (com `circuits`, `offset`, `end_offset`); um projeto sem tipo de eletrocalha ganha um (200 × 100 mm, leito), e `cable_tray_type_create` cria outros (`width`, `height`, `style`: `ladder`, `solid_bottom` ou `perforated`). Eletrocalhas só se ligam a outras eletrocalhas, e as curvas e tês entre elas aparecem em `mep_fittings`. `valve_place` coloca um registro num tubo, num `point` perto dele ou a uma `distance` ao longo dele, de um `type` ou de uma função `kind` (`gate`, `ball`, `check`, `globe`; um tipo dessa função é criado quando não há); `valve_type_create` cria tipos de várias funções (`kinds`) de uma vez. O registro tem o diâmetro e o sistema do seu tubo, é um nó da rede e acompanha o tubo; `element_get` mostra `derived.point`, `kind` e `diameter`, e `element_set` o desloca ao longo do tubo (`params.at`).
