@@ -120,13 +120,24 @@ pub(crate) fn type_json(s: &Session, id: cc_core::ElementTypeId) -> Option<Value
         let name = profile.and_then(|id| s.project().profile(id)).map(|f| f.name.clone());
         o.insert("profile".into(), json!(name));
     }
-    Some(json!({
+    // A pipe type shows its series by code, and derived sizes.
+    let mut derived = serde_json::Map::new();
+    if let (cc_core::TypeData::Pipe { series: Some(id), .. }, Some(o)) = (&t.data, params.as_object_mut()) {
+        let code = s.project().pipe_series_by_id(*id).map(|x| x.code.clone());
+        o.insert("series".into(), json!(code));
+    }
+    super::pipes::type_derived(s.project(), t, &mut derived);
+    let mut out = json!({
         "id": t.id.0,
         "name": t.name,
         "category": refs::category_name(t.category()),
         "params": params,
         "info": to_json(&t.info),
-    }))
+    });
+    if let (false, Some(o)) = (derived.is_empty(), out.as_object_mut()) {
+        o.insert("derived".into(), Value::Object(derived));
+    }
+    Some(out)
 }
 
 /// A type with all its parameters (`params`, editable with `type_set`) and identity data (`info`).
@@ -401,6 +412,10 @@ pub(crate) fn element_json(s: &mut Session, id: ElementId) -> Option<Value> {
         // A data outlet: its cables to the rack and the estimated length of each.
         derived.insert("cables".into(), json!(cables));
         derived.insert("cable_length".into(), json!(length));
+    }
+    // A pipe: its type's inside diameter, wall, series and size.
+    if let (ElementKind::Pipe(_), Some(t)) = (&e.kind, p.element_type(e.type_id)) {
+        super::pipes::type_derived(p, t, &mut derived);
     }
     super::piles::derived(p, &e, &mut derived);
     // The pile caps a beam may be framed into.

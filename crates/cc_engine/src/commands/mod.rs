@@ -44,6 +44,7 @@ pub mod pad;
 pub mod paint;
 pub mod phases;
 pub mod piles;
+pub mod pipes;
 pub mod profiles;
 pub mod project;
 pub mod query;

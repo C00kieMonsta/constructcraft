@@ -27,6 +27,7 @@ struct Settings {
     line_styles: crate::detail::LineStyles,
     fill_patterns: crate::fill_pattern::FillPatterns,
     profiles: BTreeMap<crate::ProfileId, crate::structural_profile::ProfileDef>,
+    pipe_series: BTreeMap<crate::PipeSeriesId, crate::PipeSeries>,
     option_sets: Vec<crate::OptionSet>,
     browser: crate::browser::BrowserOrganization,
     bar_marking: crate::bar_marks::BarMarking,
@@ -53,6 +54,7 @@ impl Settings {
             line_styles: p.line_styles.clone(),
             fill_patterns: p.fill_patterns.clone(),
             profiles: p.profiles.clone(),
+            pipe_series: p.pipe_series.clone(),
             option_sets: p.option_sets.clone(),
             browser: p.browser.clone(),
             bar_marking: p.bar_marking.clone(),
@@ -78,6 +80,7 @@ impl Settings {
         p.line_styles = self.line_styles;
         p.fill_patterns = self.fill_patterns;
         p.profiles = self.profiles;
+        p.pipe_series = self.pipe_series;
         p.option_sets = self.option_sets;
         p.browser = self.browser;
         p.bar_marking = self.bar_marking;
@@ -649,6 +652,12 @@ impl<'a> EditCtx<'a> {
         &mut self.project.profiles
     }
 
+    /// The project's pipe series.
+    pub fn pipe_series_mut(&mut self) -> &mut BTreeMap<crate::PipeSeriesId, crate::PipeSeries> {
+        self.touch_settings();
+        &mut self.project.pipe_series
+    }
+
     /// Construction phases, in time order.
     pub fn phases_mut(&mut self) -> &mut Vec<crate::Phase> {
         self.touch_settings();
@@ -990,8 +999,34 @@ impl<'a> EditCtx<'a> {
         }
     }
 
+    /// Pipe types of a series keep their row's outside diameter; types whose
+    /// series or size is gone drop the reference and keep the diameter. Runs
+    /// when this edit touched settings (series live there) or a pipe type,
+    /// and writes only what changes.
+    fn sync_pipe_series(&mut self) {
+        let settings = self.tx.settings.is_some();
+        let fixes: Vec<(ElementTypeId, crate::TypeData)> = self
+            .project
+            .types
+            .values()
+            .filter(|t| settings || self.tx.types.contains_key(&t.id))
+            .filter_map(|t| {
+                let fix = crate::pipe_series_project::pipe_fix(self.project, &t.data)?;
+                let mut data = t.data.clone();
+                crate::pipe_series_project::apply_pipe_fix(&mut data, fix).then_some((t.id, data))
+            })
+            .collect();
+        for (id, data) in fixes {
+            if let Some(t) = self.type_mut(id) {
+                t.data = data;
+            }
+        }
+    }
+
     /// Fill in "after" states and drop no-op entries.
     fn finish(mut self) -> Transaction {
+        // Pipe types follow their series rows.
+        self.sync_pipe_series();
         // Legacy sections follow their profiles first, so what reads them below sees the new size.
         self.sync_profiles();
         // Member hosts (steel buildings, trusses) next: they read what the

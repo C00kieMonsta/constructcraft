@@ -7,7 +7,7 @@ use std::path::Path;
 /// Current file format version. Bump when the schema changes incompatibly.
 /// 28: the ANSI and architectural sheet sizes, and the slope unit
 /// `RisePer12` (`6:12`), which older builds cannot read.
-pub const FORMAT_VERSION: u32 = 29;
+pub const FORMAT_VERSION: u32 = 30;
 
 /// Largest project file read, bytes (pictures and textures are kept in it).
 pub const MAX_FILE_BYTES: u64 = 1 << 30;
@@ -79,7 +79,9 @@ pub fn from_ron_with_repairs_localized(
     // structural profiles (older files: one per distinct column and beam section);
     // version 28 adds the ANSI and architectural sheet sizes (older files have none);
     // version 29 adds tag types and per-view tag placements (older files: the
-    // default tag types, and their moved tags as placements).
+    // default tag types, and their moved tags as placements);
+    // version 30 adds pipe series (older files: the template's pipe types, by name and
+    // diameter, become sizes of the template's series).
     let mut project = file.project;
     if file.format_version < 11 {
         project.ensure_phases(&|key| crate::project::template_default(key).to_string());
@@ -93,6 +95,9 @@ pub fn from_ron_with_repairs_localized(
     }
     project.ensure_uids();
     project.ensure_annotation_types();
+    if file.format_version < 30 {
+        project.link_old_template_pipes(translate);
+    }
     // After repair, so types whose profile was gone get one again, and after
     // the annotation types, which may add a column or beam type.
     project.convert_sections_to_profiles(&|k| {
@@ -379,6 +384,38 @@ mod tests {
             t.data,
             crate::TypeData::Column { profile: None, .. } | crate::TypeData::Beam { profile: None, .. }
         )));
+    }
+
+    #[test]
+    fn format_29_template_pipes_are_linked_to_their_series() {
+        use crate::{ElementType, ElementTypeId, TypeData};
+        let mut p = Project::from_template();
+        // A format 29 project: no series, the template's old pipe type and a free one.
+        p.pipe_series.clear();
+        p.types.retain(|_, t| !matches!(t.data, TypeData::Pipe { .. }));
+        let mut add = |name: &str, diameter: f64| {
+            let id = ElementTypeId(p.alloc_id());
+            let data = TypeData::pipe(diameter, "PVC".into());
+            p.types.insert(
+                id,
+                ElementType { id, name: name.into(), data, info: Default::default(), uid: Default::default() },
+            );
+            id
+        };
+        let old = add("Tubo PVC soldável 25 mm", 0.025);
+        let free = add("Custom", 0.025);
+        let twin = add("Tubo PVC soldável 20 mm", 0.020);
+        let text = to_ron(&p).unwrap().replacen(&format!("format_version: {FORMAT_VERSION}"), "format_version: 29", 1);
+        let back = from_ron(&text).unwrap();
+        let (series, row) = back.pipe_row(&back.types[&old].data).expect("linked");
+        assert_eq!((series.code.as_str(), row.size.as_str()), ("BR-PVC-SOLD", "25 mm"));
+        assert!(matches!(back.types[&old].data, TypeData::Pipe { diameter, .. } if diameter == row.de));
+        assert!(matches!(back.types[&free].data, TypeData::Pipe { series: None, diameter, .. } if diameter == 0.025));
+        assert!(back.pipe_row(&back.types[&twin].data).is_some());
+        assert_eq!(back.pipe_series.len(), 1, "the series is copied once");
+        // A current file is not linked again.
+        let text = to_ron(&p).unwrap();
+        assert!(from_ron(&text).unwrap().pipe_series.is_empty());
     }
 
     #[test]

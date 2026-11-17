@@ -493,10 +493,21 @@ pub enum TypeData {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mass_per_meter: Option<f64>,
     },
-    /// Pipes of outside `diameter`.
+    /// Pipes of outside `diameter`. A type of a pipe series takes its
+    /// diameter from the series row `size` (kept in step by
+    /// `EditCtx::finish`); a free type may give its inside diameter.
     Pipe {
         diameter: f64,
         material: String,
+        /// The pipe series the type is a size of.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        series: Option<crate::PipeSeriesId>,
+        /// The series row's size label.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        size: String,
+        /// Inside diameter of a free type, m.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inside: Option<f64>,
     },
     /// Conduits of outside `diameter`.
     Conduit {
@@ -654,6 +665,11 @@ impl TypeData {
     /// and the mass per meter of a round bar.
     pub fn rebar(diameter: f64, material: String) -> TypeData {
         TypeData::Rebar { diameter, material, grade: String::new(), mass_per_meter: None }
+    }
+
+    /// A free pipe type (no series) of outside `diameter` in `material`.
+    pub fn pipe(diameter: f64, material: String) -> TypeData {
+        TypeData::Pipe { diameter, material, series: None, size: String::new(), inside: None }
     }
 
     /// Material names referenced by this type.

@@ -308,7 +308,8 @@ fn the_imperial_scene_writes_inches() {
         "Eletrocalha 8\"×4\"",
         "Porta de giro 2'-8\" x 6'-8\"",
         "Porta-janela 2 folhas 5'-0\" x 6'-8\" (2)",
-        "CW Ø1/2\"",
+        // The template's 1/2" Sch 40 pipe is 0.840" outside (its series row), shown as 13/16".
+        "CW Ø13/16\"",
         "8\"×4\"",
         "8\"×8\"",
         "36\"×36\"",

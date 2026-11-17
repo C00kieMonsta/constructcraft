@@ -416,6 +416,8 @@ impl Project {
         // Fill patterns: valid patterns, and references to patterns that are gone dropped.
         repairs += self.repair_fill_patterns();
         repairs += self.repair_profiles();
+        // Pipe series, and pipe types whose series or size is gone, or whose diameter is not their row's.
+        repairs += self.repair_pipe_series();
         // Column and beam types pointing to profiles that are gone keep their box.
         repairs += self.repair_type_profiles();
 

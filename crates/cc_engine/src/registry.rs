@@ -320,6 +320,13 @@ registry![
         mep::MepConnect,
         mep::MepSizing,
         mep::MepSizeApply,
+        pipes::PipeCatalog,
+        pipes::PipeSeriesList,
+        pipes::PipeSeriesGet,
+        pipes::PipeSeriesImport,
+        pipes::PipeSeriesExport,
+        pipes::PipeSeriesDelete,
+        pipes::PipeTypeCreate,
     ],
     "Modifying elements" => [
         modify::ElementsDelete,

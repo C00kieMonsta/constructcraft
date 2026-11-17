@@ -102,6 +102,9 @@ pub(crate) fn type_out(s: &Session, id: ElementTypeId) -> Value {
 /// `profile_rotation_deg` and `profile_mirror`. `width`/`height` are the box of
 /// the turned profile; changing them alone re-points the type to a profile of
 /// that section, unturned and unmirrored.
+/// A pipe type takes `series` (a pipe series' code, name or id; null makes
+/// it a free type) and `size` (a row of the series), its diameter then
+/// following the row; a size the series lacks is refused (`unknown_size`).
 /// Changing a component's definition updates every type of that component,
 /// each keeping its own parameter values.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -137,7 +140,13 @@ impl Command for TypeSet {
             return Err(EngineError::invalid(format!("the name '{name}' is empty or already used")));
         }
         let params = self.params.as_ref().map(|patch| profile_patch(p, &ty.data, patch)).transpose()?;
+        let params = params.map(|patch| super::pipes::pipe_patch(p, &ty.data, patch)).transpose()?;
         let mut data = params.as_ref().map(|patch| patch_variant(&ty.data, patch)).transpose()?;
+        // A pipe type's size must be a row of its series (checked before the
+        // edit: finishing it would make a type of an unknown size free).
+        if let Some(d) = &data {
+            super::pipes::check_size(p, d)?;
+        }
         // A new roof covering brings the framing it usually lies on, if none was chosen.
         if let (
             Some(TypeData::Roof { covering: Some(kind), framing, .. }),

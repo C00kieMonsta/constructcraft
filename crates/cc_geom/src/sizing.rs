@@ -16,10 +16,18 @@
 //!   covers the breaker, at least 1.5 mm² for lighting and 2.5 mm² for
 //!   power, and larger until the voltage drop to the farthest device
 //!   (along the conduits, else straight) is at most 4 %.
+//!
+//! A run whose type is a size of a pipe series is sized within that series:
+//! its speed is measured in the row's inside diameter, a supply run needs
+//! the smallest row whose inside diameter keeps the speed at most
+//! [`MAX_SPEED`], and a drain the smallest row as wide as the nominal
+//! diameter (within 2 mm, as some DN 40 pipes are 38 mm outside).
 
 use crate::ModelGeometry;
 use crate::mep_net::MepNetwork;
-use cc_core::{Category, DeviceKind, ElementId, MepData, Project, SystemId, SystemKind};
+use cc_core::{
+    Category, DeviceKind, ElementId, ElementType, MepData, PipeSeries, PipeSize, Project, SystemId, SystemKind,
+};
 use std::collections::{BTreeMap, BinaryHeap, VecDeque};
 
 /// Maximum speed in water pipes, m/s.
@@ -79,6 +87,8 @@ pub struct PipeSizing {
     /// Current and required outside diameters, m.
     pub diameter: f64,
     pub required: f64,
+    /// The required row's label, for a run whose type is a size of a series.
+    pub size: Option<String>,
 }
 
 impl PipeSizing {
@@ -138,6 +148,37 @@ pub fn water_diameter(flow: f64) -> f64 {
 fn inside(outside: f64) -> f64 {
     let mm = outside * 1000.0;
     WATER_PIPES.iter().find(|(de, _)| (de - mm).abs() < 0.5).map_or(mm * 0.88, |p| p.1)
+}
+
+/// The inside diameter (mm) of a run of type `t` and outside diameter
+/// `outside` m: the type's own ([`ElementType::inside_diameter`]), else the
+/// PVC table's.
+fn inside_of(project: &Project, t: Option<&ElementType>, outside: f64) -> f64 {
+    match t.and_then(|t| t.inside_diameter(project)) {
+        Some(di) if di.is_finite() && di > 0.0 => di * 1000.0,
+        _ => inside(outside),
+    }
+}
+
+/// The rows of `series` from the narrowest.
+fn rows_by_size(series: &PipeSeries) -> Vec<&PipeSize> {
+    let mut rows: Vec<&PipeSize> = series.pipes.iter().collect();
+    rows.sort_by(|a, b| a.de.total_cmp(&b.de));
+    rows
+}
+
+/// The smallest row of `series` whose inside diameter carries `flow` l/s at
+/// most [`MAX_SPEED`], else its largest.
+pub fn series_supply_row(series: &PipeSeries, flow: f64) -> Option<&PipeSize> {
+    let rows = rows_by_size(series);
+    rows.iter().find(|r| speed(flow, r.di * 1000.0) <= MAX_SPEED).or(rows.last()).copied()
+}
+
+/// The smallest row of `series` at least `nominal` m across (within 2 mm),
+/// else its largest.
+pub fn series_drain_row(series: &PipeSeries, nominal: f64) -> Option<&PipeSize> {
+    let rows = rows_by_size(series);
+    rows.iter().find(|r| r.de >= nominal - 0.002 - 1e-9).or(rows.last()).copied()
 }
 
 /// Loads of each edge of a network component: what lies beyond it from `root`.
@@ -262,11 +303,23 @@ pub fn size_pipes(project: &Project, geom: &ModelGeometry) -> Vec<PipeSizing> {
         }
         for (run, (load, toilet)) in run_load {
             let Some(g) = geom.segments.get(&run) else { continue };
-            let (flow, required, speed_now) = match kind {
-                SystemKind::Sanitary => (None, drain_diameter(load, toilet), None),
+            let t = project.element(run).and_then(|e| project.element_type(e.type_id));
+            let series = t.and_then(|t| project.pipe_row(&t.data)).map(|(s, _)| s);
+            let (flow, required, speed_now, size) = match kind {
+                SystemKind::Sanitary => {
+                    let nominal = drain_diameter(load, toilet);
+                    match series.and_then(|s| series_drain_row(s, nominal)) {
+                        Some(row) => (None, row.de, None, Some(row.size.clone())),
+                        None => (None, nominal, None, None),
+                    }
+                }
                 _ => {
                     let q = water_flow(load);
-                    (Some(q), water_diameter(q), Some(speed(q, inside(g.diameter))))
+                    let now = Some(speed(q, inside_of(project, t, g.diameter)));
+                    match series.and_then(|s| series_supply_row(s, q)) {
+                        Some(row) => (Some(q), row.de, now, Some(row.size.clone())),
+                        None => (Some(q), water_diameter(q), now, None),
+                    }
                 }
             };
             out.push(PipeSizing {
@@ -278,6 +331,7 @@ pub fn size_pipes(project: &Project, geom: &ModelGeometry) -> Vec<PipeSizing> {
                 speed: speed_now,
                 diameter: g.diameter,
                 required,
+                size,
             });
         }
     }
@@ -393,5 +447,31 @@ mod tests {
         assert_eq!(water_diameter(0.3), 0.02);
         // 1.2 l/s needs 27.8 mm inside (2.0 m/s); 21.6 mm would run 3.3 m/s.
         assert_eq!(water_diameter(1.2), 0.032);
+    }
+
+    fn built_in(code: &str) -> &'static PipeSeries {
+        cc_core::pipe_catalog::series(code).expect("built-in series")
+    }
+
+    #[test]
+    fn series_rows_by_inside_diameter() {
+        // 5 l/s: 3.3 m/s in the BR table's 50 mm (44 mm inside), so it
+        // takes 60 mm; the EN ISO 1452 d50 (45.2 mm inside) runs 3.1 m/s
+        // too, and the series has no 60: d63 (57 mm inside, 2.0 m/s).
+        assert_eq!(water_diameter(5.0), 0.06);
+        let pn10 = built_in("EU-PVCU-1452-PN10");
+        let row = series_supply_row(pn10, 5.0).expect("a row");
+        assert_eq!(row.size, "d63");
+        assert!((row.di - 0.057).abs() < 1e-9);
+        assert!(speed(5.0, row.di * 1000.0) < MAX_SPEED);
+        // Beyond the largest row, the largest.
+        let last = pn10.pipes.iter().map(|p| p.de).fold(0.0, f64::max);
+        assert_eq!(series_supply_row(pn10, 1e6).map(|r| r.de), Some(last));
+        // A drain needing DN 100 takes the series' DN 100, 101.6 mm outside.
+        let drain = series_drain_row(built_in("BR-PVC-ESG-N"), drain_diameter(25.0, false)).expect("a row");
+        assert_eq!((drain.size.as_str(), drain.de), ("DN 100", 0.1016));
+        // DN 40 is the 40 mm row; DN 50 the 50.7 mm one.
+        assert_eq!(series_drain_row(built_in("BR-PVC-ESG-N"), 0.05).map(|r| r.size.as_str()), Some("DN 50"));
+        assert_eq!(series_drain_row(built_in("BR-PVC-ESG-N"), 0.04).map(|r| r.size.as_str()), Some("DN 40"));
     }
 }
