@@ -405,6 +405,13 @@ impl EditCtx<'_> {
         if let ElementKind::Grid(g) = &mut second.kind {
             g.name = format!("{}'", g.name);
         }
+        // The part of a wall's profile past the split, from the new wall's
+        // start (the first part is cut at its new end when the edit ends).
+        if let ElementKind::Wall(w) = &mut second.kind
+            && let Some(profile) = w.profile.take()
+        {
+            w.profile = profile.refit(len, t, len - t);
+        }
         set_line(&mut second, p, b);
         if let (Some(c), Some(bulge)) = (arc, bulge_mut(&mut second)) {
             *bulge = c.bulge_between(t, len);

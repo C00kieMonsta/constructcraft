@@ -518,6 +518,10 @@ pub struct Wall {
     /// Adjustments to the grid of a curtain wall type (ignored by other types).
     #[serde(default, skip_serializing_if = "crate::curtain::CurtainEdits::is_empty")]
     pub curtain: crate::curtain::CurtainEdits,
+    /// The outline of its face in its own elevation plane, when its base or
+    /// top is not level (straight walls only; see [`crate::wall_profile`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<crate::wall_profile::WallProfile>,
 }
 
 impl Default for Wall {
@@ -536,6 +540,7 @@ impl Default for Wall {
             bulge: 0.0,
             attach_top: None,
             curtain: Default::default(),
+            profile: None,
         }
     }
 }

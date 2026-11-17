@@ -92,6 +92,10 @@ impl Element {
                     std::mem::swap(&mut w.join_start, &mut w.join_end);
                     let length = w.length();
                     w.curtain.reverse(length);
+                    // The profile runs from the new start: its far end comes first.
+                    if let Some(profile) = &mut w.profile {
+                        *profile = profile.reversed(length);
+                    }
                 }
             }
             ElementKind::Door(h) | ElementKind::Window(h) | ElementKind::Niche(h) => {

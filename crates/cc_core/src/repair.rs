@@ -716,6 +716,29 @@ impl Project {
             let ElementKind::Wall(w) = &mut e.kind else { continue };
             repairs += w.curtain.repair(&is_component);
         }
+        // Wall profiles (see `crate::wall_profile`): only on straight walls that are not curtain
+        // walls; a bad one goes, one past the wall's end is cut there; a wall with a profile keeps
+        // it and lets go of a roof its top was attached to.
+        let curtain_types: std::collections::BTreeSet<crate::ElementTypeId> =
+            self.types.values().filter(|t| t.curtain().is_some()).map(|t| t.id).collect();
+        for e in self.elements.values_mut() {
+            let curtain = curtain_types.contains(&e.type_id);
+            let ElementKind::Wall(w) = &mut e.kind else { continue };
+            let length = w.length();
+            let Some(profile) = &mut w.profile else { continue };
+            let kept = if curtain || w.bulge != 0.0 { None } else { profile.repair(length) };
+            match kept {
+                Some(n) => repairs += n,
+                None => {
+                    w.profile = None;
+                    repairs += 1;
+                    continue;
+                }
+            }
+            if w.attach_top.take().is_some() {
+                repairs += 1;
+            }
+        }
         // Systems: circuits fed by a missing board lose it, voltages are positive;
         // elements drop references to missing systems (a pipe keeps one system).
         for system in self.systems.values_mut() {

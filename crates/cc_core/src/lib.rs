@@ -88,6 +88,7 @@ mod view;
 pub mod view_mark;
 pub mod wall_framing;
 pub mod wall_ops;
+pub mod wall_profile;
 
 pub use cad::{CadColorMode, CadDrawing, CadImport, CadLayer, CadPrim, CadUnit};
 pub use callout::{Callout, CropBox};
