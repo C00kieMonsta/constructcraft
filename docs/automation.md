@@ -249,6 +249,15 @@ A pipe series is one product line: its sizes (outside diameter, wall and inside 
 {"command": "type_set", "args": {"type": "PVC-U pressure pipe PN10 d32", "params": {"size": "d50"}}}
 ```
 
+### Wall profiles
+
+A straight wall may have an elevation profile: the outline of its face drawn in its own elevation plane, `[u, z]` meters along its location line from its start and above its base, so its base and top need not be level (a top following sloping ground, a stepped base, a gable end, an arched top). `wall_profile_set` takes the outline as `curves` (as for sketches) or `points`; it must be one closed loop that does not cross itself and that a vertical line crosses at most twice (a bottom and a top line along the wall, vertical ends and steps allowed), with no holes, within the wall's length (a shorter profile makes the wall only that long) and at most 100 m below or 1000 m above its base. `wall_profile_slope` sets a straight base and top from one end to the other (`top_start`, `top_end`, `base_start`, `base_end`, heights above the base; by default the base at 0 and the top at the wall's height), and `wall_profile_remove` takes the profile off. `wall_create` takes `profile` curves too, and `sketch_get` / `sketch_set` read and draw a wall's profile (`sketch_get` gives the rectangle of its length and height when it has none). The wall's height and top constraint stay its nominal box; its body, volume, plans (cut only where the plane passes through it), elevations, sections, 3D views, area in schedules and IFC follow the profile. Doors, windows and niches that do not lie inside it are left out of the wall. When the wall's length changes the profile stays where it is along the wall, is cut at the wall's ends and follows an end it reached when the wall grows there; a mirror walks it the other way and a split splits it. Arc walls, curtain walls, walls attached to a roof and framed walls take no profile. `element_get` shows it in `params.profile` and its `area`, `min_z`, `max_z`, `start` and `end` in `derived.profile`.
+
+```text
+{"command": "wall_profile_slope", "args": {"wall": 12, "top_start": 3.0, "top_end": 1.2}}
+{"command": "wall_profile_set", "args": {"wall": 13, "points": [[0, 0], [6, 0], [6, 3], [3, 4.5], [0, 3]]}}
+```
+
 ### Cable trays and valves
 
 `cable_tray_create` draws a cable tray run like `conduit_create` (with `circuits`, `offset`, `end_offset`); a project without a cable tray type gets one (200 × 100 mm, ladder), and `cable_tray_type_create` makes others (`width`, `height`, `style`: `ladder`, `solid_bottom` or `perforated`). Trays join only other trays, and their elbows and tees are listed by `mep_fittings`. `valve_place` puts a valve on a pipe at a `point` near it or a `distance` along it, of a `type` or a `kind` (`gate`, `ball`, `check`, `globe`; a type of that kind is made when there is none); `valve_type_create` makes types of several `kinds` at once. A valve takes its pipe's diameter and system, is a node of its network and follows the pipe; `element_get` shows its `derived.point`, `kind` and `diameter`, and `element_set` moves it along the pipe (`params.at`).

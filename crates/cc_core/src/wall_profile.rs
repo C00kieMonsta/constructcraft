@@ -196,7 +196,8 @@ fn chains_of(pts: &[DVec2]) -> Result<Chains, ProfileError> {
     let n = pts.len();
     let umin = pts.iter().map(|p| p.x).fold(f64::INFINITY, f64::min);
     let umax = pts.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max);
-    if !(umax - umin >= MIN_LENGTH) {
+    let width = umax - umin;
+    if width.is_nan() || width < MIN_LENGTH {
         return Err(ProfileError::NoArea);
     }
     let start = (0..n)
@@ -344,7 +345,7 @@ fn clip_sketch(sketch: &Sketch, lo: f64, hi: f64) -> Option<Sketch> {
     for u in [lo, hi] {
         let mut on: Vec<DVec2> = open.iter().copied().filter(|p| (p.x - u).abs() <= 10.0 * TOL).collect();
         on.sort_by(|a, b| a.y.total_cmp(&b.y));
-        if on.len() % 2 != 0 {
+        if !on.len().is_multiple_of(2) {
             return None;
         }
         used += on.len();
