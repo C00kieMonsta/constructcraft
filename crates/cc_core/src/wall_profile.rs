@@ -901,15 +901,33 @@ mod project_tests {
         });
         assert_eq!(profile(&doc, id), None);
         doc.undo();
-        let curtain = doc.project.types.values().find(|t| t.curtain().is_some()).map(|t| t.id);
-        if let Some(curtain) = curtain {
-            doc.edit("type", |e| {
-                if let Some(x) = e.element_mut(id) {
-                    x.type_id = curtain;
-                }
-            });
-            assert_eq!(profile(&doc, id), None);
-        }
+        assert!(profile(&doc, id).is_some());
+        let curtain = curtain_type(&mut doc);
+        doc.edit("type", |e| {
+            if let Some(x) = e.element_mut(id) {
+                x.type_id = curtain;
+            }
+        });
+        assert_eq!(profile(&doc, id), None);
+    }
+
+    /// A curtain wall type with the default grid.
+    fn curtain_type(doc: &mut Document) -> crate::ElementTypeId {
+        doc.edit("curtain type", |e| {
+            let id = crate::ElementTypeId(e.alloc_id());
+            e.add_type(crate::ElementType {
+                id,
+                name: "Curtain".into(),
+                data: crate::TypeData::Wall {
+                    layers: Vec::new(),
+                    function: crate::WallFunction::Exterior,
+                    curtain: Some(crate::curtain::CurtainSystem::default()),
+                    structural: false,
+                },
+                info: Default::default(),
+                uid: Default::default(),
+            })
+        })
     }
 
     #[test]
@@ -933,7 +951,15 @@ mod project_tests {
             x.kind = ElementKind::Floor(crate::Floor::new(square, 3.0));
             Some(e.add_element(x))
         });
-        // The edit dropped that one; put hostile profiles back as a file would hold them.
+        let curtain_type = curtain_type(&mut doc);
+        let curtain = doc.edit("curtain", |e| {
+            let mut x = e.project().element(id).unwrap().clone();
+            x.id = ElementId(e.alloc_id());
+            x.uid = Default::default();
+            x.type_id = curtain_type;
+            e.add_element(x)
+        });
+        // The edits dropped those; put hostile profiles back as a file would hold them.
         let mut p = doc.project.clone();
         let set = |p: &mut Project, id: ElementId, f: &dyn Fn(&mut Wall)| {
             if let Some(ElementKind::Wall(w)) = p.elements.get_mut(&id).map(|e| &mut e.kind) {
@@ -941,6 +967,7 @@ mod project_tests {
             }
         };
         set(&mut p, arc, &|w| w.profile = sloped_wall().profile);
+        set(&mut p, curtain, &|w| w.profile = sloped_wall().profile);
         set(&mut p, id, &|w| {
             w.attach_top = roof;
             if let Some(pr) = &mut w.profile {
@@ -949,13 +976,15 @@ mod project_tests {
         });
         let text = crate::to_ron(&p).unwrap();
         let (loaded, repairs) = crate::from_ron_with_repairs(&text).unwrap();
-        assert!(repairs >= 2, "{repairs}");
+        assert!(repairs >= 3, "{repairs}");
         let wall = |id: ElementId| loaded.element(id).and_then(|e| e.as_wall()).unwrap().clone();
         assert_eq!(wall(arc).profile, None, "arc walls take none");
+        assert_eq!(wall(curtain).profile, None, "curtain walls take none");
         assert_eq!(wall(id).profile, None, "not a number");
         // A good profile on an attached wall keeps the profile.
         set(&mut p, id, &|w| w.profile = sloped_wall().profile);
         set(&mut p, arc, &|w| w.profile = None);
+        set(&mut p, curtain, &|w| w.profile = None);
         let (loaded, repairs) = crate::from_ron_with_repairs(&crate::to_ron(&p).unwrap()).unwrap();
         assert_eq!(repairs, 1);
         let w = loaded.element(id).and_then(|e| e.as_wall()).unwrap();
