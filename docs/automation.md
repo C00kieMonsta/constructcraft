@@ -258,6 +258,17 @@ A straight wall may have an elevation profile: the outline of its face drawn in 
 {"command": "wall_profile_set", "args": {"wall": 13, "points": [[0, 0], [6, 0], [6, 3], [3, 4.5], [0, 3]]}}
 ```
 
+### Layer extents
+
+Each layer of a wall type may have a vertical extent of its own: `base_offset`, meters from the wall's bottom at each point along it (positive starts higher, an insulation above the ground; negative runs below, a core going deeper into the foundation; within ±100 m), and `height`, meters from the layer's own bottom (0.001 to 1000; null or left out: up to the wall's top). A layer never rises above the wall's top, and where it has no height left it is absent. They ride on `type_set` with the whole `layers` list as `type_get` shows it (default extents are not shown); floors and roofs take none. The wall's body is stepped across it, plans cut each layer at its own height, openings cut every layer they cross, and the wall's volume is the sum of its layers'; `element_get` lists each layer's `material`, `thickness`, `volume`, and its lowest `base` and highest `top` above the wall's base in `derived.layers`. Joins, rooms and the doors a wall hosts still see the wall whole.
+
+```text
+{"command": "type_set", "args": {"type": "Insulated", "params": {"layers": [
+  {"material": "EPS", "thickness": 0.05, "function": "Insulation", "base_offset": 1.0},
+  {"material": "Concrete", "thickness": 0.2, "function": "Structure", "base_offset": -0.5},
+  {"material": "Plaster", "thickness": 0.02, "function": "Finish", "height": 2.4}]}}}
+```
+
 ### Cable trays and valves
 
 `cable_tray_create` draws a cable tray run like `conduit_create` (with `circuits`, `offset`, `end_offset`); a project without a cable tray type gets one (200 × 100 mm, ladder), and `cable_tray_type_create` makes others (`width`, `height`, `style`: `ladder`, `solid_bottom` or `perforated`). Trays join only other trays, and their elbows and tees are listed by `mep_fittings`. `valve_place` puts a valve on a pipe at a `point` near it or a `distance` along it, of a `type` or a `kind` (`gate`, `ball`, `check`, `globe`; a type of that kind is made when there is none); `valve_type_create` makes types of several `kinds` at once. A valve takes its pipe's diameter and system, is a node of its network and follows the pipe; `element_get` shows its `derived.point`, `kind` and `diameter`, and `element_set` moves it along the pipe (`params.at`).

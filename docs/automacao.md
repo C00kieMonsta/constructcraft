@@ -258,6 +258,17 @@ Uma parede reta pode ter um perfil de elevação: o contorno da sua face desenha
 {"command": "wall_profile_set", "args": {"wall": 13, "points": [[0, 0], [6, 0], [6, 3], [3, 4.5], [0, 3]]}}
 ```
 
+### Extensões das camadas
+
+Cada camada de um tipo de parede pode ter uma extensão vertical própria: `base_offset`, em metros a partir da base da parede em cada ponto ao longo dela (positivo começa mais acima, um isolamento acima do terreno; negativo desce abaixo dela, um núcleo que entra na fundação; dentro de ±100 m), e `height`, em metros a partir da base da própria camada (de 0,001 a 1000; null ou ausente: até o topo da parede). Uma camada nunca passa do topo da parede e, onde não lhe resta altura, não existe. Elas vão em `type_set` com a lista `layers` inteira como `type_get` a mostra (extensões padrão não aparecem); pisos e telhados não as aceitam. O corpo da parede fica em degraus ao longo da espessura, as plantas cortam cada camada na sua própria altura, as aberturas cortam todas as camadas que atravessam, e o volume da parede é a soma das suas camadas; `element_get` lista, em `derived.layers`, o `material`, a `thickness`, o `volume`, a `base` mais baixa e o `top` mais alto de cada camada acima da base da parede. Uniões, ambientes e as portas que a parede hospeda continuam vendo a parede inteira.
+
+```text
+{"command": "type_set", "args": {"type": "Isolada", "params": {"layers": [
+  {"material": "EPS", "thickness": 0.05, "function": "Insulation", "base_offset": 1.0},
+  {"material": "Concreto", "thickness": 0.2, "function": "Structure", "base_offset": -0.5},
+  {"material": "Reboco", "thickness": 0.02, "function": "Finish", "height": 2.4}]}}}
+```
+
 ### Eletrocalhas e registros
 
 `cable_tray_create` desenha um trecho de eletrocalha como `conduit_create` (com `circuits`, `offset`, `end_offset`); um projeto sem tipo de eletrocalha ganha um (200 × 100 mm, leito), e `cable_tray_type_create` cria outros (`width`, `height`, `style`: `ladder`, `solid_bottom` ou `perforated`). Eletrocalhas só se ligam a outras eletrocalhas, e as curvas e tês entre elas aparecem em `mep_fittings`. `valve_place` coloca um registro num tubo, num `point` perto dele ou a uma `distance` ao longo dele, de um `type` ou de uma função `kind` (`gate`, `ball`, `check`, `globe`; um tipo dessa função é criado quando não há); `valve_type_create` cria tipos de várias funções (`kinds`) de uma vez. O registro tem o diâmetro e o sistema do seu tubo, é um nó da rede e acompanha o tubo; `element_get` mostra `derived.point`, `kind` e `diameter`, e `element_set` o desloca ao longo do tubo (`params.at`).

@@ -131,3 +131,68 @@ vertical extents).
 - Volumes: per layer, so quantities by material can follow.
 - IFC: a single swept outline no longer describes the wall; consider one
   item per layer (each its own outline/heights), or `IfcBuildingElementPart`s.
+
+## Per-layer extents (done)
+
+Part 3 is on `feat/wall-profiles` too (same PR, format 31).
+
+- Model: `Layer::base_offset` (meters from the wall's bottom at each point:
+  its nominal base, its profile's bottom chain, or under an attached top the
+  flat base) and `Layer::height: Option<f64>` (from the layer's own bottom,
+  clamped to the wall's top; `None` to the top), both skipped in files when
+  default. `cc_core::layer_extent`: `Extent { base_offset, height }`,
+  `range(bottom, top)`, bounds `MAX_OFFSET` (±100 m), `MIN_HEIGHT`/`MAX_HEIGHT`,
+  `check`, `repair` (resets out-of-range values), `clear` (floors and roofs
+  take none). A layer above the wall's top is simply absent there. Layers
+  never rise above the wall's top (no strong reason found for parapet-like
+  layers; a profile does that job).
+- Geometry (`cc_geom/src/wall_layers.rs`, a child module of `wall`):
+  `WallGeom::layer_extents` is empty when every layer is default, and then
+  every path is the old one, bit for bit (tests compare faces point for
+  point). Otherwise consecutive layers with one extent form a `Band`; within
+  a column each height is a `Lin` (`z0 + k u`): the wall's bottom and top
+  (`column_lines`), each band's bottom and own top, the openings' edges.
+  `split_bands` splits columns where any two of them cross (call it after
+  `set_elevation` or `set_top_profile`; `build_walls` and `attach_wall_tops`
+  do), so `extent_lines(c, extent)` — decided at the column's middle — holds
+  across the column. Not in the mitered stretch of an end column
+  (`split_column` does not split there): a crossing inside it is drawn as if
+  at the stretch's edge.
+- Union vs layers: `intervals_at` and `Column::solid` are the bands' union
+  (joins, rooms, `solid_at`, rebar, plan column states); `layer_intervals(c,
+  k, u)` and `intervals_at_v(c, u, v)` are one layer's. The joins' height
+  filter reaches down to the lowest layer; `base_z` stays nominal.
+- Openings are clamped to `[base_z, top_z]` as before: a core running below
+  the base continues under a door. Recesses are assumed to lie where the
+  layers they cut stand (their faces are built as in a plain wall; their
+  volume is taken from each layer they overlap, `recess_layer_volume`).
+- Volumes: `layer_volumes` = Σ columns (strip area × heights at the strip's
+  centroid) − recess shares; a banded wall's `volume` is their sum; for
+  plain walls they add up to `volume`. Join deductions
+  (`ModelGeometry::join_deductions`) are not spread over layers.
+  `volumes_by_material`, `layer_range` (absolute min/max), `layer_outlines`
+  (elevation polygons, openings left in) for IFC.
+- Plans: `plan::draw_banded_wall` states each band per column piece
+  (`cut_columns` splits where a band's line crosses the cut); the T-join
+  layer cleanup (`layer_span`, `layer_pieces`, `core_ends`, `layer_gaps`)
+  is reused as is, as if the layers stood at the cut. Sections keep one cut
+  material (the type's `cut_material`) over the stepped outline, as they
+  did for whole walls.
+- IFC: `layer_bodies` writes one item per layer (strips extruded at their
+  heights for level walls and arc walls; profile walls sweep each
+  `layer_outlines` polygon across the layer, and when one item is clipped
+  at a mitered end all are, so the `Clipping` representation holds only
+  clipping results). Attached tops are exported to `top_z` as plain walls
+  are. `ConstructCAD_WallLayers`: `Extents` (RON via `curtain::to_text`) in
+  the IfcWallType's `HasPropertySets` (not `IfcRelDefinesByProperties`,
+  which IFC4 forbids for type objects), `Height`/`Width` on each wall;
+  import (`Importer::layered_wall`, `layer_extents`) rebuilds the wall from
+  its axis (line, or an arc through its points) and matches types by their
+  extents too.
+- For a spline (or any curved non-arc) wall task: the band machinery only
+  needs `world(u, v)`, `span_at` and per-column `Lin`s; a wall whose base or
+  top is curved along `u` must split columns finely enough that each piece
+  is linear (as arcs are chorded), or `Lin` must become a curve with its own
+  crossing search. `strip_area` has a straight and an arc branch only;
+  `strip_centroid_u` assumes heights level along arcs. `layer_outlines` and
+  IFC's `layer_bodies` assume straight profiled walls.
