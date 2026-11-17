@@ -3838,3 +3838,27 @@ wall-profile-no-area = El perfil no encierra ningún área.
 
 ## Wall layer extents
 layer-to-top = Hasta arriba
+
+## Wall profile sketch
+edit-wall-profile = Editar perfil
+reset-wall-profile = Restablecer perfil
+cmd-desc-edit-wall-profile = Abre en un boceto el perfil de alzado del muro seleccionado: la cara del muro a lo largo de él, con la base y la parte superior inclinadas, escalonadas o curvas.
+cmd-desc-reset-wall-profile = Quita el perfil de alzado del muro seleccionado: su base y su parte superior vuelven a quedar horizontales.
+why-select-wall = Seleccione un muro.
+why-wall-profile-arc = Solo los muros rectos admiten un perfil de alzado.
+why-wall-profile-curtain = Un muro cortina no admite perfil de alzado.
+why-wall-profile-attached = La parte superior del muro está enlazada a una cubierta, un techo o un suelo: desenlácela primero.
+why-wall-profile-framed = El muro tiene entramado: el entramado solo sigue muros de base y parte superior horizontales.
+why-wall-no-profile = El muro no tiene perfil de alzado.
+why-wall-profile-curves = El perfil de un muro se dibuja con líneas y arcos.
+sketch-title-wall-profile = Perfil del muro: { $type }
+hint-wall-profile-sketch = Dibuje la cara del muro: u a lo largo de él desde su inicio (a la izquierda), z hacia arriba desde su base. Un contorno cerrado con una línea inferior y una superior; las puertas y ventanas deben quedar dentro.
+wall-profile-openings-out = { $count } abertura(s) no caben en el perfil del muro y no se recortan.
+wall-profile-ref-start = Inicio
+wall-profile-ref-end = Fin
+wall-profile-ref-base = Base
+wall-profile-ref-top = Parte superior
+section-wall-profile = Perfil
+prop-wall-profile = Perfil
+wall-profile-rectangular = Rectangular
+wall-profile-custom = Personalizado

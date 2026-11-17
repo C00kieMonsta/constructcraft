@@ -3838,3 +3838,27 @@ wall-profile-no-area = Le profil n’enferme aucune surface.
 
 ## Wall layer extents
 layer-to-top = Jusqu’en haut
+
+## Wall profile sketch
+edit-wall-profile = Modifier le profil
+reset-wall-profile = Réinitialiser le profil
+cmd-desc-edit-wall-profile = Ouvre dans une esquisse le profil d’élévation du mur sélectionné : la face du mur le long de celui-ci, avec une base et un sommet inclinés, en gradins ou courbes.
+cmd-desc-reset-wall-profile = Supprime le profil d’élévation du mur sélectionné : sa base et son sommet redeviennent horizontaux.
+why-select-wall = Sélectionnez un mur.
+why-wall-profile-arc = Seuls les murs droits acceptent un profil d’élévation.
+why-wall-profile-curtain = Un mur-rideau n’accepte pas de profil d’élévation.
+why-wall-profile-attached = Le sommet du mur est attaché à un toit, un plafond ou un plancher : détachez-le d’abord.
+why-wall-profile-framed = Le mur a une ossature : l’ossature ne suit que des murs à base et sommet horizontaux.
+why-wall-no-profile = Le mur n’a pas de profil d’élévation.
+why-wall-profile-curves = Le profil d’un mur se dessine avec des lignes et des arcs.
+sketch-title-wall-profile = Profil du mur : { $type }
+hint-wall-profile-sketch = Dessinez la face du mur : u le long du mur depuis son début (à gauche), z vers le haut depuis sa base. Un contour fermé avec une ligne basse et une ligne haute ; les portes et fenêtres doivent y être contenues.
+wall-profile-openings-out = { $count } ouverture(s) ne tiennent pas dans le profil du mur et ne sont pas découpées.
+wall-profile-ref-start = Début
+wall-profile-ref-end = Fin
+wall-profile-ref-base = Base
+wall-profile-ref-top = Sommet
+section-wall-profile = Profil
+prop-wall-profile = Profil
+wall-profile-rectangular = Rectangulaire
+wall-profile-custom = Personnalisé

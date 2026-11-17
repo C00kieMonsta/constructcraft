@@ -601,6 +601,7 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
                 readonly_row(ui, &t!("prop-thickness"), format::size(thickness, format::MetricSize::Length));
                 readonly_row(ui, &t!("prop-volume"), format::volume(state.session.geom().volume(id)));
             });
+            crate::wall_profile_ui::palette_rows(ui, state, &el, w);
             // A structural wall's reinforcement (and any sets another wall has).
             let layered = state.project().element_type(el.type_id).is_some_and(|t| !t.layers().is_empty());
             if layered && (w.structural || state.project().rebar_of(id).next().is_some()) {

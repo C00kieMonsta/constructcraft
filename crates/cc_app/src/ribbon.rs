@@ -866,7 +866,9 @@ fn modify_tab(ui: &mut Ui, state: &mut AppState) {
     group(ui, t!("group-geometry"), |ui| {
         command_buttons(ui, state, &[JoinGeometry, UnjoinGeometry, AttachTop, DetachTop, Paint, RemovePaint])
     });
-    group(ui, t!("group-sketch"), |ui| command_buttons(ui, state, &[EditBoundary, EditProfile]));
+    group(ui, t!("group-sketch"), |ui| {
+        command_buttons(ui, state, &[EditBoundary, EditProfile, EditWallProfile, ResetWallProfile])
+    });
     group(ui, t!("prop-title-block"), |ui| command_button(ui, state, EditTitleBlock));
     group(ui, t!("group-group"), |ui| command_buttons(ui, state, &[Group, Ungroup, Explode]));
     group(ui, t!("group-phasing"), |ui| command_button(ui, state, Demolish));

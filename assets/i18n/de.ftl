@@ -3838,3 +3838,27 @@ wall-profile-no-area = Das Profil umschließt keine Fläche.
 
 ## Wall layer extents
 layer-to-top = Bis oben
+
+## Wall profile sketch
+edit-wall-profile = Profil bearbeiten
+reset-wall-profile = Profil zurücksetzen
+cmd-desc-edit-wall-profile = Öffnet das Ansichtsprofil der gewählten Wand in einer Skizze: die Wandfläche entlang der Wand, mit geneigter, abgestufter oder gekrümmter Unter- und Oberkante.
+cmd-desc-reset-wall-profile = Entfernt das Ansichtsprofil der gewählten Wand: Unter- und Oberkante sind wieder waagerecht.
+why-select-wall = Eine Wand auswählen.
+why-wall-profile-arc = Nur gerade Wände erhalten ein Ansichtsprofil.
+why-wall-profile-curtain = Eine Vorhangfassade erhält kein Ansichtsprofil.
+why-wall-profile-attached = Die Oberkante der Wand ist an ein Dach, eine Decke oder einen Boden gebunden: zuerst lösen.
+why-wall-profile-framed = Die Wand hat ein Ständerwerk: Ständerwerk folgt nur Wänden mit waagerechter Unter- und Oberkante.
+why-wall-no-profile = Die Wand hat kein Ansichtsprofil.
+why-wall-profile-curves = Das Profil einer Wand wird mit Linien und Bögen gezeichnet.
+sketch-title-wall-profile = Wandprofil: { $type }
+hint-wall-profile-sketch = Die Wandfläche zeichnen: u entlang der Wand ab ihrem Anfang (links), z nach oben ab ihrer Unterkante. Ein geschlossener Umriss mit einer unteren und einer oberen Linie; Türen und Fenster müssen darin liegen.
+wall-profile-openings-out = { $count } Öffnung(en) passen nicht in das Wandprofil und werden nicht ausgeschnitten.
+wall-profile-ref-start = Anfang
+wall-profile-ref-end = Ende
+wall-profile-ref-base = Unterkante
+wall-profile-ref-top = Oberkante
+section-wall-profile = Profil
+prop-wall-profile = Profil
+wall-profile-rectangular = Rechteckig
+wall-profile-custom = Benutzerdefiniert

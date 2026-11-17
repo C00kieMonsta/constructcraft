@@ -3839,3 +3839,27 @@ wall-profile-no-area = Профіль не охоплює жодної площ�
 
 ## Wall layer extents
 layer-to-top = До верху
+
+## Wall profile sketch
+edit-wall-profile = Редагувати профіль
+reset-wall-profile = Скинути профіль
+cmd-desc-edit-wall-profile = Відкриває в ескізі профіль фасаду вибраної стіни: грань стіни вздовж неї, з похилою, ступінчастою або вигнутою основою та верхом.
+cmd-desc-reset-wall-profile = Видаляє профіль фасаду вибраної стіни: її основа і верх знову горизонтальні.
+why-select-wall = Виберіть одну стіну.
+why-wall-profile-arc = Профіль фасаду мають лише прямі стіни.
+why-wall-profile-curtain = Світлопрозора стіна не має профілю фасаду.
+why-wall-profile-attached = Верх стіни приєднано до даху, стелі або перекриття: спершу від'єднайте його.
+why-wall-profile-framed = Стіна має каркас: каркас слідує лише за стінами з горизонтальними основою та верхом.
+why-wall-no-profile = Стіна не має профілю фасаду.
+why-wall-profile-curves = Профіль стіни креслять лініями та дугами.
+sketch-title-wall-profile = Профіль стіни: { $type }
+hint-wall-profile-sketch = Накресліть грань стіни: u вздовж неї від її початку (ліворуч), z угору від її основи. Один замкнений контур із нижньою та верхньою лініями; двері та вікна мають бути всередині нього.
+wall-profile-openings-out = Прорізів, що не вміщуються в профіль стіни і не вирізаються: { $count }.
+wall-profile-ref-start = Початок
+wall-profile-ref-end = Кінець
+wall-profile-ref-base = Основа
+wall-profile-ref-top = Верх
+section-wall-profile = Профіль
+prop-wall-profile = Профіль
+wall-profile-rectangular = Прямокутний
+wall-profile-custom = Власний

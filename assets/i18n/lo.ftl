@@ -3840,3 +3840,27 @@ wall-profile-no-area = ໂປຣໄຟລ໌ບໍ່ໄດ້ອ້ອມພື
 
 ## Wall layer extents
 layer-to-top = ຮອດເທິງສຸດ
+
+## Wall profile sketch
+edit-wall-profile = ແກ້ໄຂໂປຣໄຟລ໌
+reset-wall-profile = ຕັ້ງໂປຣໄຟລ໌ຄືນໃໝ່
+cmd-desc-edit-wall-profile = ເປີດໂປຣໄຟລ໌ດ້ານໜ້າຂອງຝາທີ່ເລືອກໃນແບບຮ່າງ: ໜ້າຝາຕາມຄວາມຍາວຂອງມັນ, ໂດຍພື້ນ ແລະ ດ້ານເທິງສາມາດອຽງ, ເປັນຂັ້ນ ຫຼື ໂຄ້ງໄດ້.
+cmd-desc-reset-wall-profile = ລຶບໂປຣໄຟລ໌ດ້ານໜ້າຂອງຝາທີ່ເລືອກ: ພື້ນ ແລະ ດ້ານເທິງຂອງມັນກັບມາຢູ່ລະດັບອີກ.
+why-select-wall = ເລືອກຝາໜຶ່ງອັນ.
+why-wall-profile-arc = ມີແຕ່ຝາຊື່ເທົ່ານັ້ນທີ່ມີໂປຣໄຟລ໌ດ້ານໜ້າໄດ້.
+why-wall-profile-curtain = ຝາມ່ານບໍ່ມີໂປຣໄຟລ໌ດ້ານໜ້າ.
+why-wall-profile-attached = ດ້ານເທິງຂອງຝາຕິດກັບຫຼັງຄາ, ເພດານ ຫຼື ພື້ນ: ແຍກມັນອອກກ່ອນ.
+why-wall-profile-framed = ຝາມີໂຄງ: ໂຄງຈະຕາມແຕ່ຝາທີ່ມີພື້ນ ແລະ ດ້ານເທິງຢູ່ລະດັບເທົ່ານັ້ນ.
+why-wall-no-profile = ຝານີ້ບໍ່ມີໂປຣໄຟລ໌ດ້ານໜ້າ.
+why-wall-profile-curves = ໂປຣໄຟລ໌ຂອງຝາແຕ້ມດ້ວຍເສັ້ນ ແລະ ເສັ້ນໂຄ້ງ.
+sketch-title-wall-profile = ໂປຣໄຟລ໌ຝາ: { $type }
+hint-wall-profile-sketch = ແຕ້ມໜ້າຝາ: u ຕາມຝາຈາກຈຸດເລີ່ມ (ທາງຊ້າຍ), z ຂຶ້ນເທິງຈາກພື້ນຂອງມັນ. ຂອບປິດໜຶ່ງອັນທີ່ມີເສັ້ນລຸ່ມ ແລະ ເສັ້ນເທິງ; ປະຕູ ແລະ ປ່ອງຢ້ຽມຕ້ອງຢູ່ພາຍໃນ.
+wall-profile-openings-out = ມີ { $count } ຊ່ອງເປີດທີ່ບໍ່ພໍດີກັບໂປຣໄຟລ໌ຂອງຝາ ແລະ ບໍ່ຖືກຕັດ.
+wall-profile-ref-start = ຈຸດເລີ່ມ
+wall-profile-ref-end = ຈຸດສິ້ນສຸດ
+wall-profile-ref-base = ພື້ນ
+wall-profile-ref-top = ດ້ານເທິງ
+section-wall-profile = ໂປຣໄຟລ໌
+prop-wall-profile = ໂປຣໄຟລ໌
+wall-profile-rectangular = ສີ່ຫຼ່ຽມ
+wall-profile-custom = ກຳນົດເອງ

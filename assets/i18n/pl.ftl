@@ -3838,3 +3838,27 @@ wall-profile-no-area = Profil nie obejmuje żadnej powierzchni.
 
 ## Wall layer extents
 layer-to-top = Do góry
+
+## Wall profile sketch
+edit-wall-profile = Edytuj profil
+reset-wall-profile = Resetuj profil
+cmd-desc-edit-wall-profile = Otwiera w szkicu profil elewacji zaznaczonej ściany: lico ściany wzdłuż niej, z pochyłą, schodkową lub zakrzywioną podstawą i górą.
+cmd-desc-reset-wall-profile = Usuwa profil elewacji zaznaczonej ściany: jej podstawa i góra znów są poziome.
+why-select-wall = Zaznacz jedną ścianę.
+why-wall-profile-arc = Tylko proste ściany przyjmują profil elewacji.
+why-wall-profile-curtain = Ściana osłonowa nie przyjmuje profilu elewacji.
+why-wall-profile-attached = Góra ściany jest dołączona do dachu, sufitu lub stropu: najpierw ją odłącz.
+why-wall-profile-framed = Ściana ma szkielet: szkielet podąża tylko za ścianami o poziomej podstawie i górze.
+why-wall-no-profile = Ściana nie ma profilu elewacji.
+why-wall-profile-curves = Profil ściany rysuje się liniami i łukami.
+sketch-title-wall-profile = Profil ściany: { $type }
+hint-wall-profile-sketch = Narysuj lico ściany: u wzdłuż niej od jej początku (po lewej), z w górę od jej podstawy. Jeden zamknięty obrys z linią dolną i górną; drzwi i okna muszą leżeć w jego wnętrzu.
+wall-profile-openings-out = Otwory niemieszczące się w profilu ściany i niewycięte: { $count }.
+wall-profile-ref-start = Początek
+wall-profile-ref-end = Koniec
+wall-profile-ref-base = Podstawa
+wall-profile-ref-top = Góra
+section-wall-profile = Profil
+prop-wall-profile = Profil
+wall-profile-rectangular = Prostokątny
+wall-profile-custom = Własny

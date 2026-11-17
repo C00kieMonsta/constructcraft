@@ -3838,3 +3838,27 @@ wall-profile-no-area = Il profilo non racchiude alcuna area.
 
 ## Wall layer extents
 layer-to-top = Fino in cima
+
+## Wall profile sketch
+edit-wall-profile = Modifica profilo
+reset-wall-profile = Ripristina profilo
+cmd-desc-edit-wall-profile = Apre in uno schizzo il profilo di prospetto del muro selezionato: la faccia del muro lungo di esso, con base e sommità inclinate, a gradini o curve.
+cmd-desc-reset-wall-profile = Rimuove il profilo di prospetto del muro selezionato: base e sommità tornano orizzontali.
+why-select-wall = Selezionare un muro.
+why-wall-profile-arc = Solo i muri diritti accettano un profilo di prospetto.
+why-wall-profile-curtain = Una facciata continua non accetta un profilo di prospetto.
+why-wall-profile-attached = La sommità del muro è collegata a un tetto, un controsoffitto o un solaio: scollegarla prima.
+why-wall-profile-framed = Il muro ha un'intelaiatura: l'intelaiatura segue solo muri con base e sommità orizzontali.
+why-wall-no-profile = Il muro non ha un profilo di prospetto.
+why-wall-profile-curves = Il profilo di un muro si disegna con linee e archi.
+sketch-title-wall-profile = Profilo del muro: { $type }
+hint-wall-profile-sketch = Disegnare la faccia del muro: u lungo di esso dal suo inizio (a sinistra), z verso l'alto dalla sua base. Un contorno chiuso con una linea inferiore e una superiore; porte e finestre devono starvi dentro.
+wall-profile-openings-out = { $count } apertura/e non rientrano nel profilo del muro e non vengono ritagliate.
+wall-profile-ref-start = Inizio
+wall-profile-ref-end = Fine
+wall-profile-ref-base = Base
+wall-profile-ref-top = Sommità
+section-wall-profile = Profilo
+prop-wall-profile = Profilo
+wall-profile-rectangular = Rettangolare
+wall-profile-custom = Personalizzato

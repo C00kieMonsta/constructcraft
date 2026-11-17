@@ -102,6 +102,10 @@ pub enum UiCommand {
     EditBoundary,
     /// Open the profile of the selected sweep's type in a sketch.
     EditProfile,
+    /// Open the elevation profile of the selected wall in a sketch.
+    EditWallProfile,
+    /// Remove the selected wall's elevation profile.
+    ResetWallProfile,
     /// Open the active sheet's title block in the editor.
     EditTitleBlock,
     /// Create a title block from the standard layout and open it.
@@ -360,6 +364,8 @@ impl UiCommand {
             SketchCancel,
             EditBoundary,
             EditProfile,
+            EditWallProfile,
+            ResetWallProfile,
             EditTitleBlock,
             NewTitleBlock,
             TbLines,
@@ -541,6 +547,7 @@ impl UiCommand {
             SketchCancel => Icon::Close,
             EditBoundary => Icon::EditBoundary,
             EditProfile => Icon::EditProfile,
+            EditWallProfile | ResetWallProfile => Icon::WallProfile,
             EditTitleBlock | NewTitleBlock => Icon::TitleBlock,
             TbLines => Icon::DrawLine,
             TbText => Icon::Text,
@@ -698,7 +705,7 @@ impl UiCommand {
                 Some(Badge::Import)
             }
             ExportPdf | ExportSvg | ExportImage | ExportDxf | AnalyticalExport => Some(Badge::Export),
-            Delete | DetachTop | RemovePaint => Some(Badge::Remove),
+            Delete | DetachTop | RemovePaint | ResetWallProfile => Some(Badge::Remove),
             _ => None,
         }
     }
@@ -760,6 +767,8 @@ impl UiCommand {
             SketchCancel => t!("sketch-cancel-mode"),
             EditBoundary => t!("edit-boundary"),
             EditProfile => t!("edit-profile"),
+            EditWallProfile => t!("edit-wall-profile"),
+            ResetWallProfile => t!("reset-wall-profile"),
             EditTitleBlock => t!("action-edit-title-block"),
             NewTitleBlock => t!("action-new-title-block"),
             TbLines => t!("tb-tool-lines"),
@@ -975,6 +984,8 @@ impl UiCommand {
             SketchCancel => t!("cmd-desc-sketch-cancel-mode"),
             EditBoundary => t!("cmd-desc-edit-boundary"),
             EditProfile => t!("cmd-desc-edit-profile"),
+            EditWallProfile => t!("cmd-desc-edit-wall-profile"),
+            ResetWallProfile => t!("cmd-desc-reset-wall-profile"),
             EditTitleBlock => t!("cmd-desc-edit-title-block"),
             NewTitleBlock => t!("cmd-desc-new-title-block"),
             TbLines => t!("cmd-desc-tb-lines"),
@@ -1334,6 +1345,8 @@ impl UiCommand {
             CompConnector => "component_connector_add",
             SketchFinish | EditBoundary => "sketch_set",
             EditProfile => "sweep_profile_set",
+            EditWallProfile => "sketch_set",
+            ResetWallProfile => "wall_profile_remove",
             EditTitleBlock => "component_get",
             NewTitleBlock => "title_block_create",
             TbLines | TbText | TbImage => "component_sheet_piece_add",
@@ -1445,8 +1458,15 @@ impl UiCommand {
                 Some(t!("why-no-sketch"))
             }
             SketchPoint if !crate::sketch_mode::takes_points(state) => Some(t!("why-sketch-points")),
+            // A wall's profile is drawn with lines and arcs.
+            SketchPolygon | SketchPolygonOut | SketchCircle | SketchEllipse | SketchSpline
+                if crate::wall_profile_ui::is_open(state) =>
+            {
+                Some(t!("why-wall-profile-curves"))
+            }
             SketchPickWalls
                 if state.active_level().is_none()
+                    || crate::wall_profile_ui::is_open(state)
                     || crate::component_sketch::piece(state).is_some()
                     || crate::title_block_env::is_sheet_sketch(state) =>
             {
@@ -1468,6 +1488,8 @@ impl UiCommand {
             }
             EditBoundary if crate::sketch_mode::boundary_target(state).is_none() => Some(t!("why-select-outline")),
             EditProfile if crate::profile_sketch::target(state).is_none() => Some(t!("why-select-sweep")),
+            EditWallProfile => crate::wall_profile_ui::refusal(state),
+            ResetWallProfile => crate::wall_profile_ui::reset_refusal(state),
             Profiles if crate::profiles_dialog::section_sketch_open(state) => Some(t!("why-profile-sketch-open")),
             TbLines | TbText | TbImage if !crate::title_block_env::is_open(state) => Some(t!("why-title-block-editor")),
             EditTitleBlock if crate::title_block_env::sheet_title_block(state).is_none() => {
@@ -1980,6 +2002,8 @@ pub fn run(state: &mut AppState, ctx: &egui::Context, command: UiCommand) {
         SketchCancel => crate::sketch_mode::cancel(state),
         EditBoundary => crate::sketch_mode::edit_boundary(state),
         EditProfile => crate::profile_sketch::edit_selected(state),
+        EditWallProfile => crate::wall_profile_ui::edit_selected(state),
+        ResetWallProfile => crate::wall_profile_ui::reset_selected(state),
         EditTitleBlock => {
             if let Some(id) = actions::active_sheet(state) {
                 crate::title_block_env::edit_sheet(state, id);
