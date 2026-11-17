@@ -2,11 +2,16 @@ use crate::beam::{BeamGeom, BeamInput, ColumnInput, resolve_beams};
 use crate::polygon;
 use crate::wall::{EndJoin, LayerGap, Opening, WallGeom, WallLine, core_through, embedded_in, resolve_join};
 use crate::{Ray, Solid};
+use cc_core::wall_profile::Chains;
 use cc_core::{Category, ElementId, ElementKind, Project, RoofShape, TypeData};
 use glam::{DVec2, DVec3};
 use std::collections::BTreeMap;
 
 const FRAME: f64 = 0.05;
+
+/// How close to an end of its wall an elevation profile must come to reach it (meters).
+const END_REACH: f64 = 1e-3;
+
 /// Shading color of door and window frames.
 pub const FRAME_COLOR: [u8; 3] = [236, 236, 232];
 
@@ -933,7 +938,7 @@ impl ModelGeometry {
     fn attach_wall_tops(&mut self, project: &Project) {
         let attached: Vec<(ElementId, ElementId)> = project
             .walls()
-            .filter(|(_, w)| w.bulge.abs() < 1e-9)
+            .filter(|(_, w)| w.bulge.abs() < 1e-9 && w.profile.is_none())
             .filter_map(|(e, w)| Some((e.id, w.attach_top?)))
             .collect();
         if attached.is_empty() {
@@ -1084,6 +1089,26 @@ impl ModelGeometry {
                 lines[i].join_start = false;
                 lines[i].join_end = false;
             }
+            // Elevation profiles of straight walls that are not curtain walls, in
+            // absolute heights; an end a profile stops short of joins nothing.
+            let profiles: Vec<Option<Chains>> = walls
+                .iter()
+                .enumerate()
+                .map(|(i, (e, w))| {
+                    if curtains[i].is_some() || w.bulge != 0.0 {
+                        return None;
+                    }
+                    let chains = w.profile.as_ref()?.chains()?;
+                    let base = project.wall_base_z(e, w);
+                    let lift = |pts: &[DVec2]| pts.iter().map(|p| DVec2::new(p.x, p.y + base)).collect();
+                    Some(Chains { bottom: lift(&chains.bottom), top: lift(&chains.top) })
+                })
+                .collect();
+            for (line, chains) in lines.iter_mut().zip(&profiles) {
+                let Some(span) = chains.as_ref().map(Chains::span) else { continue };
+                line.join_start &= span.0 <= END_REACH;
+                line.join_end &= span.1 >= line.start.distance(line.end) - END_REACH;
+            }
             // Each wall's layers as `(v_from, v_to, material)` from the left face
             // inward, and the offsets of its core's faces.
             let layered: Vec<Layered> = walls
@@ -1103,10 +1128,25 @@ impl ModelGeometry {
             let mut gaps: Vec<(usize, [DVec2; 2])> = Vec::new();
             let mut layer_gaps: Vec<(usize, LayerGap)> = Vec::new();
             let mut ids = Vec::new();
-            let heights: Vec<(f64, f64)> =
-                walls.iter().map(|(e, w)| (project.wall_base_z(e, w), project.wall_top_z(e, w))).collect();
-            for (i, (e, _)) in walls.iter().enumerate() {
-                let (base_z, top_z) = heights.get(i).copied().unwrap_or_default();
+            // The heights each wall stands over (a profile's lowest and highest points).
+            let heights: Vec<(f64, f64)> = walls
+                .iter()
+                .zip(&profiles)
+                .map(|((e, w), chains)| match chains {
+                    Some(c) => c.z_range(),
+                    None => (project.wall_base_z(e, w), project.wall_top_z(e, w)),
+                })
+                .collect();
+            for (i, (e, w)) in walls.iter().enumerate() {
+                let chains = profiles.get(i).cloned().flatten();
+                // A profiled wall keeps its nominal base (sills are measured from it); its top is the profile's highest.
+                let (base_z, top_z) = match &chains {
+                    Some(c) => {
+                        let base = project.wall_base_z(e, w);
+                        (base, c.z_range().1.max(base + 0.01))
+                    }
+                    None => heights.get(i).copied().unwrap_or_default(),
+                };
                 let ty = project.element_type(e.type_id);
                 let (layers, core) = layered[i].clone();
                 // Walls meet only those they stand beside at some height: a wall wholly below or
@@ -1126,6 +1166,16 @@ impl ModelGeometry {
                     (global(resolve_join(&local, me, true)), global(resolve_join(&local, me, false)))
                 };
                 let mut g = WallGeom::new(e.id, lines[i], base_z, top_z, start_join, end_join, layers);
+                // A profile short of an end: the body ends square where it does.
+                if let Some(c) = &chains {
+                    let (a, b) = c.span();
+                    if a > END_REACH {
+                        g.start_ext = (a, a);
+                    }
+                    if b < g.length - END_REACH {
+                        g.end_ext = (b, b);
+                    }
+                }
                 g.core = core;
                 // Where this wall meets another in a T, that wall's face opens; its
                 // core runs on through the other wall's outer layers to its core.
@@ -1163,7 +1213,15 @@ impl ModelGeometry {
                     }
                 }
                 openings.extend(embedded.iter().filter(|(j, _)| *j == i).map(|(_, o)| o.clone()));
+                // In a profiled wall, doors, windows and niches that do not lie inside it are left out.
+                if let Some(c) = &chains {
+                    openings.retain(|o| c.holds(o.u0, o.u1, o.z0, o.z1));
+                    recesses.retain(|r| c.holds(r.u0, r.u1, r.z0, r.z1));
+                }
                 g.set_openings(openings);
+                if let Some(c) = chains {
+                    g.set_elevation(c);
+                }
                 g.set_recesses(recesses);
                 if let Some(system) = curtains[i] {
                     let c = crate::curtain::build(project, e, &g, system);

@@ -827,9 +827,11 @@ fn draw_wall(d: &mut Drawing2D, project: &Project, g: &WallGeom, cut_z: f64, spa
     }
     let id = Some(g.element);
     let h = g.half;
-    let states: Vec<ColumnCut> = g.columns.iter().map(|c| column_state(c, cut_z)).collect();
-    let count = g.columns.len();
-    for (i, c) in g.columns.iter().enumerate() {
+    // A wall with an elevation profile is cut only where the plane passes through it.
+    let columns = g.cut_columns(cut_z);
+    let states: Vec<ColumnCut> = columns.iter().map(|c| column_state(c, cut_z)).collect();
+    let count = columns.len();
+    for (i, c) in columns.iter().enumerate() {
         let poly = g.column_polygon(c);
         let state = states[i];
         // Each layer with its material's cut pattern; coarse, one plain region.
@@ -875,8 +877,8 @@ fn draw_wall(d: &mut Drawing2D, project: &Project, g: &WallGeom, cut_z: f64, spa
         }
     }
     let caps = [
-        (g.start_joined, g.columns.first(), states.first(), g.start_ext),
-        (g.end_joined, g.columns.last(), states.last(), g.end_ext),
+        (g.start_joined, columns.first(), states.first(), g.start_ext),
+        (g.end_joined, columns.last(), states.last(), g.end_ext),
     ];
     for (joined, col, state, (ul, ur)) in caps {
         if let (false, Some(_), Some(&state)) = (joined, col, state)

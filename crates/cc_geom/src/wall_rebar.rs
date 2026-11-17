@@ -84,7 +84,8 @@ pub(crate) fn stations(range: (f64, f64), spacing: f64, offset: f64, cover: f64)
 /// along its centerline, neighbours joined.
 fn solid_runs(g: &WallGeom, side: WallSide, z: f64) -> Vec<(f64, f64)> {
     let mut runs: Vec<(f64, f64)> = Vec::new();
-    for c in g.columns.iter().filter(|c| c.is_solid_at(z)) {
+    // A wall with an elevation profile is solid at `z` only between its chains.
+    for c in g.cut_columns(z).iter().filter(|c| c.is_solid_at(z)) {
         let (a, b) = if side == WallSide::Exterior { c.left } else { c.right };
         match runs.last_mut() {
             Some(last) if a <= last.1 + 1e-6 => last.1 = last.1.max(b),
@@ -141,9 +142,13 @@ pub(crate) fn wall_bars(g: &WallGeom, r: &Rebar, d: f64, sets: &WallSets) -> Vec
                 let Some(column) = g.column_at(u) else { continue };
                 // The stretches of the bar: the solid heights here, within the set's.
                 let mut cuts: Vec<(f64, f64)> = Vec::new();
-                for &(z0, z1) in &column.solid {
+                let profiled = g.is_profiled();
+                // An elevation profile's heights here, its base with the cover too.
+                let solid = if profiled { g.intervals_at(column, u) } else { column.solid.clone() };
+                for (k, &(z0, z1)) in solid.iter().enumerate() {
                     // Under a top that follows a roof the wall is lower here.
-                    let z1 = g.profile_top((z0 + z1) * 0.5, u).map_or(z1, |t| t.min(z1));
+                    let z1 = if profiled { z1 } else { g.profile_top((z0 + z1) * 0.5, u).map_or(z1, |t| t.min(z1)) };
+                    let low = if profiled && k == 0 { low.max(z0 + cover) } else { low };
                     let (a, b) = (z0.max(low), (z1 - cover).min(high));
                     if b - a > 1e-6 {
                         cuts.extend(pieces(r.splice, b - a, index).into_iter().map(|(lo, hi)| (a + lo, a + hi)));
@@ -184,7 +189,12 @@ pub(crate) fn wall_bars(g: &WallGeom, r: &Rebar, d: f64, sets: &WallSets) -> Vec
                     if bars.len() >= MAX_BARS {
                         return bars;
                     }
-                    if !g.column_at(u).is_some_and(|c| c.is_solid_at(z)) {
+                    let solid = if g.is_profiled() {
+                        g.solid_at(u, z)
+                    } else {
+                        g.column_at(u).is_some_and(|c| c.is_solid_at(z))
+                    };
+                    if !solid {
                         continue;
                     }
                     let points = vec![g.world(u, v0).extend(z), g.world(u, v1).extend(z)];
