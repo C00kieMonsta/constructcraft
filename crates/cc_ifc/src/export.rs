@@ -2306,6 +2306,22 @@ impl<'a> Exporter<'a> {
         self.storeys.get(&level).map(|s| s.1)
     }
 
+    /// `body` (in a wall's placement) cut by the vertical plane through the
+    /// plan points `left` and `right` of a mitered end, keeping the side away
+    /// from `outward` along the wall (-1 at its start, 1 at its end).
+    fn clip_end(&mut self, body: Id, left: DVec2, right: DVec2, outward: f64) -> Id {
+        let along = (left - right).try_normalize().unwrap_or(DVec2::Y);
+        let mut normal = along.perp();
+        if normal.x * outward < 0.0 {
+            normal = -normal;
+        }
+        let plane = self.placement3(Frame { origin: right.extend(0.0), x: along.extend(0.0), z: normal.extend(0.0) });
+        let surface = self.w.add("IFCPLANE", args![plane]);
+        // Its material on the side the normal points to: outside the wall.
+        let half = self.w.add("IFCHALFSPACESOLID", args![surface, false]);
+        self.w.add("IFCBOOLEANCLIPPINGRESULT", args![Value::Enum("DIFFERENCE"), body, half])
+    }
+
     fn write_wall(&mut self, id: ElementId) {
         let project = self.project;
         let Some(e) = project.element(id) else { return };
@@ -2324,7 +2340,25 @@ impl<'a> Exporter<'a> {
         }
 
         let h = g.half;
-        let (body, axis) = if let Some(arc) = g.arc {
+        // A wall with an elevation profile: the outline swept across the wall, clipped at mitered ends.
+        let mut kind = "SweptSolid";
+        let (body, axis) = if let Some(outline) = g.profile_outline().filter(|_| g.arc.is_none()) {
+            let pts: Vec<DVec2> = outline.iter().map(|p| DVec2::new(p.x, p.y - g.base_z)).collect();
+            // The outline's plane is the wall's axis plane (x along the wall, y up), swept from its left face to its right.
+            let position = self.placement3(Frame { origin: DVec3::new(0.0, h, 0.0), x: DVec3::X, z: -DVec3::Y });
+            let mut body = self.extrude_polygon(&pts, position, self.dir_z, 2.0 * h);
+            let (u0, u1) = (pts.first().map_or(0.0, |p| p.x), pts.iter().map(|p| p.x).fold(f64::MIN, f64::max));
+            for ((ul, ur), end, outward) in [(g.start_ext, u0, -1.0), (g.end_ext, u1, 1.0)] {
+                if (ul - end).abs() < 1e-9 && (ur - end).abs() < 1e-9 {
+                    continue;
+                }
+                body = self.clip_end(body, DVec2::new(ul, h), DVec2::new(ur, -h), outward);
+                kind = "Clipping";
+            }
+            let axis_start = self.origin2;
+            let axis_end = self.point2(DVec2::new(g.length, 0.0));
+            (body, self.w.add("IFCPOLYLINE", args![vec![axis_start, axis_end]]))
+        } else if let Some(arc) = g.arc {
             // An arc wall: its outline of arcs and lines extruded, its axis a trimmed circle.
             let left = (g.start_ext.0, g.end_ext.0);
             let right = (g.start_ext.1, g.end_ext.1);
@@ -2356,7 +2390,7 @@ impl<'a> Exporter<'a> {
             let style = self.material_style(ty.main_material());
             self.styled(body, style);
         }
-        let shape = self.shape(vec![body], Some(axis));
+        let shape = self.shape_of_type(vec![body], Some(axis), kind);
         let mut attrs = self.element_args(e, placement, shape);
         attrs.push(Value::Enum("STANDARD"));
         let product = self.w.add("IFCWALL", attrs);
@@ -2385,18 +2419,32 @@ impl<'a> Exporter<'a> {
         let thickness = 2.0 * h;
         let height = project.wall_height(e, wall);
         let length = project.wall_length(e, wall);
+        // A profiled wall's face is its profile's, and its height its highest point over its lowest.
+        let profile = wall.profile.as_ref().filter(|_| g.is_profiled());
+        let (gross, full_height) = match profile {
+            Some(p) => (p.area(), p.z_range().1 - p.z_range().0),
+            None => (length * height, height),
+        };
         self.quantities(
             e,
             "Qto_WallBaseQuantities",
             &[
                 ("Length", Quantity::Length(length)),
-                ("Height", Quantity::Length(height)),
+                ("Height", Quantity::Length(full_height)),
                 ("Width", Quantity::Length(thickness)),
-                ("GrossSideArea", Quantity::Area(length * height)),
-                ("NetSideArea", Quantity::Area((length * height - opening_area).max(0.0))),
+                ("GrossSideArea", Quantity::Area(gross)),
+                ("NetSideArea", Quantity::Area((gross - opening_area).max(0.0))),
                 ("NetVolume", Quantity::Volume(self.geom.volume(e.id))),
             ],
         );
+        if let Some(p) = profile {
+            let props = vec![
+                ("Profile", Value::Typed("IFCTEXT", Box::new(cc_core::curtain::to_text(p).into()))),
+                ("Height", Value::Typed("IFCLENGTHMEASURE", Box::new(Value::Real(height)))),
+                ("Width", Value::Typed("IFCPOSITIVELENGTHMEASURE", Box::new(Value::Real(thickness)))),
+            ];
+            self.property_set(&format!("wall-profile-{}", e.id), WALL_PROFILE_PSET, vec![product], props);
+        }
 
         for o in g.openings.clone() {
             self.write_opening(g, placement, product, &o);
@@ -3246,6 +3294,11 @@ pub const PHASING_PSET: &str = "ConstructCAD_Phasing";
 /// Property set of a curtain wall's grid: the type's `System` and the wall's
 /// `Edits` as text (see `cc_core::curtain::to_text`), its `Height` and `Bulge`.
 pub const CURTAIN_PSET: &str = "ConstructCAD_Curtain";
+/// Property set of a wall's elevation profile (see `cc_core::wall_profile`):
+/// the `Profile` as text (see `cc_core::curtain::to_text`; `u` along the
+/// wall's axis from its start, `z` above its base), its nominal `Height` and
+/// its `Width`, so import rebuilds the wall.
+pub const WALL_PROFILE_PSET: &str = "ConstructCAD_WallProfile";
 /// Property set of a roof's covering and framing (see `write_roof_framing`).
 pub const ROOFING_PSET: &str = "ConstructCAD_Roofing";
 /// `Category` of the material profile of a cold-formed section (rolled and

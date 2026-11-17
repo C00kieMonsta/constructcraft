@@ -1659,6 +1659,9 @@ impl<'a> Importer<'a> {
 
     fn import_wall(&mut self, id: u32, e: &Entity) -> bool {
         let (world, body) = self.product(e);
+        if let Some(done) = self.profiled_wall(id, e, world.translation.z, &body) {
+            return done;
+        }
         let Some(ex) = body.extrusion(true) else { return false };
         let Some((z0, z1)) = body.z_range() else { return false };
         let footprint = ex.footprint();
@@ -1708,6 +1711,27 @@ impl<'a> Importer<'a> {
             return false;
         }
         self.add_wall(id, e, (z0, z1), thickness, Wall { start, end, ..Default::default() })
+    }
+
+    /// A wall with an elevation profile written by this program
+    /// ([`crate::export::WALL_PROFILE_PSET`]): along its axis, from its
+    /// placement's elevation `base`, with its nominal height, its width and
+    /// its profile. `None` when the set is missing or does not make one.
+    fn profiled_wall(&mut self, id: u32, e: &Entity, base: f64, body: &Body) -> Option<bool> {
+        let set = |n: &str| n == crate::export::WALL_PROFILE_PSET;
+        let text = self.pset_texts(id, &set, "Profile").first().map(|s| s.to_string())?;
+        let profile: cc_core::wall_profile::WallProfile = cc_core::curtain::from_text(&text)?;
+        let numbers = self.numeric_properties(id, crate::export::WALL_PROFILE_PSET);
+        let number = |name: &str| numbers.iter().find(|n| n.0 == name).map(|n| n.1 * self.scale);
+        let (height, width) = (number("Height")?, number("Width")?);
+        let (start, end) = body.axis?;
+        let fits = height.is_finite() && height > 0.0 && width.is_finite() && width >= 0.005 && base.is_finite();
+        if !fits || !(start.is_finite() && end.is_finite()) || start.distance(end) < 0.01 {
+            return None;
+        }
+        let profile = profile.fitted(start.distance(end)).ok()?;
+        let wall = Wall { start, end, profile: Some(profile), ..Default::default() };
+        Some(self.add_wall(id, e, (base, base + height), width, wall))
     }
 
     /// Add a wall of `thickness` spanning `z` with the type and properties of `e`.
