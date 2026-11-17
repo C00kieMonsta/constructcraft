@@ -96,6 +96,8 @@ pub struct Transaction {
     views: BTreeMap<ViewId, Change<View>>,
     types: BTreeMap<ElementTypeId, Change<ElementType>>,
     settings: Option<Change<Settings>>,
+    /// Identity of the step in the undo history (see [`Document::undo_top_id`]).
+    serial: u64,
 }
 
 fn put<K: Ord, V>(map: &mut BTreeMap<K, V>, key: K, value: Option<V>) {
@@ -1084,6 +1086,8 @@ pub struct Document {
     view_state_changed: bool,
     /// Merge key of the last recorded transaction, for coalescing.
     last_merge_key: Option<u64>,
+    /// The last identity given to an undo step.
+    serials: u64,
     /// The phase new elements are built in (the active view's; `None`:
     /// the last phase). Display state: not saved, not undone.
     pub creation_phase: Option<crate::PhaseId>,
@@ -1101,6 +1105,7 @@ impl Document {
             saved_revision: 1,
             view_state_changed: false,
             last_merge_key: None,
+            serials: 0,
             creation_phase: None,
         }
     }
@@ -1167,6 +1172,22 @@ impl Document {
         self.undo.len()
     }
 
+    /// Identity of the step on top of the undo history (`None` when there is
+    /// nothing to undo). Each step recorded gets one never given before in
+    /// this document, and a step another edit is folded into (a merged edit,
+    /// a squash) gets a new one; a step undone and redone keeps its own. So a
+    /// caller that kept the identity of a step it made can tell whether that
+    /// step, unchanged, is still the one [`Document::undo`] would undo.
+    pub fn undo_top_id(&self) -> Option<u64> {
+        self.undo.last().map(|t| t.serial)
+    }
+
+    /// A new step identity.
+    fn next_serial(&mut self) -> u64 {
+        self.serials = self.serials.wrapping_add(1);
+        self.serials
+    }
+
     /// Fold the undo steps recorded since undo depth `depth` into one step
     /// named `name` (a command made of other commands, undone at once).
     /// Changes that cancel out are dropped, and so is the step if nothing is
@@ -1182,6 +1203,7 @@ impl Document {
         }
         tx.prune();
         tx.name = name.into();
+        tx.serial = self.next_serial();
         self.last_merge_key = None;
         if tx.is_empty() {
             return false;
@@ -1204,11 +1226,13 @@ impl Document {
         let result = f(&mut ctx);
         let tx = ctx.finish();
         if !tx.is_empty() {
+            let serial = self.next_serial();
             match self.undo.last_mut() {
                 Some(last) if merge_key.is_some() && merge_key == self.last_merge_key && self.redo.is_empty() => {
                     last.merge(tx);
+                    last.serial = serial;
                 }
-                _ => self.undo.push(tx),
+                _ => self.undo.push(Transaction { serial, ..tx }),
             }
             self.last_merge_key = merge_key;
             self.redo.clear();
@@ -1251,11 +1275,13 @@ impl Document {
             return outcome;
         }
         if !tx.is_empty() {
+            let serial = self.next_serial();
             match self.undo.last_mut() {
                 Some(last) if merge_key.is_some() && merge_key == self.last_merge_key && self.redo.is_empty() => {
                     last.merge(tx);
+                    last.serial = serial;
                 }
-                _ => self.undo.push(tx),
+                _ => self.undo.push(Transaction { serial, ..tx }),
             }
             self.last_merge_key = merge_key;
             self.redo.clear();
@@ -1542,5 +1568,37 @@ mod tests {
         doc.undo();
         assert_eq!(doc.project.material_users(old), users);
         assert!(doc.project.material("Carvalho").is_none());
+    }
+
+    #[test]
+    fn undo_steps_have_identities() {
+        let mut doc = Document::new(Project::from_template());
+        assert_eq!(doc.undo_top_id(), None);
+        doc.edit("a", |e| e.info_mut().name = "one".into());
+        let a = doc.undo_top_id();
+        assert!(a.is_some());
+        // Undone and redone, a step keeps its identity.
+        doc.undo();
+        assert_eq!(doc.undo_top_id(), None);
+        doc.redo();
+        assert_eq!(doc.undo_top_id(), a);
+        // An edit with no change records nothing.
+        doc.edit("none", |_| ());
+        assert_eq!(doc.undo_top_id(), a);
+        // A merged edit changes the step, and with it its identity.
+        doc.edit_merged("b", 7, |e| e.info_mut().name = "two".into());
+        let b = doc.undo_top_id();
+        assert_ne!(b, a);
+        doc.edit_merged("b", 7, |e| e.info_mut().name = "three".into());
+        assert_eq!(doc.undo_depth(), 2);
+        assert_ne!(doc.undo_top_id(), b);
+        // A step undone and replaced by another never has the same identity.
+        doc.undo();
+        doc.edit("c", |e| e.info_mut().name = "four".into());
+        assert!(doc.undo_top_id().is_some_and(|c| Some(c) != a && Some(c) != b));
+        // Squashing makes a new step.
+        let before = doc.undo_top_id();
+        assert!(doc.squash_since(0, "all"));
+        assert_ne!(doc.undo_top_id(), before);
     }
 }

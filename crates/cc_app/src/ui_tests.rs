@@ -2359,12 +2359,22 @@ fn wall_count(state: &AppState) -> usize {
     state.project().elements.values().filter(|e| e.category() == cc_core::Category::Wall).count()
 }
 
+/// The app harness wide enough for the whole Manage tab (narrower, the
+/// ribbon scrolls and its last groups are out of reach).
+fn manage_harness(state: AppState) -> Harness<'static, AppState> {
+    themed_harness(state, egui::vec2(1700.0, 760.0), egui::Theme::Light, |ui, state| {
+        crate::app::shortcuts(ui.ctx(), state);
+        crate::ribbon::ribbon(ui, state);
+        crate::dialogs::show(ui.ctx(), state);
+    })
+}
+
 /// Visual Programming opens the graph editor from the Manage tab.
 #[test]
 fn visual_programming_opens_from_the_manage_tab() {
     let mut state = sample_state();
     state.ribbon_tab = RibbonTab::Manage;
-    let mut harness = app_harness(state);
+    let mut harness = manage_harness(state);
     harness.get_by_role_and_label(Role::Button, &t!("action-visual-programming")).click();
     harness.run();
     assert!(harness.state().graph.open);
@@ -2420,6 +2430,197 @@ fn the_node_search_adds_a_node() {
     assert_eq!(g.nodes.len(), 1, "one node added");
     assert_eq!(g.nodes[0].kind, cc_engine::graph::NodeKind::Builtin("polygon_points".into()));
     assert_eq!(g.nodes[0].pos, [100.0, 50.0]);
+}
+
+/// The macro editor alone, with the app's shortcuts and dialogs.
+fn macro_harness(state: AppState) -> Harness<'static, AppState> {
+    themed_harness(state, egui::vec2(1300.0, 520.0), egui::Theme::Light, |ui, state| {
+        crate::app::shortcuts(ui.ctx(), state);
+        crate::macro_ui::show(ui, state);
+        crate::dialogs::show(ui.ctx(), state);
+    })
+}
+
+/// Two walls away from the sample house, one step each.
+const TWO_WALLS: &str = "// Two walls\n\
+    {\"command\": \"wall_create\", \"args\": {\"start\": [30, 0], \"end\": [36, 0]}}\n\
+    {\"command\": \"wall_create\", \"args\": {\"start\": [36, 0], \"end\": [36, 5]}}\n";
+
+fn macro_state(text: &str) -> AppState {
+    let mut state = sample_state();
+    state.macro_editor.open = true;
+    state.macro_editor.load_text(text);
+    state
+}
+
+fn click(harness: &mut Harness<'static, AppState>, label: &str) {
+    harness.get_by_role_and_label(Role::Button, label).click();
+    harness.run();
+}
+
+fn disabled(harness: &Harness<'static, AppState>, label: &str) -> bool {
+    harness.get_by_role_and_label(Role::Button, label).accesskit_node().is_disabled()
+}
+
+/// Macro Editor opens the panel from the Manage tab, in the graph editor's
+/// place: opening one hides the other, which keeps its state.
+#[test]
+fn macro_editor_opens_from_the_manage_tab() {
+    let mut state = sample_state();
+    state.ribbon_tab = RibbonTab::Manage;
+    state.graph.open = true;
+    let mut harness = manage_harness(state);
+    click(&mut harness, &t!("action-macro-editor"));
+    assert!(harness.state().macro_editor.open);
+    assert!(!harness.state().graph.open, "one panel under the views at a time");
+    assert!(crate::commands::UiCommand::MacroEditor.selected(harness.state()));
+    harness.state_mut().macro_editor.text = "kept".into();
+    click(&mut harness, &t!("action-visual-programming"));
+    assert!(harness.state().graph.open && !harness.state().macro_editor.open);
+    click(&mut harness, &t!("action-macro-editor"));
+    assert_eq!(harness.state().macro_editor.text, "kept", "the text is kept");
+}
+
+/// A macro typed in the editor runs a step at a time, each one undo step;
+/// Step Back undoes the last one.
+#[test]
+fn the_macro_editor_steps_through_a_macro() {
+    let mut state = sample_state();
+    state.macro_editor.open = true;
+    let (walls, depth) = (wall_count(&state), state.session.doc.undo_depth());
+    let mut harness = macro_harness(state);
+    harness.get_by_role(Role::MultilineTextInput).focus();
+    harness.run();
+    for line in TWO_WALLS.lines() {
+        harness.get_by_role(Role::MultilineTextInput).type_text(line);
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+    }
+    assert_eq!(harness.state().macro_editor.total(), 2, "{:?}", harness.state().macro_editor.text);
+    assert!(harness.state().macro_editor.dirty);
+    click(&mut harness, &t!("macro-ed-step"));
+    click(&mut harness, &t!("macro-ed-step"));
+    let s = harness.state();
+    assert_eq!((wall_count(s), s.session.doc.undo_depth()), (walls + 2, depth + 2));
+    assert_eq!(s.macro_editor.position(), 2);
+    assert!(harness.query_by_label(&t!("macro-ed-position", "n" => 2, "total" => 2)).is_some());
+    assert!(disabled(&harness, &t!("macro-ed-step")), "no step is left");
+    click(&mut harness, &t!("macro-ed-step-back"));
+    let s = harness.state();
+    assert_eq!((wall_count(s), s.session.doc.undo_depth(), s.macro_editor.position()), (walls + 1, depth + 1, 1));
+    // F10 steps too, while the pointer is over the panel.
+    harness.state_mut().macro_editor.hovered = true;
+    harness.key_press(egui::Key::F10);
+    harness.run();
+    assert_eq!(wall_count(harness.state()), walls + 2);
+}
+
+/// A line that is not a step shows in Problems and stops stepping there.
+#[test]
+fn an_invalid_line_shows_a_problem_and_stops_stepping() {
+    let text = "{\"command\": \"wall_create\", \"args\": {\"start\": [30, 0], \"end\": [36, 0]}}\nnot json\n";
+    let mut harness = macro_harness(macro_state(text));
+    click(&mut harness, &t!("macro-ed-check"));
+    let problems = harness.state().macro_editor.problems().unwrap().to_vec();
+    assert_eq!(problems.len(), 1);
+    assert_eq!(problems[0].line, Some(2));
+    let row = t!("macro-ed-problem", "line" => 2, "message" => problems[0].message.clone());
+    assert!(harness.query_by_label(&row).is_some(), "the problem is listed");
+    assert!(!disabled(&harness, &t!("macro-ed-step")), "the first step comes before the bad line");
+    assert!(disabled(&harness, &t!("macro-ed-run-end")));
+    click(&mut harness, &t!("macro-ed-step"));
+    assert!(disabled(&harness, &t!("macro-ed-step")), "no step after the bad line");
+    // Fixing it lets the run go on; a clean check says so.
+    harness.state_mut().macro_editor.load_text(&text.replace("not json", "// a comment"));
+    click(&mut harness, &t!("macro-ed-check"));
+    assert!(harness.query_by_label(&t!("macro-ed-no-problems")).is_some());
+}
+
+/// Editing a step that ran makes the run stale; Restart steps back over it.
+#[test]
+fn editing_an_executed_step_needs_a_restart() {
+    let state = macro_state(TWO_WALLS);
+    let walls = wall_count(&state);
+    let mut harness = macro_harness(state);
+    click(&mut harness, &t!("macro-ed-step"));
+    assert_eq!(wall_count(harness.state()), walls + 1);
+    // Edits after the position are fine.
+    harness.state_mut().macro_editor.load_text(&TWO_WALLS.replace("[36, 5]", "[36, 6]"));
+    harness.run();
+    assert!(!harness.state().macro_editor.is_stale());
+    // Not the step that ran.
+    harness.state_mut().macro_editor.load_text(&TWO_WALLS.replace("[30, 0]", "[31, 0]"));
+    harness.run();
+    assert!(harness.state().macro_editor.is_stale());
+    assert!(harness.query_by_label(&t!("macro-ed-stale")).is_some(), "the notice shows");
+    assert!(disabled(&harness, &t!("macro-ed-step")));
+    assert!(disabled(&harness, &t!("macro-ed-step-back")));
+    click(&mut harness, &t!("macro-ed-restart"));
+    let s = harness.state();
+    assert_eq!((wall_count(s), s.macro_editor.position(), s.macro_editor.is_stale()), (walls, 0, false));
+    click(&mut harness, &t!("macro-ed-step"));
+    assert_eq!(wall_count(harness.state()), walls + 1, "the edited step runs");
+}
+
+/// Run to End with *Single undo step* leaves one undo step, named for the run.
+#[test]
+fn run_to_end_can_make_one_undo_step() {
+    let state = macro_state(TWO_WALLS);
+    let (walls, depth) = (wall_count(&state), state.session.doc.undo_depth());
+    let mut harness = macro_harness(state);
+    harness.get_by_label(&t!("macro-ed-single-undo")).click();
+    harness.run();
+    assert!(harness.state().macro_editor.single_undo);
+    click(&mut harness, &t!("macro-ed-run-end"));
+    let s = harness.state();
+    assert_eq!((wall_count(s), s.session.doc.undo_depth()), (walls + 2, depth + 1));
+    assert_eq!(s.session.doc.undo_name(), Some(t!("macro-ed-run-name").as_str()));
+    // Restarting steps back over the run whole.
+    click(&mut harness, &t!("macro-ed-restart"));
+    assert_eq!(wall_count(harness.state()), walls);
+}
+
+/// A restart that cannot undo (the model changed since) asks before starting over.
+#[test]
+fn a_restart_that_cannot_undo_asks_first() {
+    let mut harness = macro_harness(macro_state(TWO_WALLS));
+    click(&mut harness, &t!("macro-ed-step"));
+    harness.state_mut().session.execute("project_info_set", serde_json::json!({"name": "Changed"})).unwrap();
+    click(&mut harness, &t!("macro-ed-restart"));
+    assert_eq!(harness.state().macro_editor.position(), 1, "nothing was undone");
+    click(&mut harness, &t!("macro-ed-start-over"));
+    assert_eq!(harness.state().macro_editor.position(), 0);
+    assert_eq!(harness.state().project().info.name, "Changed");
+}
+
+/// *Insert Command…* opens the palette on engine commands; the form's
+/// Insert adds the step after the cursor's line instead of running it.
+#[test]
+fn insert_command_adds_a_line() {
+    let mut state = macro_state("// first\n// second\n");
+    let walls = wall_count(&state);
+    crate::palette::open_insert(&mut state);
+    let mut harness = palette_harness(state);
+    harness.get_by_role(Role::TextInput).type_text("wall_create");
+    harness.run();
+    assert!(harness.query_by_label(&t!("action-macro-editor")).is_none(), "only engine commands");
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    harness.get_by_role(Role::MultilineTextInput).focus();
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.get_by_role(Role::MultilineTextInput).type_text(r#"{"start": [0, 0], "end": [4, 0]}"#);
+    harness.run();
+    click(&mut harness, &t!("palette-insert"));
+    let s = harness.state();
+    assert!(s.palette.is_none(), "the palette closes");
+    assert_eq!(wall_count(s), walls, "nothing ran");
+    let lines: Vec<&str> = s.macro_editor.text.lines().collect();
+    assert_eq!(lines.len(), 3, "{}", s.macro_editor.text);
+    assert_eq!(lines[0], "// first", "after the cursor's line, the first");
+    let step: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
+    assert_eq!(step, serde_json::json!({"command": "wall_create", "args": {"start": [0, 0], "end": [4, 0]}}));
+    assert_eq!(s.macro_editor.total(), 1);
 }
 
 #[test]
@@ -3086,6 +3287,8 @@ fn every_dialog_keeps_its_body_inside() {
         ("view templates".into(), Box::new(crate::graphics_dialog::open_templates)),
         ("new project".into(), Box::new(crate::new_project_dialog::open)),
         ("new component".into(), Box::new(crate::new_component_dialog::open)),
+        ("macro restart".into(), Box::new(|s| crate::macro_ui::ask(s, true))),
+        ("macro discard".into(), Box::new(|s| crate::macro_ui::ask(s, false))),
         (
             "render".into(),
             Box::new(|s| {

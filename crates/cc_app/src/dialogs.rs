@@ -50,6 +50,7 @@ pub fn show(ctx: &Context, state: &mut AppState) {
     crate::wall_framing_ui::show(ctx, state);
     crate::library::show(ctx, state);
     crate::obj_ui::show(ctx, state);
+    crate::macro_ui::dialog(ctx, state);
     crate::plugins_ui::drain_messages(state);
     crate::plugins_ui::show(ctx, state);
     // After the library window, which opens it over itself.

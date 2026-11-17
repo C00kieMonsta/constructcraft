@@ -624,7 +624,7 @@ pub fn export_dxf(state: &mut AppState) {
 // --- Macros ---
 
 /// The macro file dialog, starting in the macros folder when one is set.
-fn macro_dialog(state: &AppState) -> rfd::FileDialog {
+pub(crate) fn macro_dialog(state: &AppState) -> rfd::FileDialog {
     let dialog = rfd::FileDialog::new().add_filter(t!("file-filter-macro"), &["ccmacro", "jsonl", "json"]);
     match state.prefs.macro_dir() {
         Some(dir) => dialog.set_directory(dir),
@@ -663,7 +663,7 @@ pub fn run_macro(state: &mut AppState) {
 }
 
 /// Largest macro file read (macros are lists of commands).
-const MAX_MACRO_BYTES: u64 = 32 << 20;
+pub(crate) const MAX_MACRO_BYTES: u64 = 32 << 20;
 
 /// Run the macro at `path` (see [`run_macro`]).
 pub fn run_macro_file(state: &mut AppState, path: &std::path::Path) {

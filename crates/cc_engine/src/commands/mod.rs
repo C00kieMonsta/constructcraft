@@ -35,6 +35,7 @@ pub mod level_mark;
 pub mod levels;
 pub mod lightning;
 pub mod line_style;
+pub mod macros;
 pub mod mass;
 pub mod materials;
 pub mod mep;

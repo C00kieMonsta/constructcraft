@@ -688,6 +688,16 @@ A material a parameter names counts as used: it cannot be deleted, and renaming 
 - Elements, types, views and levels created while recording are written as [references](#scripts) to the step that created them (`{"$step": n}`), so the macro uses what it creates each time it runs. The level of the plan you record in is written as `{"$level": "active"}`: the macro plays on the level of the plan active when you run it (other levels stay as recorded).
 - Other steps refer to elements by id. Played on the project it was recorded on (or on a copy of it as it was when recording started) a macro reproduces the same changes; on another project, steps that name existing elements by id may fail or reach other elements.
 
+### Checking and formatting macros
+
+`macro_check` (with the macro's `text` or a file's `path`) reads a macro without running it and returns its number of steps and the problems found, each with its line, step and severity: lines that are not steps (bad JSON, no `"command"`), commands the session does not have (plugin commands count), argument names a command does not take, required arguments left out (a placeholder counts as given), `$step` references to a step that is not an earlier one and `$level` values other than `"active"` are errors; keys of a step other than `command` and `args`, which running it ignores, are warnings. `macro_format` rewrites a macro with one step per line in the compact form recorded macros are saved in, keeping comments and blank lines where they are and lines that are not steps as they are.
+
+```sh
+ccad run macro_check path=examples/small_house.ccmacro
+```
+
+For the app's step-by-step running, `cc_engine::script::Stepper` runs a macro one step at a time, each step one undo step, and steps back over the last one as long as nothing else changed the model since (a query steps back without undoing anything); the steps left can also run as a single undo step.
+
 ## Command palette in the app
 
 **Ctrl+Shift+P** (or the magnifier at the end of the ribbon tabs) opens the command palette. It finds interface commands, views to open or create and the engine's commands by name, description or shortcut, without regard to accents or case. Engine commands open a form with their JSON arguments, prefilled with the required fields; **Run** (Ctrl+Enter) executes them in the open project, as one undo step, and shows the result. File commands (`project_open`, `ifc_export`…) are left to the *File* tab.

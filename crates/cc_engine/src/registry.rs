@@ -535,4 +535,8 @@ registry![
         graph::GraphElements,
         graph::GraphRelease,
     ],
+    "Macros" => [
+        macros::MacroCheck,
+        macros::MacroFormat,
+    ],
 ];
