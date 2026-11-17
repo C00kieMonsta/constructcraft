@@ -3,7 +3,7 @@
   generator: "ConstructCraft 0.12.0",
   project: (
     info: (
-      uid: "7d9997c0d70747dab8743697530ca11a",
+      uid: "028d8d8588e04ee69fd658a51d23eb59",
       name: "Novo projeto",
       number: "0001",
       client: "",
@@ -684,7 +684,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "a5b3943f02364c2f9d93f7c8e5cdaf6b",
+        uid: "2088673925ba4080a7e29bdd9714c86d",
       ),
       (4): (
         id: (4),
@@ -721,7 +721,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "37eac5800a304b88a4e27c679db32ef4",
+        uid: "ad50d697f77740d4b93550812e723213",
       ),
       (5): (
         id: (5),
@@ -748,7 +748,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "3a8ad929bb654f7a83238580efe7ddbe",
+        uid: "5cb110097b334a61a968b2178e7ea9ca",
       ),
       (6): (
         id: (6),
@@ -815,7 +815,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "82954112afee41ea903196af9e7b0bad",
+        uid: "f5aa5b001d864f8884215f34aaada143",
       ),
       (7): (
         id: (7),
@@ -882,7 +882,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "0b720d8b3c6f43f18c3919b2d97f95cd",
+        uid: "2b6ac6bedb8946c3bfe72dafef323ecc",
       ),
       (8): (
         id: (8),
@@ -968,7 +968,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "39ce0b43a88d44ef81eff02de8abb563",
+        uid: "4a88b1606c2d4d48ba54bd075ed4195b",
       ),
       (9): (
         id: (9),
@@ -1054,7 +1054,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "1974d86ff4fa42d3b5810694f512c4ad",
+        uid: "78f0f450564f47e88623d6ae3f9d88ac",
       ),
       (10): (
         id: (10),
@@ -1141,7 +1141,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "89b515ef8d134cd997fcafd3355a3f0b",
+        uid: "42efb65cba5e4b02b0ed10509d29f59c",
       ),
       (11): (
         id: (11),
@@ -1240,7 +1240,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "6a87c16afe6a4af1a502e3602b0ef1f1",
+        uid: "6c79880daf9243638ac08e7f04636f16",
       ),
       (12): (
         id: (12),
@@ -1327,7 +1327,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "1dd9a3aa82e446c89d4d23dfbe3ec384",
+        uid: "43a4d490c58c477fb6475cd8d5d88946",
       ),
       (13): (
         id: (13),
@@ -1444,7 +1444,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "4b418cc7492543a9b6f709113e69811c",
+        uid: "3a97ea641b44406bbddf7a49719738bb",
       ),
       (14): (
         id: (14),
@@ -1475,7 +1475,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "da6c3d38eb784e7fb8dbfe9f37d45ed5",
+        uid: "7dbe04fedfac4bedb49de1f38a690a29",
       ),
       (15): (
         id: (15),
@@ -1496,7 +1496,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "bc1ddd9778564b239c972cbf5e0e0e60",
+        uid: "90469ed746c54cb094f108f43f16bce8",
       ),
       (16): (
         id: (16),
@@ -1521,7 +1521,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "605f44c467c2476b9aa42b8ed3dc6ed1",
+        uid: "418023b2c794416fbba0a99da2a164ea",
       ),
       (17): (
         id: (17),
@@ -1545,7 +1545,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "5c052a23a8744f45acf51c795d013749",
+        uid: "ff68d17147c2445fa1b03096a48132a4",
       ),
       (18): (
         id: (18),
@@ -1569,7 +1569,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "b2c18ccd01254d81ac63c9594f68545d",
+        uid: "1436b8c2fb2d49ab81d7adc6238308f3",
       ),
       (19): (
         id: (19),
@@ -1598,7 +1598,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "138df0f0ed83417c9dba60c3c811c182",
+        uid: "66b2cee3ce1c41f494b095be4a588e60",
       ),
       (20): (
         id: (20),
@@ -1626,7 +1626,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "446aa5a7d0774831b2cf6d81013896e1",
+        uid: "1aebf615db414b6e82fffa4fa9a333a8",
       ),
       (21): (
         id: (21),
@@ -1653,7 +1653,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "b83305bcb6c34e718a60dc923b9db877",
+        uid: "30c6e404f3f74f16b7487d589d6a3c1e",
       ),
       (22): (
         id: (22),
@@ -1674,7 +1674,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "7e4b58dc5b9d488bab7f909952d46892",
+        uid: "63c6195e99a94698a607eb5e757be4ad",
       ),
       (23): (
         id: (23),
@@ -1695,7 +1695,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "1dbbb64a4b844d3fbd7b3313a7eee7fa",
+        uid: "a5075502e10740db9503fe7fe6b21432",
       ),
       (24): (
         id: (24),
@@ -1716,7 +1716,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "ad7695c166114798bdb23f3e53e71a8b",
+        uid: "7a7ffecb1c854afc820da450d0295b47",
       ),
       (25): (
         id: (25),
@@ -1737,7 +1737,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "f325b1d5b46a43948e20138d7c430f49",
+        uid: "750c8c6455cf49d2ab638d02f4d251c6",
       ),
       (26): (
         id: (26),
@@ -1758,7 +1758,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "8bbced20651f4211960b384f3bc4f410",
+        uid: "b810a392487b44f487d80b0ce616ea78",
       ),
       (27): (
         id: (27),
@@ -1782,7 +1782,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "c31a244ead134601afc7c329abffdd23",
+        uid: "9feaa2ba6ba84630bf312c26bd6193a0",
       ),
       (28): (
         id: (28),
@@ -1806,7 +1806,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "10e60435fea34d60ab3b285ec011ceaa",
+        uid: "b3be647b233c4ab0b15b8304a67990d2",
       ),
       (29): (
         id: (29),
@@ -1830,7 +1830,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "01b09f7b651344b59678bd93b203f783",
+        uid: "be94c8fcc9654122a9d856ef3deee120",
       ),
       (30): (
         id: (30),
@@ -1871,7 +1871,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "06091c1079bd4120a11f26468613d87f",
+        uid: "04eaaff67ab24cc79e1581f9a1813626",
       ),
       (31): (
         id: (31),
@@ -1893,7 +1893,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "ae2541046ca5485c8f9be3ffda095d83",
+        uid: "dedcdcbfe4a242ee90b6c5c42590c872",
       ),
       (32): (
         id: (32),
@@ -1914,7 +1914,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "255c1d59b021456a9208713ab77ca5f7",
+        uid: "a89423bd65834a30a1517687b1ba0a76",
       ),
       (33): (
         id: (33),
@@ -1935,7 +1935,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "526899cb853848979cbe440b4b3a3af9",
+        uid: "3e25157063fb42e999ef18aa27f151de",
       ),
       (34): (
         id: (34),
@@ -1956,7 +1956,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "b7f54044fad44013b1f602bbdae5c1b7",
+        uid: "59d8227641e44f338ff9149c8ddc8adc",
       ),
       (35): (
         id: (35),
@@ -1977,7 +1977,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "2eef63284daf42a6b1243723e21f85b0",
+        uid: "3337bfaa82f546c39413fefb7704a8b2",
       ),
       (36): (
         id: (36),
@@ -1998,7 +1998,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "169e8bb8f9a44b47a22244001669a969",
+        uid: "13b8a97f51f64faca7c97b414bc5904a",
       ),
       (37): (
         id: (37),
@@ -2019,7 +2019,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "a34b4b06d2dc4a53b35fba6960134f4b",
+        uid: "497f835f5b2844eaaec21bd458a85833",
       ),
       (38): (
         id: (38),
@@ -2040,7 +2040,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "a6746421da8a429499acda6ec53f4a1c",
+        uid: "b4fb5703c88244dbba356d63a3ac1767",
       ),
       (39): (
         id: (39),
@@ -2061,7 +2061,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "a62129f3d1684bbfaf23e35c54ec98d8",
+        uid: "d973b82a988f468b88563d379589c537",
       ),
       (40): (
         id: (40),
@@ -2082,7 +2082,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "89491400a00f447dbf5168a539f0107f",
+        uid: "304fe3cc908049e898e9ab7cc73ddd1b",
       ),
       (41): (
         id: (41),
@@ -2103,7 +2103,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "e786cc1f2ebc4a5abae20fd1087b97cb",
+        uid: "5dd13c781d6c4f30848b7dcaf3e2af59",
       ),
       (42): (
         id: (42),
@@ -2121,7 +2121,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "4db8641c20654ab6b55b2d583efc5ce0",
+        uid: "cb9cce0520a54680b2500734d1910c9b",
       ),
       (43): (
         id: (43),
@@ -2145,7 +2145,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "720e218488844ff582e683abfd82341f",
+        uid: "c67766fa71d34ef29bc5b58df27148e4",
       ),
       (44): (
         id: (44),
@@ -2179,7 +2179,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "76d20be719b54e01ba105f983903bc4e",
+        uid: "2ad78f05c739468f9051b12a49210179",
       ),
       (45): (
         id: (45),
@@ -2200,7 +2200,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "f66321aebd02456794bfd3f43829df90",
+        uid: "aa1bbd12e9724ac983969579e48417d9",
       ),
       (46): (
         id: (46),
@@ -2221,7 +2221,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "758e326bbc314b789115b5c99736f041",
+        uid: "42ee9a8354bc4d26ba33e99f968696cd",
       ),
       (47): (
         id: (47),
@@ -2275,7 +2275,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "64aca37ee7324b2791c5f2288cf00fff",
+        uid: "7d1c431e62854019b1441b173a861aed",
       ),
       (48): (
         id: (48),
@@ -2350,7 +2350,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "41a9546a7b5b4bc8a9b0fd335393c434",
+        uid: "508a9f3274664f81ad07548ee802e131",
       ),
       (49): (
         id: (49),
@@ -2437,7 +2437,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "c8c22deec6cd4b038809c4c6e37718e1",
+        uid: "411eafa2f7164cc1bb82497d888d3dbe",
       ),
       (50): (
         id: (50),
@@ -2494,7 +2494,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "babe6d0587684c568ce36b57d5dff5b1",
+        uid: "3a650796177a4237923777545d5c4c2d",
       ),
       (51): (
         id: (51),
@@ -2569,7 +2569,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "a252d8002adf41e8bb95d1656a36543e",
+        uid: "f96c8482081c4d85bc4e3b2a228cc79f",
       ),
       (52): (
         id: (52),
@@ -2651,7 +2651,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "060c6407350d40d587764c71fd44f6b2",
+        uid: "a38041d8aa2940c58eb9e1cdf7744144",
       ),
       (53): (
         id: (53),
@@ -2742,7 +2742,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "5570448e0a0743a9950c9293f856483a",
+        uid: "6bc884563c5f4bc09eef9443bdf88a0e",
       ),
       (54): (
         id: (54),
@@ -2793,7 +2793,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "e2e2896e15fb42f6bce858981de9577c",
+        uid: "c66ad09ac78044388e118b76924bd729",
       ),
       (55): (
         id: (55),
@@ -2849,7 +2849,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "aed91bdef0704a418fcbb108be0ce2d7",
+        uid: "0a8f9124e745407d9ec4cd90b7b6b070",
       ),
       (56): (
         id: (56),
@@ -2905,7 +2905,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "01546773160d4fb5b634f06684e22d6a",
+        uid: "d08669bb696c4239873db056592dd6ad",
       ),
       (57): (
         id: (57),
@@ -2961,7 +2961,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "8694fb672c1449748fcacfda0ebcbbdd",
+        uid: "c3cbb486239a4261b819d75a816c9ffe",
       ),
       (58): (
         id: (58),
@@ -3016,7 +3016,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "86243b2845e941958cd76f1db99d9fc2",
+        uid: "900d47f0f2704cf28385662ef4389a65",
       ),
       (59): (
         id: (59),
@@ -3071,7 +3071,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "4977fbe04d5f4e938662a01242a55082",
+        uid: "a486409c0e0743a9919c95a276ea2ad1",
       ),
       (60): (
         id: (60),
@@ -3126,7 +3126,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "29571308fadb485f9399854423c4c06e",
+        uid: "de275afa29fd484189a16f8ac0f3cb94",
       ),
       (61): (
         id: (61),
@@ -3181,7 +3181,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "aa270f3e77794e79b6c3747f9cca9745",
+        uid: "72e3b0f4d532466ab4dbdfa8528c48d8",
       ),
       (62): (
         id: (62),
@@ -3236,7 +3236,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "b4a0848c286340169c533e8aff995dd3",
+        uid: "d20bfa2f89004ea4b9d4f2615e1e738a",
       ),
       (63): (
         id: (63),
@@ -3291,7 +3291,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "ae0abdb7e6964be393894832886db353",
+        uid: "d5bd05e3c9c5477596ca478b59571c56",
       ),
       (84): (
         id: (84),
@@ -3378,7 +3378,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "e4ad84fb476b4304a850b1134990010a",
+        uid: "c14807654a504a0e98dd2cf9e662cec3",
       ),
       (94): (
         id: (94),
@@ -3475,7 +3475,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "b812e146d0464bd18d828392a790319b",
+        uid: "4814e042e9e349ca847701c89577c2e1",
       ),
       (95): (
         id: (95),
@@ -3603,7 +3603,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "90e7578ee73a46358eb79fafa60a5661",
+        uid: "a7d74008c2804ff58520a3cc1d753728",
       ),
       (102): (
         id: (102),
@@ -3640,7 +3640,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "35f05d1bd1794930a6186b8474967274",
+        uid: "4b7bd32e2f80437fa02b92d2be1ee912",
       ),
       (103): (
         id: (103),
@@ -3677,7 +3677,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "56af39ee76ed4a48aae5348e0afc8060",
+        uid: "d31f9f29d18c44e88a2697b9dcc3dc43",
       ),
       (104): (
         id: (104),
@@ -3722,7 +3722,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "6889d6435a134f0da7bb62834b81940d",
+        uid: "8748200ec64647fa8469f965aa4baa2f",
       ),
       (105): (
         id: (105),
@@ -3759,7 +3759,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "602d419ba444449c84a2de3659013c16",
+        uid: "246d01fe08324f2dbc701d4c5ec9287c",
       ),
       (106): (
         id: (106),
@@ -3796,7 +3796,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "237ff02115dc44ee8339f56553aaf9db",
+        uid: "f671c23a09bf49c3a8c11ddbf0dfe446",
       ),
       (107): (
         id: (107),
@@ -3833,7 +3833,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "540cb72d48e647d9b0c55720dbc69e5d",
+        uid: "29f32dea2b3d42e3905c8bcf53e7a125",
       ),
       (108): (
         id: (108),
@@ -3873,7 +3873,7 @@
           comments: "",
           cost: None,
         ),
-        uid: "9d43308cc89840e3b465601779840727",
+        uid: "ad8fc99e576b4184bcdd79e45f886876",
       ),
       (109): (
         id: (109),
@@ -3914,7 +3914,47 @@
           comments: "",
           cost: None,
         ),
-        uid: "aa0af5b635d54ca7b7d98b2e19a8ce05",
+        uid: "4cbfc2b03a384985a7993d66e3b064aa",
+      ),
+      (116): (
+        id: (116),
+        name: "Insulated",
+        data: Wall(
+          layers: [
+            (
+              material: "Reboco",
+              thickness: 0.02,
+              function: Finish,
+              base_offset: 1.0,
+            ),
+            (
+              material: "Alvenaria",
+              thickness: 0.11,
+              function: Structure,
+              base_offset: -0.5,
+            ),
+            (
+              material: "Reboco",
+              thickness: 0.02,
+              function: Finish,
+              height: Some(2.0),
+            ),
+          ],
+          function: Exterior,
+        ),
+        info: (
+          type_mark: "",
+          description: "",
+          manufacturer: "",
+          model: "",
+          url: "",
+          keynote: "",
+          classification: "",
+          fire_rating: "",
+          comments: "",
+          cost: None,
+        ),
+        uid: "d351d249b9384352ab7d5106cbcae888",
       ),
     },
     elements: {
@@ -3953,7 +3993,7 @@
             )),
           )),
         )),
-        uid: "d72ca10b33b6496ab47c624bdcf602cc",
+        uid: "6aa5ec3df30f4984928ffb7f2ea36929",
         phase_created: (86),
       ),
       (111): (
@@ -3975,7 +4015,7 @@
           join_end: true,
           bulge: 0.0,
         )),
-        uid: "a595162409d74191b9a7d0508f6e544e",
+        uid: "b94219ecb4fe415db7cc6e7dacecfe29",
         phase_created: (86),
       ),
       (112): (
@@ -4007,7 +4047,7 @@
             ],
           )),
         )),
-        uid: "f4ee2d04a9324ad98a40d421bd31af47",
+        uid: "7a187a75eafd4781a54cf0602786f67f",
         phase_created: (86),
       ),
       (113): (
@@ -4023,7 +4063,7 @@
           flip_facing: false,
           flip_hand: false,
         )),
-        uid: "472e20a1f5764369ba13e15a97da78f1",
+        uid: "0d0a92ad6e1f421198305a52b9fe949f",
         phase_created: (86),
       ),
       (114): (
@@ -4053,7 +4093,7 @@
             ],
           )),
         )),
-        uid: "9b6a73ba7862484d9cd096cb3c1c41df",
+        uid: "1e22a6995b464ff8a73c7c2b7d3019ad",
         phase_created: (86),
       ),
       (115): (
@@ -4150,7 +4190,127 @@
             )),
           )),
         )),
-        uid: "4c68be26d9af4129b556a0c44695f8ba",
+        uid: "7dd95e9a467849d08e4ae50078718790",
+        phase_created: (86),
+      ),
+      (117): (
+        id: (117),
+        level: (1),
+        type_id: (116),
+        mark: "",
+        comments: "",
+        kind: Wall((
+          start: (0.0, 20.0),
+          end: (6.0, 20.0),
+          base_offset: 0.0,
+          height: 3.0,
+          top: Unconnected,
+          location_line: Centerline,
+          room_bounding: true,
+          structural: false,
+          join_start: true,
+          join_end: true,
+          bulge: 0.0,
+        )),
+        uid: "d95e4618c151448eb018d82e84b8ef3c",
+        phase_created: (86),
+      ),
+      (118): (
+        id: (118),
+        level: (1),
+        type_id: (6),
+        mark: "",
+        comments: "",
+        kind: Door((
+          host: (117),
+          offset: 3.0,
+          sill_height: 0.0,
+          flip_facing: false,
+          flip_hand: false,
+        )),
+        uid: "b2618a0a14144d5e8375b227a6161006",
+        phase_created: (86),
+      ),
+      (119): (
+        id: (119),
+        level: (1),
+        type_id: (116),
+        mark: "",
+        comments: "",
+        kind: Wall((
+          start: (0.0, 26.0),
+          end: (6.0, 26.0),
+          base_offset: 0.0,
+          height: 3.0,
+          top: Unconnected,
+          location_line: Centerline,
+          room_bounding: true,
+          structural: false,
+          join_start: true,
+          join_end: true,
+          bulge: 0.0,
+          profile: Some((
+            outline: [
+              (0.0, 0.0),
+              (6.0, 0.0),
+              (6.0, 2.0),
+              (0.0, 3.0),
+            ],
+            sketch: Some((
+              curves: [
+                Line(a: (0.0, 0.0), b: (6.0, 0.0)),
+                Line(a: (6.0, 0.0), b: (6.0, 2.0)),
+                Line(a: (6.0, 2.0), b: (0.0, 3.0)),
+                Line(a: (0.0, 3.0), b: (0.0, 0.0)),
+              ],
+            )),
+          )),
+        )),
+        uid: "8f62e05f23134ecb81300278fbad0f8c",
+        phase_created: (86),
+      ),
+      (120): (
+        id: (120),
+        level: (1),
+        type_id: (3),
+        mark: "",
+        comments: "",
+        kind: Wall((
+          start: (6.0, 26.0),
+          end: (6.0, 30.0),
+          base_offset: 0.0,
+          height: 3.0,
+          top: Unconnected,
+          location_line: Centerline,
+          room_bounding: true,
+          structural: false,
+          join_start: true,
+          join_end: true,
+          bulge: 0.0,
+        )),
+        uid: "f9a064c0c5f74eada8548f339b63dded",
+        phase_created: (86),
+      ),
+      (121): (
+        id: (121),
+        level: (1),
+        type_id: (116),
+        mark: "",
+        comments: "",
+        kind: Wall((
+          start: (14.0, 20.0),
+          end: (10.0, 24.0),
+          base_offset: 0.0,
+          height: 3.0,
+          top: Unconnected,
+          location_line: Centerline,
+          room_bounding: true,
+          structural: false,
+          join_start: true,
+          join_end: true,
+          bulge: 0.41421356237309503,
+        )),
+        uid: "a6b0ddce36ed412e80d97f6506c2d331",
         phase_created: (86),
       ),
     },
@@ -4556,7 +4716,7 @@
     profiles: {
       (96): (
         id: (96),
-        uid: "af9ce9298e274d268cc64551c373b2ef",
+        uid: "9786761ab8014d69a00925e1a445797f",
         name: "Rect 20x20",
         material: Concrete,
         shape: Rect(
@@ -4569,7 +4729,7 @@
       ),
       (97): (
         id: (97),
-        uid: "0c924059a9454214ba71ecfe2dc1ef38",
+        uid: "27571914b04b4211a6da4f7a01d55d46",
         name: "Ø30",
         material: Concrete,
         shape: Round(
@@ -4580,7 +4740,7 @@
       ),
       (98): (
         id: (98),
-        uid: "cb5373637cc447e6b2c0eb622c557e37",
+        uid: "1ad25d650b664d508cb234da36a1f69a",
         name: "Rect 15x40",
         material: Concrete,
         shape: Rect(
@@ -4593,7 +4753,7 @@
       ),
       (99): (
         id: (99),
-        uid: "127799fa62ac4fffa32ce4b42f8813dc",
+        uid: "5f7f7b14237e4010ae6bd3f6d8a51c91",
         name: "I 200x200x9x15",
         material: Steel,
         shape: I(
@@ -4608,7 +4768,7 @@
       ),
       (100): (
         id: (100),
-        uid: "3b47a36556524f0887d9924e4a198022",
+        uid: "8f6c60beafc7493ebbc08eaed8a54316",
         name: "Tube 150x150x6",
         material: Steel,
         shape: RectTube(
@@ -4622,7 +4782,7 @@
       ),
       (101): (
         id: (101),
-        uid: "7ead3b3488484fdbadd82e425312ee90",
+        uid: "7d64becc0de54b4b86210ec9914a447d",
         name: "I 300x150x7.1x10.7",
         material: Steel,
         shape: I(
@@ -4636,6 +4796,6 @@
         description: "",
       ),
     },
-    next_id: 116,
+    next_id: 122,
   ),
 )

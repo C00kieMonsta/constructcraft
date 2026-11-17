@@ -2054,6 +2054,20 @@ impl<'a> Exporter<'a> {
         let description = opt_str(&ty.info.description);
         let mut base =
             args![gid, n.clone(), ty.name.as_str(), description, n.clone(), n.clone(), n.clone(), n.clone(), n.clone()];
+        // A wall type whose layers have extents of their own carries them in its property
+        // sets ([`WALL_LAYERS_PSET`]), so files of this program round-trip.
+        if let TypeData::Wall { layers, curtain: None, .. } = &ty.data
+            && cc_core::layer_extent::any(layers)
+            && let Some(slot) = base.get_mut(5)
+        {
+            let extents: Vec<cc_core::layer_extent::Extent> =
+                layers.iter().map(cc_core::layer_extent::Extent::of).collect();
+            let text = Value::Typed("IFCTEXT", Box::new(cc_core::curtain::to_text(&extents).into()));
+            let prop = self.w.add("IFCPROPERTYSINGLEVALUE", args!["Extents", n.clone(), text, n.clone()]);
+            let gid = self.guid(&format!("pset-wall-layers-type-{type_id}"));
+            let set = self.w.add("IFCPROPERTYSET", args![gid, n.clone(), WALL_LAYERS_PSET, n.clone(), vec![prop]]);
+            *slot = Value::List(vec![Value::Ref(set)]);
+        }
         let (entity, extra): (&str, Vec<Value>) = match ty.data {
             // Rooms, grids, dimensions, texts, detail lines, regions, level marks,
             // imported drawings, masses, shafts, steel buildings, trusses and pads have no IFC type object.
@@ -2339,9 +2353,31 @@ impl<'a> Exporter<'a> {
             return;
         }
 
+        // Swept solids, or clipped where a profiled wall meets another in a mitered end.
+        let mut kind = "SweptSolid";
+        // Layers with extents of their own: one item per layer, each in its material.
+        let layered = if g.is_banded() { self.layer_bodies(g, &mut kind) } else { Vec::new() };
+        let (bodies, axis) = if !layered.is_empty() {
+            (layered, self.wall_axis(g))
+        } else {
+            let (body, axis) = self.wall_body(e, g, &mut kind);
+            (vec![body], axis)
+        };
+        let shape = self.shape_of_type(bodies, Some(axis), kind);
+        let mut attrs = self.element_args(e, placement, shape);
+        attrs.push(Value::Enum("STANDARD"));
+        let product = self.w.add("IFCWALL", attrs);
+        self.products.insert(e.id, product);
+        self.register(e, product);
+        self.write_wall_rest(e, wall, g, placement, product);
+    }
+
+    /// The body of a wall whose layers span it whole, in its main
+    /// material, and its axis.
+    fn wall_body(&mut self, e: &Element, g: &WallGeom, kind: &mut &'static str) -> (Id, Id) {
+        let project = self.project;
         let h = g.half;
         // A wall with an elevation profile: the outline swept across the wall, clipped at mitered ends.
-        let mut kind = "SweptSolid";
         let (body, axis) = if let Some(outline) = g.profile_outline().filter(|_| g.arc.is_none()) {
             let pts: Vec<DVec2> = outline.iter().map(|p| DVec2::new(p.x, p.y - g.base_z)).collect();
             // The outline's plane is the wall's axis plane (x along the wall, y up), swept from its left face to its right.
@@ -2353,7 +2389,7 @@ impl<'a> Exporter<'a> {
                     continue;
                 }
                 body = self.clip_end(body, DVec2::new(ul, h), DVec2::new(ur, -h), outward);
-                kind = "Clipping";
+                *kind = "Clipping";
             }
             let axis_start = self.origin2;
             let axis_end = self.point2(DVec2::new(g.length, 0.0));
@@ -2390,13 +2426,109 @@ impl<'a> Exporter<'a> {
             let style = self.material_style(ty.main_material());
             self.styled(body, style);
         }
-        let shape = self.shape_of_type(vec![body], Some(axis), kind);
-        let mut attrs = self.element_args(e, placement, shape);
-        attrs.push(Value::Enum("STANDARD"));
-        let product = self.w.add("IFCWALL", attrs);
-        self.products.insert(e.id, product);
-        self.register(e, product);
+        (body, axis)
+    }
 
+    /// A wall's axis: its body centerline from its start, a polyline or a trimmed circle.
+    fn wall_axis(&mut self, g: &WallGeom) -> Id {
+        match g.arc {
+            Some(arc) => {
+                let center = self.point2(wall_local(g, arc.center));
+                let position = self.w.add("IFCAXIS2PLACEMENT2D", args![center, Value::Null]);
+                let circle = self.w.add("IFCCIRCLE", args![position, arc.radius]);
+                let end = self.point2(wall_local(g, g.world(g.length, 0.0)));
+                let sense = arc.sweep >= 0.0;
+                let args = args![circle, vec![self.origin2], vec![end], sense, Value::Enum("CARTESIAN")];
+                self.w.add("IFCTRIMMEDCURVE", args)
+            }
+            None => {
+                let axis_start = self.origin2;
+                let axis_end = self.point2(DVec2::new(g.length, 0.0));
+                self.w.add("IFCPOLYLINE", args![vec![axis_start, axis_end]])
+            }
+        }
+    }
+
+    /// The body of a wall whose layers have extents of their own (see
+    /// `cc_core::layer_extent`): one item per layer, in the layer's material.
+    /// With an elevation profile, each stretch where the layer stands is its
+    /// outline in the wall's elevation plane swept across the layer and
+    /// clipped at mitered ends it reaches (a clipped body has every item
+    /// clipped, as its representation type asks: the others at an end they do
+    /// not reach, which leaves them whole); otherwise the layer's strip of the
+    /// footprint extruded from its bottom to its top. Openings stay voids.
+    fn layer_bodies(&mut self, g: &WallGeom, kind: &mut &'static str) -> Vec<Id> {
+        let h = g.half;
+        let last = g.layers.len().saturating_sub(1);
+        let across = |(ul, ur): (f64, f64), v: f64| if h > 1e-12 { ur + (ul - ur) * (v + h) / (2.0 * h) } else { ul };
+        // Each item, whether it is clipped, and its material.
+        let mut items: Vec<(Id, bool, String)> = Vec::new();
+        for (k, (v_from, v_to, material)) in g.layers.clone().into_iter().enumerate() {
+            let v_hi = if k == 0 { h } else { v_from };
+            let v_lo = if k == last { -h } else { v_to };
+            let Some(extent) = g.layer_extents.get(k).copied().filter(|_| v_hi - v_lo > 1e-9) else { continue };
+            if g.is_profiled() && g.arc.is_none() {
+                for outline in g.layer_outlines(k) {
+                    let pts: Vec<DVec2> = outline.iter().map(|p| DVec2::new(p.x, p.y - g.base_z)).collect();
+                    let frame = Frame { origin: DVec3::new(0.0, v_hi, 0.0), x: DVec3::X, z: -DVec3::Y };
+                    let position = self.placement3(frame);
+                    let mut body = self.extrude_polygon(&pts, position, self.dir_z, v_hi - v_lo);
+                    let (u0, u1) = pts.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p.x), hi.max(p.x)));
+                    // A mitered end the outline reaches cuts it.
+                    let mut clipped = false;
+                    for ((ul, ur), end, outward) in [(g.start_ext, u0, -1.0), (g.end_ext, u1, 1.0)] {
+                        let (lo, hi) = (ul.min(ur), ul.max(ur));
+                        let reaches = if outward < 0.0 { end <= hi + 1e-9 } else { end >= lo - 1e-9 };
+                        if hi - lo < 1e-9 || !reaches {
+                            continue;
+                        }
+                        body = self.clip_end(body, DVec2::new(ul, h), DVec2::new(ur, -h), outward);
+                        clipped = true;
+                    }
+                    items.push((body, clipped, material.clone()));
+                }
+            } else if let Some((z0, z1)) = extent.range(g.base_z, g.top_z) {
+                let dz = z0 - g.base_z;
+                let position =
+                    if dz.abs() < 1e-12 { self.identity } else { self.placement3(Frame::at(DVec3::new(0.0, 0.0, dz))) };
+                let body = if g.arc.is_some() {
+                    let left = (across(g.start_ext, v_hi), across(g.end_ext, v_hi));
+                    let right = (across(g.start_ext, v_lo), across(g.end_ext, v_lo));
+                    let profile = self.wall_outline_profile(g, left, right, (v_hi, v_lo));
+                    self.w.add("IFCEXTRUDEDAREASOLID", args![profile, position, self.dir_z, z1 - z0])
+                } else {
+                    let strip = [
+                        DVec2::new(across(g.start_ext, v_lo), v_lo),
+                        DVec2::new(across(g.end_ext, v_lo), v_lo),
+                        DVec2::new(across(g.end_ext, v_hi), v_hi),
+                        DVec2::new(across(g.start_ext, v_hi), v_hi),
+                    ];
+                    self.extrude_polygon(&strip, position, self.dir_z, z1 - z0)
+                };
+                items.push((body, false, material));
+            }
+        }
+        // Where one item is clipped, all are: the others at a mitered end, beyond which they lie.
+        let mitered = [(g.start_ext, -1.0), (g.end_ext, 1.0)].into_iter().find(|((ul, ur), _)| (ul - ur).abs() > 1e-9);
+        if let (true, Some(((ul, ur), outward))) = (items.iter().any(|i| i.1), mitered) {
+            *kind = "Clipping";
+            for item in items.iter_mut().filter(|i| !i.1) {
+                item.0 = self.clip_end(item.0, DVec2::new(ul, h), DVec2::new(ur, -h), outward);
+            }
+        }
+        let mut out = Vec::with_capacity(items.len());
+        for (body, _, material) in items {
+            let style = self.material_style(&material);
+            self.styled(body, style);
+            out.push(body);
+        }
+        out
+    }
+
+    /// What follows a wall's body: its layer set, property sets, quantities, openings and recesses.
+    fn write_wall_rest(&mut self, e: &Element, wall: &cc_core::Wall, g: &WallGeom, placement: Id, product: Id) {
+        let project = self.project;
+        let h = g.half;
         // Layers are listed from the left face (+Y) towards the right.
         self.layer_usage(e.type_id, product, "AXIS2", h);
 
@@ -2444,6 +2576,14 @@ impl<'a> Exporter<'a> {
                 ("Width", Value::Typed("IFCPOSITIVELENGTHMEASURE", Box::new(Value::Real(thickness)))),
             ];
             self.property_set(&format!("wall-profile-{}", e.id), WALL_PROFILE_PSET, vec![product], props);
+        }
+        // Its layers stepped (see `layer_bodies`): its nominal height and width, the extents being its type's.
+        if g.is_banded() {
+            let props = vec![
+                ("Height", Value::Typed("IFCLENGTHMEASURE", Box::new(Value::Real(height)))),
+                ("Width", Value::Typed("IFCPOSITIVELENGTHMEASURE", Box::new(Value::Real(thickness)))),
+            ];
+            self.property_set(&format!("wall-layers-{}", e.id), WALL_LAYERS_PSET, vec![product], props);
         }
 
         for o in g.openings.clone() {
@@ -3299,6 +3439,12 @@ pub const CURTAIN_PSET: &str = "ConstructCAD_Curtain";
 /// wall's axis from its start, `z` above its base), its nominal `Height` and
 /// its `Width`, so import rebuilds the wall.
 pub const WALL_PROFILE_PSET: &str = "ConstructCAD_WallProfile";
+/// Property set of a wall type whose layers have vertical extents of their own
+/// (see `cc_core::layer_extent`): its `Extents`, one `(base_offset, height)`
+/// per layer in the order of its layer set, as text (see
+/// `cc_core::curtain::to_text`); on each of its walls, their nominal `Height`
+/// and `Width`, so import rebuilds the walls whose body is one item per layer.
+pub const WALL_LAYERS_PSET: &str = "ConstructCAD_WallLayers";
 /// Property set of a roof's covering and framing (see `write_roof_framing`).
 pub const ROOFING_PSET: &str = "ConstructCAD_Roofing";
 /// `Category` of the material profile of a cold-formed section (rolled and

@@ -825,6 +825,10 @@ fn draw_wall(d: &mut Drawing2D, project: &Project, g: &WallGeom, cut_z: f64, spa
         draw_curtain(d, project, g, c, cut_z, spacing, detail);
         return;
     }
+    if g.is_banded() {
+        draw_banded_wall(d, project, g, cut_z, spacing, detail);
+        return;
+    }
     let id = Some(g.element);
     let h = g.half;
     // A wall with an elevation profile is cut only where the plane passes through it.
@@ -885,6 +889,130 @@ fn draw_wall(d: &mut Drawing2D, project: &Project, g: &WallGeom, cut_z: f64, spa
             && let Some(style) = style_of(state)
         {
             d.line(g.world(ur, -h), g.world(ul, h), style, id);
+        }
+    }
+}
+
+/// A wall whose layers have extents of their own (see
+/// [`cc_core::layer_extent`]) in plan: each band of layers is cut, seen
+/// below or left out on its own, as the cut height finds it. A cut band's
+/// layers are drawn as a plain wall's (at the coarse level one plain region
+/// per band); one wholly below the cut shows its outline; one above it
+/// nothing. Where neighbouring bands differ, the line between them takes
+/// the stronger state. The layer cleanup at Ts is drawn as for a plain wall:
+/// it takes the layers to stand at the cut.
+fn draw_banded_wall(d: &mut Drawing2D, project: &Project, g: &WallGeom, cut_z: f64, spacing: f64, detail: DetailLevel) {
+    let id = Some(g.element);
+    let h = g.half;
+    let bands = g.bands();
+    let last = bands.len().saturating_sub(1);
+    let columns = g.cut_columns(cut_z);
+    let count = columns.len();
+    let state_of = |c: &Column, band: &cc_geom::Band| {
+        let mid = (c.left.0.max(c.right.0) + c.left.1.min(c.right.1)) * 0.5;
+        let heights: Vec<(f64, f64)> = g.extent_lines(c, band.extent).iter().map(|(a, b)| (a.at(mid), b.at(mid))).collect();
+        if heights.iter().any(|&(a, b)| a <= cut_z && cut_z <= b) {
+            ColumnCut::Cut
+        } else if heights.first().is_some_and(|s| s.0 < cut_z) {
+            ColumnCut::Below
+        } else {
+            ColumnCut::None
+        }
+    };
+    let states: Vec<Vec<ColumnCut>> = columns.iter().map(|c| bands.iter().map(|b| state_of(c, b)).collect()).collect();
+    let stronger = |a: ColumnCut, b: ColumnCut| {
+        if a == ColumnCut::Cut || b == ColumnCut::Cut {
+            Some(LineStyle::Cut)
+        } else if a == ColumnCut::Below || b == ColumnCut::Below {
+            Some(LineStyle::Projection)
+        } else {
+            None
+        }
+    };
+    let layered = detail.shows_layers();
+    for (i, c) in columns.iter().enumerate() {
+        let Some(state) = states.get(i) else { continue };
+        let at = |j: usize| state.get(j).copied().unwrap_or(ColumnCut::None);
+        // Along the wall, the line `v` across it: carried on with a core reaching a T-joined wall where cut layers are drawn.
+        let span = |v: f64, cut: bool| if cut && layered { g.layer_span(c, i, count, v) } else { g.span_at(c, v) };
+        for (j, band) in bands.iter().enumerate() {
+            if at(j) != ColumnCut::Cut {
+                continue;
+            }
+            if !layered {
+                let (a, b) = (g.span_at(c, band.v_hi), g.span_at(c, band.v_lo));
+                let mut strip = g.path(a.0, a.1, band.v_hi);
+                strip.extend(g.path(b.1, b.0, band.v_lo));
+                d.cut_fill(strip, POCHE, id);
+                continue;
+            }
+            for k in band.layers.0..=band.layers.1 {
+                let Some((v0, v1, material)) = g.layers.get(k) else { continue };
+                let (a, b) = (g.layer_span(c, i, count, *v0), g.layer_span(c, i, count, *v1));
+                for ((a0, a1), (b0, b1)) in g.layer_pieces(*v0, *v1, a, b) {
+                    let mut strip = g.path(a0, a1, *v0);
+                    strip.extend(g.path(b1, b0, *v1));
+                    crate::cut::cut_fill(d, project, material, strip, spacing, id);
+                }
+            }
+            // The lines between its own layers.
+            for k in band.layers.0..band.layers.1 {
+                let Some(&(_, v, _)) = g.layers.get(k) else { continue };
+                let (u0, u1) = g.layer_span(c, i, count, v);
+                for (a, b) in g.boundary_segments(v, u0, u1) {
+                    d.polyline(&g.path(a, b, v), false, LineStyle::Thin, id);
+                }
+            }
+        }
+        // Between neighbouring bands: a layer line where both are cut, else the stronger state's.
+        for (j, band) in bands.iter().enumerate().take(last) {
+            let (a, b) = (at(j), at(j + 1));
+            let style = match (a, b) {
+                (ColumnCut::Cut, ColumnCut::Cut) => layered.then_some(LineStyle::Thin),
+                _ => stronger(a, b),
+            };
+            let Some(style) = style else { continue };
+            let v = band.v_lo;
+            let (u0, u1) = span(v, a == ColumnCut::Cut || b == ColumnCut::Cut);
+            for (p, q) in g.boundary_segments(v, u0, u1) {
+                d.polyline(&g.path(p, q, v), false, style, id);
+            }
+        }
+        // The wall's faces, opened where other walls meet them in a T and where a cut niche is.
+        for (side, j) in [(-1.0, last), (1.0, 0)] {
+            let Some(style) = style_of(at(j)) else { continue };
+            let cut = at(j) == ColumnCut::Cut;
+            let (u0, u1) = span(side * h, cut);
+            let cut_at = if cut { cut_z } else { f64::NAN };
+            for (a, b) in g.face_segments_at(side, u0, u1, cut_at) {
+                d.polyline(&g.path(a, b, side * h), false, style, id);
+            }
+        }
+        // Across the wall where a band's state changes from this column to the next.
+        if let Some(next) = states.get(i + 1) {
+            for (j, band) in bands.iter().enumerate() {
+                let theirs = next.get(j).copied().unwrap_or(ColumnCut::None);
+                if theirs == at(j) {
+                    continue;
+                }
+                if let Some(style) = stronger(at(j), theirs) {
+                    d.line(g.world(c.left.1, band.v_lo), g.world(c.left.1, band.v_hi), style, id);
+                }
+            }
+        }
+    }
+    // Each band's piece of a free end.
+    let caps = [
+        (g.start_joined, states.first(), g.start_ext),
+        (g.end_joined, states.last(), g.end_ext),
+    ];
+    let across = |(ul, ur): (f64, f64), v: f64| if h > 1e-12 { ur + (ul - ur) * (v + h) / (2.0 * h) } else { ul };
+    for (joined, state, ends) in caps {
+        let (false, Some(state)) = (joined, state) else { continue };
+        for (j, band) in bands.iter().enumerate() {
+            let Some(style) = state.get(j).copied().and_then(style_of) else { continue };
+            let (lo, hi) = (across(ends, band.v_lo), across(ends, band.v_hi));
+            d.line(g.world(lo, band.v_lo), g.world(hi, band.v_hi), style, id);
         }
     }
 }
@@ -1452,6 +1580,79 @@ mod tests {
         let d = plan(&doc.project, &geom, level, 1.2, false, 100);
         let lines = d.prims.iter().filter(|p| matches!(p, Prim::Line { element: Some(e), .. } if *e == conn)).count();
         assert!(lines >= 4, "the plate's outline at least: {lines}");
+    }
+
+    /// Layers with extents of their own are cut on their own: an outer layer
+    /// that starts 1 m up is not cut below it (no cut fill over it, no cut
+    /// line on its face: the core's face beside it is), and an inner one
+    /// 30 cm high is seen below a cut above it.
+    #[test]
+    fn layers_with_extents_are_cut_on_their_own() {
+        let mut doc = Document::new(Project::from_template());
+        let level = doc.project.levels[0].id;
+        let (wall, half, t0, t2) = doc.edit("t", |e| {
+            let base = e.project().default_type(Category::Wall).unwrap();
+            let mut ty = e.project().element_type(base).unwrap().clone();
+            let TypeData::Wall { layers, .. } = &mut ty.data else { panic!("a wall type") };
+            layers[0].base_offset = 1.0;
+            layers[2].height = Some(0.3);
+            let (t0, t2) = (layers[0].thickness, layers[2].thickness);
+            let half = ty.thickness() * 0.5;
+            (ty.id, ty.uid, ty.name) = (cc_core::ElementTypeId(e.alloc_id()), Default::default(), "extents".into());
+            let type_id = e.add_type(ty);
+            let id = ElementId(e.alloc_id());
+            e.add_element(Element {
+                id,
+                level,
+                type_id,
+                mark: String::new(),
+                comments: String::new(),
+                uid: Default::default(),
+                kind: ElementKind::Wall(Wall { end: DVec2::new(6.0, 0.0), height: 3.0, ..Default::default() }),
+                phase_created: Default::default(),
+                phase_demolished: None,
+                design_option: None,
+                paints: Vec::new(),
+            });
+            (id, half, t0, t2)
+        });
+        let geom = ModelGeometry::build(&doc.project);
+        let lines_at = |d: &Drawing2D, y: f64, style: LineStyle| {
+            d.prims
+                .iter()
+                .filter(|p| {
+                    matches!(p, Prim::Line { a, b, style: s, element: Some(e), .. }
+                        if *e == wall && *s == style && (a.y - y).abs() < 1e-9 && (b.y - y).abs() < 1e-9)
+                })
+                .count()
+        };
+        let cut_over = |d: &Drawing2D, y: f64| {
+            d.prims.iter().any(|p| match p {
+                Prim::Fill { pts, cut: true, element: Some(e), .. } if *e == wall => {
+                    let (lo, hi) = pts.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p.y), hi.max(p.y)));
+                    lo < y && y < hi
+                }
+                _ => false,
+            })
+        };
+        // Cut at 0.5 m: the outer layer stands above, the inner one below.
+        let low = plan(&doc.project, &geom, level, 0.5, false, 100);
+        let outer = half - t0 * 0.5;
+        assert!(!cut_over(&low, outer), "the outer layer is not cut");
+        assert_eq!(lines_at(&low, half, LineStyle::Cut) + lines_at(&low, half, LineStyle::Projection), 0);
+        assert!(lines_at(&low, half - t0, LineStyle::Cut) > 0, "the core's face is the cut line");
+        assert!(cut_over(&low, 0.0), "the core is cut");
+        assert!(!cut_over(&low, -half + t2 * 0.5), "the inner layer is not cut");
+        assert!(lines_at(&low, -half, LineStyle::Projection) > 0, "it is seen below the cut");
+        // Cut at 1.5 m: the outer layer is cut too.
+        let high = plan(&doc.project, &geom, level, 1.5, false, 100);
+        assert!(cut_over(&high, outer));
+        assert!(lines_at(&high, half, LineStyle::Cut) > 0);
+        assert!(lines_at(&high, half - t0, LineStyle::Thin) > 0, "a layer line between cut layers");
+        // Coarse: one plain region per cut band.
+        let mut coarse = plan_of(&doc.project, &geom, level, 0.5, (false, false), 100, (DetailLevel::Coarse, VisualStyle::HiddenLine));
+        coarse.prims.retain(|p| matches!(p, Prim::Fill { cut: true, element: Some(e), .. } if *e == wall));
+        assert!(cut_over(&coarse, 0.0) && !cut_over(&coarse, outer));
     }
 
     /// A wall with a column standing in it, cut by the plan; the column is

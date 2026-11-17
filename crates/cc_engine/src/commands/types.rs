@@ -90,6 +90,20 @@ fn profile_patch(p: &cc_core::Project, data: &TypeData, patch: &Value) -> Result
     Ok(patch)
 }
 
+/// A wall type's layers' extents within their bounds (see
+/// [`cc_core::layer_extent`]); floors and roofs take none.
+fn check_layer_extents(data: &TypeData) -> Result<()> {
+    use cc_core::layer_extent;
+    match data {
+        TypeData::Wall { layers, .. } => layer_extent::check(layers)
+            .map_err(|(i, e)| EngineError::invalid(format!("layer {}: {e}", i + 1))),
+        TypeData::Floor { layers } | TypeData::Roof { layers, .. } if layer_extent::any(layers) => {
+            Err(EngineError::invalid("base_offset and height apply to the layers of wall types only"))
+        }
+        _ => Ok(()),
+    }
+}
+
 pub(crate) fn type_out(s: &Session, id: ElementTypeId) -> Value {
     super::query::type_json(s, id).unwrap_or_else(|| json!({ "id": id.0 }))
 }
@@ -105,6 +119,12 @@ pub(crate) fn type_out(s: &Session, id: ElementTypeId) -> Value {
 /// A pipe type takes `series` (a pipe series' code, name or id; null makes
 /// it a free type) and `size` (a row of the series), its diameter then
 /// following the row; a size the series lacks is refused (`unknown_size`).
+/// A wall type's `layers` (the whole list, exterior first) each take
+/// `material`, `thickness`, `function` and their own vertical extent:
+/// `base_offset` (meters from the wall's bottom: positive starts higher,
+/// negative runs below; within ±100 m; 0 when left out) and `height` (meters
+/// from the layer's own bottom, 0.001 to 1000, never past the wall's top;
+/// null or left out: up to the wall's top). Floors and roofs take neither.
 /// Changing a component's definition updates every type of that component,
 /// each keeping its own parameter values.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -146,6 +166,7 @@ impl Command for TypeSet {
         // edit: finishing it would make a type of an unknown size free).
         if let Some(d) = &data {
             super::pipes::check_size(p, d)?;
+            check_layer_extents(d)?;
         }
         // A new roof covering brings the framing it usually lies on, if none was chosen.
         if let (

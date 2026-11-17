@@ -76,6 +76,7 @@ mod visual_style;
 mod wall_attach;
 mod wall_framing;
 mod wall_location_joins;
+mod wall_layer_extents;
 mod wall_profiles;
 mod wall_rebar;
 mod window_operation;
