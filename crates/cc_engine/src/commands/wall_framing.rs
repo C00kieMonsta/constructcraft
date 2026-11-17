@@ -118,6 +118,11 @@ impl Command for WallFramingCreate {
             if w.arc().is_some() {
                 return Err(EngineError::invalid(format!("wall {raw} is curved: only straight walls are framed")));
             }
+            if w.profile.is_some() {
+                return Err(EngineError::invalid(format!(
+                    "wall {raw} has an elevation profile: only walls with a level base and top are framed"
+                )));
+            }
             if p.wall_framing_of(id).is_some() {
                 return Err(EngineError::invalid(format!("wall {raw} is framed already")));
             }

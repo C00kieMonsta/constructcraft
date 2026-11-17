@@ -3829,3 +3829,11 @@ macro-ed-why-empty = ມາໂຄຣບໍ່ມີຂັ້ນຕອນ.
 macro-ed-why-cursor = ວາງຕົວກະພິບຫຼັງຂັ້ນຕອນຖັດໄປ ເພື່ອແລ່ນຮອດມັນ.
 macro-ed-why-errors = ແກ້ໄຂຂໍ້ຜິດພາດຈົນຮອດຂັ້ນຕອນນັ້ນກ່ອນ (ເບິ່ງ ບັນຫາ).
 palette-insert = ແຊກ
+
+## Wall elevation profiles
+tx-wall-profile = ໂປຣໄຟລ໌ຝາ
+wall-profile-invalid = ໂປຣໄຟລ໌ຕ້ອງມີຢ່າງໜ້ອຍສາມຈຸດ.
+wall-profile-too-large = ໂປຣໄຟລ໌ມີຈຸດຫຼາຍເກີນໄປ.
+wall-profile-not-monotone = ເສັ້ນຕັ້ງຕັດໂປຣໄຟລ໌ຫຼາຍກວ່າສອງເທື່ອ (ໝາຍໄວ້): ມັນຕ້ອງເປັນເສັ້ນລຸ່ມໜຶ່ງເສັ້ນ ແລະ ເສັ້ນເທິງໜຶ່ງເສັ້ນຕາມຝາ.
+wall-profile-out-of-bounds = ໂປຣໄຟລ໌ເກີນປາຍຝາ, ຫຼື ລົງຕ່ຳ ຫຼື ຂຶ້ນສູງເກີນໄປຈາກພື້ນຂອງມັນ (ໝາຍໄວ້).
+wall-profile-no-area = ໂປຣໄຟລ໌ບໍ່ໄດ້ອ້ອມພື້ນທີ່ໃດເລີຍ.

@@ -91,6 +91,10 @@ pub struct WallCreate {
     /// A structural wall (default: as the wall type says).
     #[serde(default)]
     pub structural: Option<bool>,
+    /// An elevation profile (see `wall_profile_set`): the outline of the wall's face as curves in its
+    /// elevation frame, `[u, z]` meters along `start`→`end` and above its base. Straight walls only.
+    #[serde(default)]
+    pub profile: Option<Vec<super::sketch::CurveArg>>,
 }
 
 impl Command for WallCreate {
@@ -112,7 +116,7 @@ impl Command for WallCreate {
         let type_id = refs::type_of(p, Category::Wall, self.type_ref.as_ref())?;
         let structural =
             self.structural.unwrap_or_else(|| p.element_type(type_id).is_some_and(|t| t.structural_wall()));
-        let wall = Wall {
+        let mut wall = Wall {
             start,
             end,
             bulge,
@@ -124,6 +128,18 @@ impl Command for WallCreate {
             ..Default::default()
         };
         check_arc(p, type_id, &wall)?;
+        if let Some(curves) = &self.profile {
+            if wall.arc().is_some() {
+                return Err(EngineError::invalid("only straight walls take an elevation profile"));
+            }
+            if p.element_type(type_id).is_some_and(|t| t.curtain().is_some()) {
+                return Err(EngineError::invalid("curtain walls take no elevation profile"));
+            }
+            let sketch = super::sketch::sketch_of(curves)?;
+            let profile = cc_core::wall_profile::WallProfile::from_sketch(sketch, wall.length())
+                .map_err(super::wall_profile::profile_error)?;
+            wall.profile = Some(profile);
+        }
         create(s, t!("tx-create-wall"), level, Category::Wall, self.type_ref.as_ref(), ElementKind::Wall(wall))
     }
 }

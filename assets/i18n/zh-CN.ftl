@@ -3827,3 +3827,11 @@ macro-ed-why-empty = 宏没有步骤。
 macro-ed-why-cursor = 将光标放在下一步之后，以运行到该处。
 macro-ed-why-errors = 请先修正该步骤之前的错误（见“问题”）。
 palette-insert = 插入
+
+## Wall elevation profiles
+tx-wall-profile = 墙轮廓
+wall-profile-invalid = 轮廓至少需要三个点。
+wall-profile-too-large = 轮廓的点太多。
+wall-profile-not-monotone = 一条竖直线与轮廓相交超过两次（已标示）：轮廓必须是沿墙的一条底线和一条顶线。
+wall-profile-out-of-bounds = 轮廓超出墙的两端，或在底部以下或以上太远（已标示）。
+wall-profile-no-area = 轮廓未围出任何面积。

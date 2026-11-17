@@ -249,6 +249,10 @@ pub(crate) fn element_json(s: &mut Session, id: ElementId) -> Option<Value> {
             }
             derived.insert("height".into(), json!(p.wall_height(&e, w)));
             derived.insert("thickness".into(), json!(p.thickness_of(&e)));
+            // The face of its elevation profile: area, lowest and highest points above its base, span.
+            if let Some(profile) = &w.profile {
+                derived.insert("profile".into(), super::wall_profile::derived(profile));
+            }
         }
         ElementKind::Beam(b) => {
             derived.insert("length".into(), json!(b.length()));

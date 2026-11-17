@@ -242,7 +242,11 @@ pub fn outline(sketch: &Sketch) -> Result<Vec<DVec2>> {
 
 /// The curves an element's outline is drawn with: its sketch, or lines along
 /// its outline and openings when it has none (floors, ceilings, roofs,
-/// masses and the other sketched elements, regions among them).
+/// masses and the other sketched elements, regions among them). For a wall,
+/// its elevation profile in the wall's elevation frame (`[u, z]`: meters
+/// along its location line from its start and above its base; `frame` is
+/// `wall_elevation`), or the rectangle of its length and height when it has
+/// none (`profile` false).
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SketchGet {
@@ -257,6 +261,26 @@ impl Command for SketchGet {
         let p = s.project();
         let id = refs::element(p, self.id)?;
         let e = p.element(id).ok_or_else(|| EngineError::not_found(format!("no element {}", self.id)))?;
+        // A wall's elevation profile, in its elevation frame: its curves, else its nominal box.
+        if let Some(w) = e.as_wall() {
+            let (sketch, drawn) = match &w.profile {
+                Some(profile) => (profile.curves(), profile.sketch.is_some()),
+                None => {
+                    let (length, height) = (w.length(), p.wall_height(e, w));
+                    let rect =
+                        [DVec2::ZERO, DVec2::new(length, 0.0), DVec2::new(length, height), DVec2::new(0.0, height)];
+                    (Sketch::from_polygons(&rect, &[]), false)
+                }
+            };
+            let curves: Vec<CurveArg> = sketch.curves.iter().map(CurveArg::of).collect();
+            return Ok(json!({
+                "id": id.0,
+                "curves": curves,
+                "drawn": drawn,
+                "frame": "wall_elevation",
+                "profile": w.profile.is_some(),
+            }));
+        }
         let (outline, openings) =
             e.sketched_profile().ok_or_else(|| EngineError::invalid("the element has no sketched outline"))?;
         let (sketch, drawn) = match e.drawn_sketch() {
@@ -272,12 +296,13 @@ impl Command for SketchGet {
 /// roofs and regions take the loops inside the outline as their openings; ceilings
 /// and masses take one loop. The element keeps the curves, so `sketch_get`
 /// gives them back. A terrain's measured points can change in the same
-/// step (`points`).
+/// step (`points`). A wall takes the curves as its elevation profile, in its
+/// elevation frame (as `wall_profile_set` does).
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SketchSet {
-    /// Element id (a floor, ceiling, roof, mass, shaft, terrain, pad, or a
-    /// filled or masking region).
+    /// Element id (a floor, ceiling, roof, mass, shaft, terrain, pad, a
+    /// filled or masking region, or a wall).
     pub id: u64,
     /// The curves, closed into loops.
     pub curves: Vec<CurveArg>,
@@ -297,6 +322,16 @@ impl Command for SketchSet {
             && !matches!(s.project().element(id).map(|e| &e.kind), Some(ElementKind::Topography(_)))
         {
             return Err(EngineError::invalid("only terrain has points"));
+        }
+        // A wall's elevation profile.
+        if let Some(e) = s.project().element(id)
+            && let Some(w) = e.as_wall()
+        {
+            super::wall_profile::check_takes_profile(s.project(), e, w)?;
+            let profile = cc_core::wall_profile::WallProfile::from_sketch(sketch, w.length())
+                .map_err(super::wall_profile::profile_error)?;
+            super::wall_profile::set_profile(s, id, Some(profile))?;
+            return Ok(json!({ "id": id.0 }));
         }
         let mut kind =
             s.project().element(id).map(|e| e.kind.clone()).ok_or_else(|| EngineError::not_found("element"))?;
@@ -342,7 +377,7 @@ impl Command for SketchSet {
             }
             _ => {
                 return Err(EngineError::invalid(
-                    "only floors, ceilings, roofs, masses, shafts, terrain, pads and regions have a sketched outline",
+                    "only floors, ceilings, roofs, masses, shafts, terrain, pads, regions and walls have a sketched outline",
                 ));
             }
         }

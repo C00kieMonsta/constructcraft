@@ -3827,3 +3827,11 @@ macro-ed-why-empty = La macro no tiene pasos.
 macro-ed-why-cursor = Ponga el cursor después del siguiente paso para ejecutar hasta él.
 macro-ed-why-errors = Corrija primero los errores hasta ese paso (vea Problemas).
 palette-insert = Insertar
+
+## Wall elevation profiles
+tx-wall-profile = Perfil del muro
+wall-profile-invalid = El perfil necesita al menos tres puntos.
+wall-profile-too-large = El perfil tiene demasiados puntos.
+wall-profile-not-monotone = Una línea vertical cruza el perfil más de dos veces (marcado): debe ser una línea inferior y una superior a lo largo del muro.
+wall-profile-out-of-bounds = El perfil sobrepasa los extremos del muro, o llega demasiado abajo o arriba de su base (marcado).
+wall-profile-no-area = El perfil no encierra ningún área.
