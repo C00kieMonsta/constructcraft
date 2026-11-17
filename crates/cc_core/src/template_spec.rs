@@ -309,6 +309,9 @@ pub struct Defaults {
     /// Rebar: cover, stirrup spacing, and the diameters of the bar types
     /// sought for main bars, top bars and stirrups.
     pub rebar: [f64; 5],
+    /// The template's niche type, also made by the first niche of a project
+    /// without one: name key, width, height, depth, sill.
+    pub niche: (&'static str, [f64; 4]),
 }
 
 impl Defaults {
@@ -345,6 +348,7 @@ const METRIC_DEFAULTS: Defaults = Defaults {
     terrain: (crate::topography::DEFAULT_CONTOUR_INTERVAL, crate::topography::DEFAULT_BASE_DEPTH),
     curtain: (1.5, 0.05, 0.15, 0.024),
     rebar: [0.025, 0.15, 0.010, 0.008, 0.005],
+    niche: ("tpl-type-niche-60", [0.6, 0.6, 0.1, 0.9]),
 };
 
 const IMPERIAL_DEFAULTS: Defaults = Defaults {
@@ -376,6 +380,8 @@ const IMPERIAL_DEFAULTS: Defaults = Defaults {
     // Lines every 5'-0", 2" x 6" mullions, 1" insulating glass.
     curtain: (5.0 * FOOT, 2.0 * INCH, 6.0 * INCH, 1.0 * INCH),
     rebar: [1.5 * INCH, 6.0 * INCH, 0.5 * INCH, 0.375 * INCH, 0.375 * INCH],
+    // 2'-0" x 2'-0", 4" deep, 3'-0" above the floor.
+    niche: ("tpl-imp-type-niche-24", [24.0 * INCH, 24.0 * INCH, 4.0 * INCH, 36.0 * INCH]),
 };
 
 impl TemplateSpec {
@@ -426,9 +432,13 @@ mod tests {
         assert_eq!(p.units, crate::Units::default());
         let levels: Vec<_> = p.levels.iter().map(|l| (l.id, l.elevation)).collect();
         assert_eq!(levels, [(LevelId(1), 0.0), (LevelId(2), 3.0)]);
-        assert_eq!((p.types.len(), p.views.len(), p.materials.len(), p.profiles.len()), (72, 15, 13, 6));
-        // The two pipe series take the last ids.
-        assert_eq!(p.next_id(), 112);
+        assert_eq!((p.types.len(), p.views.len(), p.materials.len(), p.profiles.len()), (73, 15, 13, 6));
+        // The two pipe series take ids 110 and 111, the niche type (issue #304) the last one.
+        assert_eq!(p.next_id(), 113);
+        let niche = &p.types[&ElementTypeId(112)];
+        assert_eq!((niche.category(), niche.name.as_str()), (Category::Niche, "Nicho 60x60x10"));
+        assert_eq!(niche.opening_size(), Some((0.6, 0.6)));
+        assert_eq!((niche.opening_depth(), niche.default_sill()), (Some(0.1), 0.9));
         for (id, name) in [
             (3, "Alvenaria 15 cm"),
             (5, "Divisória gesso 10 cm"),
@@ -610,7 +620,7 @@ mod tests {
         sizes.extend([d.tray_clearance, d.conductor.1, d.pipes.0, -d.pipes.1, d.terrain.0, d.terrain.1]);
         sizes.extend([r.min_riser, r.min_tread, r.blondel_min, r.blondel_max, d.flights.0, d.flights.1, d.flights.2]);
         sizes.extend([d.ramp_rules.max_flight_rise, d.ramp_rules.min_landing, d.curtain.0, d.curtain.1, d.curtain.2]);
-        sizes.extend(d.door.iter().chain(&d.devices).chain(&d.rebar));
+        sizes.extend(d.door.iter().chain(&d.devices).chain(&d.rebar).chain(&d.niche.1));
         for v in sizes {
             assert!(sixteenths(v), "{v} m is not a whole 1/16\"");
         }

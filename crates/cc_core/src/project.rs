@@ -490,7 +490,19 @@ impl Project {
         p.ensure_mark_types(&n);
         // The pipe types are sizes of built-in series, copied in.
         p.link_template_pipes(system, &|key| vec![n(key)]);
+        // The niche type (issue #304), last so the ids above stay as they were.
+        p.add_template_niche(&names, &n);
         p
+    }
+
+    /// The template's niche type, sized by [`crate::Defaults::niche`].
+    fn add_template_niche(&mut self, names: &crate::openings::OpeningNames, n: &dyn Fn(&str) -> String) {
+        let (key, [width, height, depth, sill]) = self.defaults().niche;
+        let def = crate::openings::niche_def(names, (width, height, depth, sill));
+        let data = TypeData::Component { component: names.niche.clone(), def };
+        let id = ElementTypeId(self.alloc_id());
+        let uid = crate::Uid::generate();
+        self.types.insert(id, ElementType { id, name: n(key), data, info: Default::default(), uid });
     }
 
     /// The template's French doors (glazed, from the floor), of one leaf
@@ -1405,6 +1417,7 @@ pub fn template_default(key: &str) -> &'static str {
         "tpl-param-bottom-rail" => "Rodapé",
         "tpl-type-french-door-80" => "Porta-janela 80x220",
         "tpl-type-french-door-double-140" => "Porta-janela 2 folhas 140x220",
+        "tpl-type-niche-60" => "Nicho 60x60x10",
         "tpl-conn-sewer" => "Esgoto",
         "tpl-conn-cold-water" => "Água fria",
         "tpl-conn-hot-water" => "Água quente",
@@ -1610,6 +1623,7 @@ pub fn template_default(key: &str) -> &'static str {
         "tpl-imp-type-wardrobe" => "Armário 5'-0\"",
         "tpl-imp-type-kitchen-sink" => "Pia inox 4'-0\"",
         "tpl-imp-type-floor-drain" => "Ralo sifonado 6\"",
+        "tpl-imp-type-niche-24" => "Nicho 2'-0\" x 2'-0\" x 4\"",
         _ => "?",
     }
 }
