@@ -251,6 +251,8 @@ pub enum UiCommand {
     Profiles,
     MacroRecord,
     MacroRun,
+    /// Open or close the macro editor.
+    MacroEditor,
     /// Open or close the visual programming editor.
     VisualProgramming,
     Plugins,
@@ -469,6 +471,7 @@ impl UiCommand {
             Profiles,
             MacroRecord,
             MacroRun,
+            MacroEditor,
             VisualProgramming,
             Plugins,
             PluginCommands,
@@ -662,6 +665,7 @@ impl UiCommand {
             Profiles => Icon::Profiles,
             MacroRecord => Icon::MacroRecord,
             MacroRun => Icon::MacroRun,
+            MacroEditor => Icon::MacroEdit,
             VisualProgramming => Icon::Graph,
             Plugins | PluginCommands => Icon::Plugin,
             ToggleRibbon => Icon::ChevronUp,
@@ -890,6 +894,7 @@ impl UiCommand {
             MacroRecord if state.session.is_recording() => t!("action-macro-stop"),
             MacroRecord => t!("action-macro-record"),
             MacroRun => t!("action-macro-run"),
+            MacroEditor => t!("action-macro-editor"),
             VisualProgramming => t!("action-visual-programming"),
             Plugins => t!("action-plugins"),
             PluginCommands => t!("action-plugin-commands"),
@@ -1119,6 +1124,7 @@ impl UiCommand {
             Profiles => t!("cmd-profiles-desc"),
             MacroRecord => t!("hint-macro-record"),
             MacroRun => t!("hint-macro-run"),
+            MacroEditor => t!("hint-macro-editor"),
             VisualProgramming => t!("cmd-desc-visual-programming"),
             Plugins => t!("cmd-desc-plugins"),
             PluginCommands => t!("cmd-desc-plugin-commands"),
@@ -1698,6 +1704,7 @@ impl UiCommand {
             MacroRecord => state.session.is_recording(),
             ActiveOption => state.project().active_option().is_some(),
             VisualProgramming => state.graph.open,
+            MacroEditor => state.macro_editor.open,
             ToggleRibbon => state.ribbon_collapsed,
             _ => false,
         }
@@ -2209,6 +2216,7 @@ pub fn run(state: &mut AppState, ctx: &egui::Context, command: UiCommand) {
         Profiles => crate::profiles_dialog::open(state),
         MacroRecord => actions::toggle_macro_recording(state),
         MacroRun => actions::run_macro(state),
+        MacroEditor => crate::macro_ui::toggle(state),
         VisualProgramming => crate::graph_ui::toggle(state),
         Plugins => crate::plugins_ui::open(state),
         // A menu in the ribbon; from the palette, the Plugins window.

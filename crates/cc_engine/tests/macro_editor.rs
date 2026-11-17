@@ -281,3 +281,29 @@ fn state(s: &Session) -> String {
     let ron = cc_core::to_ron(s.project()).unwrap();
     ron.lines().filter(|l| !l.trim_start().starts_with("next_id:")).collect::<Vec<_>>().join("\n")
 }
+
+#[test]
+fn steps_after_the_position_can_be_replaced() {
+    let mut s = Session::default();
+    let all = steps(HOUSE);
+    let mut stepper = Stepper::new(all.clone());
+    stepper.run_to(&mut s, 2).unwrap();
+
+    // The steps that ran are kept: the rest is replaced.
+    let mut edited = all[..2].to_vec();
+    edited.push(script::Step { command: "undo".into(), args: json!({}) });
+    assert!(stepper.set_steps(edited.clone()));
+    assert_eq!((stepper.steps(), stepper.position()), (edited.as_slice(), 2));
+    assert!(stepper.set_steps(all[..2].to_vec()), "fewer steps, none left to run");
+    assert!(stepper.is_done());
+
+    // A step that ran changed (or is gone): refused, nothing changes.
+    let mut changed = all.clone();
+    changed[1].args = json!({"start": [0, 0], "end": [1, 1]});
+    assert!(!stepper.set_steps(changed));
+    assert!(!stepper.set_steps(all[..1].to_vec()));
+    assert_eq!((stepper.steps(), stepper.position()), (&all[..2], 2));
+    // It still steps back over what ran.
+    assert_eq!(stepper.restart(&mut s), Ok(2));
+    assert!(stepper.set_steps(Vec::new()), "at the start any steps do");
+}

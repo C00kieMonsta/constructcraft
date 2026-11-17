@@ -262,6 +262,8 @@ pub struct AppState {
     pub callout: crate::callout_ui::CalloutOptions,
     /// The visual programming editor (see [`crate::graph_ui`]).
     pub graph: crate::graph_ui::GraphEditor,
+    /// The macro editor (see [`crate::macro_ui`]).
+    pub macro_editor: crate::macro_ui::MacroEditor,
     /// Selection seen last frame (see [`AppState::follow_selection`]).
     seen_selection: BTreeSet<ElementId>,
 }
@@ -332,6 +334,7 @@ impl AppState {
             zoom_default: Default::default(),
             seen_selection: Default::default(),
             graph: Default::default(),
+            macro_editor: Default::default(),
             value_edit: None,
             component_env: None,
             sketch: None,
@@ -369,6 +372,9 @@ impl AppState {
         let ribbon_collapsed = self.ribbon_collapsed;
         let jobs = std::mem::take(&mut self.thumbnail_jobs);
         let requested = std::mem::take(&mut self.requested_samples);
+        // The macro editor keeps its text; the run was on the old document.
+        let mut macro_editor = std::mem::take(&mut self.macro_editor);
+        macro_editor.reset_run();
         *self = Self::new(doc);
         self.recent = recent;
         self.updates = updates;
@@ -378,6 +384,7 @@ impl AppState {
         self.ribbon_collapsed = ribbon_collapsed;
         self.thumbnail_jobs = jobs;
         self.requested_samples = requested;
+        self.macro_editor = macro_editor;
         self.textures_to_free = textures;
         self.generation = generation;
         self.message = message;

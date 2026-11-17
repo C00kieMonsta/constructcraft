@@ -25,6 +25,9 @@ pub struct Palette {
     focus: bool,
     /// Not shown yet: the click that opened it (a button) must not close it.
     fresh: bool,
+    /// Opened by the macro editor: it lists only engine commands, and a
+    /// command's form inserts its step in the macro instead of running it.
+    insert: bool,
 }
 
 struct EngineCommand {
@@ -132,6 +135,10 @@ fn entries(state: &AppState, palette: &Palette) -> Vec<Entry> {
         badge: command.badge(),
         why: command.unavailable(state),
     };
+    // Inserting in a macro: only engine commands.
+    if palette.insert {
+        return engine_entries(palette).collect();
+    }
     list.extend(UiCommand::all().into_iter().map(command_entry));
     if state.project_open && !state.show_home {
         let project = state.project();
@@ -183,19 +190,22 @@ fn entries(state: &AppState, palette: &Palette) -> Vec<Entry> {
                 why: None,
             });
         }
-        for (i, command) in palette.catalog.iter().enumerate() {
-            list.push(Entry {
-                action: Action::Engine(i),
-                label: command.name.to_string(),
-                detail: command.description.clone(),
-                shortcut: None,
-                icon: Icon::MacroRun,
-                badge: None,
-                why: None,
-            });
-        }
+        list.extend(engine_entries(palette));
     }
     list
+}
+
+/// The engine commands of the catalog.
+fn engine_entries(palette: &Palette) -> impl Iterator<Item = Entry> + '_ {
+    palette.catalog.iter().enumerate().map(|(i, command)| Entry {
+        action: Action::Engine(i),
+        label: command.name.to_string(),
+        detail: command.description.clone(),
+        shortcut: None,
+        icon: Icon::MacroRun,
+        badge: None,
+        why: None,
+    })
 }
 
 /// Bonus of an entry whose whole label is the query (an engine command typed
@@ -252,6 +262,13 @@ pub fn open_command(state: &mut AppState, name: &str) {
     state.palette = Some(palette);
 }
 
+/// Open the palette to insert a command as a step of the macro editor's macro.
+pub fn open_insert(state: &mut AppState) {
+    let mut palette = Palette::new(&state.session);
+    palette.insert = true;
+    state.palette = Some(palette);
+}
+
 /// Open or close the palette.
 pub fn toggle(state: &mut AppState) {
     state.palette = match state.palette {
@@ -279,7 +296,7 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
             frame.show(ui, |ui| {
                 ui.set_width(width);
                 match palette.form.take() {
-                    Some(form) => palette.form = engine_form(ui, state, form),
+                    Some(form) => palette.form = engine_form(ui, state, form, palette.insert, &mut keep),
                     None => search(ui, state, &mut palette, &mut keep),
                 }
             });
@@ -440,8 +457,10 @@ fn entry_row(ui: &mut egui::Ui, entry: &Entry, selected: bool, height: f32) -> e
     response
 }
 
-/// The arguments of an engine command, a Run button and the result.
-fn engine_form(ui: &mut egui::Ui, state: &mut AppState, mut form: Form) -> Option<Form> {
+/// The arguments of an engine command, a Run button and the result. With
+/// `insert` (the macro editor's *Insert Command…*) the button is *Insert*,
+/// which adds the command as a step of the macro and closes the palette.
+fn engine_form(ui: &mut egui::Ui, state: &mut AppState, mut form: Form, insert: bool, keep: &mut bool) -> Option<Form> {
     let p = theme::palette(ui.ctx());
     ui.horizontal(|ui| {
         let (icon, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
@@ -464,7 +483,8 @@ fn engine_form(ui: &mut egui::Ui, state: &mut AppState, mut form: Form) -> Optio
     let mut run = run_keys;
     let mut back = false;
     ui.horizontal(|ui| {
-        if crate::dialog::styled_button(ui, &t!("palette-run"), crate::dialog::Style::Primary).clicked() {
+        let label = if insert { t!("palette-insert") } else { t!("palette-run") };
+        if crate::dialog::styled_button(ui, &label, crate::dialog::Style::Primary).clicked() {
             run = true;
         }
         if ui.button(t!("palette-back")).clicked() {
@@ -472,7 +492,16 @@ fn engine_form(ui: &mut egui::Ui, state: &mut AppState, mut form: Form) -> Optio
         }
         ui.label(RichText::new("Ctrl+Enter").size(11.0).color(p.text_faint));
     });
-    if run {
+    if run && insert {
+        match serde_json::from_str::<serde_json::Value>(&form.args) {
+            Ok(args) => {
+                let now = ui.input(|i| i.time);
+                crate::macro_ui::insert_step(state, &form.name, args, now);
+                *keep = false;
+            }
+            Err(e) => form.result = Some(Err(t!("palette-bad-json", "error" => e))),
+        }
+    } else if run {
         form.result = Some(match serde_json::from_str::<serde_json::Value>(&form.args) {
             Ok(args) => {
                 let result = state.session.execute(&form.name, args);

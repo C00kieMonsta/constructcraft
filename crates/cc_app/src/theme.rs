@@ -53,6 +53,8 @@ pub struct Palette {
     pub matte: Color32,
     /// Text and marks drawn on [`Palette::matte`].
     pub matte_text: Color32,
+    /// The command names of a macro in the macro editor.
+    pub syntax_command: Color32,
     /// Whether this is a dark theme (egui base visuals).
     pub dark: bool,
 }
@@ -83,6 +85,7 @@ pub const LIGHT: Palette = Palette {
     icon_tint: Color32::from_rgb(0x1F, 0x6F, 0xEB),
     matte: Color32::from_rgb(0x2B, 0x2D, 0x31),
     matte_text: Color32::from_rgb(0xA8, 0xAD, 0xB4),
+    syntax_command: Color32::from_rgb(0x7A, 0x3E, 0xB1),
     dark: false,
 };
 
@@ -112,6 +115,7 @@ pub const DARK: Palette = Palette {
     icon_tint: Color32::from_rgb(0x6A, 0xA2, 0xFA),
     matte: Color32::from_rgb(0x14, 0x16, 0x19),
     matte_text: Color32::from_rgb(0x9A, 0xA0, 0xA8),
+    syntax_command: Color32::from_rgb(0xC3, 0x9B, 0xF0),
     dark: true,
 };
 

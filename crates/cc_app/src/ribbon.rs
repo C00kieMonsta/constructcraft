@@ -971,6 +971,7 @@ fn manage_tab(ui: &mut Ui, state: &mut AppState) {
     group(ui, t!("group-macros"), |ui| {
         command_button(ui, state, MacroRecord);
         macro_menu(ui, state);
+        command_button(ui, state, MacroEditor);
         command_button(ui, state, VisualProgramming);
     });
     group(ui, t!("group-plugins"), |ui| {

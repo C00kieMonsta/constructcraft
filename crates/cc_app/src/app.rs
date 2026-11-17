@@ -221,10 +221,12 @@ impl ConstructApp {
 pub(crate) fn shortcuts(ctx: &egui::Context, state: &mut AppState) {
     let cmd = |i: &mut egui::InputState, k| i.consume_key(Modifiers::COMMAND, k);
     let cmd_shift = |i: &mut egui::InputState, k| i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, k);
+    // The macro editor's text keeps Ctrl+Z and Ctrl+Y for its own undo.
+    let text = ctx.memory(|m| m.has_focus(crate::macro_ui::editor_id()));
     let (undo, redo, save, save_as, open, new, close) = ctx.input_mut(|i| {
-        let redo = cmd(i, Key::Y) || cmd_shift(i, Key::Z);
+        let redo = !text && (cmd(i, Key::Y) || cmd_shift(i, Key::Z));
         let close = cmd(i, Key::W);
-        (cmd(i, Key::Z), redo, cmd(i, Key::S), cmd_shift(i, Key::S), cmd(i, Key::O), cmd(i, Key::N), close)
+        (!text && cmd(i, Key::Z), redo, cmd(i, Key::S), cmd_shift(i, Key::S), cmd(i, Key::O), cmd(i, Key::N), close)
     });
     // A file being read: the document must stay as it is until it is installed.
     if crate::jobs::busy(state) {
@@ -253,6 +255,11 @@ pub(crate) fn shortcuts(ctx: &egui::Context, state: &mut AppState) {
     if crate::graph_ui::keys(ctx, state, undo, redo, save, save_as) {
         return;
     }
+    // Over the macro editor, Save saves the macro and its keys step through it.
+    let (save, save_as) = match crate::macro_ui::keys(ctx, state, save, save_as) {
+        true => (false, false),
+        false => (save, save_as),
+    };
     if close {
         actions::guarded(state, PendingAction::Close);
     }
@@ -551,6 +558,22 @@ impl ConstructApp {
                 .show(ui, |ui| crate::graph_ui::show(ui, state));
         } else {
             state.graph.hovered = false;
+        }
+        // The macro editor, in the same place (never with the graph editor).
+        if state.macro_editor.open && !env {
+            egui::Panel::bottom("macro-editor")
+                .frame(
+                    egui::Frame::new()
+                        .fill(PALETTE.panel)
+                        .stroke(egui::Stroke::new(1.0, PALETTE.border))
+                        .inner_margin(egui::Margin::same(6)),
+                )
+                .resizable(true)
+                .default_size(320.0)
+                .size_range(160.0..=900.0)
+                .show(ui, |ui| crate::macro_ui::show(ui, state));
+        } else {
+            state.macro_editor.hovered = false;
         }
         let render_state = frame.wgpu_render_state();
         let central = egui::Frame::new().fill(PALETTE.app_bg).inner_margin(egui::Margin::same(4));

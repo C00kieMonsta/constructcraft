@@ -454,6 +454,19 @@ impl Stepper {
         self.results
     }
 
+    /// Replace the steps, keeping what ran, when the steps that ran are the
+    /// first of `steps` unchanged (an editor's text edited after the
+    /// position); returns whether they were replaced. When they differ,
+    /// nothing changes: the run no longer matches the steps.
+    pub fn set_steps(&mut self, steps: Vec<Step>) -> bool {
+        let ran = self.position();
+        if steps.get(..ran) != self.steps.get(..ran) {
+            return false;
+        }
+        self.steps = steps;
+        true
+    }
+
     /// Whether every step has run.
     pub fn is_done(&self) -> bool {
         self.position() >= self.steps.len()

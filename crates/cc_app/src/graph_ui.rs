@@ -281,6 +281,8 @@ pub fn toggle(state: &mut AppState) {
     g.open = true;
     // Plugins may have changed the commands since the last time.
     g.catalog = None;
+    // One panel under the views at a time; the macro editor keeps its text.
+    state.macro_editor.open = false;
 }
 
 fn ensure_catalog(state: &mut AppState) {
@@ -357,6 +359,7 @@ pub fn open_path(state: &mut AppState, path: PathBuf) {
         Ok((graph, repairs)) => {
             state.graph.replace(graph, Some(path));
             state.graph.open = true;
+            state.macro_editor.open = false;
             state.graph.catalog = None;
             if repairs.total() > 0 {
                 state.message = t!("graph-repaired", "count" => repairs.total());

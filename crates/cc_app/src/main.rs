@@ -39,6 +39,7 @@ mod level_mark_ui;
 mod library;
 mod line_styles_dialog;
 mod lps_cabling_ui;
+mod macro_ui;
 mod material_browser;
 mod mcp_bridge;
 mod member_host_ui;
