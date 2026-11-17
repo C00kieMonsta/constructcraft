@@ -28,7 +28,8 @@ fn close(a: f64, b: f64, what: &str) {
 /// A copy of the default wall type (plaster, masonry, plaster) and its layers as `type_get` shows them.
 fn layered_type(s: &mut Session) -> (u64, Vec<Value>) {
     let walls = run(s, "types_list", json!({"category": "wall"}));
-    let first = walls.as_array().and_then(|a| a.iter().find(|t| t["default"] == true)).map(|t| t["id"].clone()).unwrap();
+    let first =
+        walls.as_array().and_then(|a| a.iter().find(|t| t["default"] == true)).map(|t| t["id"].clone()).unwrap();
     let copy = run(s, "type_duplicate", json!({"type": first, "name": "Insulated"}));
     let id = copy["id"].as_u64().unwrap();
     let layers = run(s, "type_get", json!({"type": id}))["params"]["layers"].as_array().unwrap().clone();
@@ -196,9 +197,7 @@ fn a_section_cuts_the_stepped_body() {
         })
         .collect();
     assert!(!fills.is_empty(), "the outline closes and is filled");
-    let (lo, hi) = fills
-        .iter()
-        .flat_map(|f| f.iter())
-        .fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p.y), hi.max(p.y)));
+    let (lo, hi) =
+        fills.iter().flat_map(|f| f.iter()).fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p.y), hi.max(p.y)));
     close(hi - lo, 3.5, "from the core's bottom to the top");
 }

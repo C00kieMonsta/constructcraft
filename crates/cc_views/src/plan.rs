@@ -910,7 +910,8 @@ fn draw_banded_wall(d: &mut Drawing2D, project: &Project, g: &WallGeom, cut_z: f
     let count = columns.len();
     let state_of = |c: &Column, band: &cc_geom::Band| {
         let mid = (c.left.0.max(c.right.0) + c.left.1.min(c.right.1)) * 0.5;
-        let heights: Vec<(f64, f64)> = g.extent_lines(c, band.extent).iter().map(|(a, b)| (a.at(mid), b.at(mid))).collect();
+        let heights: Vec<(f64, f64)> =
+            g.extent_lines(c, band.extent).iter().map(|(a, b)| (a.at(mid), b.at(mid))).collect();
         if heights.iter().any(|&(a, b)| a <= cut_z && cut_z <= b) {
             ColumnCut::Cut
         } else if heights.first().is_some_and(|s| s.0 < cut_z) {
@@ -1002,10 +1003,7 @@ fn draw_banded_wall(d: &mut Drawing2D, project: &Project, g: &WallGeom, cut_z: f
         }
     }
     // Each band's piece of a free end.
-    let caps = [
-        (g.start_joined, states.first(), g.start_ext),
-        (g.end_joined, states.last(), g.end_ext),
-    ];
+    let caps = [(g.start_joined, states.first(), g.start_ext), (g.end_joined, states.last(), g.end_ext)];
     let across = |(ul, ur): (f64, f64), v: f64| if h > 1e-12 { ur + (ul - ur) * (v + h) / (2.0 * h) } else { ul };
     for (joined, state, ends) in caps {
         let (false, Some(state)) = (joined, state) else { continue };
@@ -1650,7 +1648,15 @@ mod tests {
         assert!(lines_at(&high, half, LineStyle::Cut) > 0);
         assert!(lines_at(&high, half - t0, LineStyle::Thin) > 0, "a layer line between cut layers");
         // Coarse: one plain region per cut band.
-        let mut coarse = plan_of(&doc.project, &geom, level, 0.5, (false, false), 100, (DetailLevel::Coarse, VisualStyle::HiddenLine));
+        let mut coarse = plan_of(
+            &doc.project,
+            &geom,
+            level,
+            0.5,
+            (false, false),
+            100,
+            (DetailLevel::Coarse, VisualStyle::HiddenLine),
+        );
         coarse.prims.retain(|p| matches!(p, Prim::Fill { cut: true, element: Some(e), .. } if *e == wall));
         assert!(cut_over(&coarse, 0.0) && !cut_over(&coarse, outer));
     }

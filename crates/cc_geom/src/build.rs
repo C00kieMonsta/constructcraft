@@ -1154,8 +1154,7 @@ impl ModelGeometry {
                     None => Vec::new(),
                 })
                 .collect();
-            let reach: Vec<(f64, f64)> =
-                heights.iter().zip(&lowest).map(|(&(b, t), below)| (b + below, t)).collect();
+            let reach: Vec<(f64, f64)> = heights.iter().zip(&lowest).map(|(&(b, t), below)| (b + below, t)).collect();
             for (i, (e, w)) in walls.iter().enumerate() {
                 let chains = profiles.get(i).cloned().flatten();
                 // A profiled wall keeps its nominal base (sills are measured from it); its top is the profile's highest.

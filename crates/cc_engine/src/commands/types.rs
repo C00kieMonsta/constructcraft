@@ -95,8 +95,9 @@ fn profile_patch(p: &cc_core::Project, data: &TypeData, patch: &Value) -> Result
 fn check_layer_extents(data: &TypeData) -> Result<()> {
     use cc_core::layer_extent;
     match data {
-        TypeData::Wall { layers, .. } => layer_extent::check(layers)
-            .map_err(|(i, e)| EngineError::invalid(format!("layer {}: {e}", i + 1))),
+        TypeData::Wall { layers, .. } => {
+            layer_extent::check(layers).map_err(|(i, e)| EngineError::invalid(format!("layer {}: {e}", i + 1)))
+        }
         TypeData::Floor { layers } | TypeData::Roof { layers, .. } if layer_extent::any(layers) => {
             Err(EngineError::invalid("base_offset and height apply to the layers of wall types only"))
         }

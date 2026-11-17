@@ -336,7 +336,8 @@ impl WallGeom {
                 sum.abs()
             }
             None => {
-                let quad = [self.world(lo.0, v_lo), self.world(lo.1, v_lo), self.world(hi.1, v_hi), self.world(hi.0, v_hi)];
+                let quad =
+                    [self.world(lo.0, v_lo), self.world(lo.1, v_lo), self.world(hi.1, v_hi), self.world(hi.0, v_hi)];
                 crate::polygon::area(&quad)
             }
         }
@@ -373,11 +374,8 @@ impl WallGeom {
         };
         let mid = (r.u0 + r.u1) * 0.5;
         let Some(c) = self.column_at(mid) else { return 0.0 };
-        let height: f64 = self
-            .layer_intervals(c, layer, mid)
-            .iter()
-            .map(|&(z0, z1)| (z1.min(r.z1) - z0.max(r.z0)).max(0.0))
-            .sum();
+        let height: f64 =
+            self.layer_intervals(c, layer, mid).iter().map(|&(z0, z1)| (z1.min(r.z1) - z0.max(r.z0)).max(0.0)).sum();
         area * height
     }
 
@@ -488,7 +486,6 @@ impl WallGeom {
     /// A quad from `(u0, v0)` to `(u1, v1)` in plan, its bottom running from
     /// `ba` to `bb` and its top from `za` to `zb`; corners where they meet
     /// are kept once, and one with no area is left out.
-    #[allow(clippy::too_many_arguments)]
     fn slanted_face(
         &self,
         (u0, v0): (f64, f64),
@@ -556,7 +553,14 @@ impl WallGeom {
                             let pieces =
                                 self.face_pieces(-1.0, (b0, b1), (lo.at(b0), lo.at(b1)), (hi.at(b0), hi.at(b1)));
                             for [a, b, ba, bb, ta, tb] in pieces {
-                                s.faces.extend(self.slanted_face((a, -h), (b, -h), (ba, bb), (ta, tb), right_n, curved));
+                                s.faces.extend(self.slanted_face(
+                                    (a, -h),
+                                    (b, -h),
+                                    (ba, bb),
+                                    (ta, tb),
+                                    right_n,
+                                    curved,
+                                ));
                             }
                         }
                     }

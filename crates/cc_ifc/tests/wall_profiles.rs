@@ -62,7 +62,8 @@ fn add_layered_walls(e: &mut EditCtx) {
         }
         id
     };
-    let plain = typed(e, ElementKind::Wall(Wall { start: v(0.0, 20.0), end: v(6.0, 20.0), height: 3.0, ..Default::default() }));
+    let plain =
+        typed(e, ElementKind::Wall(Wall { start: v(0.0, 20.0), end: v(6.0, 20.0), height: 3.0, ..Default::default() }));
     let door = Hosted { host: plain, offset: 3.0, sill_height: 0.0, flip_facing: false, flip_hand: false };
     add(e, Category::Door, ElementKind::Door(door));
     let sloped = WallProfile::sloped(6.0, (0.0, 0.0), (3.0, 2.0)).unwrap();
@@ -70,7 +71,10 @@ fn add_layered_walls(e: &mut EditCtx) {
     // A plain wall meeting its low end in a mitered corner: its layers are clipped there.
     add(e, Category::Wall, ElementKind::Wall(Wall { start: v(6.0, 26.0), end: v(6.0, 30.0), ..Default::default() }));
     let bulge = (std::f64::consts::PI / 8.0).tan();
-    typed(e, ElementKind::Wall(Wall { start: v(14.0, 20.0), end: v(10.0, 24.0), height: 3.0, bulge, ..Default::default() }));
+    typed(
+        e,
+        ElementKind::Wall(Wall { start: v(14.0, 20.0), end: v(10.0, 24.0), height: 3.0, bulge, ..Default::default() }),
+    );
 }
 
 /// A sloped wall in an L corner with a plain wall (a mitered joint), a
@@ -168,8 +172,11 @@ fn wall_profile_fixture_round_trips() {
     assert_eq!(profiles(&fixture).len(), 5);
 }
 
+/// A wall's uid, its layers' extents (`base_offset`, `height`) and their volumes.
+type LayerFigures = (Uid, Vec<(f64, Option<f64>)>, Vec<f64>);
+
 /// Each wall's layers' extents and volumes, by uid.
-fn layer_figures(p: &Project) -> Vec<(Uid, Vec<(f64, Option<f64>)>, Vec<f64>)> {
+fn layer_figures(p: &Project) -> Vec<LayerFigures> {
     let g = cc_geom::ModelGeometry::build(p);
     let mut out: Vec<_> = p
         .walls()

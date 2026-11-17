@@ -1772,7 +1772,9 @@ impl<'a> Importer<'a> {
         let set = |n: &str| n == crate::export::WALL_LAYERS_PSET;
         let mut owners = vec![id];
         owners.extend(self.type_of.get(&id));
-        owners.into_iter().find_map(|o| self.pset_texts(o, &set, "Extents").first().and_then(|t| cc_core::curtain::from_text(t)))
+        owners
+            .into_iter()
+            .find_map(|o| self.pset_texts(o, &set, "Extents").first().and_then(|t| cc_core::curtain::from_text(t)))
     }
 
     /// Add a wall of `thickness` spanning `z` with the type and properties of `e`.
