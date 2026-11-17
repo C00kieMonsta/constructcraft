@@ -1020,8 +1020,15 @@ impl Command for WallAttach {
         let mut walls = Vec::with_capacity(self.ids.len());
         for id in &self.ids {
             let id = refs::element(p, *id)?;
-            if !matches!(p.element(id).map(|e| &e.kind), Some(ElementKind::Wall(_))) {
-                return Err(EngineError::invalid(format!("element {} is not a wall", id.0)));
+            match p.element(id).map(|e| &e.kind) {
+                Some(ElementKind::Wall(w)) if w.profile.is_some() && target.is_some() => {
+                    return Err(EngineError::invalid(format!(
+                        "wall {} has an elevation profile, which sets its top: remove it (wall_profile_remove) to attach the top",
+                        id.0
+                    )));
+                }
+                Some(ElementKind::Wall(_)) => {}
+                _ => return Err(EngineError::invalid(format!("element {} is not a wall", id.0))),
             }
             walls.push(id);
         }

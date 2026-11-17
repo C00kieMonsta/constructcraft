@@ -3827,3 +3827,38 @@ macro-ed-why-empty = 宏没有步骤。
 macro-ed-why-cursor = 将光标放在下一步之后，以运行到该处。
 macro-ed-why-errors = 请先修正该步骤之前的错误（见“问题”）。
 palette-insert = 插入
+
+## Wall elevation profiles
+tx-wall-profile = 墙轮廓
+wall-profile-invalid = 轮廓至少需要三个点。
+wall-profile-too-large = 轮廓的点太多。
+wall-profile-not-monotone = 一条竖直线与轮廓相交超过两次（已标示）：轮廓必须是沿墙的一条底线和一条顶线。
+wall-profile-out-of-bounds = 轮廓超出墙的两端，或在底部以下或以上太远（已标示）。
+wall-profile-no-area = 轮廓未围出任何面积。
+
+## Wall layer extents
+layer-to-top = 至顶部
+
+## Wall profile sketch
+edit-wall-profile = 编辑墙轮廓
+reset-wall-profile = 重置墙轮廓
+cmd-desc-edit-wall-profile = 在草图中打开所选墙的立面轮廓：沿墙的墙面，底部和顶部可以倾斜、阶梯或弯曲。
+cmd-desc-reset-wall-profile = 移除所选墙的立面轮廓：其底部和顶部恢复水平。
+why-select-wall = 请选择一面墙。
+why-wall-profile-arc = 只有直墙可以有立面轮廓。
+why-wall-profile-curtain = 幕墙不能有立面轮廓。
+why-wall-profile-attached = 墙顶已附着到屋顶、天花板或楼板：请先分离。
+why-wall-profile-framed = 墙已有龙骨：龙骨只适用于底部和顶部水平的墙。
+why-wall-no-profile = 该墙没有立面轮廓。
+why-wall-profile-curves = 墙的轮廓用直线和圆弧绘制。
+sketch-title-wall-profile = 墙轮廓：{ $type }
+hint-wall-profile-sketch = 绘制墙面：u 从墙的起点（左侧）沿墙方向，z 从墙底向上。一个闭合轮廓，包含一条底线和一条顶线；门窗必须位于其中。
+wall-profile-openings-out = 有 { $count } 个洞口不在墙轮廓内，不会被剪切。
+wall-profile-ref-start = 起点
+wall-profile-ref-end = 终点
+wall-profile-ref-base = 底部
+wall-profile-ref-top = 顶部
+section-wall-profile = 轮廓
+prop-wall-profile = 轮廓
+wall-profile-rectangular = 矩形
+wall-profile-custom = 自定义

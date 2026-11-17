@@ -249,6 +249,26 @@ Uma série de tubos é uma linha de produtos: suas bitolas (diâmetro externo, p
 {"command": "type_set", "args": {"type": "Tubo PVC soldável 40 mm", "params": {"size": "60 mm"}}}
 ```
 
+### Perfis de parede
+
+Uma parede reta pode ter um perfil de elevação: o contorno da sua face desenhado no seu próprio plano de elevação, `[u, z]` em metros ao longo da sua linha de localização a partir do início e acima da sua base, de modo que a base e o topo não precisam ser horizontais (um topo que acompanha um terreno inclinado, uma base em degraus, uma empena, um topo em arco). `wall_profile_set` recebe o contorno como `curves` (como nos esboços) ou `points`; ele deve ser um único laço fechado que não se cruza e que uma linha vertical cruza no máximo duas vezes (uma linha de base e uma de topo ao longo da parede, com extremidades e degraus verticais), sem furos, dentro do comprimento da parede (um perfil mais curto faz a parede ter só aquele trecho) e no máximo 100 m abaixo ou 1000 m acima da sua base. `wall_profile_slope` define uma base e um topo retos de uma extremidade à outra (`top_start`, `top_end`, `base_start`, `base_end`, alturas acima da base; por padrão a base em 0 e o topo na altura da parede), e `wall_profile_remove` retira o perfil. `wall_create` também aceita `profile` com curvas, e `sketch_get` / `sketch_set` leem e desenham o perfil de uma parede (`sketch_get` devolve o retângulo do seu comprimento e altura quando ela não tem perfil). A altura e a restrição de topo da parede continuam sendo a sua caixa nominal; o seu corpo, volume, plantas (cortada só onde o plano passa por ela), elevações, cortes, vistas 3D, área nas tabelas e IFC seguem o perfil. Portas, janelas e nichos que não ficam dentro dele ficam fora da parede. Quando o comprimento da parede muda, o perfil fica onde está ao longo da parede, é cortado nas extremidades da parede e acompanha uma extremidade que alcançava quando a parede cresce para aquele lado; um espelhamento o percorre ao contrário e uma divisão o divide. Paredes em arco, cortinas de vidro, paredes presas a um telhado e paredes com enquadramento (light steel ou madeira) não aceitam perfil. `element_get` o mostra em `params.profile`, com `area`, `min_z`, `max_z`, `start` e `end` em `derived.profile`.
+
+```text
+{"command": "wall_profile_slope", "args": {"wall": 12, "top_start": 3.0, "top_end": 1.2}}
+{"command": "wall_profile_set", "args": {"wall": 13, "points": [[0, 0], [6, 0], [6, 3], [3, 4.5], [0, 3]]}}
+```
+
+### Extensões das camadas
+
+Cada camada de um tipo de parede pode ter uma extensão vertical própria: `base_offset`, em metros a partir da base da parede em cada ponto ao longo dela (positivo começa mais acima, um isolamento acima do terreno; negativo desce abaixo dela, um núcleo que entra na fundação; dentro de ±100 m), e `height`, em metros a partir da base da própria camada (de 0,001 a 1000; null ou ausente: até o topo da parede). Uma camada nunca passa do topo da parede e, onde não lhe resta altura, não existe. Elas vão em `type_set` com a lista `layers` inteira como `type_get` a mostra (extensões padrão não aparecem); pisos e telhados não as aceitam. O corpo da parede fica em degraus ao longo da espessura, as plantas cortam cada camada na sua própria altura, as aberturas cortam todas as camadas que atravessam, e o volume da parede é a soma das suas camadas; `element_get` lista, em `derived.layers`, o `material`, a `thickness`, o `volume`, a `base` mais baixa e o `top` mais alto de cada camada acima da base da parede. Uniões, ambientes e as portas que a parede hospeda continuam vendo a parede inteira.
+
+```text
+{"command": "type_set", "args": {"type": "Isolada", "params": {"layers": [
+  {"material": "EPS", "thickness": 0.05, "function": "Insulation", "base_offset": 1.0},
+  {"material": "Concreto", "thickness": 0.2, "function": "Structure", "base_offset": -0.5},
+  {"material": "Reboco", "thickness": 0.02, "function": "Finish", "height": 2.4}]}}}
+```
+
 ### Eletrocalhas e registros
 
 `cable_tray_create` desenha um trecho de eletrocalha como `conduit_create` (com `circuits`, `offset`, `end_offset`); um projeto sem tipo de eletrocalha ganha um (200 × 100 mm, leito), e `cable_tray_type_create` cria outros (`width`, `height`, `style`: `ladder`, `solid_bottom` ou `perforated`). Eletrocalhas só se ligam a outras eletrocalhas, e as curvas e tês entre elas aparecem em `mep_fittings`. `valve_place` coloca um registro num tubo, num `point` perto dele ou a uma `distance` ao longo dele, de um `type` ou de uma função `kind` (`gate`, `ball`, `check`, `globe`; um tipo dessa função é criado quando não há); `valve_type_create` cria tipos de várias funções (`kinds`) de uma vez. O registro tem o diâmetro e o sistema do seu tubo, é um nó da rede e acompanha o tubo; `element_get` mostra `derived.point`, `kind` e `diameter`, e `element_set` o desloca ao longo do tubo (`params.at`).

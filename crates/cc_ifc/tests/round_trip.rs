@@ -13,7 +13,7 @@ fn load(text: &str) -> Project {
     cc_core::from_ron(text).unwrap()
 }
 
-fn round_trip(original: &Project) -> (Project, cc_ifc::ImportReport) {
+pub(crate) fn round_trip(original: &Project) -> (Project, cc_ifc::ImportReport) {
     let text =
         export(original, &ExportOptions { time_stamp: Some("2026-01-01T00:00:00".into()), file_name: "t.ifc".into() });
     import(&text, Project::from_template()).unwrap()
@@ -31,7 +31,7 @@ fn close2(a: DVec2, b: DVec2, tol: f64, what: &str) {
     assert!(a.distance(b) <= tol, "{what}: {a} vs {b}");
 }
 
-fn check(original: &Project) {
+pub(crate) fn check(original: &Project) {
     let (imported, report) = round_trip(original);
     assert_eq!(report.schema, "IFC4");
     assert_eq!(imported.info.name, original.info.name);

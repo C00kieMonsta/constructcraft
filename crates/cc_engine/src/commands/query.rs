@@ -249,6 +249,10 @@ pub(crate) fn element_json(s: &mut Session, id: ElementId) -> Option<Value> {
             }
             derived.insert("height".into(), json!(p.wall_height(&e, w)));
             derived.insert("thickness".into(), json!(p.thickness_of(&e)));
+            // The face of its elevation profile: area, lowest and highest points above its base, span.
+            if let Some(profile) = &w.profile {
+                derived.insert("profile".into(), super::wall_profile::derived(profile));
+            }
         }
         ElementKind::Beam(b) => {
             derived.insert("length".into(), json!(b.length()));
@@ -423,9 +427,30 @@ pub(crate) fn element_json(s: &mut Session, id: ElementId) -> Option<Value> {
         ElementKind::Beam(_) => p.elements.values().filter(|x| p.pile_cap(x).is_some()).map(|x| x.id).collect(),
         _ => Default::default(),
     };
+    let type_layers: Vec<cc_core::Layer> = p.element_type(e.type_id).map(|t| t.layers().to_vec()).unwrap_or_default();
     let geom = s.element_geometry(id);
     if geom.solids_of(id).next().is_some() {
         derived.insert("volume".into(), json!(geom.volume(id)));
+    }
+    // A layered wall's layers: material, thickness, net volume and their lowest and highest
+    // points above the wall's base (each layer's own extent, see `cc_core::layer_extent`).
+    if let Some(w) = geom.walls.get(&id).filter(|w| w.curtain.is_none() && !w.layers.is_empty()) {
+        let volumes = w.layer_volumes();
+        let layers: Vec<Value> = type_layers
+            .iter()
+            .enumerate()
+            .map(|(k, l)| {
+                let range = w.layer_range(k);
+                json!({
+                    "material": l.material,
+                    "thickness": l.thickness,
+                    "volume": volumes.get(k).copied().unwrap_or(0.0),
+                    "base": range.map(|r| r.0 - w.base_z),
+                    "top": range.map(|r| r.1 - w.base_z),
+                })
+            })
+            .collect();
+        derived.insert("layers".into(), json!(layers));
     }
     // A niche: its recess as the wall cut it (none when it overlaps another opening).
     if let ElementKind::Niche(h) = &e.kind

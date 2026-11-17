@@ -3827,3 +3827,38 @@ macro-ed-why-empty = A macro não tem passos.
 macro-ed-why-cursor = Ponha o cursor depois do próximo passo para executar até ele.
 macro-ed-why-errors = Corrija primeiro os erros até esse passo (veja Problemas).
 palette-insert = Inserir
+
+## Wall elevation profiles
+tx-wall-profile = Perfil da parede
+wall-profile-invalid = O perfil precisa de pelo menos três pontos.
+wall-profile-too-large = O perfil tem pontos demais.
+wall-profile-not-monotone = Uma linha vertical cruza o perfil mais de duas vezes (marcado): ele deve ser uma linha de base e uma linha de topo ao longo da parede.
+wall-profile-out-of-bounds = O perfil passa das extremidades da parede, ou vai longe demais abaixo ou acima da sua base (marcado).
+wall-profile-no-area = O perfil não encerra nenhuma área.
+
+## Wall layer extents
+layer-to-top = Até o topo
+
+## Wall profile sketch
+edit-wall-profile = Editar perfil da parede
+reset-wall-profile = Redefinir perfil da parede
+cmd-desc-edit-wall-profile = Abre o perfil de elevação da parede selecionada num esboço: a face da parede ao longo dela, com a base e o topo inclinados, em degraus ou curvos.
+cmd-desc-reset-wall-profile = Remove o perfil de elevação da parede selecionada: a base e o topo voltam a ficar nivelados.
+why-select-wall = Selecione uma parede.
+why-wall-profile-arc = Só paredes retas recebem um perfil de elevação.
+why-wall-profile-curtain = Uma parede-cortina não recebe perfil de elevação.
+why-wall-profile-attached = O topo da parede está preso a um telhado, forro ou piso: solte-o primeiro.
+why-wall-profile-framed = A parede tem estrutura de montantes: a estrutura segue apenas paredes de base e topo nivelados.
+why-wall-no-profile = A parede não tem perfil de elevação.
+why-wall-profile-curves = O perfil de uma parede é desenhado com linhas e arcos.
+sketch-title-wall-profile = Perfil da parede: { $type }
+hint-wall-profile-sketch = Desenhe a face da parede: u ao longo dela a partir do início (à esquerda), z para cima a partir da base. Um contorno fechado com uma linha de base e uma de topo; portas e janelas devem ficar dentro dele.
+wall-profile-openings-out = { $count } abertura(s) não cabem no perfil da parede e não são recortadas.
+wall-profile-ref-start = Início
+wall-profile-ref-end = Fim
+wall-profile-ref-base = Base
+wall-profile-ref-top = Topo
+section-wall-profile = Perfil
+prop-wall-profile = Perfil
+wall-profile-rectangular = Retangular
+wall-profile-custom = Personalizado

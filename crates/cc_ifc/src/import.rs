@@ -1455,12 +1455,12 @@ impl<'a> Importer<'a> {
                     // Outer layers of a multi-layer set are finishes.
                     let function =
                         if n > 2 && (i == 0 || i == n - 1) { LayerFunction::Finish } else { LayerFunction::Structure };
-                    Layer { material, thickness: t, function }
+                    Layer { material, thickness: t, function, ..Default::default() }
                 })
                 .collect();
         }
         let material = self.material(&main.unwrap_or_else(|| "IFC".to_string()), color);
-        vec![Layer { material, thickness, function: LayerFunction::Structure }]
+        vec![Layer { material, thickness, function: LayerFunction::Structure, ..Default::default() }]
     }
 
     /// A type of `category` named `name` whose data satisfies `same`, else a
@@ -1659,6 +1659,12 @@ impl<'a> Importer<'a> {
 
     fn import_wall(&mut self, id: u32, e: &Entity) -> bool {
         let (world, body) = self.product(e);
+        if let Some(done) = self.profiled_wall(id, e, world.translation.z, &body) {
+            return done;
+        }
+        if let Some(done) = self.layered_wall(id, e, world.translation.z, &body) {
+            return done;
+        }
         let Some(ex) = body.extrusion(true) else { return false };
         let Some((z0, z1)) = body.z_range() else { return false };
         let footprint = ex.footprint();
@@ -1710,12 +1716,81 @@ impl<'a> Importer<'a> {
         self.add_wall(id, e, (z0, z1), thickness, Wall { start, end, ..Default::default() })
     }
 
+    /// A wall with an elevation profile written by this program
+    /// ([`crate::export::WALL_PROFILE_PSET`]): along its axis, from its
+    /// placement's elevation `base`, with its nominal height, its width and
+    /// its profile. `None` when the set is missing or does not make one.
+    fn profiled_wall(&mut self, id: u32, e: &Entity, base: f64, body: &Body) -> Option<bool> {
+        let set = |n: &str| n == crate::export::WALL_PROFILE_PSET;
+        let text = self.pset_texts(id, &set, "Profile").first().map(|s| s.to_string())?;
+        let profile: cc_core::wall_profile::WallProfile = cc_core::curtain::from_text(&text)?;
+        let numbers = self.numeric_properties(id, crate::export::WALL_PROFILE_PSET);
+        let number = |name: &str| numbers.iter().find(|n| n.0 == name).map(|n| n.1 * self.scale);
+        let (height, width) = (number("Height")?, number("Width")?);
+        let (start, end) = body.axis?;
+        let fits = height.is_finite() && height > 0.0 && width.is_finite() && width >= 0.005 && base.is_finite();
+        if !fits || !(start.is_finite() && end.is_finite()) || start.distance(end) < 0.01 {
+            return None;
+        }
+        let profile = profile.fitted(start.distance(end)).ok()?;
+        let wall = Wall { start, end, profile: Some(profile), ..Default::default() };
+        Some(self.add_wall(id, e, (base, base + height), width, wall))
+    }
+
+    /// A wall whose layers have extents of their own, written by this
+    /// program ([`crate::export::WALL_LAYERS_PSET`]): its body is one item
+    /// per layer, so it is rebuilt from its axis (a line, or an arc through
+    /// its points), its placement's elevation `base` and its nominal height
+    /// and width. `None` when the set is missing or does not make one.
+    fn layered_wall(&mut self, id: u32, e: &Entity, base: f64, body: &Body) -> Option<bool> {
+        let numbers = self.numeric_properties(id, crate::export::WALL_LAYERS_PSET);
+        let number = |name: &str| numbers.iter().find(|n| n.0 == name).map(|n| n.1 * self.scale);
+        let (height, width) = (number("Height")?, number("Width")?);
+        if !(height.is_finite() && height > 0.0 && width.is_finite() && width >= 0.005 && base.is_finite()) {
+            return None;
+        }
+        let points = &body.axis_points;
+        let (start, end, bulge) = match (points.first(), points.get(points.len() / 2), points.last()) {
+            (Some(&a), Some(&mid), Some(&b)) if points.len() >= 3 => {
+                (a, b, cc_core::arc::Arc::bulge_through(a, mid, b).unwrap_or(0.0))
+            }
+            _ => {
+                let (a, b) = body.axis?;
+                (a, b, 0.0)
+            }
+        };
+        if !(start.is_finite() && end.is_finite() && bulge.is_finite()) || start.distance(end) < 0.01 {
+            return None;
+        }
+        let wall = Wall { start, end, bulge, ..Default::default() };
+        Some(self.add_wall(id, e, (base, base + height), width, wall))
+    }
+
+    /// The layers' extents a wall's type (or the wall) carries in
+    /// [`crate::export::WALL_LAYERS_PSET`].
+    fn layer_extents(&self, id: u32) -> Option<Vec<cc_core::layer_extent::Extent>> {
+        let set = |n: &str| n == crate::export::WALL_LAYERS_PSET;
+        let mut owners = vec![id];
+        owners.extend(self.type_of.get(&id));
+        owners
+            .into_iter()
+            .find_map(|o| self.pset_texts(o, &set, "Extents").first().and_then(|t| cc_core::curtain::from_text(t)))
+    }
+
     /// Add a wall of `thickness` spanning `z` with the type and properties of `e`.
     fn add_wall(&mut self, id: u32, e: &Entity, (z0, z1): (f64, f64), thickness: f64, wall: Wall) -> bool {
         let (level, elevation) = self.level_for(id, z0);
         let name = self.type_name(id, e);
         let fallback = format!("{:.0} cm", thickness * 100.0);
-        let layers = self.layers(id, e, thickness);
+        let mut layers = self.layers(id, e, thickness);
+        // The layers' own extents, when the file gives one per layer.
+        if let Some(extents) = self.layer_extents(id).filter(|x| x.len() == layers.len()) {
+            for (layer, x) in layers.iter_mut().zip(extents).filter(|(_, x)| x.is_valid()) {
+                (layer.base_offset, layer.height) = (x.base_offset, x.height);
+            }
+        }
+        let wanted: Vec<cc_core::layer_extent::Extent> = layers.iter().map(cc_core::layer_extent::Extent::of).collect();
+        let same_extents = |l: &[Layer]| l.iter().map(cc_core::layer_extent::Extent::of).eq(wanted.iter().copied());
         let external = self.property(id, "Pset_WallCommon", "IsExternal").and_then(Param::as_bool);
         let structural = self.property(id, "Pset_WallCommon", "LoadBearing").and_then(Param::as_bool);
         let function = if external == Some(false) { WallFunction::Interior } else { WallFunction::Exterior };
@@ -1725,7 +1800,7 @@ impl<'a> Importer<'a> {
             name,
             fallback,
             uid,
-            |d| matches!(d, TypeData::Wall { layers, curtain: None, .. } if (layers.iter().map(|l| l.thickness).sum::<f64>() - thickness).abs() < TYPE_TOL),
+            |d| matches!(d, TypeData::Wall { layers, curtain: None, .. } if (layers.iter().map(|l| l.thickness).sum::<f64>() - thickness).abs() < TYPE_TOL && same_extents(layers)),
             || TypeData::Wall { layers, function, curtain: None, structural: false },
         );
         let wall =

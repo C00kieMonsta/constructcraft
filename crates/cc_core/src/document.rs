@@ -719,6 +719,52 @@ impl<'a> EditCtx<'a> {
         }
     }
 
+    /// Wall profiles follow what this edit did to their walls (see
+    /// [`crate::wall_profile`]): a wall whose length changed (its profile
+    /// left as it was) refits it, kept where it was along the wall (a start
+    /// moved along the wall's line shifts it back), cut at the ends and
+    /// following an end it reached where the wall grows, dropped when
+    /// nothing is left; a wall made curved or a curtain wall loses it; a
+    /// sketch that no longer makes the outline goes.
+    fn sync_wall_profiles(&mut self) {
+        let changed: Vec<(ElementId, Option<crate::Wall>)> = self
+            .element_changes()
+            .into_iter()
+            .map(|(id, before)| (id, before.and_then(|e| e.as_wall().cloned())))
+            .collect();
+        for (id, before) in changed {
+            let p = &*self.project;
+            let Some(e) = p.elements.get(&id) else { continue };
+            let Some(w) = e.as_wall() else { continue };
+            let Some(profile) = &w.profile else { continue };
+            let curtain = p.element_type(e.type_id).is_some_and(|t| t.curtain().is_some());
+            let fitted = if curtain || w.bulge != 0.0 {
+                None
+            } else {
+                match before.filter(|b| b.profile == w.profile && b.bulge == 0.0) {
+                    Some(b) if (b.length() - w.length()).abs() > 1e-9 => {
+                        let (dir, moved) = (b.direction(), w.start - b.start);
+                        // A start moved along the wall's own line: the profile stays where it was.
+                        let along = w.direction().dot(dir) > 1.0 - 1e-9 && moved.dot(dir.perp()).abs() < 1e-6;
+                        let shift = if along { moved.dot(dir) } else { 0.0 };
+                        profile.refit(b.length(), shift, w.length())
+                    }
+                    _ => {
+                        let mut kept = profile.clone();
+                        kept.drop_stale_sketch();
+                        Some(kept)
+                    }
+                }
+            };
+            if fitted.as_ref() == Some(profile) {
+                continue;
+            }
+            if let Some(crate::ElementKind::Wall(w)) = self.element_mut(id).map(|e| &mut e.kind) {
+                w.profile = fitted;
+            }
+        }
+    }
+
     /// Floors, ceilings and roofs take the cuts of the shafts that pass
     /// through them (see [`crate::shaft`]), in the same undo step as the
     /// edit that moved a shaft or them; unchanged cuts are left alone.
@@ -1039,6 +1085,7 @@ impl<'a> EditCtx<'a> {
         self.sync_pads();
         self.sync_piles();
         self.sync_attachments();
+        self.sync_wall_profiles();
         self.sync_dimensions();
         self.sync_phases();
         self.sync_options();

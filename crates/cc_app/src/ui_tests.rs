@@ -819,6 +819,38 @@ fn duplicated_type_keeps_the_typed_name() {
     assert!(harness.state().dialogs.type_editor.is_none());
 }
 
+/// A wall type's layers table gives each layer a base offset and a height
+/// (issue #306): typing a base offset sets that layer's own extent, and the
+/// layers given no height read "To top".
+#[test]
+fn a_wall_layers_base_offset_is_set_in_type_properties() {
+    let mut state = sample_state();
+    let wall = state.project().default_type(cc_core::Category::Wall).unwrap();
+    let layers = |s: &AppState| s.project().element_type(wall).map(|t| t.layers().to_vec()).unwrap_or_default();
+    let unit = state.project().units.length.unit.symbol().to_string();
+    let thickness = format!("{} {unit}", length_text(layers(&state)[0].thickness));
+    state.dialogs.type_editor = Some(wall);
+    state.dialogs.type_layers_open = true;
+    let mut harness = type_dialog_harness(state);
+    harness.run();
+    assert!(harness.query_by_label(&t!("prop-base-offset")).is_some(), "the column's heading");
+    let count = layers(harness.state()).len();
+    assert_eq!(harness.query_all_by_label(&t!("layer-to-top")).count(), count, "every layer reaches the top");
+    // The first layer's base offset: the number field after its thickness.
+    let values: Vec<String> =
+        harness.query_all_by_role(Role::SpinButton).map(|n| n.value().unwrap_or_default()).collect();
+    let at = values.iter().position(|v| *v == thickness).unwrap_or_else(|| panic!("{thickness} in {values:?}")) + 1;
+    harness.query_all_by_role(Role::SpinButton).nth(at).unwrap().focus();
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.query_all_by_role(Role::SpinButton).find(|n| n.is_focused()).unwrap().type_text(&length_text(1.0));
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    let after = layers(harness.state());
+    assert!((after[0].base_offset - 1.0).abs() < 1e-9, "{:?}", after[0]);
+    assert!(after[0].height.is_none() && after[1..].iter().all(|l| l.base_offset == 0.0 && l.height.is_none()));
+}
+
 /// *Edit Component* in Type Properties closes the dialog as it opens the
 /// environment (before, the dialog stayed in front of it).
 #[test]
@@ -5509,4 +5541,172 @@ fn tags_and_bubbles_are_dragged_turned_and_hidden_on_the_canvas() {
         "{:?}",
         placement(&harness, grid)
     );
+}
+
+/// A straight wall 6 m long and 3 m high far from the sample house, with a
+/// door at `door` meters along it (none for `None`).
+fn profile_wall(state: &mut AppState, door: Option<f64>) -> cc_core::ElementId {
+    let level = state.project().levels[0].id.0;
+    let args = serde_json::json!({"level": level, "start": [100, 100], "end": [106, 100], "height": 3.0});
+    let wall = cc_core::ElementId(state.session.execute("wall_create", args).unwrap()["id"].as_u64().unwrap());
+    if let Some(offset) = door {
+        state.session.execute("door_create", serde_json::json!({"wall": wall.0, "offset": offset})).unwrap();
+    }
+    wall
+}
+
+/// The wall's rectangle with its top sloping from 3 m at the start to `end` at the end.
+fn sloped_top(end: f64) -> Vec<cc_core::sketch::SketchCurve> {
+    use glam::DVec2;
+    let outline = [DVec2::ZERO, DVec2::new(6.0, 0.0), DVec2::new(6.0, end), DVec2::new(0.0, 3.0)];
+    cc_core::sketch::Sketch::from_polygons(&outline, &[]).curves
+}
+
+fn wall_profile(state: &AppState, wall: cc_core::ElementId) -> Option<cc_core::wall_profile::WallProfile> {
+    state.project().element(wall).and_then(|e| e.as_wall()).and_then(|w| w.profile.clone())
+}
+
+/// The properties palette, while no sketch is open.
+fn wall_palette_harness(state: AppState) -> Harness<'static, AppState> {
+    themed_harness(state, egui::vec2(360.0, 1600.0), egui::Theme::Light, |ui, state| {
+        if state.sketch.is_none() {
+            crate::properties::show(ui, state);
+        }
+    })
+}
+
+/// Issue #306: *Edit Profile* takes one straight wall; an arc wall says why
+/// not (and its palette has no Profile section), and *Reset Profile* needs a
+/// profile.
+#[test]
+fn edit_wall_profile_follows_the_selected_wall() {
+    use crate::commands::UiCommand;
+    let mut state = sample_state();
+    let wall = profile_wall(&mut state, None);
+    let level = state.project().levels[0].id.0;
+    let args = serde_json::json!({"level": level, "start": [100, 110], "end": [106, 110], "bulge": 0.3});
+    let arc = cc_core::ElementId(state.session.execute("wall_create", args).unwrap()["id"].as_u64().unwrap());
+    assert_eq!(UiCommand::EditWallProfile.unavailable(&state), Some(t!("why-select-wall")));
+    state.selection = [arc].into_iter().collect();
+    assert_eq!(UiCommand::EditWallProfile.unavailable(&state), Some(t!("why-wall-profile-arc")));
+    state.selection = [wall].into_iter().collect();
+    assert_eq!(UiCommand::EditWallProfile.unavailable(&state), None);
+    assert_eq!(UiCommand::ResetWallProfile.unavailable(&state), Some(t!("why-wall-no-profile")));
+
+    let mut harness = wall_palette_harness(state);
+    harness.run();
+    assert!(harness.query_by_label(&t!("wall-profile-rectangular")).is_some());
+    let (edit_label, reset_label) = (t!("edit-wall-profile"), t!("reset-wall-profile"));
+    let edit = harness.get_by_role_and_label(Role::Button, &edit_label);
+    assert!(!edit.accesskit_node().is_disabled());
+    let reset = harness.get_by_role_and_label(Role::Button, &reset_label);
+    assert!(reset.accesskit_node().is_disabled(), "no profile to reset");
+    harness.state_mut().selection = [arc].into_iter().collect();
+    harness.run();
+    assert!(harness.query_by_label(&t!("wall-profile-rectangular")).is_none(), "arc walls take no profile");
+}
+
+/// Issue #306: the wall's profile opens on its nominal rectangle in the
+/// profile canvas; a sloped top finishes in one undo step and leaves the
+/// sketch; Cancel changes nothing; an outline past the wall's end stays open
+/// with the reason; *Reset Profile* takes the profile off.
+#[test]
+fn a_wall_profile_is_sketched_in_its_own_canvas() {
+    use glam::DVec2;
+    let mut state = sample_state();
+    let wall = profile_wall(&mut state, Some(1.5));
+    state.selection = [wall].into_iter().collect();
+    let depth = state.session.doc.undo_depth();
+    let mut harness = wall_palette_harness(state);
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, &t!("edit-wall-profile")).click();
+    harness.run();
+    assert!(crate::profile_sketch::is_open(harness.state()));
+    assert!(crate::wall_profile_ui::is_open(harness.state()));
+    let rect = [DVec2::ZERO, DVec2::new(6.0, 0.0), DVec2::new(6.0, 3.0), DVec2::new(0.0, 3.0)];
+    let nominal = cc_core::sketch::Sketch::from_polygons(&rect, &[]).curves;
+    assert_eq!(harness.state().sketch.as_ref().unwrap().curves, nominal, "the nominal rectangle");
+
+    // The canvas and its ribbon: lines and arcs only.
+    let mut harness = sketch_harness(harness.into_state());
+    harness.run();
+    let around = crate::wall_profile_ui::context(harness.state().project(), wall, &nominal).unwrap();
+    assert_eq!((around.length, around.height, around.openings.len()), (6.0, 3.0, 1), "the lines and the door");
+    assert!(!around.levels.is_empty(), "the levels near the wall");
+    let circle = crate::commands::UiCommand::SketchCircle.label(harness.state());
+    assert!(harness.query_by_label(&circle).is_none(), "no circles");
+
+    // Cancel changes nothing.
+    let side = cc_core::sketch::SketchCurve::Line { a: DVec2::new(6.0, 0.0), b: DVec2::new(6.0, 2.0) };
+    harness.state_mut().sketch.as_mut().unwrap().set_curve(1, side);
+    harness.get_by_role_and_label(Role::Button, &t!("sketch-cancel-mode")).click();
+    harness.run();
+    assert!(harness.state().sketch.is_none());
+    assert!(wall_profile(harness.state(), wall).is_none());
+    assert_eq!(harness.state().session.doc.undo_depth(), depth);
+
+    // Past the wall's end: refused, the sketch stays with the reason.
+    assert!(crate::wall_profile_ui::open(harness.state_mut(), wall));
+    let past = [DVec2::ZERO, DVec2::new(7.0, 0.0), DVec2::new(7.0, 3.0), DVec2::new(0.0, 3.0)];
+    harness.state_mut().sketch.as_mut().unwrap().curves = cc_core::sketch::Sketch::from_polygons(&past, &[]).curves;
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, &t!("sketch-finish-mode")).click();
+    harness.run();
+    assert!(crate::wall_profile_ui::is_open(harness.state()), "the sketch stays open");
+    assert_eq!(harness.state().message, t!("wall-profile-out-of-bounds"));
+    assert_eq!(harness.state().session.doc.undo_depth(), depth);
+
+    // A sloped top: one undo step, the wall stays selected, the door fits.
+    harness.state_mut().sketch.as_mut().unwrap().curves = sloped_top(2.0);
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, &t!("sketch-finish-mode")).click();
+    harness.run();
+    assert!(harness.state().sketch.is_none(), "{}", harness.state().message);
+    let profile = wall_profile(harness.state(), wall).unwrap();
+    assert!((profile.z_range().1 - 3.0).abs() < 1e-9 && (profile.area() - 15.0).abs() < 1e-9, "{profile:?}");
+    assert_eq!(harness.state().session.doc.undo_depth(), depth + 1, "one undo step");
+    assert_eq!(harness.state().selection, [wall].into_iter().collect());
+    assert_eq!(crate::wall_profile_ui::misfits(harness.state().project(), wall), 0);
+    // Opened again it shows the profile's curves; Finish unchanged adds no step.
+    assert!(crate::wall_profile_ui::open(harness.state_mut(), wall));
+    assert_eq!(harness.state().sketch.as_ref().unwrap().curves, sloped_top(2.0));
+    crate::sketch_mode::finish(harness.state_mut());
+    assert!(harness.state().sketch.is_none());
+    assert_eq!(harness.state().session.doc.undo_depth(), depth + 1);
+    // Undone in one step.
+    harness.state_mut().session.doc.undo();
+    assert!(wall_profile(harness.state(), wall).is_none());
+    harness.state_mut().session.doc.redo();
+    assert!(wall_profile(harness.state(), wall).is_some());
+
+    // Reset Profile from the palette.
+    let mut harness = wall_palette_harness(harness.into_state());
+    harness.run();
+    assert!(harness.query_by_label(&t!("wall-profile-custom")).is_some());
+    harness.get_by_role_and_label(Role::Button, &t!("reset-wall-profile")).click();
+    harness.run();
+    assert!(wall_profile(harness.state(), wall).is_none());
+    assert_eq!(harness.state().session.doc.undo_depth(), depth + 2);
+    let reset_label = t!("reset-wall-profile");
+    let reset = harness.get_by_role_and_label(Role::Button, &reset_label);
+    assert!(reset.accesskit_node().is_disabled());
+}
+
+/// Issue #306: a profile that leaves a hosted door outside the wall's body
+/// says so in the status bar.
+#[test]
+fn a_wall_profile_that_leaves_a_door_out_warns() {
+    let mut state = sample_state();
+    let wall = profile_wall(&mut state, Some(4.5));
+    state.selection = [wall].into_iter().collect();
+    crate::commands::run(&mut state, &egui::Context::default(), crate::commands::UiCommand::EditWallProfile);
+    assert!(crate::wall_profile_ui::is_open(&state));
+    state.sketch.as_mut().unwrap().curves = sloped_top(1.0);
+    crate::sketch_mode::finish(&mut state);
+    assert!(state.sketch.is_none(), "{}", state.message);
+    assert!(wall_profile(&state, wall).is_some());
+    assert_eq!(state.message, t!("wall-profile-openings-out", "count" => 1));
+    // What the geometry leaves out is what the warning counts.
+    let door = state.project().hosted_by(wall).map(|e| e.id).next().unwrap();
+    assert!(state.session.geometry().walls.get(&wall).unwrap().openings.iter().all(|o| o.element != door));
 }

@@ -44,6 +44,10 @@ pub mod strip;
 mod strip_rebar;
 pub mod topography;
 mod wall;
+#[cfg(test)]
+mod wall_layers_tests;
+#[cfg(test)]
+mod wall_profile_tests;
 mod wall_rebar;
 
 pub use beam::{BeamEnd, BeamGeom};
@@ -64,6 +68,6 @@ pub use stair::{
     railing_path, railing_pieces, stair_geom,
 };
 pub use strip::StripArc;
-pub use wall::{Column, LayerGap, Opening, RECESS_MIN_BACK, Recess, WallGeom};
+pub use wall::{Band, Column, LayerGap, Lin, Opening, RECESS_MIN_BACK, Recess, WallGeom};
 
 pub use glam::{DVec2, DVec3};

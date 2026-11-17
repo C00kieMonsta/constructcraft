@@ -3827,3 +3827,38 @@ macro-ed-why-empty = La macro n’a aucune étape.
 macro-ed-why-cursor = Placez le curseur après l’étape suivante pour exécuter jusqu’à elle.
 macro-ed-why-errors = Corrigez d’abord les erreurs jusqu’à cette étape (voir Problèmes).
 palette-insert = Insérer
+
+## Wall elevation profiles
+tx-wall-profile = Profil du mur
+wall-profile-invalid = Le profil a besoin d’au moins trois points.
+wall-profile-too-large = Le profil a trop de points.
+wall-profile-not-monotone = Une ligne verticale coupe le profil plus de deux fois (marqué) : il doit être une ligne basse et une ligne haute le long du mur.
+wall-profile-out-of-bounds = Le profil dépasse les extrémités du mur, ou descend ou monte trop loin de sa base (marqué).
+wall-profile-no-area = Le profil n’enferme aucune surface.
+
+## Wall layer extents
+layer-to-top = Jusqu’en haut
+
+## Wall profile sketch
+edit-wall-profile = Modifier le profil du mur
+reset-wall-profile = Réinitialiser le profil du mur
+cmd-desc-edit-wall-profile = Ouvre dans une esquisse le profil d’élévation du mur sélectionné : la face du mur le long de celui-ci, avec une base et un sommet inclinés, en gradins ou courbes.
+cmd-desc-reset-wall-profile = Supprime le profil d’élévation du mur sélectionné : sa base et son sommet redeviennent horizontaux.
+why-select-wall = Sélectionnez un mur.
+why-wall-profile-arc = Seuls les murs droits acceptent un profil d’élévation.
+why-wall-profile-curtain = Un mur-rideau n’accepte pas de profil d’élévation.
+why-wall-profile-attached = Le sommet du mur est attaché à un toit, un plafond ou un plancher : détachez-le d’abord.
+why-wall-profile-framed = Le mur a une ossature : l’ossature ne suit que des murs à base et sommet horizontaux.
+why-wall-no-profile = Le mur n’a pas de profil d’élévation.
+why-wall-profile-curves = Le profil d’un mur se dessine avec des lignes et des arcs.
+sketch-title-wall-profile = Profil du mur : { $type }
+hint-wall-profile-sketch = Dessinez la face du mur : u le long du mur depuis son début (à gauche), z vers le haut depuis sa base. Un contour fermé avec une ligne basse et une ligne haute ; les portes et fenêtres doivent y être contenues.
+wall-profile-openings-out = { $count } ouverture(s) ne tiennent pas dans le profil du mur et ne sont pas découpées.
+wall-profile-ref-start = Début
+wall-profile-ref-end = Fin
+wall-profile-ref-base = Base
+wall-profile-ref-top = Sommet
+section-wall-profile = Profil
+prop-wall-profile = Profil
+wall-profile-rectangular = Rectangulaire
+wall-profile-custom = Personnalisé

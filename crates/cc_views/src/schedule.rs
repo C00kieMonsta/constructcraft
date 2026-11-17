@@ -228,7 +228,9 @@ fn summable(field: ScheduleField) -> bool {
     )
 }
 
-/// Net side area of a wall: length x height minus its openings.
+/// Net side area of a wall: length x height (the area of its elevation
+/// profile, see [`cc_core::wall_profile`]) minus its openings (with a
+/// profile, those that lie inside it: the others cut nothing).
 fn wall_area(project: &Project, e: &Element, w: &cc_core::Wall, cache: &mut Memo) -> f64 {
     // Every wall's doors and windows, in element order, found in one pass.
     let hosted = cache.hosted.get_or_insert_with(|| {
@@ -240,6 +242,7 @@ fn wall_area(project: &Project, e: &Element, w: &cc_core::Wall, cache: &mut Memo
         }
         by_host
     });
+    let chains = w.profile.as_ref().filter(|_| w.bulge == 0.0).and_then(|p| Some((p.area(), p.chains()?)));
     let openings: f64 = hosted
         .get(&e.id)
         .into_iter()
@@ -247,10 +250,19 @@ fn wall_area(project: &Project, e: &Element, w: &cc_core::Wall, cache: &mut Memo
         .filter_map(|h| project.element(*h))
         // Niches do not open the wall.
         .filter(|h| !matches!(h.kind, ElementKind::Niche(_)))
-        .filter_map(|h| project.element_type(h.type_id)?.opening_size())
-        .map(|(w, h)| w * h)
+        .filter_map(|h| Some((h.as_hosted()?, project.element_type(h.type_id)?.opening_size()?)))
+        .filter(|(x, (width, height))| {
+            chains.as_ref().is_none_or(|(_, c)| {
+                c.holds(x.offset - width * 0.5, x.offset + width * 0.5, x.sill_height, x.sill_height + height)
+            })
+        })
+        .map(|(_, (w, h))| w * h)
         .sum();
-    (project.wall_length(e, w) * project.wall_height(e, w) - openings).max(0.0)
+    let gross = match &chains {
+        Some((area, _)) => *area,
+        None => project.wall_length(e, w) * project.wall_height(e, w),
+    };
+    (gross - openings).max(0.0)
 }
 
 /// A section as text: its size, with the profile's letter (I, U, L), a box

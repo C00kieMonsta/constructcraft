@@ -299,13 +299,21 @@ impl LayerFunction {
 }
 
 /// One material layer of a compound wall/floor/roof type, listed exterior first.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Layer {
     pub material: String,
     /// Thickness in meters.
     pub thickness: f64,
     #[serde(default)]
     pub function: LayerFunction,
+    /// Walls only: where the layer starts, meters above (negative: below)
+    /// the wall's bottom at each point along it (see [`crate::layer_extent`]).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub base_offset: f64,
+    /// Walls only: the layer's height from its own bottom, never past the
+    /// wall's top (`None`: up to the wall's top).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<f64>,
 }
 
 /// Purpose of a wall type.

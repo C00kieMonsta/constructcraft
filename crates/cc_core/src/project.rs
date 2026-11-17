@@ -251,8 +251,18 @@ impl Project {
         })
         .collect();
 
-        let layer = |m: &str, t: f64| Layer { material: m.into(), thickness: t, function: LayerFunction::Structure };
-        let finish = |m: &str, t: f64| Layer { material: m.into(), thickness: t, function: LayerFunction::Finish };
+        let layer = |m: &str, t: f64| Layer {
+            material: m.into(),
+            thickness: t,
+            function: LayerFunction::Structure,
+            ..Default::default()
+        };
+        let finish = |m: &str, t: f64| Layer {
+            material: m.into(),
+            thickness: t,
+            function: LayerFunction::Finish,
+            ..Default::default()
+        };
         let names = crate::openings::OpeningNames::new(&n);
         let door = |w: f64, h: f64, m: &str| TypeData::Component {
             component: names.door.clone(),

@@ -7,7 +7,9 @@ use std::path::Path;
 /// Current file format version. Bump when the schema changes incompatibly.
 /// 28: the ANSI and architectural sheet sizes, and the slope unit
 /// `RisePer12` (`6:12`), which older builds cannot read.
-pub const FORMAT_VERSION: u32 = 30;
+/// 31 (30 is taken by another change): wall elevation profiles
+/// (`Wall::profile`), which older builds would drop.
+pub const FORMAT_VERSION: u32 = 31;
 
 /// Largest project file read, bytes (pictures and textures are kept in it).
 pub const MAX_FILE_BYTES: u64 = 1 << 30;

@@ -3827,3 +3827,38 @@ macro-ed-why-empty = The macro has no steps.
 macro-ed-why-cursor = Put the cursor after the next step to run up to it.
 macro-ed-why-errors = Fix the errors up to that step first (see Problems).
 palette-insert = Insert
+
+## Wall elevation profiles
+tx-wall-profile = Wall Profile
+wall-profile-invalid = The profile needs at least three points.
+wall-profile-too-large = The profile has too many points.
+wall-profile-not-monotone = A vertical line crosses the profile more than twice (marked): it must be one bottom line and one top line along the wall.
+wall-profile-out-of-bounds = The profile runs past the wall's ends, or too far below or above its base (marked).
+wall-profile-no-area = The profile encloses no area.
+
+## Wall layer extents
+layer-to-top = To top
+
+## Wall profile sketch
+edit-wall-profile = Edit Wall Profile
+reset-wall-profile = Reset Wall Profile
+cmd-desc-edit-wall-profile = Open the selected wall's elevation profile in a sketch: the wall's face along it, with a sloped, stepped or curved base and top.
+cmd-desc-reset-wall-profile = Remove the selected wall's elevation profile: its base and top are level again.
+why-select-wall = Select one wall.
+why-wall-profile-arc = Only straight walls take an elevation profile.
+why-wall-profile-curtain = A curtain wall takes no elevation profile.
+why-wall-profile-attached = The wall's top is attached to a roof, ceiling or floor: detach it first.
+why-wall-profile-framed = The wall is framed: framing follows walls with a level base and top only.
+why-wall-no-profile = The wall has no elevation profile.
+why-wall-profile-curves = A wall's profile is drawn with lines and arcs.
+sketch-title-wall-profile = Wall Profile: { $type }
+hint-wall-profile-sketch = Draw the wall's face: u along it from its start (at the left), z up from its base. One closed outline with a bottom and a top line; doors and windows must lie inside it.
+wall-profile-openings-out = { $count } opening(s) do not fit the wall's profile and are not cut.
+wall-profile-ref-start = Start
+wall-profile-ref-end = End
+wall-profile-ref-base = Base
+wall-profile-ref-top = Top
+section-wall-profile = Profile
+prop-wall-profile = Profile
+wall-profile-rectangular = Rectangular
+wall-profile-custom = Custom

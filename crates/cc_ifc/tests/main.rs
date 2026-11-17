@@ -10,6 +10,7 @@ mod connections;
 mod rebar;
 mod round_trip;
 mod tank;
+mod wall_profiles;
 
 /// Every `.rs` file of `tests/` is declared above, so none is skipped.
 #[test]

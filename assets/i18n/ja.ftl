@@ -3827,3 +3827,38 @@ macro-ed-why-empty = マクロにステップがありません。
 macro-ed-why-cursor = 次のステップより後ろにカーソルを置くと、そこまで実行できます。
 macro-ed-why-errors = そのステップまでのエラーを先に修正してください (「問題」を参照)。
 palette-insert = 挿入
+
+## Wall elevation profiles
+tx-wall-profile = 壁のプロファイル
+wall-profile-invalid = プロファイルには少なくとも 3 点が必要です。
+wall-profile-too-large = プロファイルの点が多すぎます。
+wall-profile-not-monotone = 垂直線がプロファイルと 3 回以上交差しています（マーク箇所）。プロファイルは壁に沿った下端線と上端線の 1 本ずつでなければなりません。
+wall-profile-out-of-bounds = プロファイルが壁の端を越えているか、基部から下または上に離れすぎています（マーク箇所）。
+wall-profile-no-area = プロファイルが面積を囲んでいません。
+
+## Wall layer extents
+layer-to-top = 上端まで
+
+## Wall profile sketch
+edit-wall-profile = 壁プロファイルを編集
+reset-wall-profile = 壁プロファイルをリセット
+cmd-desc-edit-wall-profile = 選択した壁の立面プロファイルをスケッチで開きます: 壁に沿った壁面で、下端と上端を傾斜、段状、曲線にできます。
+cmd-desc-reset-wall-profile = 選択した壁の立面プロファイルを削除します: 下端と上端が再び水平になります。
+why-select-wall = 壁を 1 つ選択してください。
+why-wall-profile-arc = 立面プロファイルを持てるのは直線の壁だけです。
+why-wall-profile-curtain = カーテンウォールは立面プロファイルを持てません。
+why-wall-profile-attached = 壁の上端が屋根、天井、または床にアタッチされています。先にデタッチしてください。
+why-wall-profile-framed = 壁に軸組があります。軸組は下端と上端が水平な壁にのみ追従します。
+why-wall-no-profile = この壁には立面プロファイルがありません。
+why-wall-profile-curves = 壁のプロファイルは線分と円弧で描きます。
+sketch-title-wall-profile = 壁プロファイル: { $type }
+hint-wall-profile-sketch = 壁面を描きます: u は壁の始点 (左) から壁に沿って、z は下端から上方向。下端線と上端線を持つ 1 つの閉じた輪郭で、ドアと窓はその内側に収める必要があります。
+wall-profile-openings-out = { $count } 個の開口部が壁のプロファイルに収まらず、切り抜かれません。
+wall-profile-ref-start = 始点
+wall-profile-ref-end = 終点
+wall-profile-ref-base = 下端
+wall-profile-ref-top = 上端
+section-wall-profile = プロファイル
+prop-wall-profile = プロファイル
+wall-profile-rectangular = 長方形
+wall-profile-custom = カスタム

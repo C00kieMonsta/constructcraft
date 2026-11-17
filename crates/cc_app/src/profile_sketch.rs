@@ -10,6 +10,11 @@
 //! level: *Finish* writes its outline and openings with `profile_set`,
 //! keeping the expressions of the points that did not move, and both
 //! *Finish* and *Cancel* go back to the manager.
+//!
+//! A wall's elevation profile (*Edit Profile* on a wall, see
+//! [`crate::wall_profile_ui`]) opens here too, in the wall's frame, with the
+//! wall's reference lines, the levels near it and its hosted openings in
+//! place of the axes.
 
 use crate::paint::{PREVIEW, Xf};
 use crate::sketch_mode::{Session, Target};
@@ -65,10 +70,12 @@ pub fn edit_selected(state: &mut AppState) {
     }
 }
 
-/// Whether the open sketch is a sweep's or a structural profile (which then
-/// takes the central area).
+/// Whether the open sketch is a sweep's or a structural profile, or a
+/// wall's elevation profile (which then takes the central area).
 pub fn is_open(state: &AppState) -> bool {
-    state.sketch.as_ref().is_some_and(|s| matches!(s.target, Target::Profile { .. } | Target::Section { .. }))
+    state.sketch.as_ref().is_some_and(|s| {
+        matches!(s.target, Target::Profile { .. } | Target::Section { .. } | Target::WallProfile { .. })
+    })
 }
 
 /// The sketch of a sketched structural profile.
@@ -253,14 +260,22 @@ struct Camera {
     scale: f64,
 }
 
-/// The camera that shows the whole profile (or 20 cm around the path).
-fn fit(curves: &[SketchCurve], rect: egui::Rect) -> Camera {
-    let pts: Vec<DVec2> = curves.iter().flat_map(|c| c.points()).chain([DVec2::ZERO]).collect();
+/// Fewest screen points per meter a profile's camera shows (a wall's may be
+/// long), and the most.
+const MIN_SCALE: f64 = 50.0;
+const MIN_WALL_SCALE: f64 = 1.0;
+const MAX_SCALE: f64 = 1e6;
+
+/// The camera that shows the whole profile and `extra` points (or 20 cm
+/// around the path), at least `min_scale` screen points per meter.
+fn fit(curves: &[SketchCurve], extra: &[DVec2], rect: egui::Rect, min_scale: f64) -> Camera {
+    let pts: Vec<DVec2> =
+        curves.iter().flat_map(|c| c.points()).chain([DVec2::ZERO]).chain(extra.iter().copied()).collect();
     let (lo, hi) = pts
         .iter()
         .fold((DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
     let size = (hi - lo).max(DVec2::splat(0.2)) * 1.5;
-    let scale = (f64::from(rect.width()) / size.x).min(f64::from(rect.height()) / size.y).clamp(50.0, 1e6);
+    let scale = (f64::from(rect.width()) / size.x).min(f64::from(rect.height()) / size.y).clamp(min_scale, MAX_SCALE);
     Camera { center: (lo + hi) / 2.0, scale }
 }
 
@@ -292,11 +307,15 @@ fn snap(s: &Session, raw: DVec2, tol: f64, shift: bool) -> Snap {
     Snap::plain(DVec2::new(x, y), false)
 }
 
-/// The profile's plane in the central area: the path's point and the axes,
-/// the sketch and its tools; middle or right drag pans, the wheel zooms, a
-/// middle double click fits.
+/// The profile's plane in the central area: the path's point and the axes
+/// (a wall's ends, base, top and levels, with what it hosts), the sketch and
+/// its tools; middle or right drag pans, the wheel zooms, a middle double
+/// click fits.
 pub fn central(ui: &mut Ui, state: &mut AppState) {
-    // A sweep type's profile (with its path) or a structural profile, and its name.
+    let curves = state.sketch.as_ref().map(|s| s.curves.clone()).unwrap_or_default();
+    // A sweep type's profile (with its path), a structural profile or a
+    // wall's elevation profile (with what is around it), and its name.
+    let mut wall = None;
     let (id, sweep, name) = match state.sketch.as_ref().map(|s| s.target) {
         Some(Target::Profile { type_id }) => (
             egui::Id::new(("sweep-profile-camera", type_id.0)),
@@ -308,13 +327,20 @@ pub fn central(ui: &mut Ui, state: &mut AppState) {
             false,
             state.project().profile(profile).map(|p| p.name.clone()),
         ),
+        Some(Target::WallProfile { wall: w }) => {
+            let p = state.project();
+            wall = crate::wall_profile_ui::context(p, w, &curves);
+            let name = p.element(w).and_then(|e| p.element_type(e.type_id)).map(|t| t.name.clone());
+            (egui::Id::new(("wall-profile-camera", w.0)), false, name)
+        }
         _ => return,
     };
+    let extra = wall.as_ref().map(|c| c.extent().to_vec()).unwrap_or_default();
+    let min_scale = if wall.is_some() { MIN_WALL_SCALE } else { MIN_SCALE };
     let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, PALETTE.paper);
-    let curves = state.sketch.as_ref().map(|s| s.curves.clone()).unwrap_or_default();
-    let mut cam = ui.ctx().data(|d| d.get_temp::<Camera>(id)).unwrap_or_else(|| fit(&curves, rect));
+    let mut cam = ui.ctx().data(|d| d.get_temp::<Camera>(id)).unwrap_or_else(|| fit(&curves, &extra, rect, min_scale));
     if resp.dragged_by(egui::PointerButton::Middle) || resp.dragged_by(egui::PointerButton::Secondary) {
         let d = resp.drag_delta();
         cam.center -= DVec2::new(f64::from(d.x), -f64::from(d.y)) / cam.scale;
@@ -327,23 +353,27 @@ pub fn central(ui: &mut Ui, state: &mut AppState) {
         if (factor - 1.0).abs() > 1e-6 {
             let xf = Xf { screen: rect.center(), origin: cam.center, scale: cam.scale };
             let before = xf.to_world(hover);
-            cam.scale = (cam.scale * factor).clamp(50.0, 1e6);
+            cam.scale = (cam.scale * factor).clamp(min_scale, MAX_SCALE);
             let after = Xf { scale: cam.scale, ..xf }.to_world(hover);
             cam.center += before - after;
         }
     }
     if resp.double_clicked_by(egui::PointerButton::Middle) {
-        cam = fit(&curves, rect);
+        cam = fit(&curves, &extra, rect, min_scale);
     }
     ui.ctx().data_mut(|d| d.insert_temp(id, cam));
     let xf = Xf { screen: rect.center(), origin: cam.center, scale: cam.scale };
 
-    // The axes through the origin: for a sweep, the path's height (x) and the path (y).
-    let axis = Stroke::new(1.0, egui::Color32::from_gray(160));
     let o = xf.to_screen(DVec2::ZERO);
-    painter.line_segment([egui::pos2(rect.left(), o.y), egui::pos2(rect.right(), o.y)], axis);
-    painter.line_segment([egui::pos2(o.x, rect.top()), egui::pos2(o.x, rect.bottom())], axis);
-    painter.circle_stroke(o, 5.0, Stroke::new(1.5, PREVIEW));
+    if let Some(c) = &wall {
+        crate::wall_profile_ui::paint_context(&painter, rect, &xf, c);
+    } else {
+        // The axes through the origin: for a sweep, the path's height (x) and the path (y).
+        let axis = Stroke::new(1.0, egui::Color32::from_gray(160));
+        painter.line_segment([egui::pos2(rect.left(), o.y), egui::pos2(rect.right(), o.y)], axis);
+        painter.line_segment([egui::pos2(o.x, rect.top()), egui::pos2(o.x, rect.bottom())], axis);
+        painter.circle_stroke(o, 5.0, Stroke::new(1.5, PREVIEW));
+    }
     let font = egui::FontId::proportional(12.0);
     let note =
         |at: egui::Pos2, align, text: String| painter.text(at, align, text, font.clone(), INK.gamma_multiply(0.7));
@@ -360,8 +390,14 @@ pub fn central(ui: &mut Ui, state: &mut AppState) {
     let tol = PICK_PX / cam.scale;
     let raw = resp.hover_pos().map(|p| xf.to_world(p));
     let shift = ui.input(|i| i.modifiers.shift);
-    let snapped = raw.map(|r| snap(&s, r, tol, shift));
+    let snapped = raw.map(|r| match &wall {
+        Some(c) => crate::wall_profile_ui::snap(&s, c, r, tol, shift),
+        None => snap(&s, r, tol, shift),
+    });
     let message = crate::sketch_mode::interact(ui, &resp, &painter, &mut s, &state.modify, raw, snapped, &xf);
+    if let Some(c) = &wall {
+        crate::wall_profile_ui::paint_error(&painter, &xf, &s, c);
+    }
     state.sketch = Some(s);
     if let Some(m) = message {
         state.message = m;

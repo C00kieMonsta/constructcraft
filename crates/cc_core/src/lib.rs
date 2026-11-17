@@ -31,6 +31,7 @@ pub mod graph_binding;
 pub mod graphics;
 pub mod grid;
 mod ids;
+pub mod layer_extent;
 pub mod level_mark;
 pub mod lightning;
 pub mod mass;
@@ -88,6 +89,7 @@ mod view;
 pub mod view_mark;
 pub mod wall_framing;
 pub mod wall_ops;
+pub mod wall_profile;
 
 pub use cad::{CadColorMode, CadDrawing, CadImport, CadLayer, CadPrim, CadUnit};
 pub use callout::{Callout, CropBox};
