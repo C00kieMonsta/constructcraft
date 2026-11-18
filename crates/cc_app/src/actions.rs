@@ -976,7 +976,7 @@ pub fn typical_rebar(state: &mut AppState) {
         .map(|id| id.0)
         .collect();
     let level = if elements.is_empty() { state.active_level().map(|l| Ref::Id(l.0)) } else { None };
-    if let Some(out) = run(state, cc_engine::commands::rebar::RebarTypical { elements, level }) {
+    if let Some(out) = run(state, cc_engine::commands::rebar::RebarTypical { elements, level, ..Default::default() }) {
         let count = out["created"].as_array().map_or(0, Vec::len);
         let skipped = out["skipped"].as_u64().unwrap_or(0);
         state.message = t!("msg-rebar-placed", "count" => count, "skipped" => skipped);

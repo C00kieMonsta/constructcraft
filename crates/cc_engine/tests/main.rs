@@ -62,6 +62,7 @@ mod slab_rebar;
 mod spline_walls;
 mod splines;
 mod steel_building;
+mod stirrup_hooks;
 mod structure_materials;
 mod structure_stress;
 mod sun;

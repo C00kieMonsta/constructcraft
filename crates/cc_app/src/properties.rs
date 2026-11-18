@@ -2321,10 +2321,10 @@ fn rebar_layout_row(ui: &mut Ui, state: &mut AppState, id: ElementId, label: &st
             }
             finish(state, &r);
         }
-        L::Stirrups { spacing } | L::Ties { spacing } => {
+        L::Stirrups { spacing, .. } | L::Ties { spacing } => {
             length_row(ui, state, label, id, "rebar-spacing", spacing, |e, v| {
                 if let ElementKind::Rebar(x) = &mut e.kind
-                    && let L::Stirrups { spacing } | L::Ties { spacing } = &mut x.layout
+                    && let L::Stirrups { spacing, .. } | L::Ties { spacing } = &mut x.layout
                 {
                     *spacing = v.max(0.02);
                 }
@@ -2430,7 +2430,8 @@ fn reinforcement(ui: &mut Ui, state: &mut AppState, host: ElementId) {
                     cc_engine::commands::slab_rebar::SlabRebarCreate { slabs: vec![host.0], ..Default::default() };
                 crate::actions::run_command(state, command);
             } else {
-                let command = cc_engine::commands::rebar::RebarTypical { elements: vec![host.0], level: None };
+                let command =
+                    cc_engine::commands::rebar::RebarTypical { elements: vec![host.0], ..Default::default() };
                 crate::actions::run_command(state, command);
             }
         }

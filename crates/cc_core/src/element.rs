@@ -1332,13 +1332,56 @@ pub mod wall_bars {
     }
 }
 
+/// The two hooks that close a stirrup: both at one corner, each bent into
+/// the section by `angle` degrees around a pin three bar diameters across,
+/// then running straight for `tail` bar diameters (at least
+/// [`StirrupHooks::MIN_TAIL_LENGTH`]). They count in the stirrup's length.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct StirrupHooks {
+    pub angle: f64,
+    pub tail: f64,
+}
+
+impl Default for StirrupHooks {
+    /// 135 degree hooks with straight ends of 10 bar diameters.
+    fn default() -> Self {
+        Self { angle: 135.0, tail: 10.0 }
+    }
+}
+
+impl StirrupHooks {
+    /// The angles a hook may be bent by, degrees (as a tie's).
+    pub const ANGLES: std::ops::RangeInclusive<f64> = wall_bars::HOOK_ANGLES;
+    /// Longest straight end, bar diameters.
+    pub const MAX_TAIL: f64 = 100.0;
+    /// Shortest straight end, meters (as a tie's hooks).
+    pub const MIN_TAIL_LENGTH: f64 = 0.05;
+
+    /// Whether the values are usable: an angle in [`Self::ANGLES`] and a
+    /// finite tail from 0 to [`Self::MAX_TAIL`] diameters.
+    pub fn is_valid(&self) -> bool {
+        Self::ANGLES.contains(&self.angle) && self.tail.is_finite() && (0.0..=Self::MAX_TAIL).contains(&self.tail)
+    }
+
+    /// The straight end of a hook of a bar `diameter` thick, meters.
+    pub fn tail_length(&self, diameter: f64) -> f64 {
+        (self.tail * diameter).max(Self::MIN_TAIL_LENGTH)
+    }
+}
+
 /// How a set of bars is laid out in its host.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RebarLayout {
     /// `count` bars running along the host, on `face`.
     Longitudinal { face: BarFace, count: u32 },
-    /// Closed stirrups (ties) around the section every `spacing` along the host.
-    Stirrups { spacing: f64 },
+    /// Closed stirrups (ties) around the section every `spacing` along the
+    /// host, closed by `hooks` at one corner (none: the closed outline alone,
+    /// as sets made before stirrups had hooks are measured).
+    Stirrups {
+        spacing: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hooks: Option<StirrupHooks>,
+    },
     /// Side (skin) bars running along a beam on both side faces, between its
     /// top and bottom bars: `count` on each face, or with a count of 0 as
     /// many as keep them at most `spacing` apart over the height.
@@ -1565,7 +1608,8 @@ impl RebarLayout {
         let spaced = |s: f64| s.is_finite() && s >= wall_bars::MIN_SPACING;
         match self {
             RebarLayout::Longitudinal { count, .. } => (1..=200).contains(count),
-            RebarLayout::Stirrups { spacing } | RebarLayout::Ties { spacing } => spaced(*spacing),
+            RebarLayout::Stirrups { spacing, hooks } => spaced(*spacing) && hooks.is_none_or(|h| h.is_valid()),
+            RebarLayout::Ties { spacing } => spaced(*spacing),
             RebarLayout::Sides { count, spacing } => {
                 *count <= 200 && spacing.is_finite() && (*count > 0 || spaced(*spacing))
             }

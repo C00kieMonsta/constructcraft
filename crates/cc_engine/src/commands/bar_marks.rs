@@ -25,7 +25,9 @@ pub(crate) fn shape_json(s: &ShapeSummary) -> Value {
     let legs: Vec<Value> = s
         .legs
         .iter()
-        .map(|l| json!({"length": l.length, "radius": l.radius, "sweep": l.sweep.to_degrees(), "bend": l.bend.to_degrees()}))
+        .map(|l| {
+            json!({"length": l.length, "radius": l.radius, "sweep": l.sweep.to_degrees(), "bend": l.bend.to_degrees(), "hook": l.hook})
+        })
         .collect();
     json!({ "closed": s.closed, "legs": legs })
 }
