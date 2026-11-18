@@ -165,6 +165,8 @@ pub struct AppState {
     pub open_requests: Vec<ViewId>,
     /// View tabs open (kept by the dock each frame).
     pub open_tabs: usize,
+    /// The last open view was closed: the project closes with it on the next frame.
+    pub close_with_last_view: bool,
     /// Close every view tab but this one on the next frame.
     pub close_others_than: Option<ViewId>,
     pub dialogs: Dialogs,
@@ -298,6 +300,7 @@ impl AppState {
             view3d: HashMap::new(),
             open_requests: Vec::new(),
             open_tabs: 0,
+            close_with_last_view: false,
             close_others_than: None,
             dialogs: Dialogs::default(),
             ribbon_tab: RibbonTab::default(),
