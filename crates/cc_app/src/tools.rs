@@ -631,6 +631,8 @@ pub struct Interaction {
     pub chain_redo: Vec<ChainStep>,
     /// The tag (or grid bubbles) a context menu was opened on: the view and the element.
     pub tag_menu: Option<(ViewId, ElementId)>,
+    /// Tab cycling the Select tool's pre-selection (issue #406).
+    pub tab: crate::preselect::TabCycle,
 }
 
 /// Where a chain stands: its anchor, the direction angles are measured
@@ -1611,7 +1613,7 @@ pub fn handle(
     let is_plan = matches!(view.kind, ViewKind::FloorPlan { .. } | ViewKind::CeilingPlan { .. });
     let tool = state.tool.clone();
     match (&tool, view.level()) {
-        (Tool::Select, _) => select(ui, resp, painter, state, is_plan, xf, drawing),
+        (Tool::Select, _) => select(ui, resp, painter, state, is_plan, xf, drawing, Some(view.id)),
         // Matching types works in any 2D view.
         (Tool::MatchType, _) => crate::clipboard::match_type_tool(resp, painter, state, xf, drawing),
         // Demolishing works in plans, elevations and sections.
@@ -1679,7 +1681,7 @@ pub fn handle(
                 if resp.clicked() {
                     state.message = t!("msg-plan-only");
                 }
-                select(ui, resp, painter, state, false, xf, drawing);
+                select(ui, resp, painter, state, false, xf, drawing, None);
             }
         }
         // Faces are painted in 3D views.
@@ -1687,13 +1689,13 @@ pub fn handle(
             if resp.clicked() {
                 state.message = t!("hint-paint-3d");
             }
-            select(ui, resp, painter, state, is_plan, xf, drawing);
+            select(ui, resp, painter, state, is_plan, xf, drawing, None);
         }
         (_, None) | (_, Some(_)) if !is_plan => {
             if resp.clicked() {
                 state.message = t!("msg-plan-only");
             }
-            select(ui, resp, painter, state, false, xf, drawing);
+            select(ui, resp, painter, state, false, xf, drawing, None);
         }
         (Tool::Wall { type_id }, Some(level)) => wall_tool(ui, resp, painter, state, level, *type_id, xf),
         (Tool::Hosted { category, type_id }, Some(level)) => {
@@ -4382,6 +4384,10 @@ fn annotation_handles(
     false
 }
 
+/// The Select tool in a 2D view (and other tools' picking where they do not
+/// apply). `cycling` is the view when Tab may cycle the pre-selection (the
+/// Select tool itself, see [`crate::preselect`]).
+#[allow(clippy::too_many_arguments)]
 fn select(
     ui: &Ui,
     resp: &Response,
@@ -4390,6 +4396,7 @@ fn select(
     movable: bool,
     xf: &Xf,
     drawing: &Drawing2D,
+    cycling: Option<ViewId>,
 ) {
     // Callout and section marks first: they lie over the model.
     if crate::callout_ui::select(ui, resp, painter, state, xf, drawing) {
@@ -4410,12 +4417,30 @@ fn select(
     let tol = 5.0 / xf.scale;
     let (ctrl, shift) = ui.input(|i| (i.modifiers.command, i.modifiers.shift));
 
-    // Pre-selection highlight.
-    if state.interaction.drag.is_none()
-        && let Some(hit) = raw.and_then(|p| drawing.hit_test(p, tol))
-        && !state.selection.contains(&hit)
+    // What a click takes: the element under the pointer or, with the Select
+    // tool, the candidate Tab has stepped to.
+    use crate::preselect::Candidate;
+    let (candidates, index) = match cycling {
+        Some(view) => crate::preselect::frame(state, view, resp.rect, resp.hover_pos(), drawing, xf, tol),
+        None => (raw.and_then(|p| drawing.hit_test(p, tol)).map(Candidate::One).into_iter().collect(), 0),
+    };
+    let current = candidates.get(index);
+    if cycling.is_some()
+        && state.interaction.drag.is_none()
+        && let Some(c) = current
     {
-        let only = BTreeSet::from([hit]);
+        let cycled = state.interaction.tab.cycle.is_some().then_some((index, candidates.len()));
+        if let Some(text) = crate::preselect::label(state.project(), c, cycled) {
+            state.hint.set(text);
+        }
+    }
+
+    // Pre-selection highlight (a candidate Tab stepped to even when selected).
+    if state.interaction.drag.is_none()
+        && let Some(c) = current
+        && (index > 0 || !c.ids().iter().all(|id| state.selection.contains(id)))
+    {
+        let only: BTreeSet<ElementId> = c.ids().iter().copied().collect();
         let opts = PaintOptions {
             highlight: &only,
             px_per_mm: 0.0,
@@ -4735,16 +4760,22 @@ fn select(
     }
 
     if resp.clicked() {
-        match raw.and_then(|p| drawing.hit_test(p, tol)) {
-            Some(hit) if ctrl => {
-                if !state.selection.remove(&hit) {
-                    state.selection.insert(hit);
+        match current.map(Candidate::ids) {
+            // Ctrl toggles: a chain is added unless all of it is selected.
+            Some(ids) if ctrl => {
+                if ids.iter().any(|id| !state.selection.contains(id)) {
+                    state.selection.extend(ids.iter().copied());
+                } else {
+                    for id in ids {
+                        state.selection.remove(id);
+                    }
                 }
             }
-            Some(hit) => state.selection = BTreeSet::from([hit]),
+            Some(ids) => state.selection = ids.iter().copied().collect(),
             None if !ctrl => state.selection.clear(),
             None => {}
         }
+        state.interaction.tab.cycle = None;
     }
 }
 

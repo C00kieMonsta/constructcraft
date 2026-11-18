@@ -246,6 +246,53 @@ pub fn connected_ends(project: &Project, id: ElementId, point: DVec2) -> Vec<(El
         .collect()
 }
 
+/// How near two wall ends must be to join a chain (see [`wall_chain`]).
+pub const CHAIN_TOLERANCE: f64 = 0.001;
+
+/// The most walls [`wall_chain`] gives.
+pub const MAX_CHAIN: usize = 1000;
+
+/// The walls joined end to end with `id` on its level: from each end of the
+/// wall, the one other wall whose location line ends there (within
+/// [`CHAIN_TOLERANCE`]), and on from its far end, until an end that meets no
+/// other wall or more than one (a branch), or the walk comes back round (a
+/// closed loop, each wall once). In order along the chain; just `id` for a
+/// lone wall, nothing when `id` is no wall. At most [`MAX_CHAIN`] walls.
+pub fn wall_chain(project: &Project, id: ElementId) -> Vec<ElementId> {
+    wall_chain_among(project, id, &mut |_| true)
+}
+
+/// [`wall_chain`] among the walls `shown` accepts (those a view draws): a
+/// wall it leaves out joins nothing, as if it were not there.
+pub fn wall_chain_among(project: &Project, id: ElementId, shown: &mut dyn FnMut(ElementId) -> bool) -> Vec<ElementId> {
+    let Some((first, wall)) = project.element(id).and_then(|e| Some((e, e.as_wall()?))) else { return Vec::new() };
+    let walls: Vec<(ElementId, DVec2, DVec2)> = project
+        .walls()
+        .filter(|(e, _)| e.level == first.level && (e.id == id || shown(e.id)))
+        .map(|(e, w)| (e.id, w.start, w.end))
+        .collect();
+    let mut seen = std::collections::BTreeSet::from([id]);
+    // From the end, then from the start (that side read backwards).
+    let mut sides = [Vec::new(), Vec::new()];
+    for (side, from) in sides.iter_mut().zip([wall.end, wall.start]) {
+        let (mut current, mut at) = (id, from);
+        while seen.len() < MAX_CHAIN {
+            let mut meeting = walls.iter().filter(|(other, start, end)| {
+                *other != current && (start.distance(at) <= CHAIN_TOLERANCE || end.distance(at) <= CHAIN_TOLERANCE)
+            });
+            let (Some(next), None) = (meeting.next(), meeting.next()) else { break };
+            if !seen.insert(next.0) {
+                break;
+            }
+            side.push(next.0);
+            current = next.0;
+            at = if next.1.distance(at) <= CHAIN_TOLERANCE { next.2 } else { next.1 };
+        }
+    }
+    let [ahead, behind] = sides;
+    behind.into_iter().rev().chain(std::iter::once(id)).chain(ahead).collect()
+}
+
 /// Why an edit could not be made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditError {
@@ -629,6 +676,81 @@ mod tests {
 
     fn v(x: f64, y: f64) -> DVec2 {
         DVec2::new(x, y)
+    }
+
+    fn ids_of(list: &[ElementId]) -> Vec<u64> {
+        list.iter().map(|e| e.0).collect()
+    }
+
+    /// Issue #406: the chain of walls joined end to end.
+    #[test]
+    fn wall_chains_follow_joined_ends() {
+        // An open chain of three, drawn in any direction.
+        let (doc, ids) = doc_with_walls(&[
+            (v(0.0, 0.0), v(4.0, 0.0)),
+            (v(4.0, 3.0), v(4.0, 0.0)),
+            (v(4.0, 3.0), v(0.0, 3.0)),
+            (v(10.0, 0.0), v(12.0, 0.0)),
+        ]);
+        let chain = wall_chain(&doc.project, ids[1]);
+        assert_eq!(ids_of(&chain), ids_of(&[ids[2], ids[1], ids[0]]), "in order along the chain");
+        let mut from_end = wall_chain(&doc.project, ids[2]);
+        from_end.sort();
+        assert_eq!(from_end, ids[..3].to_vec());
+        // A wall the view does not draw joins nothing: the chain ends before it.
+        let hidden = ids[1];
+        assert_eq!(wall_chain_among(&doc.project, ids[0], &mut |w| w != hidden), vec![ids[0]]);
+        assert_eq!(wall_chain_among(&doc.project, ids[2], &mut |w| w != hidden), vec![ids[2]]);
+        // A lone wall is its own chain; what is no wall has none.
+        assert_eq!(wall_chain(&doc.project, ids[3]), vec![ids[3]]);
+        assert!(wall_chain(&doc.project, ElementId(999_999)).is_empty());
+        // Ends within a millimeter join; farther ones do not.
+        let (doc, ids) = doc_with_walls(&[(v(0.0, 0.0), v(4.0, 0.0)), (v(4.0005, 0.0), v(8.0, 0.0))]);
+        assert_eq!(wall_chain(&doc.project, ids[0]).len(), 2);
+        let (doc, ids) = doc_with_walls(&[(v(0.0, 0.0), v(4.0, 0.0)), (v(4.002, 0.0), v(8.0, 0.0))]);
+        assert_eq!(wall_chain(&doc.project, ids[0]), vec![ids[0]]);
+    }
+
+    #[test]
+    fn a_closed_chain_has_each_wall_once() {
+        let (doc, ids) = doc_with_walls(&[
+            (v(0.0, 0.0), v(5.0, 0.0)),
+            (v(5.0, 0.0), v(5.0, 4.0)),
+            (v(5.0, 4.0), v(0.0, 4.0)),
+            (v(0.0, 4.0), v(0.0, 0.0)),
+        ]);
+        for id in &ids {
+            let mut chain = wall_chain(&doc.project, *id);
+            assert_eq!(chain.len(), 4, "{chain:?}");
+            chain.sort();
+            assert_eq!(chain, ids);
+        }
+    }
+
+    #[test]
+    fn a_chain_stops_at_a_branch_and_on_other_levels() {
+        // Three walls meet at (4, 0): a T split at the joint. Each stops there.
+        let (doc, ids) = doc_with_walls(&[
+            (v(0.0, 0.0), v(4.0, 0.0)),
+            (v(4.0, 0.0), v(8.0, 0.0)),
+            (v(4.0, 0.0), v(4.0, 5.0)),
+            (v(4.0, 5.0), v(9.0, 5.0)),
+        ]);
+        assert_eq!(wall_chain(&doc.project, ids[0]), vec![ids[0]]);
+        assert_eq!(ids_of(&wall_chain(&doc.project, ids[3])), ids_of(&[ids[2], ids[3]]));
+        // A stem ending on the middle of a wall (no end there) stops too.
+        let (doc, ids) = doc_with_walls(&[(v(0.0, 0.0), v(8.0, 0.0)), (v(4.0, 0.0), v(4.0, 5.0))]);
+        assert_eq!(wall_chain(&doc.project, ids[1]), vec![ids[1]]);
+        // Walls on another level do not join.
+        let (mut doc, ids) = doc_with_walls(&[(v(0.0, 0.0), v(4.0, 0.0)), (v(4.0, 0.0), v(4.0, 4.0))]);
+        assert_eq!(wall_chain(&doc.project, ids[0]).len(), 2);
+        let other = doc.project.levels.get(1).map(|l| l.id).expect("the template has two levels");
+        doc.edit("level", |e| {
+            if let Some(el) = e.element_mut(ids[1]) {
+                el.level = other;
+            }
+        });
+        assert_eq!(wall_chain(&doc.project, ids[0]), vec![ids[0]]);
     }
 
     #[test]

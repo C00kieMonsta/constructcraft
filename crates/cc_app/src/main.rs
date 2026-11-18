@@ -56,6 +56,7 @@ mod palette;
 mod phases_dialog;
 mod plugins_ui;
 mod preferences;
+mod preselect;
 mod profile_sketch;
 mod profiles_dialog;
 mod properties;

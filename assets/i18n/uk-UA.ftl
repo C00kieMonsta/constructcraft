@@ -370,6 +370,9 @@ sketch-from-walls = Зі стін
 status-length = Довжина: { $value }
 status-angle = Кут: { $value }°
 status-selected = Вибрано: { $count }
+status-preselect = { $category } : { $type }
+status-wall-chain = Ланцюжок стін
+status-preselect-cycle = { $label } ({ $index }/{ $count })
 status-unsaved-file = (не збережено)
 
 # Повідомлення

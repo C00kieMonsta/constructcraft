@@ -361,6 +361,9 @@ sketch-from-walls = ອີງຕາມແນວຝາ
 status-length = ຄວາມຍາວ: { $value }
 status-angle = ມຸມ: { $value }°
 status-selected = ເລືອກໄວ້ { $count } ລາຍການ
+status-preselect = { $category } : { $type }
+status-wall-chain = ຕ່ອງໂສ້ຂອງຝາ
+status-preselect-cycle = { $label } ({ $index }/{ $count })
 status-unsaved-file = (ຍັງບໍ່ໄດ້ບັນທຶກ)
 
 # Messages

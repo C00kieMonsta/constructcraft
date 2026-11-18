@@ -45,7 +45,8 @@ pub use annotate::{
 };
 pub use component_view::{ComponentView, ComponentViewKind, ViewConnector, component_view};
 pub use drawing::{
-    Anchor, BubbleHandle, Drawing2D, LineStyle, MarkHandle, Pen, Prim, ResolvedPen, SectionHandle, TagHandle, halftone,
+    Anchor, BubbleHandle, Drawing2D, LineStyle, MAX_HITS, MarkHandle, Pen, Prim, ResolvedPen, SectionHandle, TagHandle,
+    halftone,
 };
 pub use drawing_index::DrawingIndex;
 pub use legend::legend;
