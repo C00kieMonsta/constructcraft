@@ -176,7 +176,7 @@ pub(crate) fn plan_drawing(
     for (e, _) in project.walls().filter(|(e, _)| e.level == level && shown(e)) {
         if let Some(g) = geom.walls.get(&e.id) {
             draw_wall(&mut d, project, g, cut_z, spacing, detail);
-            draw_recesses(&mut d, g, cut_z, &|id| project.element(id).is_some_and(shown));
+            draw_recesses(&mut d, g, (cut_z, ceiling), &|id| project.element(id).is_some_and(shown));
             if !structural {
                 draw_openings(&mut d, project, geom, g, (ceiling, cut_z), (detail, scale));
             }
@@ -1017,10 +1017,17 @@ fn draw_banded_wall(d: &mut Drawing2D, project: &Project, g: &WallGeom, cut_z: f
 
 /// The niches of a wall in plan. One the cut passes through opens the wall's
 /// face: the wall's fill is covered from the face to the recess's back, and
-/// its sides and back are cut lines. One wholly below or above the cut is
-/// dashed. The lines and the cover belong to the niche, so hiding niches
-/// shows the wall whole.
-fn draw_recesses(d: &mut Drawing2D, g: &WallGeom, cut_z: f64, shown: &dyn Fn(cc_core::ElementId) -> bool) {
+/// its sides and back are cut lines; when the wall stands under it, a
+/// projection line along the face is its sill seen below the cut. One wholly
+/// below the cut is drawn hidden, one wholly above it hidden with longer
+/// dashes. A ceiling plan dashes both alike and draws no sill. The lines and
+/// the cover belong to the niche, so hiding niches shows the wall whole.
+fn draw_recesses(
+    d: &mut Drawing2D,
+    g: &WallGeom,
+    (cut_z, ceiling): (f64, bool),
+    shown: &dyn Fn(cc_core::ElementId) -> bool,
+) {
     for r in g.recesses.iter().filter(|r| shown(r.element)) {
         let id = Some(r.element);
         let (face, back) = r.across(g.half);
@@ -1029,11 +1036,17 @@ fn draw_recesses(d: &mut Drawing2D, g: &WallGeom, cut_z: f64, shown: &dyn Fn(cc_
             let mut area = g.path(r.u0, r.u1, face);
             area.extend(g.path(r.u1, r.u0, back));
             d.fill(area, PAPER, id);
+            // The wall under the niche: its sill's edge is seen below the cut.
+            if !ceiling && r.z0 > g.base_z + 1e-6 {
+                d.polyline(&g.path(r.u0, r.u1, face), false, LineStyle::Projection, id);
+            }
         }
         let style = if cut { LineStyle::Cut } else { LineStyle::Hidden };
-        d.line(g.world(r.u0, face), g.world(r.u0, back), style, id);
-        d.polyline(&g.path(r.u0, r.u1, back), false, style, id);
-        d.line(g.world(r.u1, back), g.world(r.u1, face), style, id);
+        let pen = (!cut && !ceiling && r.z0 > cut_z)
+            .then(|| crate::Pen { pattern: Some(cc_core::LinePattern::Dash), ..Default::default() });
+        d.line_pen(g.world(r.u0, face), g.world(r.u0, back), style, pen, id);
+        d.polyline_pen(&g.path(r.u0, r.u1, back), false, style, pen, id);
+        d.line_pen(g.world(r.u1, back), g.world(r.u1, face), style, pen, id);
     }
 }
 

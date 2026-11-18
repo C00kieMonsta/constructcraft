@@ -278,3 +278,48 @@ fn a_project_without_a_niche_type_gets_one() {
     let (_, w, h, d, sill) = types[0].clone();
     assert!(close(w, 0.6) && close(h, 0.6) && close(d, 0.1) && close(sill, 0.9), "{types:?}");
 }
+
+/// Issue 402: a plan tells a niche cut halfway up its wall from a slot cut
+/// down to the floor (the sill's edge, seen below the cut), and one above
+/// the cut from one below it (longer dashes).
+#[test]
+fn plans_tell_niches_apart_by_their_height() {
+    let mut s = Session::default();
+    // 15 cm masonry, 3 m long and high; the plan cuts at 1.2 m.
+    let w = id(&run(&mut s, "wall_create", json!({"start": [0, 0], "end": [3, 0], "type": 3, "height": 3.0})));
+    let niche = |s: &mut Session, offset: f64, sill: f64| {
+        id(&run(s, "niche_create", json!({"wall": w, "offset": offset, "sill": sill})))
+    };
+    // The default niche is 60 cm high: 0 to 0.6 below the cut, 0.9 to 1.5
+    // through it, 2.4 to 3.0 above it.
+    let low = niche(&mut s, 0.4, 0.0);
+    let mid = niche(&mut s, 1.1, 0.9);
+    let high = niche(&mut s, 1.8, 2.4);
+    run(&mut s, "niche_type_create", json!({"name": "Slot", "height": 2.0}));
+    let slot = id(&run(&mut s, "niche_create", json!({"wall": w, "offset": 2.5, "sill": 0.0, "type": "Slot"})));
+    let view = plan(&mut s);
+    let d = s.drawing(ViewId(view)).unwrap();
+    let lines = |of: u64| -> Vec<(LineStyle, Option<cc_core::LinePattern>)> {
+        d.prims
+            .iter()
+            .filter_map(|p| match p {
+                Prim::Line { element: Some(e), style, pen, .. } if e.0 == of => {
+                    Some((*style, pen.and_then(|p| p.pattern)))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    let count = |of: u64, style: LineStyle| lines(of).iter().filter(|l| l.0 == style).count();
+
+    // Cut halfway up: cut sides and back, and the sill's edge along the face.
+    assert_eq!(count(mid, LineStyle::Cut), 3, "{:?}", lines(mid));
+    assert_eq!(count(mid, LineStyle::Projection), 1, "{:?}", lines(mid));
+    // Cut down to the wall's base: no sill to see.
+    assert_eq!(count(slot, LineStyle::Cut), 3, "{:?}", lines(slot));
+    assert_eq!(count(slot, LineStyle::Projection), 0, "{:?}", lines(slot));
+    // Below the cut: hidden lines in their own pattern.
+    assert_eq!(lines(low), vec![(LineStyle::Hidden, None); 3]);
+    // Above the cut: hidden lines with longer dashes.
+    assert_eq!(lines(high), vec![(LineStyle::Hidden, Some(cc_core::LinePattern::Dash)); 3]);
+}
