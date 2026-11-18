@@ -7,9 +7,15 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[features]
+default = ["script"]
+# Script pieces run in Lua (`cc_script`, which builds Lua 5.4 from C). Without it they fail to
+# resolve, and the crate builds where no C compiler or Lua runs (WebAssembly).
+script = ["dep:cc_script"]
+
 [dependencies]
 cc_core.workspace = true
-cc_script.workspace = true
+cc_script = { workspace = true, optional = true }
 glam.workspace = true
 earcutr.workspace = true
 spade.workspace = true

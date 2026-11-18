@@ -1,14 +1,27 @@
 //! Component pieces as solids: the definition's pieces resolved with their
 //! parameter values, and the void pieces cut out of the solid pieces they
 //! overlap. Script pieces run through the process's shared script cache
-//! ([`cc_script::shared`]).
+//! (`cc_script::shared`) with the `script` feature (the default); without
+//! it they fail ([`cc_core::component_script::NoScripts`]).
 
 use crate::{Solid, polygon};
 use cc_core::component::{ComponentPart, PartError, ResolveCtx};
-use cc_core::component_script::ScriptOwner;
+use cc_core::component_script::{ScriptEval, ScriptOwner};
 use cc_core::{Category, ComponentDef, ElementId, ElementType};
 use glam::{DVec2, DVec3};
 use std::collections::BTreeMap;
+
+/// Where script pieces run: the shared script cache.
+#[cfg(feature = "script")]
+fn scripts() -> &'static dyn ScriptEval {
+    cc_script::shared()
+}
+
+/// Where script pieces run: nowhere, built without Lua; they fail.
+#[cfg(not(feature = "script"))]
+fn scripts() -> &'static dyn ScriptEval {
+    &cc_core::component_script::NoScripts
+}
 
 /// The solid pieces of `def` with `overrides`, in the component's frame,
 /// voids cut out. A piece a void reaches becomes faces; past the boolean
@@ -23,7 +36,7 @@ pub fn resolve_component_in(
     overrides: &BTreeMap<String, f64>,
     extra: &[(&str, f64)],
 ) -> Vec<ComponentPart> {
-    let ctx = ResolveCtx { overrides, extra, scripts: cc_script::shared(), ..ResolveCtx::default() };
+    let ctx = ResolveCtx { overrides, extra, scripts: scripts(), ..ResolveCtx::default() };
     cut_voids(def.resolve_with(&ctx).0)
 }
 
@@ -34,7 +47,7 @@ pub fn resolve_pieces(
     overrides: &BTreeMap<String, f64>,
     extra: &[(&str, f64)],
 ) -> (Vec<ComponentPart>, Vec<(usize, PartError)>) {
-    def.resolve_with(&ResolveCtx { overrides, extra, scripts: cc_script::shared(), ..ResolveCtx::default() })
+    def.resolve_with(&ResolveCtx { overrides, extra, scripts: scripts(), ..ResolveCtx::default() })
 }
 
 /// The solid pieces of a placed component of type `ty` (its instance
@@ -80,7 +93,7 @@ fn instance_pieces<T>(
         texts: &c.text_overrides,
         hotspots: &c.hotspots,
         extra,
-        scripts: cc_script::shared(),
+        scripts: scripts(),
         owner: ScriptOwner { type_uid: ty.uid, element: Some(element.uid), piece: 0 },
     };
     f(&ctx)
@@ -430,6 +443,25 @@ mod tests {
         assert_eq!(vertical_edges(tube, &everywhere), 0.0);
     }
 
+    /// Built without Lua, a script piece fails and the other pieces still resolve.
+    #[cfg(not(feature = "script"))]
+    #[test]
+    fn script_pieces_fail_without_lua() {
+        let n = |v: &str| v.to_string();
+        let script = ComponentShape::Script { source: n("function geometry(p) return {} end") };
+        let cube =
+            ComponentShape::Box { x: n("0"), y: n("0"), z: n("0"), width: n("1"), depth: n("1"), height: n("1") };
+        let def = ComponentDef {
+            items: vec![item("script", script, false), item("cube", cube, false)],
+            ..Default::default()
+        };
+        let (parts, errors) = resolve_pieces(&def, &BTreeMap::new(), &[]);
+        assert_eq!(parts.iter().map(|p| p.item).collect::<Vec<_>>(), [1]);
+        assert!(matches!(&errors[..], [(0, PartError::Script(_))]), "{errors:?}");
+        assert_eq!(resolve_component(&def, &BTreeMap::new()).len(), 1);
+    }
+
+    #[cfg(feature = "script")]
     #[test]
     fn placed_script_components_use_their_values_and_keep_the_last_pieces() {
         use cc_core::component_script::ParamChoice;
