@@ -463,19 +463,7 @@ impl Project {
                         }
                         // Wall bars in walls, slab bars in floors and foundation
                         // slabs, the other layouts in beams and columns.
-                        ElementKind::Rebar(r) => self.element(r.host).is_some_and(|h| match &h.kind {
-                            ElementKind::Wall(w) => r.layout.in_wall() && w.spline.is_none(),
-                            ElementKind::Floor(_) => r.layout.in_slab(),
-                            ElementKind::Foundation(f) => match f.shape {
-                                crate::FoundationShape::Slab { .. } => r.layout.in_slab(),
-                                crate::FoundationShape::Strip { .. } => r.layout.fits_strip(),
-                                crate::FoundationShape::Pad { .. } => false,
-                            },
-                            ElementKind::Beam(_) | ElementKind::Column(_) => {
-                                !r.layout.in_wall() && !r.layout.in_slab() && !r.layout.in_strip()
-                            }
-                            _ => false,
-                        }),
+                        ElementKind::Rebar(r) => self.rebar_host_fits(r),
                         ElementKind::Dimension(d) => self.view(d.view).is_some(),
                         ElementKind::Text(t) => self.view(t.view).is_some(),
                         ElementKind::LevelMark(m) => self.view(m.view).is_some(),
