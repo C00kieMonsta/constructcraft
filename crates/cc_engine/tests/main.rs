@@ -25,6 +25,7 @@ mod detail_components;
 mod detail_lines;
 mod dimension_types;
 mod drafting;
+mod dxf_hidden_lines;
 mod extension;
 mod fill_patterns;
 mod french_doors;

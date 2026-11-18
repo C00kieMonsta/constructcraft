@@ -7,6 +7,7 @@
 //! AutoCAD Color Index of the pen's color, so a plot style by color can give
 //! the pens their weights (R12 has no line weights).
 
+use crate::linework::{Linework, Polyline};
 use crate::{Anchor, Drawing2D, LineStyle, Prim};
 use glam::DVec2;
 use std::collections::BTreeMap;
@@ -193,6 +194,41 @@ pub fn to_dxf_with(
     layer: &dyn Fn(&Prim) -> String,
     blocks: &DxfBlocks,
 ) -> Vec<u8> {
+    let skipped = |prim: &Prim| prim.element().is_some_and(|e| blocks.skip.contains(&e));
+    let entities: Vec<Entity<'_>> = drawing.prims.iter().filter(|p| !skipped(p)).map(Entity::Prim).collect();
+    write_dxf(&entities, scale, layer, blocks)
+}
+
+/// [`to_dxf_with`] for a drawing cleaned by [`crate::linework::clean`]:
+/// its fills and pictures first, then its lines (a run of two points as a
+/// `LINE`, a longer one as a `POLYLINE`, closed or not, on the layer it
+/// names), then its texts. The primitives of the elements in `blocks.skip`
+/// are left out.
+pub fn to_dxf_clean(
+    linework: &Linework,
+    scale: DxfScale,
+    layer: &dyn Fn(&Prim) -> String,
+    blocks: &DxfBlocks,
+) -> Vec<u8> {
+    let skipped = |prim: &Prim| prim.element().is_some_and(|e| blocks.skip.contains(&e));
+    let kept = || linework.prims.iter().filter(|p| !skipped(p));
+    let entities: Vec<Entity<'_>> = kept()
+        .filter(|p| !matches!(p, Prim::Text { .. }))
+        .map(Entity::Prim)
+        .chain(linework.lines.iter().filter(|l| !l.element.is_some_and(|e| blocks.skip.contains(&e))).map(Entity::Run))
+        .chain(kept().filter(|p| matches!(p, Prim::Text { .. })).map(Entity::Prim))
+        .collect();
+    write_dxf(&entities, scale, layer, blocks)
+}
+
+/// What the entities section holds: a primitive, or a run of lines.
+#[derive(Clone, Copy)]
+enum Entity<'a> {
+    Prim(&'a Prim),
+    Run(&'a Polyline),
+}
+
+fn write_dxf(entities: &[Entity<'_>], scale: DxfScale, layer: &dyn Fn(&Prim) -> String, blocks: &DxfBlocks) -> Vec<u8> {
     let unit = if scale.unit.is_finite() && scale.unit > 0.0 { scale.unit } else { 1.0 };
     let paper = if scale.paper.is_finite() && scale.paper > 0.0 { scale.paper } else { 1.0 };
     let at = |p: DVec2| p * unit;
@@ -211,16 +247,30 @@ pub fn to_dxf_with(
         let parts: Vec<String> = dashes.iter().map(|d| num(d * paper).replace('.', "_")).collect();
         layer_name(&format!("CC_{}", parts.join("-")))
     };
-    let skipped = |prim: &Prim| prim.element().is_some_and(|e| blocks.skip.contains(&e));
-    let own = drawing.prims.iter().filter(|p| !skipped(p));
-    let in_blocks = blocks.blocks.iter().flat_map(|b| b.prims.iter());
+    let mut add_type = |style: &LineStyle, pen: Option<&crate::Pen>| {
+        let dashes = style.resolve(pen).dashes;
+        if !dashes.is_empty() {
+            line_types.entry(dash_name(dashes)).or_insert_with(|| dashes.iter().map(|d| d * paper).collect());
+        }
+    };
     for insert in blocks.inserts.iter().chain(blocks.blocks.iter().flat_map(|b| b.inserts.iter())) {
         layers.insert(layer_name(&insert.layer), ());
     }
     for i in &blocks.inserts {
         grow(at(i.position));
     }
-    for (prim, mine) in own.map(|p| (p, true)).chain(in_blocks.map(|p| (p, false))) {
+    let own = entities.iter().map(|e| (*e, true));
+    let in_blocks = blocks.blocks.iter().flat_map(|b| b.prims.iter()).map(|p| (Entity::Prim(p), false));
+    for (entity, mine) in own.chain(in_blocks) {
+        let prim = match entity {
+            Entity::Run(run) => {
+                layers.insert(layer_name(&run.layer), ());
+                run.pts.iter().for_each(|p| grow(at(*p)));
+                add_type(&run.style, run.pen.as_ref());
+                continue;
+            }
+            Entity::Prim(prim) => prim,
+        };
         if mine {
             layers.insert(layer_name(&layer(prim)), ());
         }
@@ -230,10 +280,7 @@ pub fn to_dxf_with(
                     grow(at(*a));
                     grow(at(*b));
                 }
-                let dashes = style.resolve(pen.as_ref()).dashes;
-                if !dashes.is_empty() {
-                    line_types.entry(dash_name(dashes)).or_insert_with(|| dashes.iter().map(|d| d * paper).collect());
-                }
+                add_type(style, pen.as_ref());
             }
             _ if !mine => {}
             Prim::Fill { pts, .. } => pts.iter().for_each(|p| grow(at(*p))),
@@ -339,8 +386,11 @@ pub fn to_dxf_with(
     // Entities, in drawing order; the blocks' elements as their inserts.
     w.pair(0, "SECTION");
     w.pair(2, "ENTITIES");
-    for prim in drawing.prims.iter().filter(|p| !skipped(p)) {
-        entity(&mut w, prim, &layer_name(&layer(prim)), unit, paper, &dash_name);
+    for e in entities {
+        match e {
+            Entity::Prim(prim) => entity(&mut w, prim, &layer_name(&layer(prim)), unit, paper, &dash_name),
+            Entity::Run(run) => polyline(&mut w, run, unit, &dash_name),
+        }
     }
     for i in &blocks.inserts {
         insert(&mut w, i, unit);
@@ -348,6 +398,42 @@ pub fn to_dxf_with(
     w.pair(0, "ENDSEC");
     w.pair(0, "EOF");
     encode(&w.out)
+}
+
+/// A run of lines: a `LINE` for two points, else a `POLYLINE` of
+/// `VERTEX`es (flag 1 when closed) ended by `SEQEND`.
+fn polyline(w: &mut Writer, run: &Polyline, unit: f64, dash_name: &dyn Fn(&[f64]) -> String) {
+    let pts: Vec<DVec2> = run.pts.iter().map(|p| *p * unit).collect();
+    if pts.len() < 2 || !pts.iter().all(|p| p.is_finite()) {
+        return;
+    }
+    let layer = layer_name(&run.layer);
+    let resolved = run.style.resolve(run.pen.as_ref());
+    let head = |w: &mut Writer, kind: &str| {
+        w.pair(0, kind);
+        w.pair(8, &layer);
+        if !resolved.dashes.is_empty() {
+            w.pair(6, dash_name(resolved.dashes));
+        }
+        w.pair(62, aci(resolved.color));
+    };
+    if let [a, b] = pts[..] {
+        head(w, "LINE");
+        w.point(10, a);
+        w.point(11, b);
+        return;
+    }
+    head(w, "POLYLINE");
+    w.pair(66, 1);
+    w.point(10, DVec2::ZERO);
+    w.pair(70, u8::from(run.closed));
+    for p in pts {
+        w.pair(0, "VERTEX");
+        w.pair(8, &layer);
+        w.point(10, p);
+    }
+    w.pair(0, "SEQEND");
+    w.pair(8, &layer);
 }
 
 /// An INSERT of a block.
@@ -559,5 +645,58 @@ mod tests {
             assert!(insert.contains(&(pair.0, pair.1.to_string())), "{pair:?} in {insert:?}");
         }
         assert!(p.contains(&(2, "DETAILCOMPONENT".into())), "the insert's layer is defined");
+    }
+
+    #[test]
+    fn cleaned_runs_become_polylines_with_their_layer_color_and_type() {
+        let run = |pts: Vec<DVec2>, closed, style| Polyline {
+            pts,
+            closed,
+            layer: "Wall".into(),
+            style,
+            pen: None,
+            element: None,
+        };
+        let square = vec![DVec2::ZERO, DVec2::X, DVec2::ONE, DVec2::Y];
+        let linework = Linework {
+            prims: vec![Prim::Text {
+                pos: DVec2::ZERO,
+                text: "A".into(),
+                size: 2.5,
+                anchor: Anchor::LeftBottom,
+                angle: 0.0,
+                element: None,
+                color: None,
+            }],
+            lines: vec![
+                run(square, true, LineStyle::Projection),
+                run(vec![DVec2::ZERO, DVec2::new(2.0, 0.0), DVec2::new(2.0, 2.0)], false, LineStyle::Hidden),
+                run(vec![DVec2::ZERO, DVec2::new(0.0, 5.0)], false, LineStyle::Cut),
+            ],
+        };
+        let p =
+            pairs(&to_dxf_clean(&linework, DxfScale::model(50), &|p| default_layer(p).into(), &DxfBlocks::default()));
+        let count = |name: &str| p.iter().filter(|(c, v)| *c == 0 && v == name).count();
+        assert_eq!((count("POLYLINE"), count("VERTEX"), count("SEQEND"), count("LINE")), (2, 7, 2, 1));
+        assert_eq!(count("TEXT"), 1);
+        let at = p.iter().position(|e| *e == (0, "POLYLINE".into())).unwrap();
+        let head = &p[at..at + 8];
+        for pair in [(8, "WALL"), (62, "250"), (66, "1"), (70, "1")] {
+            assert!(head.contains(&(pair.0, pair.1.to_string())), "{pair:?} in {head:?}");
+        }
+        let second = p.iter().skip(at + 1).position(|e| *e == (0, "POLYLINE".into())).unwrap() + at + 1;
+        let head = &p[second..second + 9];
+        assert!(head.contains(&(70, "0".into())), "open: {head:?}");
+        let dashed = head.iter().find(|(c, _)| *c == 6).map(|(_, v)| v.clone()).unwrap();
+        assert!(p.iter().any(|(c, v)| *c == 2 && *v == dashed), "{dashed} is defined");
+        // Vertices at full size in millimeters, on the run's layer.
+        assert!(
+            p.windows(3)
+                .any(|w| w[0] == (8, "WALL".into()) && w[1] == (10, "1000".into()) && w[2] == (20, "1000".into()))
+        );
+        assert!(p.contains(&(2, "WALL".into())), "the layer is defined");
+        // Texts come last, over the lines.
+        let text = p.iter().position(|e| *e == (0, "TEXT".into())).unwrap();
+        assert!(text > p.iter().rposition(|e| *e == (0, "SEQEND".into())).unwrap());
     }
 }

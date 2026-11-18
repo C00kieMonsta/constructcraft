@@ -210,7 +210,7 @@ No parameters.
 
 ### `view_export`
 
-*file* — Export any view with a drawing (plan, elevation, section, 3D view as a hidden-line axonometric, legend, drafting view, diagram or sheet) as a PNG image, as vector SVG or PDF, or as DXF for other CAD programs (by `format`, else by the file extension). The view is drawn at its scale as printed, without temporary hiding, on a page that fits it; sheets keep their paper size. A DXF holds the view at full size in millimeters (a sheet in paper millimeters), each element on the layer of its category (detail lines, and regions with a boundary, on the layer named after their line style; region fills as `SOLID` triangles, their patterns as lines), colors as the nearest color index and line patterns as line types.
+*file* — Export any view with a drawing (plan, elevation, section, 3D view as a hidden-line axonometric, legend, drafting view, diagram or sheet) as a PNG image, as vector SVG or PDF, or as DXF for other CAD programs (by `format`, else by the file extension). The view is drawn at its scale as printed, without temporary hiding, on a page that fits it; sheets keep their paper size. A DXF holds the view at full size in millimeters (a sheet in paper millimeters), each element on the layer of its category (detail lines, and regions with a boundary, on the layer named after their line style; region fills as `SOLID` triangles, their patterns as lines), colors as the nearest color index and line patterns as line types. Elevations, sections and 3D views are written as their visible linework by default (see `hidden_lines`); the result then says `hidden_lines`.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -218,6 +218,7 @@ No parameters.
 | `view` | id or name | required | View id or name. |
 | `dpi` | number | optional | Resolution of a PNG, in dots per inch (default 150). |
 | `format` | string | optional | `png`, `svg`, `pdf` or `dxf`. |
+| `hidden_lines` | boolean | optional | For DXF: remove the lines hidden behind opaque surfaces, leave out the surface fills and join the lines into polylines (default on for elevations, sections and 3D views, off for other views; sheets are always written as drawn). `false` writes the drawing's primitives as displayed. A view too large to clean is written as drawn, with `"hidden_lines": false` and a `warning` in the result. Other formats ignore it. |
 
 ### `view_render`
 
