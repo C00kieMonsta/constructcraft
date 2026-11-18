@@ -25,6 +25,7 @@ pub mod hatch;
 mod joins;
 mod legend;
 pub mod level_marks;
+pub mod linework;
 mod mep;
 pub use mep::discipline_of;
 pub mod notes;

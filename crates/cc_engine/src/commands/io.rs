@@ -81,18 +81,28 @@ pub struct SheetExport {
 /// without temporary hiding; each element on the layer of its category
 /// (detail lines, and regions with a boundary, on the layer of their line
 /// style); a view's detail components as blocks and inserts.
-fn view_dxf(s: &mut Session, id: cc_core::ViewId) -> Result<Vec<u8>> {
-    use cc_views::dxf::{DxfBlocks, DxfScale, default_layer, to_dxf_with};
-    let kind = s.project().view(id).map(|v| (matches!(v.kind, ViewKind::Sheet { .. }), v.scale));
-    let (drawing, scale, view_scale) = match kind {
-        Some((true, _)) => {
+///
+/// With `hidden_lines` (by default for elevations, sections and 3D views;
+/// never for sheets) the drawing is cleaned first
+/// ([`cc_views::linework::clean`]): lines hidden behind opaque surfaces
+/// removed, surface fills left out, lines joined into polylines. Returns
+/// the bytes and, for a view other than a sheet, whether it was cleaned
+/// (`false` also when cleaning passed its limits and the drawing was
+/// written as it is, then with the reason).
+fn view_dxf(s: &mut Session, id: cc_core::ViewId, hidden_lines: Option<bool>) -> Result<(Vec<u8>, Option<Cleaned>)> {
+    use cc_views::dxf::{DxfBlocks, DxfScale, default_layer, to_dxf_clean, to_dxf_with};
+    let kind = s.project().view(id).map(|v| (v.kind.clone(), v.scale));
+    let (drawing, scale, view_scale, clean) = match kind {
+        Some((ViewKind::Sheet { .. }, _)) => {
             let sheet = s.sheet(id).ok_or_else(|| EngineError::invalid("the sheet cannot be composed"))?;
-            (sheet.drawing.clone(), DxfScale::PAPER, None)
+            (sheet.drawing.clone(), DxfScale::PAPER, None, false)
         }
-        Some((false, scale)) => {
+        Some((kind, scale)) => {
             let drawing =
                 s.printed_drawing(id).ok_or_else(|| EngineError::invalid("the view has no drawing to export"))?;
-            ((*drawing).clone(), DxfScale::model(scale), Some(scale))
+            let projected =
+                matches!(kind, ViewKind::Elevation { .. } | ViewKind::Section { .. } | ViewKind::ThreeD { .. });
+            ((*drawing).clone(), DxfScale::model(scale), Some(scale), hidden_lines.unwrap_or(projected))
         }
         None => return Err(EngineError::not_found("view")),
     };
@@ -114,8 +124,32 @@ fn view_dxf(s: &mut Session, id: cc_core::ViewId) -> Result<Vec<u8>> {
         Some(e) => format!("{:?}", e.category()),
         None => default_layer(prim).to_string(),
     };
-    guard(|| to_dxf_with(&drawing, scale, &layer, &blocks))
+    let raw = || guard(|| to_dxf_with(&drawing, scale, &layer, &blocks));
+    if view_scale.is_none() {
+        return Ok((raw()?, None));
+    }
+    if !clean {
+        return Ok((raw()?, Some(Cleaned { done: false, warning: None })));
+    }
+    let view_owned = |e: cc_core::ElementId| project.element(e).is_some_and(|e| e.owner_view().is_some());
+    let options = cc_views::linework::Options { layer: &layer, view_owned: &view_owned, skip: &blocks.skip };
+    match guard(|| cc_views::linework::clean(&drawing, &options))? {
+        Ok(linework) => {
+            let bytes = guard(|| to_dxf_clean(&linework, scale, &layer, &blocks))?;
+            Ok((bytes, Some(Cleaned { done: true, warning: None })))
+        }
+        Err(_) => Ok((raw()?, Some(Cleaned { done: false, warning: Some(TOO_LARGE_TO_CLEAN) }))),
+    }
 }
+
+/// Whether a view's DXF was cleaned of hidden lines, and why not when it was asked.
+struct Cleaned {
+    done: bool,
+    warning: Option<&'static str>,
+}
+
+/// The warning of a view too large to clean of its hidden lines.
+const TOO_LARGE_TO_CLEAN: &str = "the view is too large to remove its hidden lines: it was written as drawn";
 
 impl Command for SheetExport {
     const NAME: &'static str = "sheet_export";
@@ -128,7 +162,7 @@ impl Command for SheetExport {
         let ext = self.path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
         let format = self.format.map(|f| f.to_ascii_lowercase()).unwrap_or(ext);
         if format == "dxf" {
-            write(&self.path, &view_dxf(s, id)?)?;
+            write(&self.path, &view_dxf(s, id, None)?.0)?;
             return Ok(json!({ "path": self.path, "format": format }));
         }
         let sheet = s.sheet(id).ok_or_else(|| EngineError::invalid("the sheet cannot be composed"))?;
@@ -152,6 +186,8 @@ impl Command for SheetExport {
 /// (detail lines, and regions with a boundary, on the layer named after
 /// their line style; region fills as `SOLID` triangles, their patterns as
 /// lines), colors as the nearest color index and line patterns as line types.
+/// Elevations, sections and 3D views are written as their visible linework
+/// by default (see `hidden_lines`); the result then says `hidden_lines`.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ViewExport {
@@ -165,6 +201,15 @@ pub struct ViewExport {
     /// Resolution of a PNG, in dots per inch (default 150).
     #[serde(default)]
     pub dpi: Option<f64>,
+    /// For DXF: remove the lines hidden behind opaque surfaces, leave out
+    /// the surface fills and join the lines into polylines (default on for
+    /// elevations, sections and 3D views, off for other views; sheets are
+    /// always written as drawn). `false` writes the drawing's primitives as
+    /// displayed. A view too large to clean is written as drawn, with
+    /// `"hidden_lines": false` and a `warning` in the result. Other formats
+    /// ignore it.
+    #[serde(default)]
+    pub hidden_lines: Option<bool>,
 }
 
 /// Margin around a view's drawing on its page, millimeters.
@@ -199,8 +244,16 @@ impl Command for ViewExport {
         let dpi = refs::finite(self.dpi.unwrap_or(150.0), "dpi")?;
         if format == "dxf" {
             let id = refs::view(s.project(), &self.view)?;
-            write(&self.path, &view_dxf(s, id)?)?;
-            return Ok(json!({ "path": self.path, "format": format }));
+            let (bytes, cleaned) = view_dxf(s, id, self.hidden_lines)?;
+            write(&self.path, &bytes)?;
+            let mut out = json!({ "path": self.path, "format": format });
+            if let Some(cleaned) = cleaned {
+                out["hidden_lines"] = json!(cleaned.done);
+                if let Some(warning) = cleaned.warning {
+                    out["warning"] = json!(warning);
+                }
+            }
+            return Ok(out);
         }
         let (drawing, paper) = Self::page(s, self.view)?;
         let mut out = json!({ "path": self.path, "format": format, "paper_mm": [paper.x, paper.y] });

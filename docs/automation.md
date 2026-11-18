@@ -177,7 +177,10 @@ ccad -p model.ifc --save-as model.ccad run project_info              # import an
 ccad -p house.ccad run sheet_export sheet=A101 path=a101.pdf
 ccad -p house.ccad run view_export view="Section 1" path=section.png dpi=300   # any view as PNG, SVG or PDF
 ccad -p house.ccad run view_export view="Level 1" path=level1.dxf              # or as DXF, at full size in mm
+ccad -p house.ccad run view_export view="South" path=south.dxf hidden_lines=false   # an elevation as displayed
 ```
+
+A DXF of an elevation, section or 3D view holds its visible linework: the lines hidden behind opaque surfaces are removed, the surface fills (shading) left out and the lines joined into polylines, while cut fills, regions and texts stay; the result says `"hidden_lines": true`. `hidden_lines=false` writes the drawing's primitives as displayed, and `hidden_lines=true` cleans a plan or other view too. A view too large to clean is written as displayed, with `"hidden_lines": false` and a `warning`.
 
 Results are printed as JSON on standard output. Errors go to standard error as JSON with exit code 1; usage errors exit with 2. Without `--save` or `--save-as` the project file is not changed.
 

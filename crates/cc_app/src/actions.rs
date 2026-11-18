@@ -592,8 +592,13 @@ pub fn export_image(state: &mut AppState) {
     if path.extension().is_none() {
         path.set_extension("png");
     }
-    let command =
-        io::ViewExport { view: Ref::Id(id.0), path: path.clone(), format: Some("png".into()), dpi: Some(IMAGE_DPI) };
+    let command = io::ViewExport {
+        view: Ref::Id(id.0),
+        path: path.clone(),
+        format: Some("png".into()),
+        dpi: Some(IMAGE_DPI),
+        hidden_lines: None,
+    };
     match state.session.run(command) {
         Ok(_) => state.message = t!("msg-exported", "path" => path.display()),
         Err(e) => state.dialogs.error = Some(t!("msg-export-failed", "error" => e.message)),
@@ -614,7 +619,13 @@ pub fn export_dxf(state: &mut AppState) {
     if path.extension().is_none() {
         path.set_extension("dxf");
     }
-    let command = io::ViewExport { view: Ref::Id(id.0), path: path.clone(), format: Some("dxf".into()), dpi: None };
+    let command = io::ViewExport {
+        view: Ref::Id(id.0),
+        path: path.clone(),
+        format: Some("dxf".into()),
+        dpi: None,
+        hidden_lines: None,
+    };
     match state.session.run(command) {
         Ok(_) => state.message = t!("msg-exported", "path" => path.display()),
         Err(e) => state.dialogs.error = Some(t!("msg-export-failed", "error" => e.message)),

@@ -177,7 +177,10 @@ ccad -p modelo.ifc --save-as modelo.ccad run project_info          # importa um 
 ccad -p casa.ccad run sheet_export sheet=A101 path=a101.pdf
 ccad -p casa.ccad run view_export view="Corte 1" path=corte.png dpi=300     # qualquer vista em PNG, SVG ou PDF
 ccad -p casa.ccad run view_export view="Térreo" path=terreo.dxf             # ou em DXF, em tamanho real em mm
+ccad -p casa.ccad run view_export view="Sul" path=sul.dxf hidden_lines=false   # uma elevação como exibida
 ```
+
+O DXF de uma elevação, corte ou vista 3D traz as suas linhas visíveis: as linhas escondidas atrás de superfícies opacas são removidas, os preenchimentos das superfícies (sombreamento) ficam de fora e as linhas são unidas em polilinhas, enquanto preenchimentos de corte, regiões e textos ficam; o resultado diz `"hidden_lines": true`. `hidden_lines=false` grava as primitivas do desenho como exibidas, e `hidden_lines=true` limpa também uma planta ou outra vista. Uma vista grande demais para limpar é gravada como exibida, com `"hidden_lines": false` e um `warning`.
 
 Os resultados saem como JSON na saída padrão. Erros vão para a saída de erro como JSON, com código de saída 1; erros de uso saem com 2. Sem `--save` ou `--save-as`, o arquivo do projeto não muda.
 
