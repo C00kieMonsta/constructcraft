@@ -370,6 +370,9 @@ sketch-from-walls = 壁から作成
 status-length = 長さ: { $value }
 status-angle = 角度: { $value }°
 status-selected = { $count } 個を選択中
+status-preselect = { $category } : { $type }
+status-wall-chain = つながった壁
+status-preselect-cycle = { $label } ({ $index }/{ $count })
 status-unsaved-file = (未保存)
 
 # Messages

@@ -370,6 +370,9 @@ sketch-from-walls = 依牆面
 status-length = 長度：{ $value }
 status-angle = 角度：{ $value }°
 status-selected = 已選取 { $count } 個
+status-preselect = { $category } : { $type }
+status-wall-chain = 相連的牆
+status-preselect-cycle = { $label } ({ $index }/{ $count })
 status-unsaved-file = （未儲存）
 
 # 訊息

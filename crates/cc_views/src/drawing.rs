@@ -201,6 +201,9 @@ impl Prim {
     }
 }
 
+/// The most elements [`Drawing2D::hits_at`] gives.
+pub const MAX_HITS: usize = 64;
+
 /// Ordered list of primitives, painted first to last.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Drawing2D {
@@ -556,16 +559,36 @@ impl Drawing2D {
 
     /// Topmost element under `p` within `tol` (view units). Background
     /// elements (imported drawings) are picked only where nothing else is.
+    /// The first of [`Self::hits_at`].
     pub fn hit_test(&self, p: DVec2, tol: f64) -> Option<ElementId> {
+        self.hits_up_to(p, tol, 1).first().copied()
+    }
+
+    /// Every element under `p` within `tol`, in pick order and without
+    /// repeats: the lines by distance (the nearest first), then the fills and
+    /// pictures topmost first, then background elements (imported drawings)
+    /// the same way. The first is what [`Self::hit_test`] picks; Tab steps
+    /// through the others. At most [`MAX_HITS`].
+    pub fn hits_at(&self, p: DVec2, tol: f64) -> Vec<ElementId> {
+        self.hits_up_to(p, tol, MAX_HITS)
+    }
+
+    fn hits_up_to(&self, p: DVec2, tol: f64, limit: usize) -> Vec<ElementId> {
+        let mut out = Vec::new();
         match self.index.candidates(&self.prims, p, tol) {
             Some(near) => {
                 let prims = || near.iter().filter_map(|i| self.prims.get(*i as usize));
-                self.hit_test_tier(prims(), p, tol, false).or_else(|| self.hit_test_tier(prims(), p, tol, true))
+                for background in [false, true] {
+                    self.tier_hits(prims(), p, tol, background, limit, &mut out);
+                }
             }
-            None => self
-                .hit_test_tier(self.prims.iter(), p, tol, false)
-                .or_else(|| self.hit_test_tier(self.prims.iter(), p, tol, true)),
+            None => {
+                for background in [false, true] {
+                    self.tier_hits(self.prims.iter(), p, tol, background, limit, &mut out);
+                }
+            }
         }
+        out
     }
 
     /// The indices of the primitives of `ids`, in drawing order.
@@ -636,8 +659,21 @@ impl Drawing2D {
     /// [`Self::hit_test`] searching every primitive (tests of the index).
     #[cfg(test)]
     pub(crate) fn hit_test_all(&self, p: DVec2, tol: f64) -> Option<ElementId> {
-        self.hit_test_tier(self.prims.iter(), p, tol, false)
-            .or_else(|| self.hit_test_tier(self.prims.iter(), p, tol, true))
+        let mut out = Vec::new();
+        for background in [false, true] {
+            self.tier_hits(self.prims.iter(), p, tol, background, 1, &mut out);
+        }
+        out.first().copied()
+    }
+
+    /// [`Self::hits_at`] searching every primitive (tests of the index).
+    #[cfg(test)]
+    pub(crate) fn hits_at_all(&self, p: DVec2, tol: f64) -> Vec<ElementId> {
+        let mut out = Vec::new();
+        for background in [false, true] {
+            self.tier_hits(self.prims.iter(), p, tol, background, MAX_HITS, &mut out);
+        }
+        out
     }
 
     /// [`Self::hit_test_line`] searching every primitive (tests of the index).
@@ -646,46 +682,70 @@ impl Drawing2D {
         self.nearest_line(self.prims.iter(), p, tol)
     }
 
-    /// The pick among `prims` (in drawing order) in one tier: foreground
-    /// elements, or background ones.
-    fn hit_test_tier<'a>(
+    /// The picks among `prims` (in drawing order) in one tier, foreground
+    /// elements or background ones, added to `out` (no repeats) until it
+    /// holds `limit`: lines by distance (drawing order among equal ones),
+    /// then fills and pictures, the last drawn first.
+    fn tier_hits<'a>(
         &self,
         prims: impl DoubleEndedIterator<Item = &'a Prim> + Clone,
         p: DVec2,
         tol: f64,
         background: bool,
-    ) -> Option<ElementId> {
+        limit: usize,
+        out: &mut Vec<ElementId>,
+    ) {
         let tier = |id: &ElementId| self.background.contains(id) == background;
+        let add = |id: ElementId, out: &mut Vec<ElementId>| {
+            if !out.contains(&id) {
+                out.push(id);
+            }
+            out.len() >= limit
+        };
+        if out.len() >= limit {
+            return;
+        }
         // Lines first: they are thin and drawn over fills.
-        let mut best: Option<(f64, ElementId)> = None;
+        let mut lines: Vec<(f64, ElementId)> = Vec::new();
         for prim in prims.clone() {
             if let Prim::Line { a, b, element: Some(id), .. } = prim
                 && tier(id)
             {
                 let (q, _) = cc_geom::polygon::closest_on_segment(*a, *b, p);
                 let d = q.distance(p);
-                if d <= tol && best.is_none_or(|(bd, _)| d < bd) {
-                    best = Some((d, *id));
+                if d <= tol {
+                    lines.push((d, *id));
                 }
             }
         }
-        if let Some((_, id)) = best {
-            return Some(id);
+        // A stable sort: among lines as near, the first drawn comes first.
+        lines.sort_by(|a, b| a.0.total_cmp(&b.0));
+        for (_, id) in lines {
+            if add(id, out) {
+                return;
+            }
         }
-        prims.rev().find_map(|prim| match prim {
-            // Fully transparent fills only show selection (room areas); they are not picked.
-            Prim::Fill { pts, element: Some(id), color, .. }
-                if color[3] > 0 && tier(id) && cc_geom::polygon::contains(pts, p) =>
+        for prim in prims.rev() {
+            let hit = match prim {
+                // Fully transparent fills only show selection (room areas); they are not picked.
+                Prim::Fill { pts, element: Some(id), color, .. }
+                    if color[3] > 0 && tier(id) && cc_geom::polygon::contains(pts, p) =>
+                {
+                    Some(*id)
+                }
+                Prim::Image { origin, u, v, element: Some(id), .. }
+                    if tier(id) && cc_geom::polygon::contains(&Prim::image_corners(*origin, *u, *v), p) =>
+                {
+                    Some(*id)
+                }
+                _ => None,
+            };
+            if let Some(id) = hit
+                && add(id, out)
             {
-                Some(*id)
+                return;
             }
-            Prim::Image { origin, u, v, element: Some(id), .. }
-                if tier(id) && cc_geom::polygon::contains(&Prim::image_corners(*origin, *u, *v), p) =>
-            {
-                Some(*id)
-            }
-            _ => None,
-        })
+        }
     }
 
     /// Elements taken by the rectangle `lo`..`hi`: with `fully` (a window)
@@ -816,6 +876,57 @@ mod tests {
         assert_eq!(d.hit_test_line(v(25.0, 5.0), 0.1), None, "inside the floor");
         assert_eq!(d.hit_test(v(25.0, 5.0), 0.1), Some(ElementId(2)), "a click still picks it");
         assert_eq!(d.hit_test_line(v(25.0, 12.5), 0.1), None, "on the imported line");
+    }
+
+    /// Issue #406: every element under the point in pick order, once each:
+    /// the lines by distance, the fills topmost first (a room area, fully
+    /// transparent, never), the imported drawing last.
+    #[test]
+    fn hits_list_everything_under_the_point_in_pick_order() {
+        let mut d = Drawing2D::default();
+        let square = |lo: f64, hi: f64| vec![v(lo, lo), v(hi, lo), v(hi, hi), v(lo, hi)];
+        d.line(v(-50.0, -50.0), v(100.0, 50.0), LineStyle::Thin, Some(ElementId(15)));
+        d.background.insert(ElementId(15));
+        d.fill(square(0.0, 10.0), [200, 200, 200, 255], Some(ElementId(10)));
+        d.fill(square(5.0, 15.0), [150, 150, 150, 255], Some(ElementId(11)));
+        d.fill(square(-5.0, 20.0), [0, 0, 0, 0], Some(ElementId(14)));
+        d.line(v(0.0, 7.8), v(20.0, 7.8), LineStyle::Cut, Some(ElementId(11)));
+        d.line(v(0.0, 7.5), v(20.0, 7.5), LineStyle::Cut, Some(ElementId(13)));
+        d.line(v(0.0, 7.0), v(20.0, 7.0), LineStyle::Cut, Some(ElementId(12)));
+        // A second line of the nearest element, farther: no repeat.
+        d.line(v(0.0, 6.5), v(20.0, 6.5), LineStyle::Cut, Some(ElementId(12)));
+        let p = v(7.0, 7.2);
+        // The imported line passes y = 7.2 at x = 64.4, far from p: give it a point near p too.
+        d.line(v(6.0, 7.0), v(8.0, 7.0), LineStyle::Thin, Some(ElementId(15)));
+        assert_eq!(ids(d.hits_at(p, 1.0)), [12, 13, 11, 10, 15]);
+        assert_eq!(d.hit_test(p, 1.0), Some(ElementId(12)));
+        assert_eq!(d.hits_at(p, 1.0), d.hits_at_all(p, 1.0));
+        // Inside the fills only, away from the lines: the topmost first.
+        assert_eq!(ids(d.hits_at(v(7.0, 9.5), 0.1)), [11, 10]);
+        assert_eq!(d.hit_test(v(7.0, 9.5), 0.1), Some(ElementId(11)));
+        // Only in the room area: nothing.
+        assert!(d.hits_at(v(-2.0, -2.0), 0.1).is_empty());
+        assert_eq!(d.hit_test(v(-2.0, -2.0), 0.1), None);
+        // Only on the imported drawing: it is picked, as it is alone.
+        assert_eq!(ids(d.hits_at(v(-50.0, -50.0), 0.1)), [15]);
+        // Equally near lines keep their drawing order.
+        let mut e = Drawing2D::default();
+        e.line(v(0.0, 1.0), v(10.0, 1.0), LineStyle::Cut, Some(ElementId(2)));
+        e.line(v(0.0, -1.0), v(10.0, -1.0), LineStyle::Cut, Some(ElementId(1)));
+        assert_eq!(ids(e.hits_at(v(5.0, 0.0), 1.5)), [2, 1]);
+        assert_eq!(e.hit_test(v(5.0, 0.0), 1.5), Some(ElementId(2)));
+    }
+
+    /// The list is bounded.
+    #[test]
+    fn hits_are_bounded() {
+        let mut d = Drawing2D::default();
+        for i in 0..(MAX_HITS as u64 + 10) {
+            d.fill(vec![v(-1.0, -1.0), v(1.0, -1.0), v(1.0, 1.0), v(-1.0, 1.0)], [9, 9, 9, 255], Some(ElementId(i)));
+        }
+        let hits = d.hits_at(v(0.0, 0.0), 0.1);
+        assert_eq!(hits.len(), MAX_HITS);
+        assert_eq!(hits.first(), Some(&ElementId(MAX_HITS as u64 + 9)), "the last drawn first");
     }
 
     /// Tags are picked within their box, the last drawn first.

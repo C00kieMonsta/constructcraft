@@ -425,11 +425,19 @@ impl ConstructApp {
 
 impl eframe::App for ConstructApp {
     /// While a segment is drawn, Tab switches the typed field (length or
-    /// angle) instead of moving keyboard focus between widgets.
+    /// angle) instead of moving keyboard focus between widgets. Over a 2D
+    /// view with the Select tool, Tab and Shift+Tab step through the
+    /// elements under the pointer (see [`crate::preselect`]).
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        // Set again by the Select tool each frame the pointer is over a canvas.
+        let armed = self.state.interaction.tab.armed.take();
         let sketch = self.state.sketch.as_ref().is_some_and(|s| s.typing());
         let detail = crate::detail_ui::typing(&self.state);
-        if !(sketch || detail || self.state.typing_segment()) || ctx.memory(|m| m.focused().is_some()) {
+        let focused = ctx.memory(|m| m.focused().is_some());
+        if !(sketch || detail || self.state.typing_segment()) || focused {
+            let blocked = focused || ctx.memory(|m| m.top_modal_layer().is_some());
+            let steps = &mut self.state.interaction.tab.steps;
+            crate::preselect::take_tab(armed, steps, &mut raw_input.events, blocked);
             return;
         }
         let is_tab = |e: &Event| matches!(e, Event::Key { key: Key::Tab, .. });
@@ -482,6 +490,7 @@ impl ConstructApp {
         self.state.updates.poll();
         crate::jobs::poll(&mut self.state);
         self.state.follow_selection();
+        self.state.hint.begin_frame();
         if !self.state.textures_to_free.is_empty()
             && let Some(rs) = frame.wgpu_render_state()
         {
@@ -516,6 +525,7 @@ impl ConstructApp {
             self.recovery.dialog(&ctx, &mut self.state);
             crate::palette::show(&ctx, &mut self.state);
             crate::jobs::show(&ctx, &mut self.state);
+            self.end_frame(&ctx);
             return;
         }
         let state = &mut self.state;
@@ -606,6 +616,17 @@ impl ConstructApp {
         self.recovery.dialog(&ctx, &mut self.state);
         crate::palette::show(&ctx, &mut self.state);
         crate::jobs::show(&ctx, &mut self.state);
+        self.end_frame(&ctx);
+    }
+
+    /// The frame's transient state settled: the status hint it set shown
+    /// next (one more frame when that changed), and Tab presses no canvas
+    /// took dropped rather than kept for a later frame.
+    fn end_frame(&mut self, ctx: &egui::Context) {
+        self.state.interaction.tab.steps = 0;
+        if self.state.hint.end_frame() {
+            ctx.request_repaint();
+        }
     }
 }
 

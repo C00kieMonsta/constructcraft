@@ -1529,7 +1529,8 @@ pub fn status_bar(ui: &mut Ui, state: &mut AppState) {
             ui.label(t!("status-selected", "count" => n));
             ui.separator();
         }
-        ui.label(theme::muted(&state.message));
+        // What the pointer pre-selects stands in for the message meanwhile.
+        ui.label(theme::muted(state.hint.shown().unwrap_or(&state.message)));
         let rev = (state.active_view, state.session.doc.revision());
         let cache = egui::Id::new("title-block-error");
         let error = match ui.data(|d| d.get_temp::<((Option<cc_core::ViewId>, u64), Option<String>)>(cache)) {

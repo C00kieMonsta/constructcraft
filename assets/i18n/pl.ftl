@@ -370,6 +370,9 @@ sketch-from-walls = Ze ścian
 status-length = Długość: { $value }
 status-angle = Kąt: { $value }°
 status-selected = Zaznaczono: { $count }
+status-preselect = { $category } : { $type }
+status-wall-chain = Łańcuch ścian
+status-preselect-cycle = { $label } ({ $index }/{ $count })
 status-unsaved-file = (niezapisany)
 
 # Komunikaty

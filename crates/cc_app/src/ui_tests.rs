@@ -5582,6 +5582,119 @@ fn the_tag_section_adjusts_the_selected_elements_tag() {
     }
 }
 
+/// Issue #406: Tab steps through what lies under the pointer in a plan.
+/// Over a wall of the sample house the wall comes first and the chain of
+/// walls joined to it next; the status bar names the candidate, a click
+/// selects it (the whole chain), and moving the pointer starts over. The
+/// app's raw input hook turns Tab into steps (tested in `preselect`); the
+/// harness skips it, so the test sets the steps as the hook would.
+#[test]
+fn tab_cycles_the_preselection_on_the_canvas() {
+    use crate::preselect::{Candidate, label};
+    /// Where the view is centered (the drawing closure cannot capture).
+    static ORIGIN: std::sync::OnceLock<glam::DVec2> = std::sync::OnceLock::new();
+    let mut state = sample_state();
+    // A point on a wall where a click takes the wall (no grid, opening or tag there).
+    let walls: Vec<_> = state.project().walls().map(|(e, w)| (e.id, e.level, w.start, w.end)).collect();
+    let (wall, plan, mid) = walls
+        .into_iter()
+        .flat_map(|(wall, level, a, b)| {
+            let across = (b - a).perp().normalize_or_zero();
+            (1..10).flat_map(move |k| [-0.1, 0.1].map(|off| (wall, level, a.lerp(b, k as f64 / 10.0) + across * off)))
+        })
+        .find_map(|(wall, level, at)| {
+            let p = state.project();
+            let plan = p.views.values().find(|v| v.is_plan() && v.level() == Some(level))?.id;
+            let drawing = state.drawing(plan)?;
+            let first = drawing.hits_at(at, 5.0 / 20.0).first().copied();
+            let tagged = drawing.tags.iter().any(|t| t.center.distance(at) < 2.0);
+            (first == Some(wall) && !tagged).then_some((wall, plan, at))
+        })
+        .unwrap();
+    ORIGIN.set(mid).unwrap();
+    let p = state.project();
+    let chain = cc_core::wall_ops::wall_chain(p, wall);
+    assert!(chain.len() > 1, "the sample's walls are joined: {chain:?}");
+    let wall_text = label(p, &Candidate::One(wall), None).unwrap();
+    state.active_view = Some(plan);
+    state.set_tool(crate::tools::Tool::Select);
+    let mut harness = themed_harness(state, egui::vec2(600.0, 400.0), egui::Theme::Light, |ui, state| {
+        state.hint.begin_frame();
+        let (resp, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
+        let Some(origin) = ORIGIN.get().copied() else { return };
+        let xf = crate::paint::Xf { screen: resp.rect.center(), origin, scale: 20.0 };
+        let Some(view) = state.active_view.and_then(|v| state.project().view(v).cloned()) else { return };
+        let Some(drawing) = state.drawing(view.id) else { return };
+        crate::tools::handle(ui, &resp, &painter, state, &view, &xf, &drawing);
+        state.hint.end_frame();
+    });
+    harness.run();
+    let center = egui::pos2(300.0, 200.0);
+    let point = |h: &mut Harness<'static, AppState>, pos: egui::Pos2| {
+        h.input_mut().events.push(egui::Event::PointerMoved(pos));
+        h.run();
+    };
+    let tab = |h: &mut Harness<'static, AppState>, steps: i64| {
+        h.state_mut().interaction.tab.steps = steps;
+        h.run();
+    };
+    let click = |h: &mut Harness<'static, AppState>, pos: egui::Pos2| {
+        for pressed in [true, false] {
+            let (button, modifiers) = (egui::PointerButton::Primary, egui::Modifiers::NONE);
+            h.input_mut().events.push(egui::Event::PointerButton { pos, button, pressed, modifiers });
+            h.run();
+        }
+    };
+    let hint = |h: &Harness<'static, AppState>| h.state().hint.shown().map(str::to_string);
+    let index = |h: &Harness<'static, AppState>| h.state().interaction.tab.cycle.map(|c| c.index);
+
+    // Over the wall: it is pre-selected, and the canvas takes Tab next frame.
+    point(&mut harness, center);
+    assert_eq!(hint(&harness), Some(wall_text.clone()));
+    assert!(harness.state().interaction.tab.armed.is_some());
+    assert_eq!(index(&harness), None);
+    // Tab: the chain, counted among the candidates.
+    tab(&mut harness, 1);
+    assert_eq!(index(&harness), Some(1));
+    let shown = hint(&harness).unwrap();
+    assert!(shown.starts_with(&t!("status-wall-chain")) && shown.contains(" (2/"), "{shown}");
+    // Shift+Tab twice wraps round to the last candidate, Tab once more to the first.
+    tab(&mut harness, -2);
+    let last = index(&harness).unwrap();
+    let shown = hint(&harness).unwrap();
+    assert!(last >= 1 && shown.ends_with(&format!("({}/{})", last + 1, last + 1)), "{last} {shown}");
+    tab(&mut harness, 1);
+    assert_eq!(index(&harness), Some(0));
+    let shown = hint(&harness).unwrap();
+    assert!(shown.starts_with(&wall_text) && shown.contains(" (1/"), "cycled: the count follows: {shown}");
+    // Within 3 points the cycle holds; farther it starts over.
+    tab(&mut harness, 1);
+    point(&mut harness, center + egui::vec2(2.0, 0.0));
+    assert_eq!(index(&harness), Some(1));
+    point(&mut harness, center + egui::vec2(6.0, 0.0));
+    assert_eq!(index(&harness), None);
+    // Back over the wall: the wall again, with no count.
+    point(&mut harness, center);
+    assert_eq!((index(&harness), hint(&harness)), (None, Some(wall_text.clone())));
+    // A click on the chain selects all its walls and ends the cycle.
+    tab(&mut harness, 1);
+    click(&mut harness, center);
+    let selected: Vec<_> = harness.state().selection.iter().copied().collect();
+    let mut expected = chain.clone();
+    expected.sort();
+    assert_eq!(selected, expected);
+    assert_eq!(index(&harness), None);
+    // Without Tab a click takes the wall alone, as before.
+    click(&mut harness, center);
+    assert_eq!(harness.state().selection.iter().copied().collect::<Vec<_>>(), vec![wall]);
+    // Off the canvas nothing is pre-selected and no step is taken.
+    harness.input_mut().events.push(egui::Event::PointerGone);
+    harness.run();
+    assert_eq!(hint(&harness), None);
+    tab(&mut harness, 1);
+    assert_eq!((harness.state().interaction.tab.steps, index(&harness)), (1, None));
+}
+
 /// In a plan a room's tag is dragged to a new spot (a click on it still
 /// selects the room), turned by the grip of the room selected alone, hidden
 /// from its context menu; a grid's bubble is dragged with an elbow.

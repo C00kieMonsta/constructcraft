@@ -322,6 +322,7 @@ mod tests {
                 let hit = d.hit_test(p, tol);
                 picked += usize::from(hit.is_some());
                 assert_eq!(hit, linear(&d, p, tol), "{n} {p} {tol}");
+                assert_eq!(d.hits_at(p, tol), d.hits_at_all(p, tol), "{n} {p} {tol}");
                 assert_eq!(d.hit_test_line(p, tol), d.nearest_line_all(p, tol), "{n} {p} {tol}");
             }
             assert!(indexed > 1500 && picked > 100, "{n}: {indexed} indexed, {picked} picked");

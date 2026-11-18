@@ -370,6 +370,9 @@ sketch-from-walls = À partir des murs
 status-length = Longueur : { $value }
 status-angle = Angle : { $value }°
 status-selected = { $count } sélectionné(s)
+status-preselect = { $category } : { $type }
+status-wall-chain = Chaîne de murs
+status-preselect-cycle = { $label } ({ $index }/{ $count })
 status-unsaved-file = (non enregistré)
 
 # Messages

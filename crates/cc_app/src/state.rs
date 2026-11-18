@@ -130,6 +130,41 @@ pub struct Dialogs {
     pub preferences: Option<crate::preferences::PreferencesDialog>,
 }
 
+/// A status bar text that lasts while something sets it every frame, such
+/// as what the pointer pre-selects: the status bar, drawn before the views,
+/// shows what the last frame set, and [`StatusHint::end_frame`] asks for
+/// one more frame when that changes, so the text never stays behind.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StatusHint {
+    shown: Option<String>,
+    next: Option<String>,
+}
+
+impl StatusHint {
+    /// The text to show in place of the message.
+    pub fn shown(&self) -> Option<&str> {
+        self.shown.as_deref()
+    }
+
+    /// Shows `text` until a frame no longer sets it.
+    pub fn set(&mut self, text: String) {
+        self.next = Some(text);
+    }
+
+    /// Starts a frame: what it does not set goes.
+    pub fn begin_frame(&mut self) {
+        self.next = None;
+    }
+
+    /// Ends a frame: the text set in it is shown next; true when that
+    /// changed what is shown (the caller repaints).
+    pub fn end_frame(&mut self) -> bool {
+        let changed = self.next != self.shown;
+        self.shown = self.next.take();
+        changed
+    }
+}
+
 pub struct AppState {
     /// The engine session: document, derived geometry, drawings and sheets.
     pub session: Session,
@@ -185,6 +220,8 @@ pub struct AppState {
     pub section_selection: Option<ViewId>,
     /// Status bar message.
     pub message: String,
+    /// A transient status bar text shown in place of the message (see [`StatusHint`]).
+    pub hint: StatusHint,
     /// Cursor position in the active 2D view's coordinates.
     pub cursor: Option<glam::DVec2>,
     /// Typed shortcut letters (e.g. "WA").
@@ -311,6 +348,7 @@ impl AppState {
             sheet_selection: None,
             section_selection: None,
             message: String::new(),
+            hint: StatusHint::default(),
             cursor: None,
             key_buffer: String::new(),
             typed: Default::default(),
@@ -645,6 +683,23 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A hint shows while frames set it and goes with the first that does not.
+    #[test]
+    fn status_hints_last_while_set() {
+        let mut hint = StatusHint::default();
+        hint.begin_frame();
+        hint.set("Wall : Generic".into());
+        assert_eq!(hint.shown(), None, "the status bar was drawn before");
+        assert!(hint.end_frame(), "changed: one more frame");
+        assert_eq!(hint.shown(), Some("Wall : Generic"));
+        hint.begin_frame();
+        hint.set("Wall : Generic".into());
+        assert!(!hint.end_frame(), "the same: no repaint needed");
+        hint.begin_frame();
+        assert!(hint.end_frame());
+        assert_eq!(hint.shown(), None);
+    }
 
     #[test]
     fn selecting_objects_opens_the_modify_tab() {

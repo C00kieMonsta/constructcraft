@@ -370,6 +370,9 @@ sketch-from-walls = Aus Wänden
 status-length = Länge: { $value }
 status-angle = Winkel: { $value }°
 status-selected = { $count } ausgewählt
+status-preselect = { $category } : { $type }
+status-wall-chain = Wandkette
+status-preselect-cycle = { $label } ({ $index }/{ $count })
 status-unsaved-file = (nicht gespeichert)
 
 # Meldungen
