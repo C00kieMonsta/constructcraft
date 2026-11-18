@@ -8,6 +8,7 @@
 mod bar_sets;
 mod classes;
 mod connections;
+mod curved_elements;
 mod curved_profiles;
 mod foreign_bars;
 mod rebar;
