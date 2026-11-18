@@ -190,7 +190,14 @@ impl TabViewer for Tabs<'_> {
         }
     }
 
+    /// Closing the last view closes the project (see [`sync_tabs`]): the tab
+    /// stays until then, so cancelling the question about unsaved changes
+    /// keeps the view open.
     fn on_close(&mut self, tab: &mut ViewId) -> OnCloseResponse {
+        if self.state.open_tabs <= 1 {
+            self.state.close_with_last_view = true;
+            return OnCloseResponse::Ignore;
+        }
         if let Some(v) = self.state.view3d.remove(tab) {
             self.state.textures_to_free.extend(v.texture);
         }
@@ -606,6 +613,10 @@ impl ConstructApp {
 /// (and, after Close Inactive Views, all but one), open requested views,
 /// and record the active view and how many tabs are open.
 fn sync_tabs(dock: &mut DockState<ViewId>, state: &mut AppState) {
+    // The last view was closed: close the project, asking first when it has unsaved changes.
+    if std::mem::take(&mut state.close_with_last_view) {
+        actions::guarded(state, PendingAction::Close);
+    }
     // Drop tabs whose view no longer exists (deleted or undone).
     let project = &state.session.doc.project;
     // Close Inactive Views (or Close Other Views on a tab) keeps one tab.
@@ -681,6 +692,42 @@ mod tests {
         // Opening a view again recreates the tree.
         dock.push_to_focused_leaf(ViewId(2));
         assert_eq!(active_tab(&mut dock), Some(ViewId(2)));
+    }
+
+    /// Closing the last view closes the project and goes back to the home
+    /// screen; with unsaved changes it asks first and the view stays open.
+    /// A view closed while others are open only closes its tab.
+    #[test]
+    fn closing_the_last_view_closes_the_project() {
+        let mut state = AppState::new(cc_core::Document::new(crate::home::sample_project("casa_simples").unwrap()));
+        state.project_open = true;
+        state.show_home = false;
+        let views: Vec<ViewId> = state.project().views.keys().copied().take(2).collect();
+        let mut dock = DockState::new(vec![views[0], views[1]]);
+        sync_tabs(&mut dock, &mut state);
+        let mut tab = views[1];
+        let close = |state: &mut AppState, tab: &mut ViewId| Tabs { state, render_state: None }.on_close(tab);
+        assert!(matches!(close(&mut state, &mut tab), OnCloseResponse::Close), "another view is open");
+        dock.retain_tabs(|t| *t != views[1]);
+        sync_tabs(&mut dock, &mut state);
+        assert!(state.project_open && state.open_tabs == 1);
+
+        // Unsaved changes: the question is asked and the view stays.
+        let mut tab = views[0];
+        let upper = state.project().levels[1].id;
+        actions::delete_level(&mut state, upper);
+        assert!(state.session.doc.is_dirty());
+        assert!(matches!(close(&mut state, &mut tab), OnCloseResponse::Ignore));
+        sync_tabs(&mut dock, &mut state);
+        assert!(matches!(state.dialogs.confirm.take(), Some(PendingAction::Close)));
+        assert!(state.project_open && state.open_tabs == 1, "nothing closes before the answer");
+
+        // Nothing to save: the project closes at once.
+        state.session.doc.mark_saved();
+        assert!(matches!(close(&mut state, &mut tab), OnCloseResponse::Ignore));
+        sync_tabs(&mut dock, &mut state);
+        assert!(!state.project_open && state.show_home);
+        assert!(!state.close_with_last_view);
     }
 
     /// Close Inactive Views keeps the active tab only; Close Other Views on a
