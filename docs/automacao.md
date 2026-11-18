@@ -381,6 +381,12 @@ Um pilar que continua uma parede cilíndrica tem um perfil `annular_sector`; `re
 {"command": "rebar_create", "args": {"host": 42, "layout": "ties", "spacing": 0.30}}
 ```
 
+As barras verticais de um pilar cortadas em lances (`max_length`, ou `lifts` em alturas dadas) são todas emendadas nas mesmas alturas; `stagger` emenda uma barra sim, outra não, em volta da seção, mais acima: `half_lap` (meio traspasse) ou um deslocamento em metros, no máximo `(max_length - lap) / 2`. Cada barra continua indo da base ao topo, então o primeiro pedaço de uma barra defasada é mais comprido pelo deslocamento e o último mais curto (uma emenda que fique a menos de um traspasse do topo é retirada); com `max_length` os lances são encurtados quando o primeiro pedaço mais comprido não caberia na barra comercial. Os pedaços defasados têm posições próprias. `element_set` a altera (`{"splice": {"stagger": "half_lap"}}`, `{"offset": 0.3}` ou `"none"`):
+
+```text
+{"command": "rebar_create", "args": {"host": 42, "layout": "perimeter", "count": 8, "max_length": 4, "lap": 0.5, "stagger": "half_lap"}}
+```
+
 `wall_rebar_create` arma paredes, retas ou em arco: barras horizontais (de anel) com um espaçamento ou `zones` por altura, barras verticais com pontas dobradas e conjuntos adicionais, e grampos, junto às duas faces com um cobrimento para cada. Uma parede cilíndrica recebe as suas quatro famílias de barras em um comando:
 
 ```text

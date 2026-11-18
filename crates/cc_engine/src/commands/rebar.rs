@@ -7,7 +7,7 @@ use crate::registry::{Command, CommandKind};
 use crate::session::Session;
 use crate::t;
 use cc_core::{
-    BarFace, Category, ElementId, ElementKind, ElementTypeId, FaceBars, Project, Rebar, RebarLayout, Splice,
+    BarFace, Category, ElementId, ElementKind, ElementTypeId, FaceBars, Project, Rebar, RebarLayout, Splice, Stagger,
     StirrupHooks, TypeData,
 };
 use schemars::JsonSchema;
@@ -101,9 +101,6 @@ fn stock_length(p: &Project) -> f64 {
     }
 }
 
-/// The lap splices of bars of `type_id` running along a beam: `max_length`
-/// (default: the stock length; 0 for whole bars) and `lap` (default: 40 bar
-/// diameters).
 /// A partition as it is kept: trimmed, at most [`cc_core::bar_marks::MAX_MARK_TEXT`] characters.
 pub(crate) fn partition_arg(text: Option<&str>) -> Result<String> {
     let text = text.unwrap_or("").trim();
@@ -116,6 +113,52 @@ pub(crate) fn partition_arg(text: Option<&str>) -> Result<String> {
     Ok(text.to_string())
 }
 
+/// A stagger of a column's splices as commands take it.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum StaggerArg {
+    /// An offset, meters.
+    Offset(f64),
+    /// `none` or `half_lap`.
+    Name(String),
+}
+
+impl StaggerArg {
+    fn stagger(&self) -> Result<Stagger> {
+        match self {
+            StaggerArg::Offset(o) => Ok(Stagger::Offset(finite(*o, "stagger")?)),
+            StaggerArg::Name(n) => match n.as_str() {
+                "none" => Ok(Stagger::None),
+                "half_lap" => Ok(Stagger::HalfLap),
+                other => Err(EngineError::invalid(format!(
+                    "stagger must be none, half_lap or an offset in meters, not '{other}'"
+                ))),
+            },
+        }
+    }
+}
+
+/// `splice` staggered by `stagger`, checked against its stock and lap.
+fn staggered(splice: Splice, stagger: Stagger) -> Result<Splice> {
+    let out = Splice { stagger, ..splice };
+    check_stagger(&out)?;
+    Ok(out)
+}
+
+/// A stagger offset is above zero and at most half of what a piece holds past its lap.
+pub(crate) fn check_stagger(splice: &Splice) -> Result<()> {
+    if splice.stagger_is_valid() {
+        return Ok(());
+    }
+    Err(EngineError::invalid(format!(
+        "stagger must be above 0 and at most (max_length - lap) / 2 = {:.3} m",
+        splice.max_stagger()
+    )))
+}
+
+/// The lap splices of bars of `type_id` running along a beam: `max_length`
+/// (default: the stock length; 0 for whole bars) and `lap` (default: 40 bar
+/// diameters).
 pub(crate) fn splice(
     p: &Project,
     type_id: ElementTypeId,
@@ -131,7 +174,7 @@ pub(crate) fn splice(
         _ => 0.01,
     };
     let lap = finite(lap.unwrap_or(40.0 * diameter), "lap")?.max(Splice::MIN_LAP);
-    let splice = Splice { max_length, lap };
+    let splice = Splice::new(max_length, lap);
     if !splice.is_valid() {
         return Err(EngineError::invalid(
             "max_length must be at least 1 (or 0 for whole bars) and lap at most half of it",
@@ -159,8 +202,10 @@ pub(crate) fn splice(
 /// `stirrups` follow the section's outline, and `ties` adds cross-ties every
 /// `spacing`: a hooked bar from each bar between the corners to the bar
 /// opposite. With `max_length` a column's vertical bars are cut in lifts
-/// that lap by `lap`. `same_type` gives the set to every column (or beam) of
-/// the host's type.
+/// that lap by `lap`, all at the same heights unless `stagger` moves the
+/// splices of every other bar around the section up (half a lap, or an
+/// offset). `same_type` gives the set to every column (or beam) of the
+/// host's type.
 ///
 /// Stirrups are closed by two hooks at one corner, bent into the section
 /// by `hook` degrees with straight ends of `tail` bar diameters (at least
@@ -214,6 +259,15 @@ pub struct RebarCreate {
     /// height. Instead of the equal lifts of `max_length`.
     #[serde(default)]
     pub lifts: Option<Vec<f64>>,
+    /// Columns, `perimeter` cut in lifts (`max_length` or `lifts`): splice every other bar
+    /// around the section higher, so neighbouring bars do not lap at the same heights:
+    /// `none` (default), `half_lap` (half the lap length) or an offset in meters, above 0 and
+    /// at most `(max_length - lap) / 2`. A staggered bar still runs from the base to the top:
+    /// its first piece is longer by the offset and its last shorter (a splice moved to less
+    /// than a lap below the top is left out); with `max_length` the lifts are made shorter
+    /// where needed so the longer first piece stays within it.
+    #[serde(default)]
+    pub stagger: Option<StaggerArg>,
     /// Columns, `perimeter`: the number of bars on each face of the section, in the order of
     /// the column's `derived.faces`, the two corner bars of a face included (at least 2).
     #[serde(default)]
@@ -339,6 +393,20 @@ impl Command for RebarCreate {
         let splice = match (lifts.is_empty(), splice) {
             (false, None) => super::rebar::splice(p, type_id, None, self.lap)?,
             (_, splice) => splice,
+        };
+        // Staggered splices: a column's vertical bars cut in lifts.
+        let stagger = self.stagger.as_ref().map(StaggerArg::stagger).transpose()?.unwrap_or_default();
+        let splice = match (stagger.is_none(), splice) {
+            (true, splice) => splice,
+            (false, _) if beam || !matches!(layout, RebarLayout::Longitudinal { face: BarFace::Perimeter, .. }) => {
+                return Err(EngineError::invalid("`stagger` goes with the `perimeter` bars of a column"));
+            }
+            (false, None) => {
+                return Err(EngineError::invalid(
+                    "`stagger` needs the bars cut in lifts: give `max_length` or `lifts`",
+                ));
+            }
+            (false, Some(splice)) => Some(staggered(splice, stagger)?),
         };
         let partition = partition_arg(self.partition.as_deref())?;
         let set = |host| {

@@ -61,6 +61,7 @@ mod skp;
 mod slab_rebar;
 mod spline_walls;
 mod splines;
+mod staggered_splices;
 mod steel_building;
 mod stirrup_hooks;
 mod structure_materials;
