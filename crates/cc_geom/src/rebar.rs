@@ -8,16 +8,22 @@
 //! and bottom bars that do not fit side by side go in further layers, side
 //! bars run between them, and bars longer than the stock length are spliced.
 //!
+//! Anchored bars of a beam run on into the columns and pile caps its ends
+//! frame into, bending down or up where the straight length does not fit,
+//! and lap inside a support with the bars of a beam carrying on in line.
+//!
 //! A column's bars stand around its section ([`crate::faces`]): a count
 //! spread around it, or so many on each face with the corner bars shared;
 //! its ties follow the section's outline, cross-ties link the bars between
 //! the corners to the bars opposite, and the vertical bars may be cut in
 //! lifts that lap.
 
+use crate::beam::ColumnInput;
 use crate::faces::{self, FaceBar, SectionFace};
+use crate::polygon;
 use crate::{BeamEnd, BeamGeom};
 use cc_core::profiles_project::SectorPlacement;
-use cc_core::{BarFace, ElementId, ElementKind, Project, Rebar, RebarLayout, Splice, TypeData};
+use cc_core::{AnchorHook, Anchorage, BarFace, ElementId, ElementKind, Project, Rebar, RebarLayout, Splice, TypeData};
 use glam::{DVec2, DVec3};
 use std::collections::BTreeMap;
 
@@ -278,6 +284,9 @@ pub fn build_rebar(
         beam_ends = beams.iter().map(|(id, g)| (*id, ends_of(g))).collect();
         strip_ends = foundations.iter().filter_map(|(id, f)| Some((*id, ends_of(f.strip.as_ref()?)))).collect();
     }
+    // The supports beams frame into, when a set is anchored into them.
+    let anchored = project.elements.values().any(|e| matches!(&e.kind, ElementKind::Rebar(r) if r.anchorage.is_some()));
+    let supports = if anchored { Supports::of(project, beams) } else { Supports::default() };
     let mut out = BTreeMap::new();
     for e in project.elements.values() {
         let ElementKind::Rebar(r) = &e.kind else { continue };
@@ -290,7 +299,8 @@ pub fn build_rebar(
                 let Some(TypeData::Beam { height, .. }) = project.element_type(host.type_id).map(|t| &t.data) else {
                     continue;
                 };
-                beam_bars(g, *height, r, d, ds, beam_past(r, d, g, &beam_ends))
+                let anchors = supports.anchors(g, r, d);
+                beam_bars(g, *height, r, d, ds, beam_past(r, d, g, &beam_ends), anchors)
             }
             // A strip footing: its own bars, or those of a beam in its beam part.
             ElementKind::Foundation(f) if matches!(f.shape, cc_core::FoundationShape::Strip { .. }) => {
@@ -323,7 +333,7 @@ pub fn build_rebar(
                 } else {
                     // As a beam as wide as the beam part and as deep as the whole section.
                     let part = BeamGeom { half: section.beam_half(), ..g.clone() };
-                    beam_bars(&part, data.foundation_depth(), r, d, ds, beam_past(r, d, g, &strip_ends))
+                    beam_bars(&part, data.foundation_depth(), r, d, ds, beam_past(r, d, g, &strip_ends), [None, None])
                 }
             }
             ElementKind::Floor(_) | ElementKind::Foundation(_) => {
@@ -434,6 +444,270 @@ pub(crate) fn run_past(inside: (f64, f64), cover: f64, past: (f64, f64), scale: 
     (from, to)
 }
 
+/// Two beam ends framed into one support whose axes leave it this close to
+/// opposite ways (some ten degrees) carry on in line through it.
+const IN_LINE: f64 = -0.985;
+
+/// How far behind a beam's end face the line of a bar may meet the support
+/// and still run into it, meters.
+const SUPPORT_GAP: f64 = 0.02;
+
+/// The supports beams frame into (structural columns and pile caps), and the
+/// beam ends framed into each: what anchored bars run into.
+#[derive(Default)]
+struct Supports {
+    /// Each support's plan outline and its bottom and top elevations.
+    shapes: BTreeMap<ElementId, ColumnInput>,
+    /// The beam ends framed into each support.
+    ends: BTreeMap<ElementId, Vec<FramedEnd>>,
+}
+
+/// A beam end framed into a support: the beam, the direction its axis
+/// leaves the support by and the beam's lowest and highest elevations.
+type FramedEnd = (ElementId, DVec2, (f64, f64));
+
+impl Supports {
+    fn of(project: &Project, beams: &BTreeMap<ElementId, BeamGeom>) -> Self {
+        let mut out = Self::default();
+        for g in beams.values() {
+            let ends = [(g.start, -g.dir_at(0.0)), (g.end, g.dir_at(g.length))];
+            for (end, out_dir) in ends {
+                let BeamEnd::Column(support) = end else { continue };
+                out.ends.entry(support).or_default().push((g.element, out_dir, g.z_bounds()));
+                if !out.shapes.contains_key(&support)
+                    && let Some(shape) = project.element(support).and_then(|e| crate::build::support_input(project, e))
+                {
+                    out.shapes.insert(support, shape);
+                }
+            }
+        }
+        out
+    }
+
+    /// How the bars of the set `r` (bars `d` thick) in the beam `g` run into
+    /// the supports at its start and end: none where it is not anchored or
+    /// the end frames into no support.
+    fn anchors(&self, g: &BeamGeom, r: &Rebar, d: f64) -> [Option<EndAnchor<'_>>; 2] {
+        let Some(a) = r.anchorage.filter(|a| a.is_valid() && Anchorage::fits(&r.layout)) else { return [None, None] };
+        let lap = lap_of(r, d);
+        let z = g.z_bounds();
+        let end = |end: BeamEnd, out: DVec2| {
+            let BeamEnd::Column(support) = end else { return None };
+            let shape = self.shapes.get(&support).filter(|s| s.outline.len() >= 3)?;
+            let in_line = self.ends.get(&support).is_some_and(|ends| {
+                ends.iter().any(|(id, dir, zr)| *id != g.element && dir.dot(out) < IN_LINE && overlaps(*zr, z))
+            });
+            Some(EndAnchor {
+                outline: &shape.outline,
+                z: shape.z_range,
+                in_line,
+                length: a.length * d,
+                lap,
+                min_hook: Anchorage::MIN_HOOK * d,
+                hook: a.hook,
+            })
+        };
+        [end(g.start, -g.dir_at(0.0)), end(g.end, g.dir_at(g.length))]
+    }
+}
+
+/// Whether two ranges of elevations overlap.
+fn overlaps(a: (f64, f64), b: (f64, f64)) -> bool {
+    a.0 < b.1 - 1e-6 && b.0 < a.1 - 1e-6
+}
+
+/// How the bars of a set run into the support at one end of a beam.
+#[derive(Debug, Clone, Copy)]
+struct EndAnchor<'a> {
+    /// The support's plan outline, and its bottom and top elevations.
+    outline: &'a [DVec2],
+    z: (f64, f64),
+    /// Another beam carries on in line from the other side of the support.
+    in_line: bool,
+    /// The anchorage, the lap and the shortest hook leg, meters.
+    length: f64,
+    lap: f64,
+    min_hook: f64,
+    hook: AnchorHook,
+}
+
+/// The stretches `(from, to)` along the axis of the beam `g` where the bar
+/// line `v` (its circle on an arc beam) lies inside `outline`, rising: the
+/// parts of a straight line, or of the circle within half a turn either
+/// way of `face`, the end face's place on the line.
+fn support_span(g: &BeamGeom, v: f64, outline: &[DVec2], face: f64) -> Vec<(f64, f64)> {
+    let Some(arc) = &g.arc else { return polygon::clip_line(outline, g.world(0.0, v), g.dir) };
+    let (c, r, big) = (arc.center, arc.radius_at(v), arc.radius);
+    if !(r.is_finite() && r > 1e-9 && big.is_finite() && big > 1e-9) {
+        return Vec::new();
+    }
+    // Where the circle crosses each side, as a place along the axis from the face's.
+    let at_face = arc.angle_at(face);
+    let mut us: Vec<f64> = Vec::new();
+    for (i, p) in outline.iter().enumerate() {
+        let Some(q) = outline.get((i + 1) % outline.len()) else { continue };
+        let (dir, from_c) = (*q - *p, *p - c);
+        let a = dir.length_squared();
+        let b = 2.0 * from_c.dot(dir);
+        let disc = b * b - 4.0 * a * (from_c.length_squared() - r * r);
+        if !(a > 1e-18 && disc >= 0.0) {
+            continue;
+        }
+        let root = disc.sqrt();
+        for t in [(-b - root) / (2.0 * a), (-b + root) / (2.0 * a)] {
+            if (0.0..1.0).contains(&t) {
+                let hit = *p + dir * t - c;
+                let turn = (hit.y.atan2(hit.x) - at_face + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
+                    - std::f64::consts::PI;
+                us.push(face + arc.sign() * turn * big);
+            }
+        }
+    }
+    us.retain(|u| u.is_finite());
+    us.sort_by(f64::total_cmp);
+    us.dedup_by(|a, b| (*a - *b).abs() < 1e-12);
+    // The stretches between crossings whose middle is inside.
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    for w in us.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        if !polygon::contains(outline, arc.at((a + b) * 0.5, v)) {
+            continue;
+        }
+        match out.last_mut() {
+            Some(last) if (last.1 - a).abs() < 1e-12 => last.1 = b,
+            _ => out.push((a, b)),
+        }
+    }
+    out
+}
+
+/// Where a bar on the line `(v, z)` of the section of the beam `g` ends in
+/// the support of `anchor` at the beam's start (`at_end` false) or end: its
+/// place along the axis, and the signed leg of its hook (up when positive;
+/// 0 for none), the hook bending `bend` (1 up, -1 down) when it may. `scale`
+/// is the bar's length per meter of axis. `None` where the bar's line misses
+/// the support behind the end face or lies above or below it, or the
+/// support leaves no room past the cover: the bar then stops as it would.
+///
+/// The bar runs on along its line (its circle) past the support's near face,
+/// up to its far face less the cover, at most the anchorage length; where
+/// that is short of the anchorage and the bar may bend, a 90° leg up or down
+/// makes up the rest, at least `min_hook` long and inside the support's
+/// height less the cover (none where that leaves less). Where another beam
+/// carries on in line, the bar runs half a lap past the support's middle
+/// along its line instead (still at most to the far face less the cover).
+#[allow(clippy::too_many_arguments)]
+fn anchor_end(
+    g: &BeamGeom,
+    v: f64,
+    z: f64,
+    at_end: bool,
+    anchor: &EndAnchor,
+    cover: f64,
+    scale: f64,
+    bend: Option<f64>,
+) -> Option<(f64, f64)> {
+    let face = g.face_u(at_end, v);
+    let spans = support_span(g, v, anchor.outline, face);
+    // The stretch behind the face (or across it) nearest to it: the bar meets the
+    // support's near face where its own line does (a round column bulges past the
+    // end face, which runs straight between the beam's sides).
+    let (near, far) = if at_end {
+        let (t0, t1) = spans.into_iter().filter(|s| s.1 > face + 1e-9).min_by(|a, b| a.0.total_cmp(&b.0))?;
+        (t0 <= face + SUPPORT_GAP).then_some((t0, t1))?
+    } else {
+        let (t0, t1) = spans.into_iter().filter(|s| s.0 < face - 1e-9).max_by(|a, b| a.1.total_cmp(&b.1))?;
+        (t1 >= face - SUPPORT_GAP).then_some((t1, t0))?
+    };
+    let depth = (far - near).abs() * scale;
+    let room = depth - cover;
+    if !(room.is_finite() && room > 1e-6) {
+        return None;
+    }
+    let (reach, hook) = if anchor.in_line {
+        ((depth + anchor.lap) * 0.5, None)
+    } else {
+        (anchor.length, bend.filter(|_| anchor.length > room + 1e-9))
+    };
+    let run = reach.min(room);
+    let u = if at_end { near + run / scale } else { near - run / scale };
+    // The bar lies within the support's height.
+    let elevation = g.z_at(u).0 + z * g.stretch();
+    if !(elevation > anchor.z.0 && elevation < anchor.z.1) {
+        return None;
+    }
+    let leg = hook.map_or(0.0, |dir| {
+        let height = if dir < 0.0 { elevation - (anchor.z.0 + cover) } else { anchor.z.1 - cover - elevation };
+        let want = (anchor.length - run).max(anchor.min_hook);
+        if height >= anchor.min_hook { want.min(height) * dir.signum() } else { 0.0 }
+    });
+    Some((u, leg))
+}
+
+/// A bar along the line `(v, z)` of a beam's section from `a` to `b` along
+/// the axis (`scale` meters of bar per meter of axis), with a vertical leg
+/// bent at each end (up when positive, meters; 0 for none). The corners are
+/// sharp: the legs are measured to the line of the run, as a wall bar's
+/// bent ends are.
+struct BeamRun {
+    v: f64,
+    z: f64,
+    a: f64,
+    b: f64,
+    scale: f64,
+    legs: [f64; 2],
+}
+
+impl BeamRun {
+    /// The developed length: the legs and the run.
+    fn length(&self) -> f64 {
+        self.legs[0].abs() + (self.b - self.a) * self.scale + self.legs[1].abs()
+    }
+
+    /// The point `u` along the axis of `g` on the bar's line.
+    fn at(&self, g: &BeamGeom, u: f64) -> DVec3 {
+        g.world(u, self.v).extend(g.z_at(u).0 + self.z * g.stretch())
+    }
+
+    /// The piece of the bar from `from` to `to` along its developed length
+    /// (following the arc of an arc beam in chords, with its true length).
+    fn piece(&self, g: &BeamGeom, from: f64, to: f64) -> Bar {
+        let (l0, l1) = (self.legs[0].abs(), self.legs[1].abs());
+        let s = self.scale.max(1e-9);
+        let run = ((self.b - self.a) * s).max(0.0);
+        let point = |x: f64| -> DVec3 {
+            if x < l0 {
+                self.at(g, self.a) + DVec3::Z * self.legs[0] * (1.0 - x / l0)
+            } else if x > l0 + run && l1 > 0.0 {
+                self.at(g, self.b) + DVec3::Z * self.legs[1] * ((x - l0 - run) / l1).min(1.0)
+            } else {
+                self.at(g, self.a + (x - l0).clamp(0.0, run) / s)
+            }
+        };
+        let mut points = vec![point(from)];
+        if from < l0 && to > l0 {
+            points.push(self.at(g, self.a));
+        }
+        // An arc in chords, each at most the arc step.
+        let (ra, rb) = (from.max(l0), to.min(l0 + run));
+        if let Some(arc) = &g.arc
+            && rb > ra
+        {
+            let (ua, ub) = (self.a + (ra - l0) / s, self.a + (rb - l0) / s);
+            let n = cc_core::arc::segments((ub - ua) / arc.radius.max(1e-9), cc_core::arc::ARC_STEP);
+            points.extend((1..n).map(|i| self.at(g, ua + (ub - ua) * i as f64 / n as f64)));
+        }
+        if l1 > 0.0 && from < l0 + run && to > l0 + run {
+            points.push(self.at(g, self.b));
+        }
+        points.push(point(to));
+        let all = points.clone();
+        points.dedup_by(|p, q| p.distance(*q) < 1e-9);
+        let points = if points.len() >= 2 { points } else { all };
+        Bar { true_length: g.arc.is_some().then_some(to - from), ..Bar::new(points, false) }
+    }
+}
+
 /// Whether a slab's set lies inside the other bars of its layer.
 fn slab_inner(layout: &RebarLayout) -> bool {
     matches!(
@@ -530,8 +804,18 @@ fn side_heights(count: u32, spacing: f64, lo: f64, hi: f64) -> Vec<f64> {
 
 /// Bars along a beam: longitudinal and side bars from end to end inside the
 /// cover (following the arc of an arc beam), stirrups in vertical planes
-/// across it (radial on an arc).
-fn beam_bars(g: &BeamGeom, height: f64, r: &Rebar, d: f64, ds: f64, past: (f64, f64)) -> Vec<Bar> {
+/// across it (radial on an arc). The bars along it run `past` its ends
+/// (half a lap where another beam carries on), or into the supports of
+/// `anchors` (which come first at an end that has both).
+fn beam_bars(
+    g: &BeamGeom,
+    height: f64,
+    r: &Rebar,
+    d: f64,
+    ds: f64,
+    past: (f64, f64),
+    anchors: [Option<EndAnchor>; 2],
+) -> Vec<Bar> {
     let (layout, cover, splice) = (&r.layout, r.cover, r.splice);
     let k = g.stretch();
     let u0 = g.start_ext.0.max(g.start_ext.1) + cover;
@@ -540,28 +824,44 @@ fn beam_bars(g: &BeamGeom, height: f64, r: &Rebar, d: f64, ds: f64, past: (f64, 
         return Vec::new();
     }
     let at = |u: f64, v: f64, z: f64| g.world(u, v).extend(g.z_at(u).0 + z * k);
+    // The way the anchored bars' hooks bend: top and bottom bars may, side bars do not.
+    let face = match layout {
+        RebarLayout::Longitudinal { face, .. } => Some(*face),
+        _ => None,
+    };
+    let bend = anchors.map(|a| a.and_then(|a| a.hook.direction(face)));
     // The bars along the lines `(v, z)` of the section, spliced where longer than the stock.
     let runs = |lines: Vec<(f64, f64)>| {
         let mut bars = Vec::new();
         for (index, (v, z)) in lines.into_iter().enumerate() {
             // Length of the bar per meter of the axis: its own radius on an arc, the slope.
             let scale = g.arc.as_ref().map_or(k, |a| (a.radius_at(v) / a.radius.max(1e-9)).max(1e-9));
-            let (u0, u1) = run_past((u0, u1), cover, past, scale);
-            let length = (u1 - u0) * scale;
+            let (mut a, mut b) = run_past((u0, u1), cover, past, scale);
+            // Into the supports at the ends framed into one, with the hooks' legs.
+            let mut legs = [0.0; 2];
+            for (end, anchor) in anchors.iter().enumerate() {
+                let Some(anchor) = anchor else { continue };
+                let bend = bend.get(end).copied().flatten();
+                let Some((u, leg)) = anchor_end(g, v, z, end == 1, anchor, cover, scale, bend) else { continue };
+                if end == 0 {
+                    a = u;
+                } else {
+                    b = u;
+                }
+                legs[end] = leg;
+            }
+            if !(b - a).is_finite() || b - a <= 1e-9 {
+                continue;
+            }
+            // The developed bar (legs and run) cut into the stock's pieces.
+            let bar = BeamRun { v, z, a, b, scale, legs };
+            let length = bar.length();
             let pieces = splice.map_or_else(|| vec![(0.0, length)], |s| s.pieces(length, index));
             for (from, to) in pieces {
                 if bars.len() >= MAX_BARS {
                     return bars;
                 }
-                let (a, b) = (u0 + from / scale, u0 + to / scale);
-                bars.push(match &g.arc {
-                    Some(arc) => {
-                        let n = cc_core::arc::segments((b - a) / arc.radius.max(1e-9), cc_core::arc::ARC_STEP);
-                        let points = (0..=n).map(|i| at(a + (b - a) * i as f64 / n as f64, v, z)).collect();
-                        Bar { true_length: Some(to - from), ..Bar::new(points, false) }
-                    }
-                    None => Bar::new(vec![at(a, v, z), at(b, v, z)], false),
-                });
+                bars.push(bar.piece(g, from, to));
             }
         }
         bars
@@ -969,5 +1269,106 @@ mod tests {
             true,
         );
         assert!((bar.length() - 0.8).abs() < 1e-12);
+    }
+
+    /// A 20 x 50 cm beam from `a` to `b` bending by `bulge`, framed into `columns`.
+    fn framed(a: DVec2, b: DVec2, bulge: f64, columns: &[ColumnInput]) -> BeamGeom {
+        let input = crate::beam::BeamInput {
+            element: ElementId(1),
+            start: a,
+            end: b,
+            half: 0.1,
+            z_range: (2.5, 3.0),
+            slope: 0.0,
+            section: crate::beam::box_section(0.2, 0.5),
+            curved: false,
+            join_start: true,
+            join_end: true,
+            bulge,
+        };
+        crate::beam::resolve_beams(&[input], columns).remove(0)
+    }
+
+    fn square(id: u64, c: DVec2, half: f64) -> ColumnInput {
+        let outline =
+            [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].map(|(x, y)| c + DVec2::new(x, y) * half).to_vec();
+        ColumnInput { element: ElementId(id), outline, z_range: (0.0, 3.0) }
+    }
+
+    fn anchor(outline: &[DVec2]) -> EndAnchor<'_> {
+        EndAnchor {
+            outline,
+            z: (0.0, 3.0),
+            in_line: false,
+            length: 0.4,
+            lap: 0.4,
+            min_hook: 0.08,
+            hook: AnchorHook::Auto,
+        }
+    }
+
+    #[test]
+    fn a_bar_runs_to_the_far_face_of_its_support() {
+        let column = square(10, DVec2::ZERO, 0.15);
+        let g = framed(DVec2::ZERO, DVec2::new(6.0, 0.0), 0.0, std::slice::from_ref(&column));
+        assert_eq!(g.start, BeamEnd::Column(ElementId(10)));
+        // 0.3 deep: 0.275 straight from the face at 0.15, and a leg up of the 0.125 left.
+        let a = anchor(&column.outline);
+        let (u, leg) = anchor_end(&g, 0.07, 0.03, false, &a, 0.025, 1.0, Some(1.0)).unwrap();
+        assert!((u - (0.15 - 0.275)).abs() < 1e-12 && (leg - 0.125).abs() < 1e-12, "{u} {leg}");
+        // In line with another beam: half the column and half a lap, at most to the far face.
+        let (u, leg) =
+            anchor_end(&g, 0.07, 0.03, false, &EndAnchor { in_line: true, ..a }, 0.025, 1.0, Some(1.0)).unwrap();
+        assert!((u - (0.15 - 0.275)).abs() < 1e-12 && leg == 0.0, "{u} {leg}");
+        // A bar above the support's top runs into nothing.
+        let low = EndAnchor { z: (0.0, 2.6), ..a };
+        assert!(anchor_end(&g, 0.07, 0.3, false, &low, 0.025, 1.0, Some(1.0)).is_none());
+    }
+
+    /// Supports a file may hold: anchored bars stop as unanchored ones do, and nothing panics.
+    #[test]
+    fn hostile_supports_anchor_nothing() {
+        let column = square(10, DVec2::ZERO, 0.15);
+        let g = framed(DVec2::ZERO, DVec2::new(6.0, 0.0), 0.0, std::slice::from_ref(&column));
+        let flat = [DVec2::new(-0.15, 0.0), DVec2::new(0.15, 0.0), DVec2::new(0.0, 0.0)];
+        let nan = [DVec2::new(f64::NAN, 0.0), DVec2::new(0.15, -0.15), DVec2::new(0.15, 0.15)];
+        let far_away = square(11, DVec2::new(-5.0, 0.0), 0.15).outline;
+        let thin = square(12, DVec2::ZERO, 0.01).outline;
+        for outline in [&flat[..], &nan[..], &far_away[..], &thin[..], &[][..]] {
+            for bend in [None, Some(-1.0), Some(1.0)] {
+                assert!(anchor_end(&g, 0.07, 0.03, false, &anchor(outline), 0.025, 1.0, bend).is_none());
+            }
+        }
+        // A cover deeper than the support.
+        assert!(anchor_end(&g, 0.0, 0.03, false, &anchor(&column.outline), 0.5, 1.0, None).is_none());
+        // Not numbers.
+        let a = EndAnchor { length: f64::NAN, lap: f64::NAN, min_hook: f64::NAN, ..anchor(&column.outline) };
+        let _ = anchor_end(&g, f64::NAN, f64::NAN, true, &a, f64::NAN, f64::NAN, Some(f64::NAN));
+        let _ = anchor_end(&g, 0.07, 0.03, false, &a, 0.025, 1.0, Some(1.0));
+        // An arc of a tiny radius, and an arc whose circle misses the support.
+        let tiny = framed(DVec2::new(0.11, 0.0), DVec2::new(-0.11, 0.0), 1.0, &[]);
+        let _ = anchor_end(&tiny, 0.0, 0.03, false, &anchor(&column.outline), 0.025, 1.0, Some(1.0));
+        let _ = support_span(&tiny, 0.05, &column.outline, 0.0);
+        let ring = framed(DVec2::new(4.0, 0.0), DVec2::new(0.0, 4.0), (std::f64::consts::FRAC_PI_2 / 4.0).tan(), &[]);
+        assert!(support_span(&ring, 0.0, &far_away, 0.0).is_empty());
+    }
+
+    /// Along an arc beam the bar runs on along its own circle, to where that
+    /// circle leaves the support.
+    #[test]
+    fn an_arc_bar_runs_on_along_its_circle() {
+        let column = square(10, DVec2::new(4.0, 0.0), 0.3);
+        let bulge = (std::f64::consts::FRAC_PI_2 / 4.0).tan();
+        let g = framed(DVec2::new(4.0, 0.0), DVec2::new(0.0, 4.0), bulge, std::slice::from_ref(&column));
+        assert_eq!(g.start, BeamEnd::Column(ElementId(10)));
+        // The circle of radius 3.93 crosses the faces y = ±0.3 at ±asin(0.3 / 3.93).
+        let rho: f64 = 3.93;
+        let spans = support_span(&g, 0.07, &column.outline, g.face_u(false, 0.07));
+        let edge = (0.3 / rho).asin() * 4.0;
+        assert!(spans.iter().any(|(a, b)| (a + edge).abs() < 1e-9 && (b - edge).abs() < 1e-9), "{spans:?}");
+        // 40 diameters straight, along the circle: 0.4 m of it past the near face.
+        let scale = rho / 4.0;
+        let (u, leg) = anchor_end(&g, 0.07, 0.03, false, &anchor(&column.outline), 0.025, scale, Some(1.0)).unwrap();
+        assert!((u - (edge - 0.4 / scale)).abs() < 1e-9 && leg == 0.0, "{u}");
     }
 }

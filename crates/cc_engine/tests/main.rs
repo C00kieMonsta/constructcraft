@@ -8,6 +8,7 @@
 mod arc_beams;
 mod arc_strip_footings;
 mod bar_marks;
+mod beam_anchorage;
 mod bracing;
 mod browser_org;
 mod cad;

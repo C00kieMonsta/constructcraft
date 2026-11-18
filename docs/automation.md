@@ -370,6 +370,13 @@ Column and beam types are drawn and built with a structural profile: a standard 
 {"command": "rebar_create", "args": {"host": 42, "layout": "stirrups", "spacing": 0.12}}
 ```
 
+With `anchor` a beam's top, bottom and side bars run on into the columns and pile caps its ends frame into, along their own line or circle: up to the support's far face less the cover, at most the anchorage length past its near face (`true` for 40 bar diameters, or a number of diameters from 10 to 100). Where the support is too shallow for that, top and bottom bars end in a 90° hook whose leg makes up the rest, at least 8 diameters and inside the support's height less the cover: `anchor_hook` `auto` (top bars down, bottom bars up), `down`, `up` or `none`; side bars stay straight. Where another beam carries on in line beyond the support (a continuous beam, or the arcs of a ring beam), the bars of both run half a lap past its middle, so they lap by `lap` inside it, or reach its far face less the cover when it is shallower. The anchorage counts in the bars' length (and so in bar marks and schedules) before they are spliced; `lap_at_joins` still acts where a beam joins another without a column. `rebar_typical` takes `anchor` for the beams' top and bottom bars, and `element_set` changes a set's `anchorage` (`{"length": 30, "hook": "none"}`, or `null`):
+
+```text
+{"command": "rebar_create", "args": {"host": 42, "layout": "bottom", "count": 3, "anchor": true}}
+{"command": "rebar_create", "args": {"host": 42, "layout": "top", "anchor": 50, "anchor_hook": "down"}}
+```
+
 A column that continues a cylindrical wall has an `annular_sector` profile; `rebar_create` then takes its bars face by face (the faces are listed, in order, in the column's `derived.faces`), ties that follow the outline, cross-ties and lifts:
 
 ```text

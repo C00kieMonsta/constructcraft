@@ -370,6 +370,13 @@ Tipos de pilar e de viga são desenhados e construídos com um perfil estrutural
 {"command": "rebar_create", "args": {"host": 42, "layout": "stirrups", "spacing": 0.12}}
 ```
 
+Com `anchor` as barras superiores, inferiores e de pele de uma viga continuam para dentro dos pilares e blocos de coroamento em que as suas pontas se apoiam, ao longo da sua própria linha ou círculo: até a face oposta do apoio menos o cobrimento, no máximo o comprimento de ancoragem depois da face de entrada (`true` para 40 diâmetros da barra, ou um número de diâmetros de 10 a 100). Onde o apoio é raso demais para isso, as barras superiores e inferiores terminam em um gancho de 90° cuja perna completa o restante, com no mínimo 8 diâmetros e dentro da altura do apoio menos o cobrimento: `anchor_hook` `auto` (barras superiores para baixo, inferiores para cima), `down`, `up` ou `none`; as barras de pele ficam retas. Onde outra viga continua alinhada do outro lado do apoio (uma viga contínua, ou os arcos de uma viga em anel), as barras das duas passam meio traspasse além do seu meio, de modo que se traspassam por `lap` dentro dele, ou chegam à face oposta menos o cobrimento quando ele é mais raso. A ancoragem entra no comprimento das barras (e portanto nas posições e tabelas) antes de elas serem emendadas; `lap_at_joins` continua valendo onde uma viga encontra outra sem pilar. `rebar_typical` recebe `anchor` para as barras superiores e inferiores das vigas, e `element_set` altera a `anchorage` de um conjunto (`{"length": 30, "hook": "none"}`, ou `null`):
+
+```text
+{"command": "rebar_create", "args": {"host": 42, "layout": "bottom", "count": 3, "anchor": true}}
+{"command": "rebar_create", "args": {"host": 42, "layout": "top", "anchor": 50, "anchor_hook": "down"}}
+```
+
 Um pilar que continua uma parede cilíndrica tem um perfil `annular_sector`; `rebar_create` recebe então as barras face a face (as faces são listadas, em ordem, no `derived.faces` do pilar), estribos que seguem o contorno, grampos e lances:
 
 ```text
