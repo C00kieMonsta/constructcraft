@@ -1341,15 +1341,16 @@ No parameters.
 
 ### `sweep_create`
 
-*edit* — Create a swept profile: the profile of its type carried along `path` in plan, `base_offset` above the level, on the left of the path walking along it (`flip` puts it on the right); `closed` runs the path back to its first point (around a room). A project without a sweep type gets one (a baseboard).
+*edit* — Create a swept profile: the profile of its type carried along `path` in plan, `base_offset` above the level, on the left of the path walking along it (`flip` puts it on the right); `closed` runs the path back to its first point (around a room). Instead of points, the path may be drawn with `curves` (lines and arcs chained end to end, or one circle), as `floor_create` takes them: arcs stay arcs (the profile follows them square to the path, and the volume is exact), the path runs the way the first curve runs and is closed when the chain closes; a circle runs counter-clockwise, so the profile is inside it unless flipped. A project without a sweep type gets one (a baseboard).
 
 | Parameter | Type | | Description |
 |---|---|---|---|
-| `path` | [[x, y], …] | required | Points of the path in plan (at least 2; 3 when closed). |
 | `base_offset` | number | optional | Height of the path above the level, meters (default 0). |
-| `closed` | boolean | optional | Run the path back to its first point. |
+| `closed` | boolean | optional | Run the path back to its first point (with `curves`: the curves must close). |
+| `curves` | [JSON, …] | optional | The path drawn with curves instead of points: lines, arcs (`bulge` or `through`) and circles (alone), as in `floor_create`; rectangles and polygons make closed paths of lines. |
 | `flip` | boolean | optional | Put the profile on the right of the path. |
 | `level` | id or name | optional | Level id or name (default: the lowest level). |
+| `path` | [[x, y], …] | optional | Points of the path in plan (at least 2; 3 when closed). Give these or `curves`. |
 | `type` | id or name | optional | Type id or name (default: the category's default type). |
 
 ### `sweep_type_create`

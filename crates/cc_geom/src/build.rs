@@ -634,8 +634,16 @@ impl ModelGeometry {
                 }
                 (ElementKind::Railing(r), TypeData::Railing { .. }) => crate::add_railing(project, e, r, &mut s),
                 (ElementKind::Sweep(sw), TypeData::Sweep { .. }) => {
-                    let Some(faces) = crate::profile_sweep::sweep_faces(project, e, sw) else { continue };
-                    s.add_polygons(faces);
+                    let Some(mesh) = crate::profile_sweep::sweep_mesh(project, e, sw) else { continue };
+                    for (face, smooth) in mesh.faces.into_iter().zip(mesh.smooth) {
+                        let before = s.faces.len();
+                        s.add_polygons([face]);
+                        s.faces.iter_mut().skip(before).for_each(|f| f.smooth = smooth);
+                    }
+                    // Along arcs: exact (the solid meshes them with chords).
+                    if let Some(volume) = crate::profile_sweep::exact_volume(project, e, sw) {
+                        self.curved_volumes.insert(e.id, volume);
+                    }
                 }
                 _ => continue,
             }

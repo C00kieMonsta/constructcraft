@@ -448,6 +448,13 @@ impl Project {
         // Spline walls: a curve that makes no wall goes (the wall is straight between its ends).
         repairs += self.repair_wall_splines();
 
+        // Sweep paths: their arcs' bulges in range (before the paths are checked).
+        for e in self.elements.values_mut() {
+            if let ElementKind::Sweep(s) = &mut e.kind {
+                repairs += s.repair();
+            }
+        }
+
         // Elements: repeat until stable, since removing a wall orphans what it hosts.
         loop {
             let invalid: Vec<_> = self

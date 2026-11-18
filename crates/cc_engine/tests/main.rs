@@ -66,6 +66,7 @@ mod steel_building;
 mod structure_materials;
 mod structure_stress;
 mod sun;
+mod sweep_curves;
 mod tags;
 mod textures_paint;
 mod title_block_migration;
