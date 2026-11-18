@@ -304,7 +304,7 @@ A ferramenta *Viga* tem dois modos na barra de opções, como a de parede: *Linh
 
 ## Armadura de vigas
 
-*Armadura típica*, nas propriedades de uma viga ou pilar, cria barras inferiores, superiores e estribos. Outros conjuntos são criados com `rebar_create` (paleta de comandos), e a quantidade ou o espaçamento de cada conjunto é editado na seção *Armadura*.
+*Armadura típica*, nas propriedades de uma viga ou pilar, cria barras inferiores, superiores e estribos. Outros conjuntos são criados com `rebar_create` (paleta de comandos), e a quantidade ou o espaçamento de cada conjunto é editado na seção *Armadura*. Os estribos são fechados por dois ganchos em um canto (135° com pontas retas de 10 diâmetros da barra, contados no seu comprimento); as propriedades de um conjunto de estribos selecionado mostram *Ganchos do estribo* (nenhum, 90° ou 135°) e *Ponta do gancho* (diâmetros da barra).
 
 - **Camadas**: as barras superiores e inferiores que não cabem lado a lado, mantendo uma distância livre igual ao diâmetro da barra e de no mínimo 2 cm, vão para uma segunda camada acima das inferiores ou abaixo das superiores (até quatro camadas).
 - **Barras de pele**: *Adicionar barras de pele* põe uma barra em cada face lateral, à meia altura; `rebar_create` com o layout `sides` aceita um `count` por face, ou um `spacing` que põe quantas barras forem necessárias para mantê-las a essa distância ao longo da altura.
