@@ -7,6 +7,7 @@
 
 mod classes;
 mod connections;
+mod foreign_bars;
 mod rebar;
 mod round_trip;
 mod spline_walls;
