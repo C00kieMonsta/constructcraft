@@ -103,7 +103,9 @@ pub struct WallCreate {
     /// `FinishExterior`, `FinishInterior`, `CoreExterior` or `CoreInterior`.
     #[serde(default)]
     pub location_line: Option<String>,
-    /// A structural wall (default: as the wall type says).
+    /// A structural wall, one that takes reinforcement (default: as the wall type says; the
+    /// template's concrete wall types are structural, its masonry and partitions are not).
+    /// Changing the wall's type later leaves it as it is.
     #[serde(default)]
     pub structural: Option<bool>,
     /// An elevation profile (see `wall_profile_set`): the outline of the wall's face as curves in its

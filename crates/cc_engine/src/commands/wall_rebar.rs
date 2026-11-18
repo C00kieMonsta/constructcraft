@@ -118,7 +118,9 @@ pub struct TieBars {
 /// vertical bars may cover part of the height, start between those of
 /// another set (`offset`) and have bent ends. Each call adds sets, so a
 /// second call makes the additional bars of a zone. One set per family and
-/// face, in one undo step; the bars follow the wall.
+/// face, in one undo step; the bars follow the wall. Without `walls`, only
+/// structural walls are reinforced: the others that could take bars are
+/// listed in `not_structural`, with a `warning` when no wall was reinforced.
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct WallRebarCreate {
@@ -192,10 +194,15 @@ fn end(arg: Option<EndArg>, what: &str) -> Result<BarEnd> {
     Ok(end)
 }
 
+/// The walls chosen, how many walls were left out, and the layered walls
+/// among them left out for not being structural.
+type Hosts = (Vec<(ElementId, LevelId)>, usize, Vec<ElementId>);
+
 /// The walls to reinforce: those given (each a wall with a body of its own
 /// that is no spline wall), or the structural walls of the level or project
-/// (spline walls left out); and how many were left out.
-fn hosts(p: &Project, ids: &[u64], level: Option<&Ref>) -> Result<(Vec<(ElementId, LevelId)>, usize)> {
+/// (spline walls left out); and how many were left out, and which of those
+/// would take bars if they were structural.
+fn hosts(p: &Project, ids: &[u64], level: Option<&Ref>) -> Result<Hosts> {
     let layered = |e: &cc_core::Element| {
         p.element_type(e.type_id).is_some_and(|t| !t.layers().is_empty())
             && e.as_wall().is_some_and(|w| w.spline.is_none())
@@ -213,13 +220,15 @@ fn hosts(p: &Project, ids: &[u64], level: Option<&Ref>) -> Result<(Vec<(ElementI
                 _ => return Err(EngineError::invalid(format!("element {} is not a wall", id.0))),
             }
         }
-        return Ok((out, 0));
+        return Ok((out, 0, Vec::new()));
     }
     let level = level.map(|r| refs::level(p, r)).transpose()?;
     let walls = || p.elements.values().filter(|e| level.is_none_or(|l| e.level == l)).filter(|e| e.as_wall().is_some());
+    let structural = |e: &cc_core::Element| e.as_wall().is_some_and(|w| w.structural);
     let chosen: Vec<(ElementId, LevelId)> =
-        walls().filter(|e| layered(e) && e.as_wall().is_some_and(|w| w.structural)).map(|e| (e.id, e.level)).collect();
-    Ok((chosen.clone(), walls().count() - chosen.len()))
+        walls().filter(|e| layered(e) && structural(e)).map(|e| (e.id, e.level)).collect();
+    let not_structural = walls().filter(|e| layered(e) && !structural(e)).map(|e| e.id).collect();
+    Ok((chosen.clone(), walls().count() - chosen.len(), not_structural))
 }
 
 impl Command for WallRebarCreate {
@@ -228,7 +237,7 @@ impl Command for WallRebarCreate {
     fn run(self, s: &mut Session) -> Result<Value> {
         let p = s.project();
         let [default_cover, default_spacing, main_bar, _, tie_bar] = p.defaults().rebar;
-        let (walls, skipped) = hosts(p, &self.walls, self.level.as_ref())?;
+        let (walls, skipped, not_structural) = hosts(p, &self.walls, self.level.as_ref())?;
         let sides: &[WallSide] = match self.faces.as_deref().unwrap_or("both") {
             "both" => &WallSide::ALL,
             "exterior" => &[WallSide::Exterior],
@@ -323,7 +332,17 @@ impl Command for WallRebarCreate {
             sets.push((bar(&ties.type_ref, tie_bar)?, layout, covers[0].min(covers[1]), None));
         }
         if walls.is_empty() || sets.is_empty() {
-            return Ok(json!({"created": [], "walls": 0, "skipped": skipped}));
+            let mut out =
+                json!({"created": [], "walls": 0, "skipped": skipped, "not_structural": ids_json(&not_structural)});
+            // Walls that would take bars but are not structural: say so rather than do nothing quietly.
+            if walls.is_empty() && !not_structural.is_empty() {
+                out["warning"] = json!(format!(
+                    "no structural wall to reinforce: {} wall(s) are not structural (make them structural with \
+                     `structural: true`, or give their ids in `walls`)",
+                    not_structural.len()
+                ));
+            }
+            return Ok(out);
         }
         let count = walls.len();
         let lap_at_joins = self.lap_at_joins.unwrap_or(false);
@@ -343,6 +362,11 @@ impl Command for WallRebarCreate {
             }
             Ok(ids)
         })?;
-        Ok(json!({"created": ids_json(&created), "walls": count, "skipped": skipped}))
+        Ok(json!({
+            "created": ids_json(&created),
+            "walls": count,
+            "skipped": skipped,
+            "not_structural": ids_json(&not_structural),
+        }))
     }
 }

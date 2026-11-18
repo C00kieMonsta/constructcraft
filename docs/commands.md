@@ -448,7 +448,7 @@ No parameters.
 | `mid` | [x, y] | optional | A point on the arc between the ends: makes an arc wall through the three points. |
 | `profile` | [JSON, …] | optional | An elevation profile (see `wall_profile_set`): the outline of the wall's face as curves in its elevation frame, `[u, z]` meters along `start`→`end` and above its base. Straight walls only. |
 | `radius` | number | optional | Arc walls: the radius in meters, positive when the arc turns counter-clockwise from `start` to `end`, negative clockwise; at least half the distance between the ends. Ignored when `mid` or `bulge` is given. |
-| `structural` | boolean | optional | A structural wall (default: as the wall type says). |
+| `structural` | boolean | optional | A structural wall, one that takes reinforcement (default: as the wall type says; the template's concrete wall types are structural, its masonry and partitions are not). Changing the wall's type later leaves it as it is. |
 | `through` | [[x, y], …] | optional | Spline walls: the points `[x, y]` the wall line passes through between `start` and `end`, in order (at most 63; none makes a straight spline): a smooth curve through them all, whose bends must leave the face inside them a radius of 5 cm at least. |
 | `top_level` | id or name | optional | Level the top is attached to, instead of a height. |
 | `top_offset` | number | optional | Offset of the top from `top_level`, meters. |
@@ -880,7 +880,7 @@ No parameters.
 
 ### `wall_rebar_create`
 
-*edit* — Reinforce walls, straight or arc: `horizontal` bars up the wall (ring bars in an arc wall, each as long as the arc at its own radius) and `vertical` bars along it near each face, and `ties` between the faces. With none of the three given, horizontal and vertical bars every 15 cm on both faces. Bars lie `cover` inside the faces of the wall's structure (its core layers), stop at its ends and around its doors and windows, and those longer than `max_length` are lap spliced, neighbouring splices staggered. Horizontal bars may close up towards the base (`zones`); vertical bars may cover part of the height, start between those of another set (`offset`) and have bent ends. Each call adds sets, so a second call makes the additional bars of a zone. One set per family and face, in one undo step; the bars follow the wall.
+*edit* — Reinforce walls, straight or arc: `horizontal` bars up the wall (ring bars in an arc wall, each as long as the arc at its own radius) and `vertical` bars along it near each face, and `ties` between the faces. With none of the three given, horizontal and vertical bars every 15 cm on both faces. Bars lie `cover` inside the faces of the wall's structure (its core layers), stop at its ends and around its doors and windows, and those longer than `max_length` are lap spliced, neighbouring splices staggered. Horizontal bars may close up towards the base (`zones`); vertical bars may cover part of the height, start between those of another set (`offset`) and have bent ends. Each call adds sets, so a second call makes the additional bars of a zone. One set per family and face, in one undo step; the bars follow the wall. Without `walls`, only structural walls are reinforced: the others that could take bars are listed in `not_structural`, with a `warning` when no wall was reinforced.
 
 | Parameter | Type | | Description |
 |---|---|---|---|

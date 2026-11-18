@@ -17,6 +17,7 @@ mod column_sections;
 mod commands;
 mod component_env;
 mod component_script;
+mod concrete_walls;
 mod connections;
 mod curtain;
 mod design_options;
