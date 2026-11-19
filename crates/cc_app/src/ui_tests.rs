@@ -1119,7 +1119,7 @@ fn component_library_loads_a_component_from_the_online_library() {
     harness.run();
     let lib = harness.state().dialogs.library.as_ref().unwrap();
     assert_eq!((lib.source, lib.entries.len()), (crate::library::Source::Online, 1));
-    harness.get_by_label(&t!("lib-online-count", "count" => 1));
+    harness.get_by_label(&t!("lib-count", "count" => 1));
     harness.get_by_label_contains("Porta online").click();
     harness.run();
     harness.get_by_label(&t!("lib-load")).click();
@@ -1160,6 +1160,282 @@ fn an_online_component_that_does_not_download_says_why() {
     harness.run();
     assert!(harness.state().dialogs.library.is_some(), "nothing to load: the window stays");
     assert_eq!(harness.state().project().types.len(), before);
+}
+
+/// A card of the online library shows the picture its catalog entry gives,
+/// and its component file is not downloaded until the card is picked.
+#[test]
+fn an_online_card_shows_its_catalog_picture_without_downloading_the_component() {
+    let mut state = sample_state();
+    let dir = std::env::temp_dir().join(format!("ccad-crafthouse-picture-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let png = dir.join("porta.png");
+    let mut bytes = Vec::new();
+    let mut encoder = png::Encoder::new(&mut bytes, 36, 24);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.write_header().unwrap().write_image_data(&[200; 36 * 24 * 4]).unwrap();
+    std::fs::write(&png, bytes).unwrap();
+    let file = std::path::Path::new("components/doors/porta-online.ccomp");
+    let picture = std::path::Path::new("thumbnails/doors/porta-online.png");
+    let mut entry = online_entry("components/doors/porta-online.ccomp", "Porta online");
+    entry.thumbnail = Some(picture.into());
+    state.crafthouse.set_catalog(vec![entry]);
+    state.crafthouse.set_picture(picture, png.clone());
+    crate::library::open(&mut state);
+    let mut harness = library_harness(state, egui::vec2(1200.0, 800.0), egui::Theme::Light);
+    harness.get_by_label(&t!("lib-source-online")).click();
+    let failed = crate::crafthouse::FileStatus::Failed("offline".into());
+    // Offline, a download started would fail at once.
+    for _ in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        harness.run_steps(2);
+        assert_ne!(harness.state().crafthouse.file_status(file), failed, "the card in sight downloads nothing");
+    }
+    assert!(harness.state().thumbnail_jobs.is_empty(), "nothing to render: the picture is there");
+    assert_eq!(harness.state().crafthouse.picture(picture), Some(&png));
+    // Picked, the component is downloaded (and fails offline).
+    harness.get_by_label_contains("Porta online").click();
+    harness.run_steps(2);
+    for _ in 0..200 {
+        if harness.state().crafthouse.file_status(file) == failed {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        harness.run_steps(2);
+    }
+    assert_eq!(harness.state().crafthouse.file_status(file), failed);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The component library's window over an empty screen.
+fn library_harness(state: AppState, size: egui::Vec2, theme: egui::Theme) -> Harness<'static, AppState> {
+    themed_harness(state, size, theme, |ui, state| crate::library::show(ui.ctx(), state))
+}
+
+/// The component of the sample house's first type of `category`, saved to `path`.
+fn save_sample_component(state: &mut AppState, category: cc_core::Category, path: &std::path::Path) -> String {
+    let component = state
+        .project()
+        .component_types()
+        .find(|t| t.category() == category)
+        .and_then(|t| match &t.data {
+            cc_core::TypeData::Component { component, .. } => Some(component.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let save = cc_engine::commands::io::ComponentSave { component: component.clone(), path: path.to_path_buf() };
+    state.session.run(save).unwrap();
+    component
+}
+
+/// A kind picked in the filters leaves only its components, and the count
+/// says how many of all they are; Clear Filters, offered when nothing is
+/// left, brings them all back.
+#[test]
+fn library_filters_by_kind_and_clears_the_filters() {
+    let mut state = sample_state();
+    let mut window = online_entry("components/windows/basculante.ccomp", "Basculante de alumínio");
+    window.kind = "Window".into();
+    state.crafthouse.set_catalog(vec![
+        online_entry("components/doors/porta-a.ccomp", "Porta de abrir"),
+        online_entry("components/doors/porta-b.ccomp", "Porta de correr"),
+        window,
+    ]);
+    crate::library::open(&mut state);
+    // The cards' downloads keep asking for frames, so the harness steps a few at a time.
+    let mut harness = library_harness(state, egui::vec2(1200.0, 800.0), egui::Theme::Light);
+    harness.get_by_label(&t!("lib-source-online")).click();
+    harness.run_steps(4);
+    harness.get_by_label(&t!("lib-count", "count" => 3));
+    harness.get_by_label(&crate::i18n::tr(cc_core::ComponentKind::Window.key())).click();
+    harness.run_steps(4);
+    assert_eq!(harness.state().dialogs.library.as_ref().unwrap().kind.as_deref(), Some("Window"));
+    harness.get_by_label(&t!("lib-count-of", "shown" => 1, "total" => 3));
+    assert!(harness.query_by_label_contains("Porta de abrir").is_none());
+    assert!(harness.query_by_label_contains("Basculante de alumínio").is_some());
+    // A search that finds none of what is left.
+    harness.state_mut().dialogs.library.as_mut().unwrap().search = "nada assim".into();
+    harness.run_steps(4);
+    harness.get_by_label(&t!("lib-none"));
+    harness.get_by_label(&t!("lib-clear-filters")).click();
+    harness.run_steps(4);
+    let lib = harness.state().dialogs.library.as_ref().unwrap();
+    assert!(lib.kind.is_none() && lib.search.is_empty());
+    harness.get_by_label(&t!("lib-count", "count" => 3));
+    assert!(harness.query_by_label_contains("Porta de abrir").is_some());
+}
+
+/// Double-clicking a card loads its component, as Load into Project does.
+#[test]
+fn double_clicking_a_library_card_loads_the_component() {
+    let mut state = sample_state();
+    let dir = std::env::temp_dir().join(format!("ccad-library-double-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let door = save_sample_component(&mut state, cc_core::Category::Door, &dir.join("porta.ccomp"));
+    state.prefs.library_folders = vec![dir.clone()];
+    crate::library::open(&mut state);
+    let before = state.project().types.len();
+    let mut harness = library_harness(state, egui::vec2(1200.0, 800.0), egui::Theme::Light);
+    // Both clicks in one frame: the harness gives each queued event a frame
+    // of its own, a quarter second apart, too slow for a double click.
+    let at = harness.get_by_label_contains(&door).rect().center();
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    };
+    let events = [egui::Event::PointerMoved(at), button(true), button(false), button(true), button(false)];
+    harness.input_mut().events.extend(events);
+    harness.step();
+    harness.run();
+    crate::jobs::wait(harness.state_mut());
+    assert!(harness.state().dialogs.library.is_none(), "the window closes");
+    assert!(harness.state().project().types.len() > before, "the door's types joined the project");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The online library's body fits in the window while the catalog is read,
+/// when it cannot be read, and with a component of long texts and many
+/// types picked among many others.
+#[test]
+fn the_online_library_keeps_its_body_inside() {
+    let size = egui::vec2(1200.0, 760.0);
+    // The dialog panics in tests when its body is too wide; its footer must stay in the window too.
+    // Background work keeps asking for frames, so the harness steps a few at a time.
+    let footer_inside = |harness: &Harness<'static, AppState>| {
+        let rect = harness.get_by_label(&t!("lib-load")).rect();
+        assert!(rect.max.x <= size.x && rect.max.y <= size.y, "{rect:?}");
+    };
+    // Reading the catalog, then failing to (tests are offline).
+    let mut state = sample_state();
+    crate::library::open(&mut state);
+    let mut harness = library_harness(state, size, egui::Theme::Light);
+    harness.get_by_label(&t!("lib-source-online")).click();
+    harness.run_steps(4);
+    footer_inside(&harness);
+    for _ in 0..200 {
+        if matches!(harness.state().crafthouse.status(), crate::crafthouse::Status::Failed(_)) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        harness.run_steps(4);
+    }
+    assert!(matches!(harness.state().crafthouse.status(), crate::crafthouse::Status::Failed(_)));
+    harness.run_steps(4);
+    harness.get_by_label(&t!("lib-try-again"));
+    footer_inside(&harness);
+
+    // Read, with a component of long texts picked.
+    // First by name, so its card is in sight.
+    let long = "Armário de nome muito comprido ".repeat(6);
+    let mut entry = online_entry("components/doors/longa.ccomp", &long);
+    entry.author = "Autora de nome igualmente comprido ".repeat(5);
+    entry.types =
+        (0..60).map(|i| (format!("Tipo {i} ").repeat(8), "Uma descrição bastante longa do tipo ".repeat(4))).collect();
+    entry.parameters = (0..40).map(|i| format!("Parâmetro{i}")).collect();
+    let mut entries = vec![entry];
+    entries.extend((0..40).map(|i| {
+        let mut e = online_entry(&format!("components/misc/c-{i}.ccomp"), &format!("Componente {i}"));
+        e.author = format!("Autor {}", i % 3);
+        e.kind = ["Furniture", "Casework", "Lighting"][i % 3].into();
+        e
+    }));
+    let mut state = sample_state();
+    state.crafthouse.set_catalog(entries);
+    crate::library::open(&mut state);
+    let mut harness = library_harness(state, size, egui::Theme::Light);
+    harness.get_by_label(&t!("lib-source-online")).click();
+    harness.run_steps(4);
+    harness.get_by_label_contains(long.trim()).click();
+    harness.run_steps(4);
+    let lib = harness.state().dialogs.library.as_ref().unwrap();
+    assert_eq!(lib.selected.as_deref(), Some(std::path::Path::new("components/doors/longa.ccomp")));
+    footer_inside(&harness);
+}
+
+/// The library window in My Folders with a few components and in 3D
+/// CraftHouse with a catalog, a component picked, in both themes. The
+/// components are not rendered here, so the cards show placeholders.
+#[test]
+fn library_snapshots() {
+    if !snapshots_requested() {
+        return;
+    }
+    let mut results = egui_kittest::SnapshotResults::new();
+    let dir = std::env::temp_dir().join("ccad-library-snapshots");
+    let _ = std::fs::remove_dir_all(&dir);
+    let folders = [dir.join("Mobiliario"), dir.join("Esquadrias")];
+    let mut state = sample_state();
+    let components =
+        [(0, "Cama"), (0, "Mesa"), (0, "Cadeira"), (0, "Armário"), (0, "Bacia sanitária"), (1, "Porta de giro")];
+    let components = components.into_iter().chain([(1, "Janela de correr"), (1, "Janela maxim-ar")]);
+    for (i, (folder, component)) in components.enumerate() {
+        std::fs::create_dir_all(&folders[folder]).unwrap();
+        let path = folders[folder].join(format!("component-{i}.ccomp"));
+        state.session.run(cc_engine::commands::io::ComponentSave { component: component.into(), path }).unwrap();
+    }
+    let door = folders[1].join("component-5.ccomp");
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let mut state = sample_state();
+        state.prefs.library_folders = folders.to_vec();
+        crate::library::open(&mut state);
+        let mut harness = library_harness(state, egui::vec2(1240.0, 800.0), theme);
+        harness.get_by_label_contains("Porta de giro").click();
+        harness.run();
+        harness.remove_cursor();
+        harness.run();
+        // The file's path differs from one machine to another.
+        let path = harness.get_by_label_contains(&dir.display().to_string()).rect();
+        harness.mask(path);
+        results.add(harness.try_snapshot(format!("library_folders_{theme:?}").to_lowercase()));
+    }
+    let catalog = [
+        ("Porta de giro", "Door", "Ana", 3),
+        ("Porta de correr", "Door", "Ana", 2),
+        ("Janela de correr", "Window", "Bruno", 4),
+        ("Janela basculante", "Window", "Bruno", 1),
+        ("Cama de casal", "Furniture", "Carla", 2),
+        ("Mesa de jantar", "Furniture", "Carla", 3),
+        ("Cadeira", "Furniture", "Ana", 0),
+        ("Armário aéreo", "Casework", "Bruno", 5),
+        ("Bancada de cozinha", "Casework", "Carla", 2),
+        ("Bacia sanitária", "Plumbing", "Ana", 1),
+        ("Pendente", "Lighting", "Bruno", 2),
+        ("Tomada dupla", "Electrical", "Carla", 1),
+    ];
+    let catalog: Vec<crate::library::Entry> = catalog
+        .into_iter()
+        .enumerate()
+        .map(|(i, (name, kind, author, types))| crate::library::Entry {
+            path: format!("components/items/c-{i}.ccomp").into(),
+            component: name.into(),
+            kind: kind.into(),
+            author: author.into(),
+            types: (1..=types).map(|t| (format!("{name} {t}"), format!("Variante {t}"))).collect(),
+            parameters: vec!["Largura".into(), "Altura".into()],
+            ..Default::default()
+        })
+        .collect();
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        let mut state = sample_state();
+        state.crafthouse.set_catalog(catalog.clone());
+        for e in &catalog {
+            state.crafthouse.set_downloaded(&e.path, door.clone());
+        }
+        crate::library::open(&mut state);
+        let mut harness = library_harness(state, egui::vec2(1240.0, 800.0), theme);
+        harness.get_by_label(&t!("lib-source-online")).click();
+        harness.run();
+        harness.get_by_label_contains("Porta de giro").click();
+        harness.run();
+        harness.remove_cursor();
+        harness.run();
+        results.add(harness.try_snapshot(format!("library_online_{theme:?}").to_lowercase()));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    results.unwrap();
 }
 
 /// The ribbon, the app's shortcuts and the dialogs (Preferences among them).
@@ -3557,6 +3833,7 @@ fn every_dialog_keeps_its_body_inside() {
         ("view templates".into(), Box::new(crate::graphics_dialog::open_templates)),
         ("new project".into(), Box::new(crate::new_project_dialog::open)),
         ("new component".into(), Box::new(crate::new_component_dialog::open)),
+        ("component library".into(), Box::new(crate::library::open)),
         ("macro restart".into(), Box::new(|s| crate::macro_ui::ask(s, true))),
         ("macro discard".into(), Box::new(|s| crate::macro_ui::ask(s, false))),
         (
