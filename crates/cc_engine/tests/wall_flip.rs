@@ -320,3 +320,97 @@ fn a_curtain_wall_keeps_its_own_grid_in_place() {
     let g = run(&mut s, "curtain_get", json!({"element": id(&w)}));
     assert_eq!(g["vertical"], json!([3.5, 5.0]));
 }
+
+/// A curtain type with a 1 m fixed-distance grid both ways, justified as `justification`.
+fn curtain_type(s: &mut Session, justification: &str) -> u64 {
+    let grid = json!({"layout": "FixedDistance", "spacing": 1.0, "justification": justification});
+    let mullion = json!({"width": 0.05, "depth": 0.1, "material": ""});
+    let curtain = json!({
+        "vertical": grid,
+        "horizontal": grid,
+        "panel": {"kind": "Glass", "thickness": 0.02, "material": ""},
+        "vertical_mullion": mullion,
+        "horizontal_mullion": mullion,
+        "border_mullion": mullion,
+    });
+    id(&run(s, "curtain_type_create", json!({"name": format!("CW {justification}"), "curtain": curtain})))
+}
+
+/// The world points of curtain wall `id`'s vertical grid lines, rounded and sorted.
+fn grid_points(s: &mut Session, id: u64) -> Vec<[i64; 2]> {
+    let g = s.geometry().walls.get(&ElementId(id)).cloned().unwrap();
+    let layout = &g.curtain.as_ref().unwrap().layout;
+    let mut points: Vec<[i64; 2]> = layout
+        .interior(cc_core::curtain::GridAxis::Vertical)
+        .iter()
+        .map(|u| g.world(*u, 0.0))
+        .map(|p| [(p.x * 1e6).round() as i64, (p.y * 1e6).round() as i64])
+        .collect();
+    points.sort_unstable();
+    points
+}
+
+#[test]
+fn a_curtain_type_grid_stays_where_it_is() {
+    for justification in ["Start", "Center", "End"] {
+        let mut s = Session::default();
+        let ty = curtain_type(&mut s, justification);
+        // 4.3 m: the grid leaves a remainder at one end, or half at each.
+        let w = run(&mut s, "wall_create", json!({"start": [0, 0], "end": [4.3, 0], "type": ty, "height": 3.0}));
+        let before = grid_points(&mut s, id(&w));
+        assert!(before.len() >= 4, "{justification}: {before:?}");
+        run(&mut s, "wall_flip", json!({"walls": [id(&w)]}));
+        assert_eq!(grid_points(&mut s, id(&w)), before, "{justification}");
+        // A centered grid is the same counted from either end: it stays the type's.
+        assert_eq!(wall(&s, id(&w)).curtain.vertical.is_none(), justification == "Center", "{justification}");
+        run(&mut s, "wall_flip", json!({"walls": [id(&w)]}));
+        assert_eq!(grid_points(&mut s, id(&w)), before, "{justification}, twice");
+    }
+}
+
+/// The world points of the vertical bars of wall `id`, rounded and sorted.
+fn vertical_bars(s: &mut Session, id: u64) -> Vec<[i64; 2]> {
+    let sets: Vec<ElementId> = s
+        .project()
+        .rebar_of(ElementId(id))
+        .filter(|(_, r)| matches!(r.layout, RebarLayout::WallVertical { .. }))
+        .map(|(e, _)| e.id)
+        .collect();
+    let g = s.geometry();
+    let mut points: Vec<[i64; 2]> = sets
+        .iter()
+        .filter_map(|i| g.rebar.get(i))
+        .flat_map(|r| r.bars.iter())
+        .map(|b| [(b.points[0].x * 1e6).round() as i64, (b.points[0].y * 1e6).round() as i64])
+        .collect();
+    points.sort_unstable();
+    points
+}
+
+#[test]
+fn vertical_bars_stay_at_their_stations() {
+    let mut s = Session::default();
+    // 5.03 m is no multiple of the 0.2 m spacing: counted from the other end
+    // (0.1 m after the 2.5 cm cover) the bars would move.
+    let w = run(&mut s, "wall_create", json!({"start": [0, 0], "end": [5.03, 0], "height": 3.0}));
+    run(&mut s, "element_set", json!({"id": id(&w), "params": {"structural": true}}));
+    run(&mut s, "wall_rebar_create", json!({"walls": [id(&w)], "vertical": {"spacing": 0.2, "offset": 0.1}}));
+    let original = s.project().elements.clone();
+    let before = vertical_bars(&mut s, id(&w));
+    assert!(before.len() > 40, "{before:?}");
+    run(&mut s, "wall_flip", json!({"walls": [id(&w)]}));
+    assert_eq!(vertical_bars(&mut s, id(&w)), before);
+    // The sets now count from the other end: 5.03 - 2 x 0.025 - 0.1 = 4.88 m, 0.08 m past the last bar.
+    let offsets: Vec<f64> = s
+        .project()
+        .rebar_of(ElementId(id(&w)))
+        .filter_map(|(_, r)| match r.layout {
+            RebarLayout::WallVertical { offset, .. } => Some(offset),
+            _ => None,
+        })
+        .collect();
+    assert!(!offsets.is_empty() && offsets.iter().all(|o| (o - 0.08).abs() < 1e-9), "{offsets:?}");
+    run(&mut s, "wall_flip", json!({"walls": [id(&w)]}));
+    assert_eq!(vertical_bars(&mut s, id(&w)), before);
+    assert_eq!(s.project().elements, original, "flip twice is the identity");
+}

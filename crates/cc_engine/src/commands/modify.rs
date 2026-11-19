@@ -278,8 +278,10 @@ impl Command for ElementFlip {
 /// located by a finish face keeps that face on the line, its body goes to
 /// the other side); arcs keep their circle and splines their curve; its
 /// doors, windows and niches stay in place facing the same way; its
-/// profile and curtain grid are reversed along it; its reinforcement stays
-/// on the faces looking the same way; dimensions keep their points. One
+/// profile and curtain grid stay in place along it (a curtain grid its type
+/// lays out from one end becomes the wall's own lines); its reinforcement
+/// stays on the faces looking the same way, its vertical bars at the same
+/// stations; dimensions keep their points. One
 /// undo step; pinned walls are left alone. A wall that cannot be flipped
 /// (an arc or spline too tight for its body on the other side) fails the
 /// command and nothing changes.
@@ -298,6 +300,64 @@ fn flip_error(id: ElementId, e: cc_core::wall_flip::FlipError) -> EngineError {
     }
 }
 
+/// What a flip keeps in place that only the walls' derived geometry knows
+/// (see `cc_core::wall_flip`): the offsets that keep vertical bar sets at
+/// their stations, and the own grid lines that keep a curtain wall's type
+/// grid where it is when its layout is not the same counted from the other
+/// end (a fixed distance justified at the start or the end).
+#[derive(Default)]
+struct FlipKeep {
+    offsets: Vec<(ElementId, f64)>,
+    lines: Vec<(ElementId, Vec<f64>)>,
+}
+
+/// What flipping `walls` must keep in place, from the geometry before the flip.
+fn flip_keep(s: &mut Session, walls: &[ElementId]) -> FlipKeep {
+    let (p, geom) = s.project_and_geometry();
+    let mut keep = FlipKeep::default();
+    for id in walls {
+        let (Some(e), Some(g)) = (p.element(*id), geom.walls.get(id)) else { continue };
+        let Some(w) = e.as_wall() else { continue };
+        for (bar, r) in p.rebar_of(*id) {
+            if let Some(offset) = cc_geom::flipped_vertical_offset(g, r) {
+                keep.offsets.push((bar.id, offset));
+            }
+        }
+        // A curtain wall laid out by its type's vertical grid.
+        let system = p.element_type(e.type_id).and_then(|t| t.curtain());
+        let (Some(system), Some(curtain), None) = (system, g.curtain.as_ref(), &w.curtain.vertical) else { continue };
+        let (Some(&lo), Some(&hi)) = (curtain.layout.u.first(), curtain.layout.u.last()) else { continue };
+        let along = p.flipped_along(e, w);
+        let mut kept: Vec<f64> =
+            curtain.layout.interior(cc_core::curtain::GridAxis::Vertical).iter().map(|u| along(*u)).collect();
+        kept.sort_by(f64::total_cmp);
+        let laid = system.vertical.lines(along(hi), along(lo));
+        let same = laid.len() == kept.len() && laid.iter().zip(&kept).all(|(a, b)| (a - b).abs() < 1e-9);
+        if !same {
+            keep.lines.push((*id, kept));
+        }
+    }
+    keep
+}
+
+/// Flip `walls` in this edit, keeping in place what `keep` says.
+fn flip_walls(e: &mut cc_core::EditCtx, walls: &[ElementId], keep: &FlipKeep) -> Result<Vec<ElementId>> {
+    let changed = e.flip_walls(walls).map_err(|(id, err)| flip_error(id, err))?;
+    for (id, value) in &keep.offsets {
+        if let Some(ElementKind::Rebar(r)) = e.element_mut(*id).map(|x| &mut x.kind)
+            && let cc_core::RebarLayout::WallVertical { offset, .. } = &mut r.layout
+        {
+            *offset = *value;
+        }
+    }
+    for (id, lines) in &keep.lines {
+        if let Some(ElementKind::Wall(w)) = e.element_mut(*id).map(|x| &mut x.kind) {
+            w.curtain.vertical = Some(lines.clone());
+        }
+    }
+    Ok(changed)
+}
+
 impl Command for WallFlip {
     const NAME: &'static str = "wall_flip";
     const KIND: CommandKind = CommandKind::Edit;
@@ -310,7 +370,8 @@ impl Command for WallFlip {
         let changed = if free.is_empty() {
             Vec::new()
         } else {
-            edit(s, t!("tx-wall-flip"), |e| e.flip_walls(&free).map_err(|(id, err)| flip_error(id, err)))?
+            let keep = flip_keep(s, &free);
+            edit(s, t!("tx-wall-flip"), |e| flip_walls(e, &free, &keep))?
         };
         Ok(json!({ "changed": ids_json(&changed), "walls": ids_json(&free), "pinned_skipped": ids_json(&pinned) }))
     }
@@ -923,8 +984,9 @@ impl Command for ElementsTurn {
             );
         }
         let name = if turnable.is_empty() { t!("tx-wall-flip") } else { t!("tx-rotate") };
+        let keep = flip_keep(s, &walls);
         edit(s, name, |e| {
-            e.flip_walls(&walls).map_err(|(id, err)| flip_error(id, err))?;
+            flip_walls(e, &walls, &keep)?;
             for id in &turnable {
                 let Some(el) = e.element_mut(*id) else { continue };
                 match &mut el.kind {

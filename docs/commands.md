@@ -2004,7 +2004,7 @@ No parameters.
 
 ### `wall_flip`
 
-*edit* — Flip walls: swap their exterior and interior sides, their location line staying where it is (the Space key on selected walls). The wall is walked the other way: its layers mirror about the location line (a wall located by a finish face keeps that face on the line, its body goes to the other side); arcs keep their circle and splines their curve; its doors, windows and niches stay in place facing the same way; its profile and curtain grid are reversed along it; its reinforcement stays on the faces looking the same way; dimensions keep their points. One undo step; pinned walls are left alone. A wall that cannot be flipped (an arc or spline too tight for its body on the other side) fails the command and nothing changes.
+*edit* — Flip walls: swap their exterior and interior sides, their location line staying where it is (the Space key on selected walls). The wall is walked the other way: its layers mirror about the location line (a wall located by a finish face keeps that face on the line, its body goes to the other side); arcs keep their circle and splines their curve; its doors, windows and niches stay in place facing the same way; its profile and curtain grid stay in place along it (a curtain grid its type lays out from one end becomes the wall's own lines); its reinforcement stays on the faces looking the same way, its vertical bars at the same stations; dimensions keep their points. One undo step; pinned walls are left alone. A wall that cannot be flipped (an arc or spline too tight for its body on the other side) fails the command and nothing changes.
 
 | Parameter | Type | | Description |
 |---|---|---|---|

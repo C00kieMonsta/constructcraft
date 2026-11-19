@@ -80,6 +80,22 @@ pub(crate) fn stations(range: (f64, f64), spacing: f64, offset: f64, cover: f64)
     (0..count.min(5000)).map(|i| first + spacing * i as f64).collect()
 }
 
+/// The `offset` that puts the vertical bars of set `r` (in wall `g`) where
+/// they stand now once the wall is flipped (see `cc_core::wall_flip`): the
+/// set then counts its stations from the other end of the same face, so
+/// its first bar must be the last one now. `None` for other sets and for
+/// sets with no bars. Snapped to the nanometer, so flipping twice gives
+/// back the offset it started from (taken within one spacing).
+pub fn flipped_vertical_offset(g: &WallGeom, r: &Rebar) -> Option<f64> {
+    let RebarLayout::WallVertical { side, spacing, offset, .. } = &r.layout else { return None };
+    let range = if *side == WallSide::Exterior { (g.start_ext.0, g.end_ext.0) } else { (g.start_ext.1, g.end_ext.1) };
+    let last = *stations(range, *spacing, *offset, r.cover).last()?;
+    // What is left after the last bar, before the cover at the end (never
+    // below 0: a station may sit a hair past the end within the tolerance).
+    let rest = (range.1 - r.cover - last).max(0.0);
+    Some((rest * 1e9).round() / 1e9)
+}
+
 /// The stretches of the wall on `side` that are solid at elevation `z`,
 /// along its centerline, neighbours joined.
 fn solid_runs(g: &WallGeom, side: WallSide, z: f64) -> Vec<(f64, f64)> {

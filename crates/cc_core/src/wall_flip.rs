@@ -19,7 +19,16 @@
 //! set near the exterior face now lies near the interior one), and
 //! dimensions measuring the wall or its openings keep measuring the same
 //! points. A wall framing is laid out again from the new start, as after
-//! any change to its wall.
+//! any change to its wall (it has no setting to count its studs from the
+//! end).
+//!
+//! Two things only the derived geometry knows are left to the caller (the
+//! engine's `wall_flip` does them in the same edit): the `offset` that keeps
+//! a vertical bar set at its stations (`cc_geom::flipped_vertical_offset`,
+//! since the stations count from the face's end after joins), and the own
+//! grid lines that keep a curtain wall's type grid in place when its layout
+//! counted from the other end differs (a fixed distance justified at the
+//! start or the end), set from [`Project::flipped_along`].
 
 use crate::{EditCtx, ElementId, ElementKind, Project, RebarLayout, Wall, WallSide};
 use std::collections::BTreeSet;
@@ -92,6 +101,18 @@ fn reverse_along(u: f64, old: f64, new: f64) -> f64 {
 }
 
 impl Project {
+    /// Where a position `u` along the body centerline of wall `w` (of
+    /// element `e`) lies once the wall is flipped: `L - u`, scaled by the
+    /// new centerline length on an arc wall whose centerline moves.
+    pub fn flipped_along(&self, e: &crate::Element, w: &Wall) -> impl Fn(f64) -> f64 + use<> {
+        let (old, new) = if w.arc().is_some() {
+            (self.wall_length(e, w), self.wall_length(e, &w.reversed()))
+        } else {
+            (w.length(), w.length())
+        };
+        move |u| reverse_along(u, old, new)
+    }
+
     /// Whether wall `id` can be flipped (see [`crate::wall_flip`]).
     pub fn check_wall_flip(&self, id: ElementId) -> Result<(), FlipError> {
         let e = self.element(id).ok_or(FlipError::NotWall)?;
@@ -128,13 +149,8 @@ impl EditCtx<'_> {
             let mut flipped = w.reversed();
             // Positions along the body centerline: its length changes on an
             // arc wall whose location line is not its centerline.
-            let (old, new) = if w.arc().is_some() {
-                (p.wall_length(e, w), p.wall_length(e, &flipped))
-            } else {
-                (w.length(), w.length())
-            };
-            let along = |u: f64| reverse_along(u, old, new);
-            flipped.curtain.remap(along);
+            let along = p.flipped_along(e, w);
+            flipped.curtain.remap(&along);
             let hosted: Vec<ElementId> = p.hosted_by(*id).map(|h| h.id).collect();
             let bars: Vec<ElementId> = p.rebar_of(*id).map(|(b, _)| b.id).collect();
             if let Some(ElementKind::Wall(x)) = self.element_mut(*id).map(|e| &mut e.kind) {
