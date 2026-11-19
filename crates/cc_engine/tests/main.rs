@@ -5,6 +5,7 @@
 // Test helpers outside #[test] functions may fail loudly.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod analytical_arcs;
 mod arc_beams;
 mod arc_strip_footings;
 mod bar_marks;

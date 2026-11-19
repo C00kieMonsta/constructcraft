@@ -1079,9 +1079,11 @@ No parameters.
 
 ### `analytical_model`
 
-*query* — The analytical model of the structure: structural columns and beams as members along their center lines between shared nodes. Beams framed into columns end on the column axis, beams ending on beams end on their line, and members are split where others connect. Each member carries its `section`: the profile's name, `width` and `height` (m), `area` (m²), `ix`, `iy` and `j` (m⁴).
+*query* — The analytical model of the structure: structural columns and beams as members along their center lines between shared nodes. Beams framed into columns end on the column axis, beams ending on beams end on their line, and members are split where others connect. Each member carries its `section`: the profile's name, `width` and `height` (m), `area` (m²), `ix`, `iy` and `j` (m⁴). The members of an arc beam follow its arc: each has an `arc` (`bulge`, `center`, `radius`, `sweep` in degrees) and the arc's `length`.
 
-No parameters.
+| Parameter | Type | | Description |
+|---|---|---|---|
+| `arc_segments` | integer | optional | Split each curved member (part of an arc beam) into this many straight members, between new nodes on its arc, for programs that take only straight members (1 to 360; default: keep the arcs). |
 
 ### `analytical_export`
 
@@ -1090,6 +1092,7 @@ No parameters.
 | Parameter | Type | | Description |
 |---|---|---|---|
 | `path` | string | required | Path of the .json file to write. |
+| `arc_segments` | integer | optional | Split each curved member (part of an arc beam) into this many straight members, between new nodes on its arc, for programs that take only straight members (1 to 360; default: keep the arcs). |
 
 ### `footing_create`
 

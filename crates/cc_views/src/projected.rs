@@ -956,12 +956,14 @@ pub fn analytical(project: &Project, geom: &ModelGeometry, camera: &CameraState)
     let model = cc_geom::analytical::analytical_model(project, geom);
     let mut d = Drawing2D::default();
     for m in &model.members {
-        if let Some((a, b)) = model.line(m) {
-            let style = match m.kind {
-                cc_geom::analytical::MemberKind::Column => crate::LineStyle::Cut,
-                cc_geom::analytical::MemberKind::Beam => crate::LineStyle::Projection,
-            };
-            d.line(frame.project(a), frame.project(b), style, Some(m.element));
+        let style = match m.kind {
+            cc_geom::analytical::MemberKind::Column => crate::LineStyle::Cut,
+            cc_geom::analytical::MemberKind::Beam => crate::LineStyle::Projection,
+        };
+        // An arc member in short chords.
+        let pts: Vec<DVec2> = model.points(m, cc_core::arc::ARC_STEP).iter().map(|p| frame.project(*p)).collect();
+        if pts.len() >= 2 {
+            d.polyline(&pts, false, style, Some(m.element));
         }
     }
     for n in &model.nodes {

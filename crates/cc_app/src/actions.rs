@@ -959,7 +959,8 @@ pub fn export_analytical(state: &mut AppState) {
     if path.extension().is_none() {
         path.set_extension("json");
     }
-    match state.session.run(cc_engine::commands::analytical::AnalyticalExport { path: path.clone() }) {
+    let export = cc_engine::commands::analytical::AnalyticalExport { path: path.clone(), arc_segments: None };
+    match state.session.run(export) {
         Ok(_) => state.message = t!("msg-exported", "path" => path.display()),
         Err(e) => state.dialogs.error = Some(t!("msg-export-failed", "error" => e.message)),
     }
