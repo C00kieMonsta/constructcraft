@@ -667,7 +667,7 @@ pub(crate) fn sync_tabs(dock: &mut DockState<ViewId>, state: &mut AppState) {
     let only = state.close_others_than.take();
     let closed = std::mem::take(&mut state.tab_bar.close);
     let mut removed = Vec::new();
-    dock.retain_tabs(|tab| {
+    retain_tabs(dock, |tab| {
         let keep = project.views.contains_key(tab) && only.is_none_or(|v| v == *tab) && !closed.contains(tab);
         if !keep {
             removed.push(*tab);
@@ -699,6 +699,25 @@ pub(crate) fn sync_tabs(dock: &mut DockState<ViewId>, state: &mut AppState) {
     }
     state.active_view = active_tab(dock);
     state.open_tabs = dock.iter_all_tabs().count();
+}
+
+/// Drop the tabs `keep` rejects, keeping each bar's active tab in front.
+/// egui_dock's `retain_tabs` leaves a bar's active index as it was: with a
+/// tab before it closed, the index points at another tab or past the end,
+/// and a bar whose index is past the end draws no view at all (#431). The
+/// active tab stays active; when it was closed, the tab now at its place
+/// (or the bar's last) takes over.
+fn retain_tabs(dock: &mut DockState<ViewId>, keep: impl FnMut(&mut ViewId) -> bool) {
+    let active: Vec<ViewId> =
+        dock.iter_leaves().filter_map(|(_, leaf)| leaf.tabs.get(leaf.active.0).copied()).collect();
+    dock.retain_tabs(keep);
+    for (_, leaf) in dock.iter_leaves_mut() {
+        let index = match leaf.tabs.iter().position(|tab| active.contains(tab)) {
+            Some(kept) => kept,
+            None => leaf.active.0.min(leaf.tabs.len().saturating_sub(1)),
+        };
+        leaf.active = egui_dock::TabIndex(index);
+    }
 }
 
 #[cfg(test)]

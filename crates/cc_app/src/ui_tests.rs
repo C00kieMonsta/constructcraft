@@ -6688,3 +6688,30 @@ fn the_tab_bar_lists_the_open_views() {
     assert_eq!(open, [ids[0]]);
     assert_eq!(harness.state().state.open_tabs, 1);
 }
+
+/// Issue #431: Close Other Views from the list of a bar whose active tab is
+/// not the first left the bar pointing past its only tab, and the view was
+/// not drawn (black) until its tab was clicked.
+#[test]
+fn closing_the_other_views_keeps_a_later_tab_shown() {
+    let project = sample_state().session.doc.project;
+    let plans = project.views_of(cc_core::ViewCategory::FloorPlan);
+    let ids: Vec<_> = plans.chain(project.views_of(cc_core::ViewCategory::Elevation)).map(|v| v.id).take(3).collect();
+    assert_eq!(ids.len(), 3);
+    let mut harness = tabs_harness(&ids);
+    harness.state_mut().state.open_view(ids[1]);
+    harness.run();
+    assert_eq!(harness.state().state.active_view, Some(ids[1]));
+
+    harness.get_by_role_and_label(Role::Button, &t!("tabs-open-views")).click();
+    harness.run();
+    harness.get_by_label(&t!("action-close-other-views")).click();
+    harness.run();
+    let open: Vec<_> = harness.state().dock.iter_all_tabs().map(|(_, t)| *t).collect();
+    assert_eq!(open, [ids[1]]);
+    let (_, leaf) = harness.state().dock.iter_leaves().next().unwrap();
+    assert_eq!(leaf.active.0, 0, "the bar's active tab is its only one");
+    assert_eq!(harness.state().state.active_view, Some(ids[1]));
+    // The view is drawn: its zoom button is there.
+    assert!(harness.query_by_label(&t!("canvas-zoom-menu")).is_some());
+}
