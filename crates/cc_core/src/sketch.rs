@@ -366,7 +366,7 @@ impl Sketch {
     /// The closed loops the curves make, each as points without the closing
     /// repeat.
     pub fn loops(&self) -> Result<Vec<Vec<DVec2>>, SketchError> {
-        Ok(self.walk()?.into_iter().map(|(pts, _)| pts).collect())
+        Ok(self.walk()?.into_iter().map(|(pts, ..)| pts).collect())
     }
 
     /// The exact area the sketch encloses: its outline less its openings,
@@ -379,7 +379,7 @@ impl Sketch {
         let outer = (0..loops.len()).max_by(|&a, &b| area(&loops[a].0).total_cmp(&area(&loops[b].0)));
         let Some(outer) = outer else { return Err(SketchError::Empty) };
         let mut total = 0.0;
-        for (i, (_, swept)) in loops.iter().enumerate() {
+        for (i, (_, swept, _)) in loops.iter().enumerate() {
             total += if i == outer { swept.abs() } else { -swept.abs() };
         }
         Ok(total.max(0.0))
@@ -391,8 +391,28 @@ impl Sketch {
         self.curves.iter().any(SketchCurve::is_curved)
     }
 
-    /// The loops as points, each with its exact signed area.
-    fn walk(&self) -> Result<Vec<(Vec<DVec2>, f64)>, SketchError> {
+    /// The outline's curves and each opening's, as [`Self::profile`] tells
+    /// them apart, every loop's curves in order from end to end (some run
+    /// the other way, as [`SketchCurve::reversed`]); the outline turns
+    /// counter-clockwise and the openings clockwise.
+    #[allow(clippy::type_complexity)]
+    pub fn curve_profile(&self) -> Result<(Vec<SketchCurve>, Vec<Vec<SketchCurve>>), SketchError> {
+        self.profile()?;
+        let mut loops = self.walk()?;
+        let outer = (0..loops.len()).max_by(|&a, &b| area(&loops[a].0).total_cmp(&area(&loops[b].0)));
+        let Some(outer) = outer else { return Err(SketchError::Empty) };
+        // A loop whose area has the other sign runs the other way.
+        let turned = |(_, swept, curves): (Vec<DVec2>, f64, Vec<SketchCurve>), ccw: bool| {
+            if (swept > 0.0) == ccw { curves } else { curves.iter().rev().map(SketchCurve::reversed).collect() }
+        };
+        let outline = turned(loops.swap_remove(outer), true);
+        Ok((outline, loops.into_iter().map(|l| turned(l, false)).collect()))
+    }
+
+    /// The loops as points, each with its exact signed area and its curves
+    /// in order.
+    #[allow(clippy::type_complexity)]
+    fn walk(&self) -> Result<Vec<(Vec<DVec2>, f64, Vec<SketchCurve>)>, SketchError> {
         if self.curves.is_empty() {
             return Err(SketchError::Empty);
         }
@@ -404,12 +424,14 @@ impl Sketch {
         }
         let mut loops: Vec<Vec<DVec2>> = Vec::new();
         let mut swept: Vec<f64> = Vec::new();
+        let mut chains: Vec<Vec<SketchCurve>> = Vec::new();
         // Closed curves are loops of their own.
         for c in self.curves.iter().filter(|c| c.is_closed()) {
             let mut pts = c.points();
             pts.pop();
             loops.push(pts);
             swept.push(c.swept_area());
+            chains.push(vec![c.clone()]);
         }
         // Open curves meet at nodes: ends within the tolerance.
         let open: Vec<(SketchCurve, DVec2, DVec2)> =
@@ -444,6 +466,7 @@ impl Sketch {
                 continue;
             }
             let mut pts: Vec<DVec2> = Vec::new();
+            let mut chain: Vec<SketchCurve> = Vec::new();
             let mut loop_area = 0.0;
             let (mut curve, mut from) = (first, ends[first].0);
             // Every curve is used once: the walk is bounded by their count.
@@ -457,6 +480,7 @@ impl Sketch {
                 // The joint is written once: the next curve starts there.
                 cp.pop();
                 pts.extend(cp);
+                chain.push(c);
                 from = next;
                 let Some(&following) = at[from].iter().find(|&&k| k != curve) else { break };
                 if used[following] {
@@ -466,6 +490,7 @@ impl Sketch {
             }
             loops.push(pts);
             swept.push(loop_area);
+            chains.push(chain);
         }
         if loops.iter().map(Vec::len).sum::<usize>() > MAX_POINTS {
             return Err(SketchError::TooLarge);
@@ -478,7 +503,7 @@ impl Sketch {
                 return Err(SketchError::NoArea(l.first().copied().unwrap_or_default()));
             }
         }
-        Ok(loops.into_iter().zip(swept).collect())
+        Ok(loops.into_iter().zip(swept).zip(chains).map(|((pts, swept), chain)| (pts, swept, chain)).collect())
     }
 
     /// The outline (the loop around all the others) and the openings in it.

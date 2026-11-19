@@ -200,8 +200,12 @@ fn a_plain_strip_gets_the_footing_bars_and_a_beam_only_when_asked() {
         (f.footprint.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max) * 2.0, f.z_range.1 - f.z_range.0)
     };
     let bar = &g.rebar[&stirrups].bars[0];
-    let c = 0.025 + g.rebar[&stirrups].diameter / 2.0;
-    assert!(close(bar.length(), 2.0 * (w - 2.0 * c) + 2.0 * (h - 2.0 * c)), "{}", bar.length());
+    let d = g.rebar[&stirrups].diameter;
+    let c = 0.025 + d / 2.0;
+    // Closed by two 135° hooks: each a bend of 3/4 pi around a pin (center line 2 diameters
+    // out) and a straight end of 10 diameters, at least 5 cm.
+    let hooks = 2.0 * (0.75 * std::f64::consts::PI * 2.0 * d + (10.0 * d).max(0.05));
+    assert!(close(bar.length(), 2.0 * (w - 2.0 * c) + 2.0 * (h - 2.0 * c) + hooks), "{}", bar.length());
     // Nothing to make, other elements and bad values.
     let none = json!({"strips": [strip.0], "transverse_spacing": 0, "longitudinal_spacing": 0, "beam": false});
     assert_eq!(created(&run(&mut s, "strip_rebar_create", none)).len(), 0);

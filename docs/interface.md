@@ -304,7 +304,7 @@ The *Beam* tool has two modes in the options bar, as the wall tool has: *Line* d
 
 ## Beam reinforcement
 
-*Typical Reinforcement* in a beam's or column's properties gives it bottom and top bars and stirrups. Further sets are made with `rebar_create` (command palette), and each set's count or spacing is edited in the *Reinforcement* section.
+*Typical Reinforcement* in a beam's or column's properties gives it bottom and top bars and stirrups. Further sets are made with `rebar_create` (command palette), and each set's count or spacing is edited in the *Reinforcement* section. Stirrups are closed by two hooks at one corner (135° with straight ends of 10 bar diameters, counted in their length); a selected stirrup set's properties show *Stirrup Hooks* (none, 90° or 135°) and *Hook Tail* (bar diameters).
 
 - **Layers**: top and bottom bars that do not fit side by side, keeping a clear distance of the bar diameter and at least 2 cm, go in a second layer above the bottom bars or below the top ones (up to four layers).
 - **Side bars**: *Add side bars* puts one bar on each side face at mid height; `rebar_create` with the `sides` layout takes a `count` per face, or a `spacing` that puts as many as keep them that far apart over the height.

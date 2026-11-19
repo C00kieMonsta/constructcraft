@@ -361,7 +361,7 @@ Column and beam types are drawn and built with a structural profile: a standard 
 {"command": "element_set", "args": {"id": 42, "params": {"spacing": 0.4}}}
 ```
 
-`beam_create` draws an arc beam with `mid` (a point on the arc), `bulge` or `radius` (positive counter-clockwise; `major_arc` takes the longer arc), as `wall_create` draws arc walls; `element_get` then gives its `center`, `radius`, `sweep` and `true_length` along the arc. `rebar_create` lays bars in a beam or column: `top`, `bottom` (beams) or `perimeter` (columns) with a `count`, `sides` (side bars on both side faces of a beam: a `count` per face, or a `spacing` over the height) and `stirrups` every `spacing`. In an arc beam the bars follow the arc, each as long as the arc at its own radius, and the stirrups are radial. Bars that do not fit side by side go in a second layer, and bars along a beam longer than `max_length` (default 12 m; 0 for whole bars) are lap spliced by `lap` (default 40 diameters), neighbouring splices staggered.
+`beam_create` draws an arc beam with `mid` (a point on the arc), `bulge` or `radius` (positive counter-clockwise; `major_arc` takes the longer arc), as `wall_create` draws arc walls; `element_get` then gives its `center`, `radius`, `sweep` and `true_length` along the arc. `rebar_create` lays bars in a beam or column: `top`, `bottom` (beams) or `perimeter` (columns) with a `count`, `sides` (side bars on both side faces of a beam: a `count` per face, or a `spacing` over the height) and `stirrups` every `spacing`, each closed by two hooks at one corner (`hook`: 135 degrees by default, 90 to 180, 0 for none; `tail`: the straight end, 10 bar diameters by default, at least 5 cm) that count in its length and show in the bending schedule (`stirrup 14x44 hook 135° 5 hook 135° 5`). In an arc beam the bars follow the arc, each as long as the arc at its own radius, and the stirrups are radial. Bars that do not fit side by side go in a second layer, and bars along a beam longer than `max_length` (default 12 m; 0 for whole bars) are lap spliced by `lap` (default 40 diameters), neighbouring splices staggered.
 
 ```text
 {"command": "beam_create", "args": {"start": [2.5, 0], "end": [0, 2.5], "radius": 2.5}}
@@ -379,6 +379,12 @@ A column that continues a cylindrical wall has an `annular_sector` profile; `reb
 {"command": "rebar_create", "args": {"host": 42, "layout": "perimeter", "faces": [7, 3, 7, 3], "same_type": true}}
 {"command": "rebar_create", "args": {"host": 42, "layout": "stirrups", "spacing": 0.15}}
 {"command": "rebar_create", "args": {"host": 42, "layout": "ties", "spacing": 0.30}}
+```
+
+A column's vertical bars cut in lifts (`max_length`, or `lifts` at given heights) are all spliced at the same heights; `stagger` splices every other bar around the section higher: `half_lap` (half the lap length) or an offset in meters, at most `(max_length - lap) / 2`. Each bar still runs from the base to the top, so a staggered bar's first piece is longer by the offset and its last one shorter (a splice moved to less than a lap below the top is left out); with `max_length` the lifts are shortened where the longer first piece would not fit the stock. The staggered pieces have their own bar marks. `element_set` changes it (`{"splice": {"stagger": "half_lap"}}`, `{"offset": 0.3}` or `"none"`):
+
+```text
+{"command": "rebar_create", "args": {"host": 42, "layout": "perimeter", "count": 8, "max_length": 4, "lap": 0.5, "stagger": "half_lap"}}
 ```
 
 `wall_rebar_create` reinforces walls, straight or arc: horizontal (ring) bars with a spacing or `zones` by height, vertical bars with bent ends and additional sets, and ties, near both faces with a cover each. A cylindrical wall gets its four bar families in one command:

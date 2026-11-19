@@ -8,14 +8,14 @@
 //! elements with matching or new types. Products that cannot be interpreted
 //! are counted in the report instead of failing the import.
 
-use crate::geometry::{Extrusion, Geometry, Solid, affine, clean_loop};
+use crate::geometry::{Extrusion, Geometry, ProfileKind, Solid, affine, clean_loop, rect_kind_of};
 use crate::guid;
 use crate::parse::{Entity, Param, ParseError, StepFile, parse};
 use cc_core::component::IfcClass;
 use cc_core::component::convex_hull;
 use cc_core::curtain::{CurtainEdits, CurtainPanel, CurtainSystem};
 use cc_core::properties::{Atom, IfcValue, Property, PropertySet, PropertyValue};
-use cc_core::sketch::Sketch;
+use cc_core::sketch::{Sketch, SketchCurve};
 use cc_core::structural_profile::{
     MAX_NAME, MAX_OPENINGS as MAX_SKETCH_OPENINGS, MAX_POINTS as MAX_SKETCH_POINTS, MAX_PROFILES, ParamSketch,
     ProfileDef, ProfileMaterial, ProfileShape,
@@ -31,6 +31,7 @@ use cc_core::{Foundation, FoundationKind, FoundationShape};
 use cc_geom::polygon;
 use glam::{DAffine3, DVec2, DVec3};
 use std::collections::{BTreeMap, HashMap};
+use std::f64::consts::TAU;
 
 /// Deepest nesting of complex properties.
 const MAX_PROPERTY_DEPTH: usize = 8;
@@ -295,43 +296,436 @@ struct RingSector {
 /// The ring sector `curves` draw: two arcs about one center, of different
 /// radii and the same turn, and two straight sides between their ends along
 /// radii. `None` for any other outline, or a turn past the profile's limit.
-fn ring_sector(curves: &[cc_core::sketch::SketchCurve]) -> Option<RingSector> {
-    use cc_core::sketch::SketchCurve;
+fn ring_sector(curves: &[SketchCurve]) -> Option<RingSector> {
     if curves.len() != 4 {
         return None;
     }
+    let band = ring_band(curves)?;
+    let limit = ProfileShape::MAX_SECTOR_SWEEP.to_radians();
+    if !(1e-4..limit - 1e-6).contains(&band.sweep) {
+        return None;
+    }
+    let axis = DVec2::from_angle(band.start + band.sweep / 2.0);
+    Some(RingSector { center: band.center, r_in: band.r_in, r_out: band.r_out, sweep: band.sweep, axis })
+}
+
+/// A band of a ring: between the circles of radii `r_in` and `r_out` about
+/// `center`, from the angle `start` counter-clockwise through `sweep`
+/// (radians; a whole turn for a full ring).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RingBand {
+    center: DVec2,
+    r_in: f64,
+    r_out: f64,
+    start: f64,
+    sweep: f64,
+}
+
+impl RingBand {
+    fn is_full(&self) -> bool {
+        self.sweep >= TAU - 1e-9
+    }
+
+    /// Radius of the band's middle circle.
+    fn radius(&self) -> f64 {
+        (self.r_in + self.r_out) / 2.0
+    }
+
+    fn width(&self) -> f64 {
+        self.r_out - self.r_in
+    }
+}
+
+/// The band of a ring that `curves` draw: two concentric circles (a full
+/// ring), or arcs about one center on two radii, the outer ones turning one
+/// way and the inner ones the other through the same angle, joined by two
+/// straight sides along radii. `None` for any other outline.
+fn ring_band(curves: &[SketchCurve]) -> Option<RingBand> {
     let tol = 1e-4;
-    let mut arcs: Vec<(cc_core::arc::Arc, DVec2, DVec2)> = Vec::new();
+    if let [SketchCurve::Circle { center: a, radius: ra }, SketchCurve::Circle { center: b, radius: rb }] = *curves {
+        let (r_in, r_out) = (ra.min(rb), ra.max(rb));
+        let ring = a.distance(b) <= tol && r_out - r_in >= tol && r_in > tol;
+        return ring.then_some(RingBand { center: a, r_in, r_out, start: 0.0, sweep: TAU });
+    }
+    if !(4..=64).contains(&curves.len()) {
+        return None;
+    }
+    let mut arcs: Vec<cc_core::arc::Arc> = Vec::new();
     let mut lines: Vec<(DVec2, DVec2)> = Vec::new();
     for curve in curves {
         match *curve {
-            SketchCurve::Arc { a, b, bulge } => arcs.push((cc_core::arc::Arc::from_bulge(a, b, bulge)?, a, b)),
+            SketchCurve::Arc { a, b, bulge } => arcs.push(cc_core::arc::Arc::from_bulge(a, b, bulge)?),
             SketchCurve::Line { a, b } => lines.push((a, b)),
             _ => return None,
         }
     }
-    let [(first, ..), (second, ..)] = arcs.as_slice() else { return None };
-    if lines.len() != 2 || first.center.distance(second.center) > tol {
+    let center = arcs.first()?.center;
+    if lines.len() != 2 || arcs.len() < 2 || arcs.iter().any(|a| a.center.distance(center) > tol) {
         return None;
     }
-    let (inner, outer) = if first.radius < second.radius { (&arcs[0], &arcs[1]) } else { (&arcs[1], &arcs[0]) };
-    let (center, r_in, r_out) = (outer.0.center, inner.0.radius, outer.0.radius);
-    let sweep = outer.0.sweep.abs();
-    let limit = ProfileShape::MAX_SECTOR_SWEEP.to_radians();
-    if r_out - r_in < 1e-4 || (inner.0.sweep.abs() - sweep).abs() > 1e-4 || !(1e-4..limit - 1e-6).contains(&sweep) {
+    let r_out = arcs.iter().map(|a| a.radius).fold(f64::NEG_INFINITY, f64::max);
+    let r_in = arcs.iter().map(|a| a.radius).fold(f64::INFINITY, f64::min);
+    if !(r_out - r_in >= tol && r_in > tol && r_out.is_finite()) {
         return None;
     }
-    // The straight sides run along radii: each joins an end of one arc to the end of the other on its ray.
-    let radial = |(a, b): (DVec2, DVec2)| {
-        let (da, db) = ((a - center).normalize_or_zero(), (b - center).normalize_or_zero());
-        da.distance(db) < 1e-4 && ((a.distance(center) - b.distance(center)).abs() - (r_out - r_in)).abs() < tol
+    let (outer, inner): (Vec<&cc_core::arc::Arc>, Vec<&cc_core::arc::Arc>) =
+        arcs.iter().partition(|a| (a.radius - r_out).abs() <= tol);
+    if inner.is_empty() || inner.iter().any(|a| (a.radius - r_in).abs() > tol) {
+        return None;
+    }
+    // Around the loop the outer arcs turn one way and the inner ones the other, as far.
+    let turn = |arcs: &[&cc_core::arc::Arc]| arcs.iter().map(|a| a.sweep).sum::<f64>();
+    let (out_turn, in_turn) = (turn(&outer), turn(&inner));
+    let one_way = |arcs: &[&cc_core::arc::Arc], sign: f64| arcs.iter().all(|a| a.sweep * sign > 0.0);
+    let sweep = out_turn.abs();
+    if !(one_way(&outer, out_turn) && one_way(&inner, -out_turn) && (sweep - in_turn.abs()).abs() <= tol) {
+        return None;
+    }
+    if !(1e-4..TAU - 1e-6).contains(&sweep) {
+        return None;
+    }
+    // The straight sides run along radii, from one circle to the other.
+    let mut ends = Vec::new();
+    for (a, b) in lines {
+        let (da, db) = (a - center, b - center);
+        let radii = (da.length().min(db.length()), da.length().max(db.length()));
+        let along = da.normalize_or_zero().distance(db.normalize_or_zero()) < tol;
+        if !(along && (radii.0 - r_in).abs() <= tol && (radii.1 - r_out).abs() <= tol) {
+            return None;
+        }
+        ends.push(da.y.atan2(da.x));
+    }
+    let [first, second] = ends.as_slice() else { return None };
+    // The band runs from one side to the other through the outer arcs' turn,
+    // the middle of every arc within it.
+    let within = |start: f64| {
+        arcs.iter().all(|a| {
+            let m = a.point(a.length() / 2.0) - center;
+            (m.y.atan2(m.x) - start).rem_euclid(TAU) < sweep
+        })
     };
-    if !lines.iter().copied().all(radial) {
+    let reaches = |from: f64, to: f64| {
+        let gap = (from + sweep - to).rem_euclid(TAU);
+        gap <= tol || TAU - gap <= tol
+    };
+    let start = [(*first, *second), (*second, *first)]
+        .into_iter()
+        .find(|(from, to)| reaches(*from, *to) && within(*from))
+        .map(|(from, _)| from)?;
+    let mean = |arcs: &[&cc_core::arc::Arc]| arcs.iter().map(|a| a.radius).sum::<f64>() / arcs.len().max(1) as f64;
+    Some(RingBand { center, r_in: mean(&inner), r_out: mean(&outer), start, sweep })
+}
+
+/// Largest radius of a ring read as arcs (m).
+const MAX_RING_RADIUS: f64 = 10_000.0;
+
+/// The arcs on the circle of `radius` about `center` that run clockwise
+/// (so a wall's exterior side, its left, faces out) through the band from
+/// `start` counter-clockwise through `sweep`: one arc, or two halves when a
+/// bulge cannot hold it (a full ring is two half circles). As `(start, end,
+/// bulge)`.
+fn ring_arcs(center: DVec2, radius: f64, start: f64, sweep: f64) -> Vec<(DVec2, DVec2, f64)> {
+    let sweep = sweep.min(TAU);
+    let full = sweep >= TAU - 1e-9;
+    let pieces = if full || (sweep / 4.0).tan() > cc_core::arc::MAX_BULGE { 2 } else { 1 };
+    let step = sweep / f64::from(pieces);
+    let at = |t: f64| center + DVec2::from_angle(t) * radius;
+    (0..pieces)
+        .map(|i| {
+            let from = start + sweep - step * f64::from(i);
+            (at(from), at(from - step), -(step / 4.0).tan())
+        })
+        .collect()
+}
+
+/// Largest width, depth or length of a footing read from a file (m).
+const MAX_FOOTING_SIZE: f64 = 1000.0;
+/// How far the corners of a footing's section may be from those of a native section (m).
+const SECTION_TOL: f64 = 1e-5;
+
+/// The corners of a closed outline: the points where it turns (repeated
+/// points and points in line with their neighbors dropped). `None` past 256
+/// points or under three corners.
+fn corners(pts: &[DVec2]) -> Option<Vec<DVec2>> {
+    let pts = clean_polygon(pts.to_vec());
+    let n = pts.len();
+    if !(3..=256).contains(&n) {
         return None;
     }
-    // Under half a turn, the middle of the outer arc's chord lies on the bisector.
-    let axis = ((outer.1 + outer.2) / 2.0 - center).try_normalize()?;
-    Some(RingSector { center, r_in, r_out, sweep, axis })
+    let kept: Vec<DVec2> = (0..n)
+        .filter_map(|i| {
+            let (p, c, q) = (*pts.get((i + n - 1) % n)?, *pts.get(i)?, *pts.get((i + 1) % n)?);
+            let (u, v) = (c - p, q - p);
+            // Off the line through its neighbors, or turning back.
+            let off = u.perp_dot(v).abs() / v.length().max(1e-12);
+            (off > 1e-7 || u.dot(q - c) < 0.0).then_some(c)
+        })
+        .collect();
+    (kept.len() >= 3).then_some(kept)
+}
+
+/// Whether two outlines have the same corners within [`SECTION_TOL`], in any order.
+fn same_corners(a: &[DVec2], b: &[DVec2]) -> bool {
+    let covers = |a: &[DVec2], b: &[DVec2]| a.iter().all(|p| b.iter().any(|q| p.distance(*q) < SECTION_TOL));
+    a.len() == b.len() && covers(a, b) && covers(b, a)
+}
+
+/// A strip footing's section: its middle across the strip, its bottom, its
+/// width and thickness (at the beam, for an inverted T) and its haunch.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct StripSection {
+    middle: f64,
+    bottom: f64,
+    width: f64,
+    thickness: f64,
+    haunch: Option<cc_core::StripHaunch>,
+}
+
+impl StripSection {
+    /// From the bottom to the top (of the beam, for an inverted T).
+    fn depth(&self) -> f64 {
+        self.thickness + self.haunch.map_or(0.0, |h| h.beam_height)
+    }
+
+    fn is_valid(&self) -> bool {
+        let size = |v: f64| v.is_finite() && (0.01..=MAX_FOOTING_SIZE).contains(&v);
+        size(self.width) && size(self.depth()) && self.middle.is_finite() && self.bottom.is_finite()
+    }
+}
+
+/// The section of a strip footing from its outline across the strip (`x`
+/// across, `y` up): a rectangle, or the inverted T a [`cc_core::StripHaunch`]
+/// draws, its beam in the middle. `None` for any other outline.
+fn strip_section(outline: &[DVec2]) -> Option<StripSection> {
+    let pts = corners(outline)?;
+    if pts.len() > 16 {
+        return None;
+    }
+    let (lo, hi) = crate::geometry::bounds2(&pts);
+    let (width, depth) = (hi.x - lo.x, hi.y - lo.y);
+    let middle = (lo.x + hi.x) / 2.0;
+    let plain = StripSection { middle, bottom: lo.y, width, thickness: depth, haunch: None };
+    if !plain.is_valid() {
+        return None;
+    }
+    let local: Vec<DVec2> = pts.iter().map(|p| *p - DVec2::new(middle, lo.y)).collect();
+    let w = width / 2.0;
+    let rect = [DVec2::new(-w, 0.0), DVec2::new(w, 0.0), DVec2::new(w, depth), DVec2::new(-w, depth)];
+    if same_corners(&local, &rect) {
+        return Some(plain);
+    }
+    // An inverted T: the beam is the top, the footing as thick as the
+    // beam's faces show and the edges as their tops.
+    let tol = SECTION_TOL;
+    let half = local.iter().filter(|p| (p.y - depth).abs() < tol).map(|p| p.x.abs()).fold(0.0, f64::max);
+    let edge = local.iter().filter(|p| (p.x.abs() - w).abs() < tol).map(|p| p.y).fold(0.0, f64::max);
+    let face = local
+        .iter()
+        .filter(|p| (p.x.abs() - half).abs() < tol && p.y < depth - tol && p.y > tol)
+        .map(|p| p.y)
+        .fold(None, |m: Option<f64>, y| Some(m.map_or(y, |m| m.max(y))));
+    let (thickness, beam_height) = face.map_or((depth, 0.0), |f| (f, depth - f));
+    let haunch = cc_core::StripHaunch { edge_thickness: edge, beam_width: 2.0 * half, beam_height };
+    if !haunch.fits(width, thickness) {
+        return None;
+    }
+    let want = corners(&haunch.outline(width, thickness))?;
+    same_corners(&local, &want).then_some(StripSection { thickness, haunch: Some(haunch), ..plain })
+}
+
+/// Whether two strip haunches are the same within [`TYPE_TOL`].
+fn same_haunch(a: Option<cc_core::StripHaunch>, b: Option<cc_core::StripHaunch>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => {
+            (a.edge_thickness - b.edge_thickness).abs() < TYPE_TOL
+                && (a.beam_width - b.beam_width).abs() < TYPE_TOL
+                && (a.beam_height - b.beam_height).abs() < TYPE_TOL
+        }
+        _ => false,
+    }
+}
+
+/// Where a strip footing runs in plan.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum StripPath {
+    Line(DVec2, DVec2),
+    /// On the circle of `radius` about `center`, from the angle `start`
+    /// counter-clockwise through `sweep` (radians; a whole turn for a ring).
+    Arc {
+        center: DVec2,
+        radius: f64,
+        start: f64,
+        sweep: f64,
+    },
+}
+
+impl StripPath {
+    /// The native strips along it, as `(start, end, bulge)`.
+    fn pieces(&self) -> Vec<(DVec2, DVec2, f64)> {
+        match *self {
+            StripPath::Line(a, b) => vec![(a, b, 0.0)],
+            StripPath::Arc { center, radius, start, sweep } => ring_arcs(center, radius, start, sweep),
+        }
+    }
+}
+
+/// A strip footing's section revolved about a vertical axis: the arc (or
+/// ring) its middle runs on and the section. `None` when the axis is not
+/// vertical, the profile's plane does not hold it, the profile reaches it
+/// or has voids, or the section is no native one.
+fn revolved_strip(r: &crate::geometry::Revolution) -> Option<(StripPath, StripSection)> {
+    let up = r.axis.z;
+    if up.abs() < 1.0 - 1e-9 || !r.profile.holes.is_empty() {
+        return None;
+    }
+    let outline: Vec<DVec2> = r.section()?.into_iter().map(|p| DVec2::new(p.x, r.origin.z + p.y * up)).collect();
+    let section = strip_section(&outline)?;
+    let dir = r.start_direction()?.truncate();
+    // Counter-clockwise in plan when it turns about an upward axis.
+    let turn = r.angle * up.signum();
+    let sweep = turn.abs().min(TAU);
+    let start = dir.y.atan2(dir.x) + turn.min(0.0);
+    let center = r.origin.truncate();
+    let radius = section.middle;
+    let ok = sweep >= 1e-3 && start.is_finite() && center.is_finite() && radius <= MAX_RING_RADIUS;
+    let sweep = if sweep >= TAU - 1e-9 { TAU } else { sweep };
+    ok.then_some((StripPath::Arc { center, radius, start, sweep }, section))
+}
+
+/// A strip footing's body: a section revolved about a vertical axis, or a
+/// band of a ring extruded upwards (arcs or a ring); with `straight`, also
+/// a plan rectangle extruded upwards (along its long side) or a section
+/// extruded level along the strip. `None` for anything else.
+fn strip_of(body: &Body, straight: bool) -> Option<(StripPath, StripSection)> {
+    let found = strip_body(body, straight)?;
+    let (path, section) = &found;
+    let fits = match *path {
+        StripPath::Line(a, b) => a.is_finite() && b.is_finite() && (0.01..=MAX_FOOTING_SIZE).contains(&a.distance(b)),
+        StripPath::Arc { center, radius, .. } => {
+            center.is_finite() && radius.is_finite() && radius - section.width / 2.0 > 1e-3 && radius <= MAX_RING_RADIUS
+        }
+    };
+    (fits && section.is_valid()).then_some(found)
+}
+
+fn strip_body(body: &Body, straight: bool) -> Option<(StripPath, StripSection)> {
+    if let [s] = body.solids.as_slice()
+        && !s.clipped
+        && let Some(r) = &s.revolution
+    {
+        return revolved_strip(r);
+    }
+    if let Some(ex) = body.sole_extrusion_with_voids().filter(|x| x.is_vertical())
+        && let Some(band) = ex.footprint_curves().as_deref().and_then(ring_band)
+    {
+        let (z0, z1) = ex.z_range();
+        let section =
+            StripSection { middle: band.radius(), bottom: z0, width: band.width(), thickness: z1 - z0, haunch: None };
+        let path = StripPath::Arc { center: band.center, radius: band.radius(), start: band.start, sweep: band.sweep };
+        return Some((path, section));
+    }
+    if !straight {
+        return None;
+    }
+    let ex = body.sole_extrusion()?;
+    if ex.is_vertical() {
+        // A plan rectangle extruded upwards: the long side is the strip.
+        let ProfileKind::Rect { center, x, w, h } = rect_kind_of(&clean_polygon(ex.footprint())) else { return None };
+        let (along, length, width) = if w >= h { (x, w, h) } else { (x.perp(), h, w) };
+        let (z0, z1) = ex.z_range();
+        let section = StripSection { middle: 0.0, bottom: z0, width, thickness: z1 - z0, haunch: None };
+        return Some((StripPath::Line(center - along * length / 2.0, center + along * length / 2.0), section));
+    }
+    // A section extruded level, square to its plane, along the strip.
+    let length = ex.vector.length();
+    let dir = ex.vector.truncate().try_normalize()?;
+    let normal = ex.xf.matrix3.x_axis.cross(ex.xf.matrix3.y_axis).try_normalize()?;
+    if ex.vector.z.abs() > 1e-9 * length || normal.dot(ex.vector / length).abs() < 1.0 - 1e-9 {
+        return None;
+    }
+    let across = dir.perp().extend(0.0);
+    let origin = ex.plane_point(DVec2::ZERO);
+    let outline: Vec<DVec2> =
+        ex.profile.pts.iter().map(|p| ex.plane_point(*p)).map(|w| DVec2::new((w - origin).dot(across), w.z)).collect();
+    let section = strip_section(&outline)?;
+    let start = origin.truncate() + dir.perp() * section.middle;
+    Some((StripPath::Line(start, start + ex.vector.truncate()), section))
+}
+
+/// The plan of a pile cap another program wrote, as a native cap's outline
+/// can hold it, with its bottom and top: a rectangle or a disk extruded
+/// upwards, or a full ring (two circles extruded upwards, or a rectangle
+/// revolved about a vertical axis).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CapShape {
+    Rect { center: DVec2, x: DVec2, w: f64, h: f64 },
+    Disk { center: DVec2, radius: f64 },
+    Ring { center: DVec2, r_in: f64, r_out: f64 },
+}
+
+impl CapShape {
+    /// Whether a pile's axis at `q` stands inside the plan.
+    fn holds(&self, q: DVec2) -> bool {
+        match *self {
+            CapShape::Rect { center, x, w, h } => {
+                let d = q - center;
+                d.dot(x).abs() < w / 2.0 && d.dot(x.perp()).abs() < h / 2.0
+            }
+            CapShape::Disk { center, radius } => q.distance(center) < radius,
+            CapShape::Ring { center, r_in, r_out } => (r_in..r_out).contains(&q.distance(center)),
+        }
+    }
+}
+
+fn cap_shape(body: &Body) -> Option<(CapShape, f64, f64)> {
+    if let [s] = body.solids.as_slice()
+        && !s.clipped
+        && let Some(r) = &s.revolution
+    {
+        let (StripPath::Arc { center, radius, sweep, .. }, section) = revolved_strip(r)? else { return None };
+        let half = section.width / 2.0;
+        let ring = sweep >= TAU && section.haunch.is_none() && section.is_valid() && radius - half > 1e-3;
+        let shape = CapShape::Ring { center, r_in: radius - half, r_out: radius + half };
+        return ring.then_some((shape, section.bottom, section.bottom + section.thickness));
+    }
+    let ex = body.sole_extrusion_with_voids().filter(|x| x.is_vertical())?;
+    let (z0, z1) = ex.z_range();
+    let shape = match ex.footprint_curves().as_deref() {
+        Some([SketchCurve::Circle { center, radius }]) => CapShape::Disk { center: *center, radius: *radius },
+        Some(curves) => {
+            let band = ring_band(curves).filter(RingBand::is_full)?;
+            CapShape::Ring { center: band.center, r_in: band.r_in, r_out: band.r_out }
+        }
+        None if ex.profile.holes.is_empty() => {
+            let ProfileKind::Rect { center, x, w, h } = rect_kind_of(&clean_polygon(ex.footprint())) else {
+                return None;
+            };
+            CapShape::Rect { center, x, w, h }
+        }
+        None => return None,
+    };
+    Some((shape, z0, z1))
+}
+
+/// Close a stirrup as this program writes it (see the export's `directrix`):
+/// from the middle of its first side round to that side's start, and back
+/// along it at most a diameter (`2 * radius`) towards where it started.
+fn close_stirrup(path: &mut [DVec3], radius: f64) {
+    if path.len() < 4 {
+        return;
+    }
+    let [first, .., corner, last] = path else { return };
+    let (side, back) = (*corner - *first, *last - *first);
+    let length = side.length();
+    if !(length > 1e-9 && radius.is_finite()) {
+        return;
+    }
+    let along = back.dot(side) / length;
+    let off = (back - side * (along / length)).length();
+    if along > 1e-9 && along <= 2.0 * radius + 1e-6 && off <= 1e-6 {
+        *last = *first;
+    }
 }
 
 /// Entities that are not physical objects: spatial structure, zones,
@@ -395,8 +789,10 @@ struct Importer<'a> {
     item_colors: HashMap<u32, [u8; 3]>,
     /// Surface style name of styled items.
     item_styles: HashMap<u32, String>,
-    /// Imported walls by IFC instance.
-    walls: HashMap<u32, ElementId>,
+    /// Imported walls by IFC instance (a ring is several arc walls).
+    walls: HashMap<u32, Vec<ElementId>>,
+    /// Pile caps of other programs, imported when every pile is in.
+    foreign_caps: Vec<u32>,
     /// Products with parts aggregated into them (e.g. roofs made of slabs).
     has_parts: HashMap<u32, usize>,
     /// Roofs imported with their framing restored (from [`crate::export::ROOFING_PSET`]):
@@ -405,6 +801,9 @@ struct Importer<'a> {
     /// Piles this program wrote under a cap: the pile, the cap's GlobalId and
     /// the pile's place in its layout (linked when the import ends).
     cap_piles: Vec<(ElementId, String, u32)>,
+    /// Bar sets this program wrote laid out in a host: the shaped bars they
+    /// came in as, the host's GlobalId and the set (restored when the import ends).
+    bar_sets: Vec<(ElementId, String, cc_core::Rebar)>,
     /// Pile cap types and the name of their piles' type (resolved when the import ends).
     cap_types: Vec<(ElementTypeId, String)>,
     /// Curtain walls imported as such: their plates and members come in with them.
@@ -531,9 +930,11 @@ impl<'a> Importer<'a> {
             item_colors: HashMap::new(),
             item_styles: HashMap::new(),
             walls: HashMap::new(),
+            foreign_caps: Vec::new(),
             has_parts: HashMap::new(),
             framed_roofs: Default::default(),
             cap_piles: Vec::new(),
+            bar_sets: Vec::new(),
             cap_types: Vec::new(),
             curtain_walls: Default::default(),
             products: Vec::new(),
@@ -580,7 +981,7 @@ impl<'a> Importer<'a> {
                 "IFCCOLUMN" | "IFCCOLUMNSTANDARDCASE" => self.import_column(id, e),
                 "IFCBEAM" | "IFCBEAMSTANDARDCASE" => self.import_beam(id, e),
                 "IFCREINFORCINGBAR" => self.import_bar(id, e),
-                "IFCFOOTING" => self.import_pile_cap(id, e),
+                "IFCFOOTING" => self.import_footing(id, e),
                 "IFCPILE" => self.import_pile(id, e),
                 // The framing of a roof whose type now draws it again.
                 "IFCMEMBER" if self.parent.get(&id).is_some_and(|r| self.framed_roofs.contains(r)) => continue,
@@ -678,6 +1079,289 @@ impl<'a> Importer<'a> {
         }
         let foundation = Foundation::new(FoundationShape::Pad { position, rotation_deg }, z1 - elevation);
         self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Foundation(foundation));
+        true
+    }
+
+    /// A footing (#370): a pile cap this program wrote; a pile cap of
+    /// another program is held until every pile is in (see
+    /// [`Self::import_foreign_caps`]); others become native strips or pads
+    /// when their shape is one (see [`Self::footing`]).
+    fn import_footing(&mut self, id: u32, e: &Entity) -> bool {
+        if self.import_pile_cap(id, e) {
+            return true;
+        }
+        if self.has_openings(id) {
+            return false;
+        }
+        let kind = e.arg(8).as_enum().unwrap_or("NOTDEFINED");
+        if kind == "PILE_CAP" {
+            self.foreign_caps.push(id);
+            return true;
+        }
+        self.footing(id, e, kind)
+    }
+
+    /// A footing of predefined type `kind` as native strips: a section (a
+    /// rectangle or an inverted T) revolved about a vertical axis, or a band
+    /// of a ring extruded upwards, of any type; a plan rectangle extruded
+    /// upwards or a section extruded level along it, of a `STRIP_FOOTING`.
+    /// Else a `PAD_FOOTING` that is a plan rectangle extruded upwards as a
+    /// native pad. `false` for anything else.
+    fn footing(&mut self, id: u32, e: &Entity, kind: &str) -> bool {
+        let (_, body) = self.product(e);
+        if let Some((path, section)) = strip_of(&body, kind == "STRIP_FOOTING") {
+            return self.add_strips(id, e, path, section);
+        }
+        kind == "PAD_FOOTING" && self.import_pad(id, e, &body)
+    }
+
+    /// Native strip footings along `path` (a ring as [`ring_arcs`] splits
+    /// it) of a strip type (found or made) of `section`.
+    fn add_strips(&mut self, id: u32, e: &Entity, path: StripPath, section: StripSection) -> bool {
+        let pieces = path.pieces();
+        let top = section.bottom + section.depth();
+        let usable = |(a, b, bulge): &(DVec2, DVec2, f64)| {
+            a.is_finite() && b.is_finite() && bulge.is_finite() && a.distance(*b) >= 0.01
+        };
+        if pieces.is_empty() || !pieces.iter().all(usable) || !top.is_finite() {
+            return false;
+        }
+        let (level, elevation) = self.level_for(id, top);
+        let name = self.type_name(id, e);
+        let material = self.main_material(id, e);
+        let uid = self.type_uid(id);
+        let StripSection { width, thickness, haunch, .. } = section;
+        let fallback = format!("{:.0} x {:.0} cm", width * 100.0, section.depth() * 100.0);
+        let same = move |d: &TypeData| {
+            matches!(d, TypeData::Foundation { kind: FoundationKind::Strip, width: w, thickness: t, haunch: h, .. }
+                if (w - width).abs() < TYPE_TOL && (t - thickness).abs() < TYPE_TOL && same_haunch(*h, haunch))
+        };
+        let type_id = self.find_or_add_type(Category::Foundation, name, fallback, uid, same, || TypeData::Foundation {
+            kind: FoundationKind::Strip,
+            width,
+            length: 1.0,
+            thickness,
+            material,
+            haunch,
+            pile_cap: None,
+        });
+        for (start, end, bulge) in pieces {
+            let strip = Foundation::new(FoundationShape::Strip { start, end, bulge }, top - elevation);
+            self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Foundation(strip));
+        }
+        true
+    }
+
+    /// A pad footing whose body is a plan rectangle extruded upwards: a
+    /// native pad at its center, of a pad type (found or made) of its size.
+    fn import_pad(&mut self, id: u32, e: &Entity, body: &Body) -> bool {
+        let Some(ex) = body.sole_extrusion().filter(|x| x.is_vertical()) else { return false };
+        let ProfileKind::Rect { center, x, w, h } = rect_kind_of(&clean_polygon(ex.footprint())) else { return false };
+        let (z0, z1) = ex.z_range();
+        let thickness = z1 - z0;
+        let size = |v: f64| v.is_finite() && (0.01..=MAX_FOOTING_SIZE).contains(&v);
+        if !(size(w) && size(h) && size(thickness) && center.is_finite() && z1.is_finite()) {
+            return false;
+        }
+        let name = self.type_name(id, e);
+        let pad = move |d: &TypeData, w: f64, h: f64| {
+            matches!(d, TypeData::Foundation { kind: FoundationKind::Pad, width, length, thickness: t, .. }
+                if (width - w).abs() < TYPE_TOL && (length - h).abs() < TYPE_TOL && (t - thickness).abs() < TYPE_TOL)
+        };
+        // A type of that name the other way round: the pad turned a quarter.
+        let named = |t: &&ElementType| name.as_deref().is_some_and(|n| t.name == n);
+        let turned = self.p.types_of(Category::Foundation).filter(named).any(|t| pad(&t.data, h, w))
+            && !self.p.types_of(Category::Foundation).filter(named).any(|t| pad(&t.data, w, h));
+        let (w, h, x) = if turned { (h, w, x.perp()) } else { (w, h, x) };
+        let (level, elevation) = self.level_for(id, z1);
+        let material = self.main_material(id, e);
+        let uid = self.type_uid(id);
+        let fallback = format!("{:.0} x {:.0} cm", w * 100.0, h * 100.0);
+        let type_id = self.find_or_add_type(
+            Category::Foundation,
+            name,
+            fallback,
+            uid,
+            move |d| pad(d, w, h),
+            || TypeData::Foundation {
+                kind: FoundationKind::Pad,
+                width: w,
+                length: h,
+                thickness,
+                material,
+                haunch: None,
+                pile_cap: None,
+            },
+        );
+        let rotation_deg = x.y.atan2(x.x).to_degrees();
+        let foundation = Foundation::new(FoundationShape::Pad { position: center, rotation_deg }, z1 - elevation);
+        self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Foundation(foundation));
+        true
+    }
+
+    /// The pile caps of other programs, now that every pile is in: native
+    /// caps when their piles fit a layout (see [`Self::foreign_cap`]), else
+    /// rings as native strips, else generic objects.
+    fn import_foreign_caps(&mut self) {
+        let f = self.f;
+        for id in std::mem::take(&mut self.foreign_caps) {
+            let Some(e) = f.get(id) else { continue };
+            let ok = self.foreign_cap(id, e) || self.footing(id, e, "PILE_CAP");
+            self.or_generic(id, e, ok);
+        }
+    }
+
+    /// A pile cap of another program (#370): a native cap when its plan is a
+    /// rectangle, a disk or a ring ([`cap_shape`]) and the free piles whose
+    /// heads are in it, all of one type, length and embedment, stand where a
+    /// layout of that outline puts them (within a millimeter): one, two, a
+    /// square of four or a line along a rectangle; three or more evenly
+    /// round a disk or on a ring's middle circle. The piles become the cap's.
+    fn foreign_cap(&mut self, id: u32, e: &Entity) -> bool {
+        use cc_core::pile::{MAX_EDGE_DISTANCE, MAX_PILES, MIN_EDGE_DISTANCE, PileCap, PileLayout};
+        let (_, body) = self.product(e);
+        let Some((shape, z0, z1)) = cap_shape(&body) else { return false };
+        let thickness = z1 - z0;
+        if !(thickness > 1e-3 && thickness <= cc_core::StripHaunch::MAX_HEIGHT && z1.is_finite()) {
+            return false;
+        }
+        let mut piles: Vec<(ElementId, DVec2)> = Vec::new();
+        let mut first: Option<(ElementTypeId, f64, f64)> = None;
+        for pile in self.p.elements.values() {
+            let ElementKind::Pile(p) = &pile.kind else { continue };
+            let head = self.p.level_elevation(pile.level) + p.cut_off;
+            if p.cap.is_some() || !shape.holds(p.position) || head < z0 - 1e-3 || head > z1 + 1e-3 {
+                continue;
+            }
+            // One type, length and head for all of them.
+            let (type_id, length, at) = *first.get_or_insert((pile.type_id, p.length(), head));
+            if pile.type_id != type_id || (p.length() - length).abs() > 1e-4 || (head - at).abs() > 1e-4 {
+                return false;
+            }
+            piles.push((pile.id, p.position));
+            if piles.len() > MAX_PILES as usize {
+                return false;
+            }
+        }
+        let Some((pile_type, pile_length, head)) = first else { return false };
+        let Some(TypeData::Pile { section, .. }) = self.p.element_type(pile_type).map(|t| &t.data) else {
+            return false;
+        };
+        let pile_size = section.size();
+        let base = PileCap {
+            layout: PileLayout::Single,
+            pile_type: Some(pile_type),
+            pile_length,
+            embedment: (head - z0).max(0.0),
+            ..PileCap::default()
+        };
+        let n = piles.len() as u32;
+        // Layouts of that outline for that many piles, with the cap's center and turn.
+        let mut candidates: Vec<(DVec2, f64, PileCap)> = Vec::new();
+        let first_angle = |center: DVec2| piles.first().map(|(_, q)| (*q - center).to_angle().to_degrees());
+        match shape {
+            CapShape::Rect { center, x, w, h } => {
+                for (u, along, across) in [(x, w, h), (x.perp(), h, w)] {
+                    let turn = u.to_angle().to_degrees();
+                    let cap = |layout, spacing: f64, edge_distance: f64| {
+                        (center, turn, PileCap { layout, spacing, edge_distance, ..base.clone() })
+                    };
+                    let square = (along - across).abs() < 1e-4;
+                    match n {
+                        1 if square => candidates.push(cap(PileLayout::Single, base.spacing, along / 2.0)),
+                        2 => candidates.push(cap(PileLayout::Pair, along - across, across / 2.0)),
+                        _ => {}
+                    }
+                    if n == 4 && square {
+                        // The square's side from the piles themselves.
+                        let side = piles.iter().map(|(_, q)| (*q - center).dot(u).abs() * 2.0).fold(0.0, f64::max);
+                        candidates.push(cap(PileLayout::Square, side, (along - side) / 2.0));
+                    }
+                    if n >= 3 {
+                        let spacing = (along - across) / f64::from(n - 1);
+                        candidates.push(cap(PileLayout::Line { count: n }, spacing, across / 2.0));
+                    }
+                }
+            }
+            CapShape::Disk { center, radius } => {
+                if let Some(turn) = first_angle(center) {
+                    let r = piles.first().map_or(0.0, |(_, q)| q.distance(center));
+                    let layout = PileLayout::Circle { count: n, radius: r, ring_width: None };
+                    candidates.push((center, turn, PileCap { layout, edge_distance: radius - r, ..base.clone() }));
+                }
+            }
+            CapShape::Ring { center, r_in, r_out } => {
+                if let Some(turn) = first_angle(center) {
+                    let width = r_out - r_in;
+                    let layout = PileLayout::Circle { count: n, radius: (r_in + r_out) / 2.0, ring_width: Some(width) };
+                    let edge_distance = (width / 2.0).clamp(MIN_EDGE_DISTANCE, MAX_EDGE_DISTANCE);
+                    candidates.push((center, turn, PileCap { layout, edge_distance, ..base.clone() }));
+                }
+            }
+        }
+        // To the hundredth of a millimeter: files round their points, and caps
+        // alike but for that noise share a type.
+        let round = |v: f64| (v * 1e5).round() / 1e5;
+        let rounded = |mut cap: PileCap| {
+            (cap.spacing, cap.edge_distance) = (round(cap.spacing), round(cap.edge_distance));
+            (cap.pile_length, cap.embedment) = (round(cap.pile_length), round(cap.embedment));
+            if let PileLayout::Circle { radius, ring_width, .. } = &mut cap.layout {
+                *radius = round(*radius);
+                *ring_width = ring_width.map(round);
+            }
+            cap
+        };
+        // The first layout that holds the piles where they stand: each pile by its place in it.
+        let fitted = candidates.into_iter().find_map(|(center, turn, cap)| {
+            let cap = rounded(cap);
+            if cap.problem(pile_size).is_some()
+                || cap.clone().repair() != 0
+                || !(center.is_finite() && turn.is_finite())
+            {
+                return None;
+            }
+            let rotate = DVec2::from_angle(turn.to_radians());
+            let mut left = piles.clone();
+            let mut order = Vec::new();
+            for local in cap.positions() {
+                let at = center + rotate.rotate(local);
+                let i = left.iter().position(|(_, q)| q.distance(at) < 1e-3)?;
+                order.push(left.swap_remove(i).0);
+            }
+            left.is_empty().then_some((center, turn, cap, order))
+        });
+        let Some((position, rotation_deg, cap, order)) = fitted else { return false };
+        let (level, elevation) = self.level_for(id, z1);
+        let name = self.type_name(id, e);
+        let material = self.main_material(id, e);
+        let uid = self.type_uid(id);
+        let (low, high) = cap.outline().bounds();
+        let size = high - low;
+        let wanted = cap.clone();
+        let same = move |d: &TypeData| {
+            matches!(d, TypeData::Foundation { kind: FoundationKind::PileCap, thickness: t, pile_cap: Some(c), .. }
+                if (t - thickness).abs() < TYPE_TOL && *c == wanted)
+        };
+        let fallback = format!("{} x {:.0} cm", cap.layout.count(), thickness * 100.0);
+        let type_id = self.find_or_add_type(Category::Foundation, name, fallback, uid, same, || TypeData::Foundation {
+            kind: FoundationKind::PileCap,
+            width: size.x,
+            length: size.y,
+            thickness,
+            material,
+            haunch: None,
+            pile_cap: Some(cap),
+        });
+        let foundation = Foundation::new(FoundationShape::Pad { position, rotation_deg }, z1 - elevation);
+        let element = self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Foundation(foundation));
+        // The piles are the cap's now, where its layout puts them.
+        let Some(cap_element) = self.p.element(element).cloned() else { return true };
+        for (index, type_id, want) in self.p.cap_piles(&cap_element) {
+            let Some(pile) = order.get(index as usize).and_then(|p| self.p.elements.get_mut(p)) else { continue };
+            pile.level = cap_element.level;
+            pile.type_id = type_id;
+            pile.kind = ElementKind::Pile(want);
+        }
         true
     }
 
@@ -867,10 +1551,18 @@ impl<'a> Importer<'a> {
 
     fn read_project_info(&mut self) {
         let Some(e) = self.f.get(self.project_id) else { return };
-        if let Some(name) = e.arg(2).as_str().filter(|s| !s.is_empty()) {
+        // `Name` is the short identifier (the project number) and `LongName`
+        // the full name (#369). With only one of them (or both the same), it
+        // is the name.
+        let text = |i: usize| e.arg(i).as_str().map(str::trim).filter(|s| !s.is_empty());
+        let (name, number) = match (text(2), text(5)) {
+            (Some(short), Some(long)) if short != long => (Some(long), short),
+            (short, long) => (short.or(long), ""),
+        };
+        if let Some(name) = name {
             self.p.info.name = name.to_string();
         }
-        self.p.info.number = e.arg(5).as_str().unwrap_or_default().to_string();
+        self.p.info.number = number.to_string();
         self.p.info.uid = e.arg(0).as_str().and_then(guid::decode).map(Uid).unwrap_or_default();
         self.p.info.client.clear();
         self.p.info.author.clear();
@@ -1258,6 +1950,8 @@ impl<'a> Importer<'a> {
 
     fn finish(&mut self) {
         self.link_piles();
+        self.import_foreign_caps();
+        let swapped = self.restore_bar_sets();
         self.import_design_options();
         self.import_phases();
         let levels: Vec<(LevelId, String)> = self.p.levels.iter().map(|l| (l.id, l.name.clone())).collect();
@@ -1280,6 +1974,7 @@ impl<'a> Importer<'a> {
             v.phase_filter = v.phase_filter.or(filter);
         }
         self.p.repair();
+        self.check_bar_sets(swapped);
     }
 
     // --- Lookups ---
@@ -1671,6 +2366,9 @@ impl<'a> Importer<'a> {
         if let Some((start, end, bulge, thickness)) = arc_wall(&body.axis_points, &footprint) {
             return self.add_wall(id, e, (z0, z1), thickness, Wall { start, end, bulge, ..Default::default() });
         }
+        if let Some(done) = self.ring_wall(id, e, &body) {
+            return done;
+        }
         // Wall direction: the axis representation, else the placement's X axis
         // (or Y when the footprint is longer that way).
         let mut dir = world.matrix3.x_axis.truncate().try_normalize().unwrap_or(DVec2::X);
@@ -1766,6 +2464,44 @@ impl<'a> Importer<'a> {
         Some(self.add_wall(id, e, (base, base + height), width, wall))
     }
 
+    /// A wall whose body is one vertical extrusion of a band of a ring (a
+    /// hollow circle, two concentric circles, or concentric arcs joined by
+    /// radial sides, #370): arc walls on the band's middle circle, as
+    /// [`ring_arcs`] splits it (a full ring is two half circles), as thick
+    /// as the band. `None` for other bodies, and for walls with openings
+    /// that no door or window fills (a native wall could not show them).
+    fn ring_wall(&mut self, id: u32, e: &Entity, body: &Body) -> Option<bool> {
+        // Its openings must be doors and windows, which cut native walls.
+        let f = self.f;
+        let filled = |opening: &u32| {
+            self.opening_of_filler.iter().any(|(filler, o)| {
+                o == opening
+                    && f.get(*filler).is_some_and(|x| x.name.starts_with("IFCDOOR") || x.name.starts_with("IFCWINDOW"))
+            })
+        };
+        if !self.openings_of.get(&id).into_iter().flatten().all(filled) {
+            return None;
+        }
+        let ex = body.sole_extrusion_with_voids().filter(|x| x.is_vertical())?;
+        let band = ring_band(&ex.footprint_curves()?)?;
+        let (z0, z1) = ex.z_range();
+        let (radius, thickness) = (band.radius(), band.width());
+        let fits = thickness >= 0.005
+            && radius <= MAX_RING_RADIUS
+            && radius * band.sweep >= 0.01
+            && band.center.is_finite()
+            && z1 - z0 > 1e-3
+            && (z1 - z0).is_finite();
+        if !fits {
+            return None;
+        }
+        let mut done = false;
+        for (start, end, bulge) in ring_arcs(band.center, radius, band.start, band.sweep) {
+            done |= self.add_wall(id, e, (z0, z1), thickness, Wall { start, end, bulge, ..Default::default() });
+        }
+        Some(done)
+    }
+
     /// The layers' extents a wall's type (or the wall) carries in
     /// [`crate::export::WALL_LAYERS_PSET`].
     fn layer_extents(&self, id: u32) -> Option<Vec<cc_core::layer_extent::Extent>> {
@@ -1805,11 +2541,20 @@ impl<'a> Importer<'a> {
         );
         let wall =
             Wall { base_offset: z0 - elevation, height: z1 - z0, structural: structural.unwrap_or(false), ..wall };
-        self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Wall(wall));
-        if let Some(element) = self.p.elements.keys().next_back().copied() {
-            self.walls.insert(id, element);
-        }
+        let element = self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Wall(wall));
+        self.walls.entry(id).or_default().push(element);
         true
+    }
+
+    /// Of the walls an IFC wall became, the one whose span along it holds
+    /// `at`, else the nearest by that span.
+    fn wall_piece(&self, pieces: &[ElementId], at: DVec2) -> Option<ElementId> {
+        let outside = |id: &ElementId| {
+            let wall = self.p.element(*id).and_then(Element::as_wall)?;
+            let u = wall.project(at).0;
+            Some((-u).max(u - wall.length()).max(0.0))
+        };
+        pieces.iter().filter_map(|id| Some((*id, outside(id)?))).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(id, _)| id)
     }
 
     /// A curtain wall: rebuilt from [`crate::export::CURTAIN_PSET`] when the
@@ -2035,7 +2780,8 @@ impl<'a> Importer<'a> {
             (lo + hi) * 0.5
         };
         // Host: the voided wall, else the nearest wall within reach.
-        let host = host_ifc.and_then(|h| self.walls.get(&h)).copied().or_else(|| {
+        let pieces = host_ifc.and_then(|h| self.walls.get(&h));
+        let host = pieces.and_then(|w| self.wall_piece(w, center.truncate())).or_else(|| {
             self.p
                 .walls()
                 .map(|(w, wall)| {
@@ -2140,6 +2886,16 @@ impl<'a> Importer<'a> {
         (footprint.len() >= 3 && polygon::area(&footprint) > 1e-4).then_some((footprint, z0, z1, thickness))
     }
 
+    /// The outline of a body that is one vertical extrusion of a profile
+    /// drawn with arcs or circles and no voids, and the sketch of those
+    /// curves, which draws it (#368).
+    fn curved_outline(body: &Body) -> Option<(Vec<DVec2>, Sketch)> {
+        let ex = body.sole_extrusion().filter(|e| e.is_vertical())?;
+        let sketch = Sketch { curves: ex.footprint_curves()? };
+        let outline = sketch.outline().ok()?;
+        (outline.len() >= 3 && polygon::area(&outline) > 1e-4).then_some((outline, sketch))
+    }
+
     /// Openings voiding a product that a native element (other than a wall,
     /// whose doors and windows cut it) could not show.
     fn has_openings(&self, id: u32) -> bool {
@@ -2166,6 +2922,8 @@ impl<'a> Importer<'a> {
             return None;
         }
         let mut openings: Vec<Vec<DVec2>> = ex.void_footprints().into_iter().map(clean_polygon).collect();
+        // The curves of each opening after the profile's voids, when it is drawn with them.
+        let mut opening_curves: Vec<Option<Vec<SketchCurve>>> = Vec::new();
         // An opening passes through the whole slab (a recess would leave part of it).
         let through = |(c0, c1): (f64, f64)| c0 <= z0 + SLAB_TOL && c1 >= z1 - SLAB_TOL;
         for cut in cuts {
@@ -2173,6 +2931,7 @@ impl<'a> Importer<'a> {
                 return None;
             }
             openings.push(clean_polygon(cut.footprint()));
+            opening_curves.push(cut.footprint_curves());
         }
         let f = self.f;
         for o in self.openings_of.get(&id).into_iter().flatten() {
@@ -2185,14 +2944,25 @@ impl<'a> Importer<'a> {
             let footprint = clean_polygon(cut.footprint());
             if !openings.iter().any(|o| same_outline(o, &footprint)) {
                 openings.push(footprint);
+                opening_curves.push(cut.footprint_curves());
             }
         }
-        // The profile's curves, with the other openings as lines: the outline
+        // The profile's curves (or its outline and voids as lines, when only
+        // an opening is curved), with the other openings by their own curves
+        // (a circular opening stays a circle, #370) or as lines: the outline
         // and openings are then the sketch's (arcs split as natives split them).
         let voids = ex.profile.holes.len();
-        let sketch = ex.footprint_curves().and_then(|mut curves| {
-            for o in openings.iter().skip(voids) {
-                curves.extend(Sketch::from_polygons(o, &[]).curves);
+        let curved_opening = opening_curves.iter().flatten().any(|c| c.iter().any(SketchCurve::is_curved));
+        let base = ex.footprint_curves().or_else(|| {
+            let (outline, holes) = (&outline, openings.get(..voids).unwrap_or_default());
+            curved_opening.then(|| Sketch::from_polygons(outline, holes).curves)
+        });
+        let sketch = base.and_then(|mut curves| {
+            for (o, own) in openings.iter().skip(voids).zip(&opening_curves) {
+                match own {
+                    Some(own) => curves.extend(own.iter().cloned()),
+                    None => curves.extend(Sketch::from_polygons(o, &[]).curves),
+                }
             }
             let sketch = Sketch { curves };
             let p = sketch.profile().ok()?;
@@ -2315,7 +3085,11 @@ impl<'a> Importer<'a> {
             |d| matches!(d, TypeData::Ceiling { thickness: t, .. } if (t - thickness).abs() < TYPE_TOL),
             || TypeData::Ceiling { thickness, material },
         );
-        let ceiling = Ceiling { boundary, height_offset: z0 - elevation, cuts: Vec::new(), sketch: None };
+        let (boundary, sketch) = match Self::curved_outline(&body) {
+            Some((outline, sketch)) => (outline, Some(sketch)),
+            None => (boundary, None),
+        };
+        let ceiling = Ceiling { boundary, height_offset: z0 - elevation, cuts: Vec::new(), sketch };
         self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Ceiling(ceiling));
         true
     }
@@ -2355,7 +3129,19 @@ impl<'a> Importer<'a> {
             return self.add_roof(id, e, footprint, z0, thickness, shape);
         }
         if let Some((footprint, z0, _, thickness)) = Self::sketch(&body, false) {
-            return self.add_roof(id, e, footprint, z0, thickness, RoofShape::Flat);
+            // An outline of arcs and circles keeps them as the roof's sketch (#368).
+            let Some((outline, sketch)) = Self::curved_outline(&body) else {
+                return self.add_roof(id, e, footprint, z0, thickness, RoofShape::Flat);
+            };
+            if !self.add_roof(id, e, outline, z0, thickness, RoofShape::Flat) {
+                return false;
+            }
+            if let Some(&(roof, _)) = self.products.last()
+                && let Some(ElementKind::Roof(r)) = self.p.elements.get_mut(&roof).map(|e| &mut e.kind)
+            {
+                r.sketch = Some(sketch);
+            }
+            return true;
         }
         // Roofs as written by this program: one closed body whose vertical
         // faces (eaves and gables) outline the roof and its openings, and
@@ -2982,7 +3768,6 @@ impl<'a> Importer<'a> {
             return false;
         }
         let (level, elevation) = self.level_for(id, z0);
-        let bars = lines.into_iter().map(|l| l.into_iter().map(|p| p - DVec3::Z * elevation).collect()).collect();
         // The partition and the mark given by hand, as this program writes them.
         let own = |name: &str| {
             let is_set = |n: &str| n == crate::export::REBAR_PSET;
@@ -2990,6 +3775,24 @@ impl<'a> Importer<'a> {
             text.filter(|t| !t.is_empty() && t.chars().count() <= cc_core::bar_marks::MAX_MARK_TEXT)
         };
         let (partition, bar_mark, own_grade) = (own("Partition"), own("BarMark"), own("Grade"));
+        // A set laid out in a host: the host's GlobalId and the layout (#368).
+        let laid_out = {
+            let is_set = |n: &str| n == crate::export::REBAR_PSET;
+            let first = |name: &str| self.pset_texts(id, &is_set, name).first().map(|t| t.to_string());
+            first("Host").zip(first("Layout"))
+        };
+        // Whether this program wrote the set (its tag is then the mark given to it).
+        let ours = partition.is_some()
+            || bar_mark.is_some()
+            || own_grade.is_some()
+            || own("Mark").is_some()
+            || laid_out.is_some();
+        // This program's stirrups stop a diameter short of where they start,
+        // so their disks do not meet: closed again, they have their length.
+        if ours {
+            lines.iter_mut().for_each(|l| close_stirrup(l, radius));
+        }
+        let bars = lines.into_iter().map(|l| l.into_iter().map(|p| p - DVec3::Z * elevation).collect()).collect();
         // Another program's sets say their part of the structure in a property of that name.
         let partition = partition.or_else(|| self.foreign_partition(id)).unwrap_or_default();
         let rebar = ShapedRebar { bars, properties: self.property_sets(id), partition, bar_mark };
@@ -3021,31 +3824,146 @@ impl<'a> Importer<'a> {
         let size = format!("Ø {:.1} mm", diameter * 1000.0);
         // The type's steel grade: this program's own, else the bar's.
         let fits = |g: &String| g.chars().count() <= cc_core::bar_marks::MAX_MARK_TEXT;
+        // This program's grade is its type's: only a type of that grade keeps it.
+        let strict_grade = own_grade.is_some();
         let type_grade = own_grade.or_else(|| grade.clone().filter(fits)).unwrap_or_default();
         let wanted_grade = type_grade.clone();
         let fallback = grade.map_or_else(|| size.clone(), |g| format!("{size} {g}"));
         let name = self.type_entity(id).and_then(|t| t.arg(2).as_str()).map(clean_name).filter(|s| !s.is_empty());
         let uid = self.type_uid(id);
-        let type_id = self.find_or_add_type(
-            Category::Rebar,
-            name,
-            fallback,
-            uid,
-            |t| match t {
-                // A bar of a grade takes a type of that grade.
-                TypeData::Rebar { diameter: d, material: m, grade: g, .. } => {
-                    (d - diameter).abs() <= 1e-5
-                        && material.as_ref().is_none_or(|want| m == want)
-                        && (wanted_grade.is_empty() || *g == wanted_grade)
+        // A bar of a grade takes a type of that grade.
+        let same = |t: &TypeData| match t {
+            TypeData::Rebar { diameter: d, material: m, grade: g, .. } => {
+                (d - diameter).abs() <= 1e-5
+                    && material.as_ref().is_none_or(|want| m == want)
+                    && (wanted_grade.is_empty() || *g == wanted_grade)
+            }
+            _ => false,
+        };
+        // The type the file's type object names (a round trip), else a bar
+        // type of the project of the same nominal size and grade (#369), else
+        // a new one.
+        let named = name
+            .as_deref()
+            .and_then(|n| self.p.types_of(Category::Rebar).find(|t| t.name == n && same(&t.data)))
+            .map(|t| t.id);
+        let type_id = match named.or_else(|| self.nominal_bar_type(diameter, &wanted_grade, strict_grade)) {
+            Some(type_id) => type_id,
+            None => self.find_or_add_type(Category::Rebar, name, fallback, uid, same, || TypeData::Rebar {
+                diameter,
+                material: fallback_material,
+                grade: type_grade,
+                mass_per_meter: None,
+            }),
+        };
+        // The bar mark: the tag, else the name. A purely numeric tag of
+        // another program is its element id, not a mark (#369).
+        let tag = Self::tag(e);
+        let foreign_id = !ours && !tag.trim().is_empty() && tag.trim().chars().all(|c| c.is_ascii_digit());
+        let mark = if foreign_id {
+            None
+        } else {
+            Some(tag).filter(|t| !t.is_empty()).or_else(|| e.arg(2).as_str().map(clean_name))
+        };
+        let element =
+            self.add_element(id, e, level, type_id, mark.unwrap_or_default(), ElementKind::ShapedRebar(rebar));
+        // Laid out again in its host when the import ends, if the host comes in.
+        if let Some((host, layout)) = laid_out
+            && let Some(layout) = cc_core::curtain::from_text::<cc_core::Rebar>(&layout)
+        {
+            self.bar_sets.push((element, host, layout));
+        }
+        true
+    }
+
+    /// Sets this program wrote laid out in a host ([`crate::export::REBAR_PSET`]'s
+    /// `Host` and `Layout`) become native sets of the host again when it was
+    /// imported as a native element that takes the layout (#368), so their
+    /// bars have their true lengths and go with the host. The swapped sets
+    /// and what they were, for [`Self::check_bar_sets`].
+    fn restore_bar_sets(&mut self) -> Vec<(ElementId, ElementKind, LevelId)> {
+        let pending = std::mem::take(&mut self.bar_sets);
+        if pending.is_empty() {
+            return Vec::new();
+        }
+        let by_uid: HashMap<Uid, ElementId> =
+            self.p.elements.values().filter(|e| e.uid != Uid::default()).map(|e| (e.uid, e.id)).collect();
+        let mut swapped = Vec::new();
+        for (id, host, mut rebar) in pending {
+            let Some(host) = guid::decode(host.trim()).map(Uid).and_then(|u| by_uid.get(&u).copied()) else {
+                continue;
+            };
+            let Some(ElementKind::ShapedRebar(shaped)) = self.p.element(id).map(|e| &e.kind) else { continue };
+            rebar.host = host;
+            rebar.partition = shaped.partition.clone();
+            rebar.bar_mark = shaped.bar_mark.clone();
+            let Some(host_level) = self.p.element(host).map(|h| h.level) else { continue };
+            if !(rebar.is_valid() && self.p.rebar_host_fits(&rebar)) {
+                continue;
+            }
+            if let Some(e) = self.p.elements.get_mut(&id) {
+                let kind = std::mem::replace(&mut e.kind, ElementKind::Rebar(rebar));
+                swapped.push((id, kind, std::mem::replace(&mut e.level, host_level)));
+            }
+        }
+        swapped
+    }
+
+    /// Sets made native again whose layout no longer draws the bars of the
+    /// file (as many, within a diameter and a centimeter of their bounds)
+    /// go back to the shaped bars they came in as: the host changed.
+    fn check_bar_sets(&mut self, swapped: Vec<(ElementId, ElementKind, LevelId)>) {
+        if swapped.is_empty() {
+            return;
+        }
+        let geom = cc_geom::ModelGeometry::build(&self.p);
+        for (id, shaped, level) in swapped {
+            let elevation = self.p.level_elevation(level);
+            let fits = match (&shaped, geom.rebar.get(&id)) {
+                (ElementKind::ShapedRebar(s), Some(g)) if s.bars.len() == g.bars.len() => {
+                    let bounds = |pts: &mut dyn Iterator<Item = DVec3>| {
+                        pts.fold((DVec3::INFINITY, DVec3::NEG_INFINITY), |(lo, hi), p| (lo.min(p), hi.max(p)))
+                    };
+                    let file = bounds(&mut s.bars.iter().flatten().map(|p| *p + DVec3::Z * elevation));
+                    let laid = bounds(&mut g.bars.iter().flat_map(|b| b.points.iter().copied()));
+                    let tol = g.diameter + 0.01;
+                    file.0.distance(laid.0) <= tol && file.1.distance(laid.1) <= tol
                 }
                 _ => false,
-            },
-            || TypeData::Rebar { diameter, material: fallback_material, grade: type_grade, mass_per_meter: None },
-        );
-        // The bar mark: the tag, else the name.
-        let mark = Some(Self::tag(e)).filter(|t| !t.is_empty()).or_else(|| e.arg(2).as_str().map(clean_name));
-        self.add_element(id, e, level, type_id, mark.unwrap_or_default(), ElementKind::ShapedRebar(rebar));
-        true
+            };
+            if !fits && let Some(e) = self.p.elements.get_mut(&id) {
+                e.kind = shaped;
+                e.level = level;
+            }
+        }
+    }
+
+    /// The project's bar type of nominal `diameter` (within 0.05 mm) whose
+    /// grade is `grade` or, unless `strict`, that has none (any type when
+    /// `grade` is empty): one of that very grade first, then the closest
+    /// size, then the first.
+    fn nominal_bar_type(&self, diameter: f64, grade: &str, strict: bool) -> Option<ElementTypeId> {
+        const TOLERANCE: f64 = 0.05e-3;
+        let key =
+            |g: &str| -> String { g.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_uppercase).collect() };
+        let wanted = key(grade);
+        self.p
+            .types_of(Category::Rebar)
+            .filter_map(|t| match &t.data {
+                TypeData::Rebar { diameter: d, grade: g, .. } if (d - diameter).abs() <= TOLERANCE => {
+                    let g = key(g);
+                    (wanted.is_empty() || (g.is_empty() && !strict) || g == wanted).then_some((
+                        t,
+                        g == wanted,
+                        (d - diameter).abs(),
+                    ))
+                }
+                _ => None,
+            })
+            .min_by(|(a, a_same, a_d), (b, b_same, b_d)| {
+                b_same.cmp(a_same).then(a_d.total_cmp(b_d)).then(a.id.0.cmp(&b.id.0))
+            })
+            .map(|(t, ..)| t.id)
     }
 
     fn import_generic(&mut self, id: u32, e: &Entity) -> bool {

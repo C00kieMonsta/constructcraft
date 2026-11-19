@@ -1287,6 +1287,25 @@ impl Project {
         })
     }
 
+    /// Whether set `r` has a host that takes its layout: wall bars in walls
+    /// (not spline ones), slab bars in floors and foundation slabs, strip bars
+    /// in strip footings, the other layouts in beams and columns.
+    pub fn rebar_host_fits(&self, r: &crate::Rebar) -> bool {
+        self.element(r.host).is_some_and(|h| match &h.kind {
+            ElementKind::Wall(w) => r.layout.in_wall() && w.spline.is_none(),
+            ElementKind::Floor(_) => r.layout.in_slab(),
+            ElementKind::Foundation(f) => match f.shape {
+                crate::FoundationShape::Slab { .. } => r.layout.in_slab(),
+                crate::FoundationShape::Strip { .. } => r.layout.fits_strip(),
+                crate::FoundationShape::Pad { .. } => false,
+            },
+            ElementKind::Beam(_) | ElementKind::Column(_) => {
+                !r.layout.in_wall() && !r.layout.in_slab() && !r.layout.in_strip()
+            }
+            _ => false,
+        })
+    }
+
     /// The bar tags of reinforcement set `set`.
     pub fn bar_tags_of(&self, set: ElementId) -> impl Iterator<Item = (&Element, &crate::bar_tag::BarTag)> {
         self.elements.values().filter_map(move |e| match &e.kind {
