@@ -334,6 +334,26 @@ fn ring_sector(curves: &[cc_core::sketch::SketchCurve]) -> Option<RingSector> {
     Some(RingSector { center, r_in, r_out, sweep, axis })
 }
 
+/// Close a stirrup as this program writes it (see the export's `directrix`):
+/// from the middle of its first side round to that side's start, and back
+/// along it at most a diameter (`2 * radius`) towards where it started.
+fn close_stirrup(path: &mut [DVec3], radius: f64) {
+    if path.len() < 4 {
+        return;
+    }
+    let [first, .., corner, last] = path else { return };
+    let (side, back) = (*corner - *first, *last - *first);
+    let length = side.length();
+    if !(length > 1e-9 && radius.is_finite()) {
+        return;
+    }
+    let along = back.dot(side) / length;
+    let off = (back - side * (along / length)).length();
+    if along > 1e-9 && along <= 2.0 * radius + 1e-6 && off <= 1e-6 {
+        *last = *first;
+    }
+}
+
 /// Entities that are not physical objects: spatial structure, zones,
 /// features cut from their hosts, ports, annotations and analysis models.
 fn is_non_physical(name: &str) -> bool {
@@ -405,6 +425,9 @@ struct Importer<'a> {
     /// Piles this program wrote under a cap: the pile, the cap's GlobalId and
     /// the pile's place in its layout (linked when the import ends).
     cap_piles: Vec<(ElementId, String, u32)>,
+    /// Bar sets this program wrote laid out in a host: the shaped bars they
+    /// came in as, the host's GlobalId and the set (restored when the import ends).
+    bar_sets: Vec<(ElementId, String, cc_core::Rebar)>,
     /// Pile cap types and the name of their piles' type (resolved when the import ends).
     cap_types: Vec<(ElementTypeId, String)>,
     /// Curtain walls imported as such: their plates and members come in with them.
@@ -534,6 +557,7 @@ impl<'a> Importer<'a> {
             has_parts: HashMap::new(),
             framed_roofs: Default::default(),
             cap_piles: Vec::new(),
+            bar_sets: Vec::new(),
             cap_types: Vec::new(),
             curtain_walls: Default::default(),
             products: Vec::new(),
@@ -867,10 +891,18 @@ impl<'a> Importer<'a> {
 
     fn read_project_info(&mut self) {
         let Some(e) = self.f.get(self.project_id) else { return };
-        if let Some(name) = e.arg(2).as_str().filter(|s| !s.is_empty()) {
+        // `Name` is the short identifier (the project number) and `LongName`
+        // the full name (#369). With only one of them (or both the same), it
+        // is the name.
+        let text = |i: usize| e.arg(i).as_str().map(str::trim).filter(|s| !s.is_empty());
+        let (name, number) = match (text(2), text(5)) {
+            (Some(short), Some(long)) if short != long => (Some(long), short),
+            (short, long) => (short.or(long), ""),
+        };
+        if let Some(name) = name {
             self.p.info.name = name.to_string();
         }
-        self.p.info.number = e.arg(5).as_str().unwrap_or_default().to_string();
+        self.p.info.number = number.to_string();
         self.p.info.uid = e.arg(0).as_str().and_then(guid::decode).map(Uid).unwrap_or_default();
         self.p.info.client.clear();
         self.p.info.author.clear();
@@ -1258,6 +1290,7 @@ impl<'a> Importer<'a> {
 
     fn finish(&mut self) {
         self.link_piles();
+        let swapped = self.restore_bar_sets();
         self.import_design_options();
         self.import_phases();
         let levels: Vec<(LevelId, String)> = self.p.levels.iter().map(|l| (l.id, l.name.clone())).collect();
@@ -1280,6 +1313,7 @@ impl<'a> Importer<'a> {
             v.phase_filter = v.phase_filter.or(filter);
         }
         self.p.repair();
+        self.check_bar_sets(swapped);
     }
 
     // --- Lookups ---
@@ -2140,6 +2174,16 @@ impl<'a> Importer<'a> {
         (footprint.len() >= 3 && polygon::area(&footprint) > 1e-4).then_some((footprint, z0, z1, thickness))
     }
 
+    /// The outline of a body that is one vertical extrusion of a profile
+    /// drawn with arcs or circles and no voids, and the sketch of those
+    /// curves, which draws it (#368).
+    fn curved_outline(body: &Body) -> Option<(Vec<DVec2>, Sketch)> {
+        let ex = body.sole_extrusion().filter(|e| e.is_vertical())?;
+        let sketch = Sketch { curves: ex.footprint_curves()? };
+        let outline = sketch.outline().ok()?;
+        (outline.len() >= 3 && polygon::area(&outline) > 1e-4).then_some((outline, sketch))
+    }
+
     /// Openings voiding a product that a native element (other than a wall,
     /// whose doors and windows cut it) could not show.
     fn has_openings(&self, id: u32) -> bool {
@@ -2315,7 +2359,11 @@ impl<'a> Importer<'a> {
             |d| matches!(d, TypeData::Ceiling { thickness: t, .. } if (t - thickness).abs() < TYPE_TOL),
             || TypeData::Ceiling { thickness, material },
         );
-        let ceiling = Ceiling { boundary, height_offset: z0 - elevation, cuts: Vec::new(), sketch: None };
+        let (boundary, sketch) = match Self::curved_outline(&body) {
+            Some((outline, sketch)) => (outline, Some(sketch)),
+            None => (boundary, None),
+        };
+        let ceiling = Ceiling { boundary, height_offset: z0 - elevation, cuts: Vec::new(), sketch };
         self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Ceiling(ceiling));
         true
     }
@@ -2355,7 +2403,19 @@ impl<'a> Importer<'a> {
             return self.add_roof(id, e, footprint, z0, thickness, shape);
         }
         if let Some((footprint, z0, _, thickness)) = Self::sketch(&body, false) {
-            return self.add_roof(id, e, footprint, z0, thickness, RoofShape::Flat);
+            // An outline of arcs and circles keeps them as the roof's sketch (#368).
+            let Some((outline, sketch)) = Self::curved_outline(&body) else {
+                return self.add_roof(id, e, footprint, z0, thickness, RoofShape::Flat);
+            };
+            if !self.add_roof(id, e, outline, z0, thickness, RoofShape::Flat) {
+                return false;
+            }
+            if let Some(&(roof, _)) = self.products.last()
+                && let Some(ElementKind::Roof(r)) = self.p.elements.get_mut(&roof).map(|e| &mut e.kind)
+            {
+                r.sketch = Some(sketch);
+            }
+            return true;
         }
         // Roofs as written by this program: one closed body whose vertical
         // faces (eaves and gables) outline the roof and its openings, and
@@ -2982,7 +3042,6 @@ impl<'a> Importer<'a> {
             return false;
         }
         let (level, elevation) = self.level_for(id, z0);
-        let bars = lines.into_iter().map(|l| l.into_iter().map(|p| p - DVec3::Z * elevation).collect()).collect();
         // The partition and the mark given by hand, as this program writes them.
         let own = |name: &str| {
             let is_set = |n: &str| n == crate::export::REBAR_PSET;
@@ -2990,6 +3049,24 @@ impl<'a> Importer<'a> {
             text.filter(|t| !t.is_empty() && t.chars().count() <= cc_core::bar_marks::MAX_MARK_TEXT)
         };
         let (partition, bar_mark, own_grade) = (own("Partition"), own("BarMark"), own("Grade"));
+        // A set laid out in a host: the host's GlobalId and the layout (#368).
+        let laid_out = {
+            let is_set = |n: &str| n == crate::export::REBAR_PSET;
+            let first = |name: &str| self.pset_texts(id, &is_set, name).first().map(|t| t.to_string());
+            first("Host").zip(first("Layout"))
+        };
+        // Whether this program wrote the set (its tag is then the mark given to it).
+        let ours = partition.is_some()
+            || bar_mark.is_some()
+            || own_grade.is_some()
+            || own("Mark").is_some()
+            || laid_out.is_some();
+        // This program's stirrups stop a diameter short of where they start,
+        // so their disks do not meet: closed again, they have their length.
+        if ours {
+            lines.iter_mut().for_each(|l| close_stirrup(l, radius));
+        }
+        let bars = lines.into_iter().map(|l| l.into_iter().map(|p| p - DVec3::Z * elevation).collect()).collect();
         // Another program's sets say their part of the structure in a property of that name.
         let partition = partition.or_else(|| self.foreign_partition(id)).unwrap_or_default();
         let rebar = ShapedRebar { bars, properties: self.property_sets(id), partition, bar_mark };
@@ -3021,31 +3098,146 @@ impl<'a> Importer<'a> {
         let size = format!("Ø {:.1} mm", diameter * 1000.0);
         // The type's steel grade: this program's own, else the bar's.
         let fits = |g: &String| g.chars().count() <= cc_core::bar_marks::MAX_MARK_TEXT;
+        // This program's grade is its type's: only a type of that grade keeps it.
+        let strict_grade = own_grade.is_some();
         let type_grade = own_grade.or_else(|| grade.clone().filter(fits)).unwrap_or_default();
         let wanted_grade = type_grade.clone();
         let fallback = grade.map_or_else(|| size.clone(), |g| format!("{size} {g}"));
         let name = self.type_entity(id).and_then(|t| t.arg(2).as_str()).map(clean_name).filter(|s| !s.is_empty());
         let uid = self.type_uid(id);
-        let type_id = self.find_or_add_type(
-            Category::Rebar,
-            name,
-            fallback,
-            uid,
-            |t| match t {
-                // A bar of a grade takes a type of that grade.
-                TypeData::Rebar { diameter: d, material: m, grade: g, .. } => {
-                    (d - diameter).abs() <= 1e-5
-                        && material.as_ref().is_none_or(|want| m == want)
-                        && (wanted_grade.is_empty() || *g == wanted_grade)
+        // A bar of a grade takes a type of that grade.
+        let same = |t: &TypeData| match t {
+            TypeData::Rebar { diameter: d, material: m, grade: g, .. } => {
+                (d - diameter).abs() <= 1e-5
+                    && material.as_ref().is_none_or(|want| m == want)
+                    && (wanted_grade.is_empty() || *g == wanted_grade)
+            }
+            _ => false,
+        };
+        // The type the file's type object names (a round trip), else a bar
+        // type of the project of the same nominal size and grade (#369), else
+        // a new one.
+        let named = name
+            .as_deref()
+            .and_then(|n| self.p.types_of(Category::Rebar).find(|t| t.name == n && same(&t.data)))
+            .map(|t| t.id);
+        let type_id = match named.or_else(|| self.nominal_bar_type(diameter, &wanted_grade, strict_grade)) {
+            Some(type_id) => type_id,
+            None => self.find_or_add_type(Category::Rebar, name, fallback, uid, same, || TypeData::Rebar {
+                diameter,
+                material: fallback_material,
+                grade: type_grade,
+                mass_per_meter: None,
+            }),
+        };
+        // The bar mark: the tag, else the name. A purely numeric tag of
+        // another program is its element id, not a mark (#369).
+        let tag = Self::tag(e);
+        let foreign_id = !ours && !tag.trim().is_empty() && tag.trim().chars().all(|c| c.is_ascii_digit());
+        let mark = if foreign_id {
+            None
+        } else {
+            Some(tag).filter(|t| !t.is_empty()).or_else(|| e.arg(2).as_str().map(clean_name))
+        };
+        let element =
+            self.add_element(id, e, level, type_id, mark.unwrap_or_default(), ElementKind::ShapedRebar(rebar));
+        // Laid out again in its host when the import ends, if the host comes in.
+        if let Some((host, layout)) = laid_out
+            && let Some(layout) = cc_core::curtain::from_text::<cc_core::Rebar>(&layout)
+        {
+            self.bar_sets.push((element, host, layout));
+        }
+        true
+    }
+
+    /// Sets this program wrote laid out in a host ([`crate::export::REBAR_PSET`]'s
+    /// `Host` and `Layout`) become native sets of the host again when it was
+    /// imported as a native element that takes the layout (#368), so their
+    /// bars have their true lengths and go with the host. The swapped sets
+    /// and what they were, for [`Self::check_bar_sets`].
+    fn restore_bar_sets(&mut self) -> Vec<(ElementId, ElementKind, LevelId)> {
+        let pending = std::mem::take(&mut self.bar_sets);
+        if pending.is_empty() {
+            return Vec::new();
+        }
+        let by_uid: HashMap<Uid, ElementId> =
+            self.p.elements.values().filter(|e| e.uid != Uid::default()).map(|e| (e.uid, e.id)).collect();
+        let mut swapped = Vec::new();
+        for (id, host, mut rebar) in pending {
+            let Some(host) = guid::decode(host.trim()).map(Uid).and_then(|u| by_uid.get(&u).copied()) else {
+                continue;
+            };
+            let Some(ElementKind::ShapedRebar(shaped)) = self.p.element(id).map(|e| &e.kind) else { continue };
+            rebar.host = host;
+            rebar.partition = shaped.partition.clone();
+            rebar.bar_mark = shaped.bar_mark.clone();
+            let Some(host_level) = self.p.element(host).map(|h| h.level) else { continue };
+            if !(rebar.is_valid() && self.p.rebar_host_fits(&rebar)) {
+                continue;
+            }
+            if let Some(e) = self.p.elements.get_mut(&id) {
+                let kind = std::mem::replace(&mut e.kind, ElementKind::Rebar(rebar));
+                swapped.push((id, kind, std::mem::replace(&mut e.level, host_level)));
+            }
+        }
+        swapped
+    }
+
+    /// Sets made native again whose layout no longer draws the bars of the
+    /// file (as many, within a diameter and a centimeter of their bounds)
+    /// go back to the shaped bars they came in as: the host changed.
+    fn check_bar_sets(&mut self, swapped: Vec<(ElementId, ElementKind, LevelId)>) {
+        if swapped.is_empty() {
+            return;
+        }
+        let geom = cc_geom::ModelGeometry::build(&self.p);
+        for (id, shaped, level) in swapped {
+            let elevation = self.p.level_elevation(level);
+            let fits = match (&shaped, geom.rebar.get(&id)) {
+                (ElementKind::ShapedRebar(s), Some(g)) if s.bars.len() == g.bars.len() => {
+                    let bounds = |pts: &mut dyn Iterator<Item = DVec3>| {
+                        pts.fold((DVec3::INFINITY, DVec3::NEG_INFINITY), |(lo, hi), p| (lo.min(p), hi.max(p)))
+                    };
+                    let file = bounds(&mut s.bars.iter().flatten().map(|p| *p + DVec3::Z * elevation));
+                    let laid = bounds(&mut g.bars.iter().flat_map(|b| b.points.iter().copied()));
+                    let tol = g.diameter + 0.01;
+                    file.0.distance(laid.0) <= tol && file.1.distance(laid.1) <= tol
                 }
                 _ => false,
-            },
-            || TypeData::Rebar { diameter, material: fallback_material, grade: type_grade, mass_per_meter: None },
-        );
-        // The bar mark: the tag, else the name.
-        let mark = Some(Self::tag(e)).filter(|t| !t.is_empty()).or_else(|| e.arg(2).as_str().map(clean_name));
-        self.add_element(id, e, level, type_id, mark.unwrap_or_default(), ElementKind::ShapedRebar(rebar));
-        true
+            };
+            if !fits && let Some(e) = self.p.elements.get_mut(&id) {
+                e.kind = shaped;
+                e.level = level;
+            }
+        }
+    }
+
+    /// The project's bar type of nominal `diameter` (within 0.05 mm) whose
+    /// grade is `grade` or, unless `strict`, that has none (any type when
+    /// `grade` is empty): one of that very grade first, then the closest
+    /// size, then the first.
+    fn nominal_bar_type(&self, diameter: f64, grade: &str, strict: bool) -> Option<ElementTypeId> {
+        const TOLERANCE: f64 = 0.05e-3;
+        let key =
+            |g: &str| -> String { g.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_uppercase).collect() };
+        let wanted = key(grade);
+        self.p
+            .types_of(Category::Rebar)
+            .filter_map(|t| match &t.data {
+                TypeData::Rebar { diameter: d, grade: g, .. } if (d - diameter).abs() <= TOLERANCE => {
+                    let g = key(g);
+                    (wanted.is_empty() || (g.is_empty() && !strict) || g == wanted).then_some((
+                        t,
+                        g == wanted,
+                        (d - diameter).abs(),
+                    ))
+                }
+                _ => None,
+            })
+            .min_by(|(a, a_same, a_d), (b, b_same, b_d)| {
+                b_same.cmp(a_same).then(a_d.total_cmp(b_d)).then(a.id.0.cmp(&b.id.0))
+            })
+            .map(|(t, ..)| t.id)
     }
 
     fn import_generic(&mut self, id: u32, e: &Entity) -> bool {

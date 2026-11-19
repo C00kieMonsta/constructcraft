@@ -293,6 +293,40 @@ fn map_curves(curves: &[SketchCurve], xf: &DAffine3) -> Option<Vec<SketchCurve>>
         .collect()
 }
 
+/// The circle that `curves` draw when they are arcs of it turning one way
+/// all the way round from end to end (a circle written as trimmed halves).
+fn whole_circle(curves: &[SketchCurve]) -> Option<SketchCurve> {
+    if curves.len() < 2 {
+        return None;
+    }
+    let tol = cc_core::sketch::JOIN_TOL;
+    let mut first: Option<cc_core::arc::Arc> = None;
+    let mut sweep = 0.0;
+    let mut end: Option<DVec2> = None;
+    for c in curves {
+        let SketchCurve::Arc { a, b, bulge } = *c else { return None };
+        let arc = cc_core::arc::Arc::from_bulge(a, b, bulge)?;
+        if let Some(f) = &first
+            && (f.center.distance(arc.center) > tol
+                || (f.radius - arc.radius).abs() > tol
+                || f.sweep * arc.sweep <= 0.0)
+        {
+            return None;
+        }
+        if end.is_some_and(|p| p.distance(a) > tol) {
+            return None;
+        }
+        first.get_or_insert(arc);
+        sweep += arc.sweep;
+        end = Some(b);
+    }
+    let first = first?;
+    let start = curves.first().and_then(SketchCurve::ends).map(|(a, _)| a)?;
+    let closes = end.is_some_and(|p| p.distance(start) <= tol) && (sweep.abs() - TAU).abs() < 1e-6;
+    let circle = SketchCurve::Circle { center: first.center, radius: first.radius };
+    (closes && circle.is_valid()).then_some(circle)
+}
+
 /// Points of an arc from `a` through `b` to `c` (a straight segment when collinear),
 /// `segments` chords for an arc of a given angle.
 fn arc3(a: DVec3, b: DVec3, c: DVec3, segments: impl Fn(f64) -> usize) -> Vec<DVec3> {
@@ -827,10 +861,19 @@ impl<'a> Geometry<'a> {
                         return None;
                     }
                 }
-                out
+                // Arcs of one circle that turn all the way round: the circle (#368).
+                match whole_circle(&out) {
+                    Some(circle) => vec![circle],
+                    None => out,
+                }
             }
             "IFCTRIMMEDCURVE" => match f.deref(e.arg(0))?.name.as_str() {
-                "IFCCIRCLE" => arcs(&self.trimmed(e, depth))?,
+                // One arc, or the circle when it turns all the way round, else
+                // arcs through its points.
+                "IFCCIRCLE" => match self.circle_arc(e) {
+                    Some(curve) => vec![curve],
+                    None => arcs(&self.trimmed(e, depth))?,
+                },
                 "IFCLINE" => lines(&self.trimmed(e, depth)),
                 _ => return None,
             },
@@ -859,6 +902,54 @@ impl<'a> Geometry<'a> {
         Some((local.y / b).atan2(local.x / a))
     }
 
+    /// A trimmed circle as one sketch arc in its own coordinates, or its
+    /// circle when it turns all the way round; `None` when it does not trim
+    /// a circle, its radius or trims are unusable, or the arc turns too far
+    /// for one bulge.
+    fn circle_arc(&self, e: &Entity) -> Option<SketchCurve> {
+        let basis = self.f.deref(e.arg(0)).filter(|b| b.name == "IFCCIRCLE")?;
+        let (t0, sweep) = self.conic_trim(e, basis)?;
+        if sweep.abs() >= TAU - 1e-9 {
+            let center = self.axis_placement(basis.arg(0)).transform_point3(DVec3::ZERO).truncate();
+            let circle = SketchCurve::Circle { center, radius: self.positive(basis.arg(1))? };
+            return circle.is_valid().then_some(circle);
+        }
+        let at = |t: f64| self.conic_point(basis, t).map(DVec3::truncate);
+        let (a, m, b) = (at(t0)?, at(t0 + sweep * 0.5)?, at(t0 + sweep)?);
+        let arc = SketchCurve::Arc { a, b, bulge: cc_core::arc::Arc::bulge_through(a, m, b)? };
+        arc.is_valid().then_some(arc)
+    }
+
+    /// Where a trimmed circle or ellipse starts (its parameter, radians) and
+    /// the turn to its end along its sense, within one full turn (equal
+    /// ends make a full turn); `None` when a trim cannot be read.
+    fn conic_trim(&self, e: &Entity, basis: &Entity) -> Option<(f64, f64)> {
+        let sense = e.arg(3).as_bool() != Some(false);
+        let prefer_points = e.arg(4).as_enum() == Some("CARTESIAN");
+        // A trim select: a parameter value and/or a point.
+        let trim = |p: &Param| -> Option<f64> {
+            let mut value = None;
+            let mut point = None;
+            for x in p.as_list() {
+                match x {
+                    Param::Typed(t, v) if t == "IFCPARAMETERVALUE" => value = v.as_f64(),
+                    Param::Ref(_) => point = self.point(x),
+                    _ => {}
+                }
+            }
+            let from_point = point.and_then(|p| self.conic_parameter(basis, p));
+            let from_value = value.map(|v| v * self.angle);
+            if prefer_points { from_point.or(from_value) } else { from_value.or(from_point) }
+        };
+        let (a, b) = (trim(e.arg(1))?, trim(e.arg(2))?);
+        let turn = |d: f64| match d.rem_euclid(TAU) {
+            d if d <= 1e-12 => TAU,
+            d => d,
+        };
+        let sweep = if sense { turn(b - a) } else { -turn(a - b) };
+        (a.is_finite() && b.is_finite() && sweep.is_finite()).then_some((a, sweep))
+    }
+
     fn trimmed(&self, e: &Entity, depth: usize) -> Vec<DVec3> {
         let f = self.f;
         let Some(basis) = f.deref(e.arg(0)) else { return Vec::new() };
@@ -880,22 +971,7 @@ impl<'a> Geometry<'a> {
         let (t1, t2) = (trim(e.arg(1)), trim(e.arg(2)));
         match basis.name.as_str() {
             "IFCCIRCLE" | "IFCELLIPSE" => {
-                let param = |(v, p): (Option<f64>, Option<DVec3>)| -> Option<f64> {
-                    let from_point = p.and_then(|p| self.conic_parameter(basis, p));
-                    let from_value = v.map(|v| v * self.angle);
-                    if prefer_points { from_point.or(from_value) } else { from_value.or(from_point) }
-                };
-                let (Some(a), Some(b)) = (param(t1), param(t2)) else { return Vec::new() };
-                // The turn from `a` to `b` along the sense, within one full
-                // turn (an equal end is a full turn).
-                let turn = |d: f64| match d.rem_euclid(TAU) {
-                    d if d <= 1e-12 => TAU,
-                    d => d,
-                };
-                let sweep = if sense { turn(b - a) } else { -turn(a - b) };
-                if !(a.is_finite() && b.is_finite() && sweep.is_finite()) {
-                    return Vec::new();
-                }
+                let Some((a, sweep)) = self.conic_trim(e, basis) else { return Vec::new() };
                 let b = a + sweep;
                 let n = self.arc_chords(b - a);
                 (0..=n).filter_map(|i| self.conic_point(basis, a + (b - a) * i as f64 / n as f64)).collect()

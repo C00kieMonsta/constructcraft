@@ -109,13 +109,17 @@ enum Value {
     Power(f64),
     /// A plain quantity (fixture units).
     Number(f64),
+    /// A quantity written its own way (a bar's `Ø 12.5`, a slope's `2 %`),
+    /// with the number it filters and sorts by, in SI units (diameters in
+    /// meters, slopes as rise over run).
+    Measured(String, f64),
     Missing,
 }
 
 impl Value {
     fn cell(&self) -> Cell {
         match self {
-            Value::Text(s) => Cell::Text(s.clone()),
+            Value::Text(s) | Value::Measured(s, _) => Cell::Text(s.clone()),
             Value::Key(k) => Cell::Key(k),
             Value::Count(n) => Cell::Text(n.to_string()),
             Value::Length(v) => Cell::Text(format::meters(*v)),
@@ -143,7 +147,8 @@ impl Value {
             | Value::Weight(v)
             | Value::LinearMass(v)
             | Value::Power(v)
-            | Value::Number(v) => Some(*v),
+            | Value::Number(v)
+            | Value::Measured(_, v) => Some(*v),
             _ => None,
         }
     }
@@ -561,10 +566,11 @@ fn value_cached(project: &Project, geom: &ModelGeometry, e: &Element, field: Sch
         F::Diameter => {
             match valve_pipe(project, e).map_or(ty, |pipe| project.element_type(pipe.type_id)).map(|t| &t.data) {
                 Some(TypeData::Rebar { diameter, .. } | TypeData::LightningConductor { diameter, .. }) => {
-                    Value::Text(format!("Ø {}", format::size(*diameter, format::MetricSize::Mm(1))))
+                    let text = format!("Ø {}", format::size(*diameter, format::MetricSize::Mm(1)));
+                    Value::Measured(text, *diameter)
                 }
                 Some(TypeData::Pipe { diameter, .. } | TypeData::Conduit { diameter, .. }) => {
-                    Value::Text(format!("Ø {}", format::size(*diameter, format::MetricSize::Mm(0))))
+                    Value::Measured(format!("Ø {}", format::size(*diameter, format::MetricSize::Mm(0))), *diameter)
                 }
                 // A pile's diameter, or a square pile's side.
                 Some(TypeData::Pile { section, .. }) => Value::Length(section.size()),
@@ -593,15 +599,11 @@ fn value_cached(project: &Project, geom: &ModelGeometry, e: &Element, field: Sch
             if labels.is_empty() { Value::Missing } else { Value::Text(labels.join(", ")) }
         }
         F::Slope => match &e.kind {
-            ElementKind::Pipe(s) if !s.is_vertical() => Value::Text(format::slope(s.slope())),
-            ElementKind::Roof(_) => geom
-                .roof_framing
-                .get(&e.id)
-                .and_then(|g| g.slopes)
-                .map_or(Value::Missing, |(lo, _)| Value::Text(format::slope(lo))),
-            ElementKind::Ramp(r) => {
-                cc_geom::ramp_geom(project, e, r).map_or(Value::Missing, |g| Value::Text(format::slope(g.check.slope)))
+            ElementKind::Pipe(s) if !s.is_vertical() => slope(s.slope()),
+            ElementKind::Roof(_) => {
+                geom.roof_framing.get(&e.id).and_then(|g| g.slopes).map_or(Value::Missing, |(lo, _)| slope(lo))
             }
+            ElementKind::Ramp(r) => cc_geom::ramp_geom(project, e, r).map_or(Value::Missing, |g| slope(g.check.slope)),
             _ => Value::Missing,
         },
         F::Power => match project.mep_data(e) {
@@ -664,11 +666,12 @@ fn value_cached(project: &Project, geom: &ModelGeometry, e: &Element, field: Sch
         F::PlateMass => geom.connections.get(&e.id).map_or(Value::Missing, |g| Value::Weight(g.plate_mass())),
         F::BoltCount => geom.connections.get(&e.id).map_or(Value::Missing, |g| Value::Count(g.bolt_count())),
         F::BoltDiameter => geom.connections.get(&e.id).map_or(Value::Missing, |g| {
-            if format::imperial() {
-                Value::Text(format!("Ø {}", format::inch_size(g.bolt_diameter)))
+            let text = if format::imperial() {
+                format!("Ø {}", format::inch_size(g.bolt_diameter))
             } else {
-                Value::Text(format!("Ø {} mm", format::number(g.bolt_diameter * 1000.0, 0)))
-            }
+                format!("Ø {} mm", format::number(g.bolt_diameter * 1000.0, 0))
+            };
+            Value::Measured(text, g.bolt_diameter)
         }),
         F::Number => match &e.kind {
             ElementKind::Room(r) => text(&r.number),
@@ -693,10 +696,15 @@ fn value_cached(project: &Project, geom: &ModelGeometry, e: &Element, field: Sch
     }
 }
 
+/// A slope as schedules write it, filtered and sorted by its rise over run.
+fn slope(value: f64) -> Value {
+    if value.is_finite() { Value::Measured(format::slope(value), value) } else { Value::Missing }
+}
+
 /// A field's value for view filters: its text (keys reduced to their last
 /// word, e.g. `yes`, `exterior`) and, for quantities, its number in SI
 /// units (meters, square and cubic meters; yes/no as 1/0; diameters in
-/// meters). `None` when the element has no value.
+/// meters; slopes as rise over run). `None` when the element has no value.
 pub fn field_value(
     project: &Project,
     geom: &ModelGeometry,
@@ -716,18 +724,7 @@ pub fn field_value(
             Some((word, number))
         }
         Value::Text(t) => {
-            let number = match (field, project.element_type(e.type_id).map(|t| &t.data)) {
-                (
-                    ScheduleField::Diameter,
-                    Some(
-                        TypeData::Rebar { diameter, .. }
-                        | TypeData::Pipe { diameter, .. }
-                        | TypeData::Conduit { diameter, .. },
-                    ),
-                ) => Some(*diameter),
-                (ScheduleField::BoltDiameter, _) => geom.connections.get(&e.id).map(|g| g.bolt_diameter),
-                _ => t.trim().replace(',', ".").parse::<f64>().ok().filter(|v| v.is_finite()),
-            };
+            let number = t.trim().replace(',', ".").parse::<f64>().ok().filter(|v| v.is_finite());
             Some((t, number))
         }
         other => Some((text_of(&other), other.number())),

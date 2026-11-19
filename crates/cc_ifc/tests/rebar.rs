@@ -1,6 +1,7 @@
 //! Reinforcing bars as other tools write them (IFC2X3, no type objects,
 //! swept disk bodies) become native shaped bars of the reinforcement
-//! category, one type per diameter and grade (#263). Objects of other
+//! category, one type per diameter and grade (#263), the project's type of
+//! that size when it has one (#369). Objects of other
 //! classes with the same geometry come in as components: identical ones
 //! share one component type, whether their geometry is written in a local
 //! placement or in world coordinates, and ones of different shapes do not.
@@ -205,6 +206,8 @@ fn bars_become_native_reinforcement() {
     let ty = p.element_type(bars[0].0.type_id).unwrap();
     assert_eq!(ty.name, "Ø 12.0 mm CA-50");
     assert!(matches!(&ty.data, TypeData::Rebar { material, .. } if material == "CA-50"));
+    // Ø10 is a size of the template: its bars take that type (#369).
+    assert_eq!(p.element_type(bars[3].0.type_id).unwrap().name, "Barra Ø 10,0 mm");
     // H: G's U turned a quarter in plan, 0.5 m up.
     let (_, h) = bars[5];
     let expected = [(7.005, 10.0), (6.705, 10.0), (6.705, 11.0), (7.005, 11.0)];
@@ -235,8 +238,9 @@ fn bars_become_native_reinforcement() {
         assert!((l - l2).abs() < 1e-6, "{mark}: {l} vs {l2}");
         assert_eq!(partition(&r2.properties), partition(&r.properties));
     }
+    // Only Ø12, a size the template lacks, made a type.
     let types = again.types_of(Category::Rebar).filter(|t| t.name.starts_with("Ø")).count();
-    assert_eq!(types, 2);
+    assert_eq!(types, 1);
 }
 
 /// A bar with a hollow disk or of another shape stays a component; one
