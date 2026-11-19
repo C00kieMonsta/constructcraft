@@ -112,7 +112,7 @@ impl SunPass {
         let alpha = Some(wgpu::BlendState::ALPHA_BLENDING);
         let blended = pipeline(spec("cc_render sun blended", tri, ("vs_sun", "fs_sun_face"), FACE_BIAS, alpha));
         let lines = wgpu::PrimitiveTopology::LineList;
-        let edges = pipeline(spec("cc_render sun edges", lines, ("vs_main", "fs_edge"), Default::default(), None));
+        let edges = pipeline(spec("cc_render sun edges", lines, ("vs_edge", "fs_edge"), Default::default(), None));
         // Seen from above only; drawn over what is in front of it, not hiding anything.
         let ground = pipeline(PipelineSpec {
             vertices: false,
@@ -253,6 +253,7 @@ impl SunPass {
             light_dir: [0.0; 4],
             style: [0.0; 4],
             shading: [0.0; 4],
+            eye: [0.0; 4],
         };
         queue.write_buffer(&self.light_uniforms, 0, bytemuck::bytes_of(&camera));
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

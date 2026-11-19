@@ -7,6 +7,7 @@
 [![Platforms](https://img.shields.io/badge/platforms-Windows_%C2%B7_macOS_%C2%B7_Linux-lightgrey.svg)](#running)
 [![DCO](https://img.shields.io/badge/DCO-signed--off-brightgreen.svg)](CONTRIBUTING.md)
 [![Discord](https://img.shields.io/badge/Discord-join-5865F2.svg?logo=discord&logoColor=white)](https://discord.gg/y8ySJZjpK)
+[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa.svg?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/francisreboucas)
 
 Free and open source **Building Information Modeling (BIM)** software, written in Rust and independent of any commercial vendor.
 
@@ -238,7 +239,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and project rules.
 
 ## Support the project
 
-ConstructCraft is free and developed in spare time. If it is useful to you, a coffee helps keep the work going:
+ConstructCraft is free and developed in spare time. If it is useful to you, you can sponsor its development on [GitHub Sponsors](https://github.com/sponsors/francisreboucas):
+
+<a href="https://github.com/sponsors/francisreboucas"><img src="https://img.shields.io/badge/Sponsor_on_GitHub-%E2%9D%A4-ea4aaa.svg?logo=githubsponsors&logoColor=white" alt="Sponsor on GitHub" height="32"></a>
+
+A coffee also helps keep the work going:
 
 <a href="https://www.buymeacoffee.com/francisreboucas"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy me a coffee" height="48"></a>
 
