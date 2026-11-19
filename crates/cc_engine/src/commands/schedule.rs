@@ -37,6 +37,20 @@ fn part<T: DeserializeOwned>(value: &Value, what: &str) -> Result<T> {
     serde_json::from_value(value.clone()).map_err(|e| EngineError::invalid(format!("{what}: {e}")))
 }
 
+/// Filters with each JSON number `value` written as text (`0.008` as
+/// `"0.008"`), the way a definition keeps it.
+fn numbers_as_text(filters: &Value) -> Value {
+    let mut filters = filters.clone();
+    if let Some(list) = filters.as_array_mut() {
+        for filter in list {
+            if let Some(value) = filter.get_mut("value").filter(|v| v.is_number()) {
+                *value = Value::String(value.to_string());
+            }
+        }
+    }
+    filters
+}
+
 fn name_of(f: ScheduleField) -> Value {
     serde_json::to_value(f).unwrap_or(Value::Null)
 }
@@ -90,8 +104,10 @@ impl Command for ScheduleGet {
 /// `field` with a `value` by `op` (`equals`, `not_equals`, `contains`,
 /// `not_contains`, `begins_with`, `not_begins_with`, `greater`,
 /// `greater_or_equal`, `less`, `less_or_equal`, `has_value`,
-/// `has_no_value`); numbers compare as numbers in SI units (lengths in
-/// meters), texts without case. `sorting` orders the rows by up to four
+/// `has_no_value`); numbers compare as numbers in SI units (lengths and
+/// diameters in meters, slopes as rise over run), also when the column
+/// writes them otherwise (`Ø 12.5`), texts without case; a `value` may be
+/// a JSON number or a text. `sorting` orders the rows by up to four
 /// levels, the first outermost; a level with `header`, `footer` or
 /// `blank_line` groups the rows alike in it under a heading, over a footer
 /// (the group's count and totals) or apart by a blank line. With `itemize`
@@ -114,7 +130,8 @@ pub struct ScheduleSet {
     /// The fields shown, in order (names as `schedule_get` lists them in `available`).
     #[serde(default)]
     pub fields: Option<Vec<String>>,
-    /// The filters, `[{"field": "Level", "op": "equals", "value": "Térreo"}, …]` (at most 8; `[]` for none).
+    /// The filters, `[{"field": "Level", "op": "equals", "value": "Térreo"}, {"field": "Diameter", "op":
+    /// "greater_or_equal", "value": 0.008}, …]` (at most 8; `[]` for none).
     #[serde(default)]
     pub filters: Option<Value>,
     /// The sorting levels, `[{"field": "Type", "header": true, "footer": true}, …]` (at most 4; `[]` for none).
@@ -160,7 +177,7 @@ impl Command for ScheduleSet {
             def.fields = fields;
         }
         if let Some(value) = &self.filters {
-            let filters: Vec<ScheduleFilter> = part(value, "filters")?;
+            let filters: Vec<ScheduleFilter> = part(&numbers_as_text(value), "filters")?;
             for f in &filters {
                 known(f.field)?;
             }
