@@ -631,12 +631,13 @@ No parameters.
 
 ### `roof_edge_set`
 
-*edit* — Set the slope of one edge of a gable or hip roof's outline (edge `i` runs from outline point `i` to the next): `0` makes it a gable end, a positive slope an eave rising at that slope, `null` returns it to the shape's own.
+*edit* — Set the slope or the overhang of one edge of a roof's outline (edge `i` runs from outline point `i` to the next). Slope (gable and hip roofs): `0` makes the edge a gable end, a positive slope an eave rising at that slope, `null` returns it to the shape's own. Overhang: how far the roof reaches past the edge, `null` for the roof's own; the roof planes stay where the roof's overhang puts them, so the eave moves along its plane (lower when it reaches further out). What is left out stays as it is.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
 | `edge` | integer | required | Edge index, from 0. |
 | `id` | integer | required | Roof id. |
+| `overhang` | number | optional | Overhang past the edge, meters (0 where the roof meets a wall or another roof), or `null` for the roof's overhang. |
 | `slope` | number | optional | Slope as rise over run (0.5 = 50 %), `0` for a gable end, or `null` for the roof's slope. |
 
 ### `roof_opening_remove`

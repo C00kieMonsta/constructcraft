@@ -6,6 +6,15 @@
 //! The older construction, kept as a fallback when the skeleton fails,
 //! takes the lowest of the planes rising from each sloped eave: right for
 //! convex footprints only.
+//!
+//! The roof's base is the underside at the tips of its eaves when every
+//! edge has the roof's `overhang`: each sloped plane passes through its
+//! wall line (the footprint edge) at `base + slope * overhang`. An edge
+//! with an overhang of its own (`Roof::edge_overhangs`) keeps that plane
+//! and moves its eave along it: `slope * (overhang - own)` above the base
+//! (below it when it reaches further out). The skeleton starts such an edge
+//! late (see [`crate::skeleton::skeleton_with_starts`]) and the base drops
+//! to the lowest eave ([`eave_starts`]).
 
 use crate::polygon;
 use crate::{Face, Solid};
@@ -70,6 +79,115 @@ pub fn ccw_edge_slopes(r: &cc_core::Roof) -> Vec<Option<f64>> {
     }
     // Reversed, edge `j` runs from old point `n-1-j` to `n-2-j`: old edge `n-2-j`.
     (0..n).map(|j| r.edge_slope((2 * n - 2 - j) % n)).collect()
+}
+
+/// The footprint edge (index into `Roof::footprint`) that edge `j` of its
+/// counter-clockwise copy comes from.
+fn ccw_source(r: &cc_core::Roof, j: usize) -> usize {
+    let n = r.footprint.len();
+    if n == 0 || polygon::signed_area(&r.footprint) >= 0.0 { j } else { (2 * n - 2 - j) % n }
+}
+
+/// A roof's outline, the footprint grown by the overhang of each edge,
+/// counter-clockwise, with what belongs to each of its edges.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RoofOutline {
+    pub points: Vec<DVec2>,
+    /// Per edge (from point `i` to `i + 1`): the slope the roof sets on it,
+    /// like [`ccw_edge_slopes`] (a step between collinear edges of
+    /// different overhangs is a gable, `Some(0.0)`).
+    pub own: Vec<Option<f64>>,
+    /// Per edge: its overhang.
+    pub overhangs: Vec<f64>,
+}
+
+/// The outline of a roof's slab in plan: its footprint grown by the
+/// overhang of each edge (mitered corners, as [`polygon::offset`], which
+/// gives it exactly when no edge has an overhang of its own).
+pub fn outline(r: &cc_core::Roof) -> RoofOutline {
+    let n = r.footprint.len();
+    if !r.has_edge_overhangs() || n < 3 {
+        let points = polygon::ccw(&polygon::offset(&r.footprint, r.overhang));
+        let m = points.len();
+        return RoofOutline { own: ccw_edge_slopes(r), overhangs: vec![r.overhang; m], points };
+    }
+    let pts = polygon::ccw(&r.footprint);
+    let d: Vec<f64> = (0..n).map(|j| r.overhang_of(ccw_source(r, j)).max(0.0)).collect();
+    let own: Vec<Option<f64>> = (0..n).map(|j| r.edge_slope(ccw_source(r, j))).collect();
+    let mut out = RoofOutline { points: Vec::new(), own: Vec::new(), overhangs: Vec::new() };
+    for i in 0..n {
+        let (prev, cur, next) = (pts[(i + n - 1) % n], pts[i], pts[(i + 1) % n]);
+        let (d1, d2) = (d[(i + n - 1) % n], d[i]);
+        // Outward normals of a counter-clockwise outline point to the right of each edge.
+        let n1 = -(cur - prev).normalize_or_zero().perp();
+        let n2 = -(next - cur).normalize_or_zero().perp();
+        let det = n1.perp_dot(n2);
+        if det.abs() > 1e-9 {
+            // Where the two moved edge lines meet (v · n1 = d1, v · n2 = d2),
+            // pulled in at sharp corners as `polygon::offset` does.
+            let v = DVec2::new(d1 * n2.y - d2 * n1.y, n1.x * d2 - n2.x * d1) / det;
+            let limit = 5.0 * d1.max(d2);
+            let v = if v.length() > limit && limit > 0.0 { v * (limit / v.length()) } else { v };
+            out.points.push(cur + v);
+        } else if n1.dot(n2) > 0.0 && (d1 - d2).abs() > 1e-12 {
+            // Straight on with another overhang: a step, square to the edge.
+            out.points.push(cur + n1 * d1);
+            out.own.push(Some(0.0));
+            out.overhangs.push(d2);
+            out.points.push(cur + n2 * d2);
+        } else {
+            out.points.push(cur + (n1 * d1 + n2 * d2) * 0.5);
+        }
+        out.own.push(own.get(i).copied().flatten());
+        out.overhangs.push(d2);
+    }
+    out
+}
+
+/// Where each sloped plane of a roof outline starts (see
+/// [`crate::skeleton::skeleton_with_starts`]): the height of its eave above
+/// the lowest eave, and that lowest eave's height above the roof's base.
+/// `slopes` holds the slope of each outline edge (see [`edge_slopes`]) and
+/// `overhangs` its overhang; `overhang`, the roof's own, fixes the planes;
+/// `openings` says whether opening edges, whose eaves lie at the base, count.
+pub fn eave_starts(slopes: &[f64], overhangs: &[f64], overhang: f64, openings: bool) -> (Vec<f64>, f64) {
+    let rise: Vec<f64> = slopes
+        .iter()
+        .enumerate()
+        .map(|(i, &s)| if s > 0.0 { s * (overhang - overhangs.get(i).copied().unwrap_or(overhang)) } else { 0.0 })
+        .collect();
+    let mut low = rise.iter().zip(slopes).filter(|(_, s)| **s > 0.0).map(|(r, _)| *r).fold(f64::INFINITY, f64::min);
+    if openings {
+        low = low.min(0.0);
+    }
+    if !low.is_finite() {
+        low = 0.0;
+    }
+    let starts = rise.iter().zip(slopes).map(|(r, s)| if *s > 0.0 { (r - low).max(0.0) } else { 0.0 }).collect();
+    (starts, low)
+}
+
+/// Where a shed roof's plane starts, along its rise direction `d`: the low
+/// eave of the footprint grown by the roof's own overhang (edges with an
+/// overhang of their own leave the plane where it is).
+pub fn shed_low(r: &cc_core::Roof, d: DVec2) -> f64 {
+    polygon::offset(&r.footprint, r.overhang).iter().map(|p| p.dot(d)).fold(f64::INFINITY, f64::min)
+}
+
+/// Move the eaves [`sloped_eaves`] gave for `footprint` and `slopes` out to
+/// where their planes reach the base, given the height each starts at
+/// (see [`eave_starts`]).
+pub fn raise_eaves(eaves: &mut [Eave], footprint: &[DVec2], slopes: &[f64], starts: &[f64]) {
+    let n = footprint.len();
+    let sloped = (0..n).filter(|&i| {
+        (footprint[(i + 1) % n] - footprint[i]).try_normalize().is_some() && slopes.get(i).is_some_and(|s| *s > 0.0)
+    });
+    for (eave, i) in eaves.iter_mut().zip(sloped) {
+        let start = starts.get(i).copied().unwrap_or(0.0);
+        if eave.slope > 0.0 {
+            eave.a -= eave.normal * (start / eave.slope);
+        }
+    }
 }
 
 /// The sloped eaves of a counter-clockwise footprint, given the slope of
@@ -166,8 +284,8 @@ pub fn add_pitched_roof(solid: &mut Solid, footprint: &[DVec2], eaves: &[Eave], 
     }
 }
 
-/// Plan area covered by a roof: its outline grown by the overhang, less
-/// its openings shrunk by it.
+/// Plan area covered by a roof: its outline grown by the overhangs, less
+/// its openings shrunk by the roof's.
 pub fn plan_area(r: &cc_core::Roof) -> f64 {
     let holes: f64 = r
         .holes
@@ -176,7 +294,7 @@ pub fn plan_area(r: &cc_core::Roof) -> f64 {
         .filter(|h| h.len() >= 3 && polygon::signed_area(h) > 0.0)
         .map(|h| polygon::area(&h))
         .sum();
-    (polygon::area(&polygon::offset(&r.footprint, r.overhang)) - holes).max(0.0)
+    (polygon::area(&outline(r).points) - holes).max(0.0)
 }
 
 /// Edge weights of a footprint's loops for the skeleton: sloped eaves move
@@ -224,10 +342,15 @@ pub fn add_skeleton_roof(solid: &mut Solid, sk: &crate::skeleton::Skeleton, base
         }
         solid.faces.push(Face::new(quad, out));
     };
-    for plane in sk.planes.iter().filter(|p| p.weight > 0.0) {
+    for plane in sk.planes.iter().filter(|p| p.weight > 0.0 && p.start <= 0.0) {
         let a = plane.origin;
         let b = a + plane.dir * plane.length;
         strip(DVec3::new(a.x, a.y, base), DVec3::new(b.x, b.y, base), -plane.dir.perp());
+    }
+    // Eaves that start higher: the part of their edge left when they do.
+    for &(i, a, b, h) in &sk.late_eaves {
+        let Some(plane) = sk.planes.get(i) else { continue };
+        strip(DVec3::new(a.x, a.y, base + h), DVec3::new(b.x, b.y, base + h), -plane.dir.perp());
     }
     for &(p, t0, q, t1, out) in &sk.gables {
         strip(DVec3::new(p.x, p.y, base + t0), DVec3::new(q.x, q.y, base + t1), out);
@@ -357,5 +480,48 @@ mod tests {
         // The same segment as the footprint's edge 1, walked the other way.
         let (a, b) = (ccw[i], ccw[(i + 1) % 4]);
         assert!(a.distance(r.footprint[2]) < 1e-9 && b.distance(r.footprint[1]) < 1e-9, "{a} {b}");
+    }
+
+    /// Overhangs per edge: each edge moves out by its own; a straight wall
+    /// split in two with different overhangs steps square between them; no
+    /// edge of its own gives the uniform offset exactly.
+    #[test]
+    fn outline_grows_each_edge_by_its_overhang() {
+        let fp =
+            vec![DVec2::ZERO, DVec2::new(5.0, 0.0), DVec2::new(10.0, 0.0), DVec2::new(10.0, 6.0), DVec2::new(0.0, 6.0)];
+        let mut r = cc_core::Roof::new(fp, 0.0, 0.5, cc_core::RoofShape::Hip { slope: 0.5 });
+        assert_eq!(outline(&r).points, polygon::ccw(&polygon::offset(&r.footprint, 0.5)));
+        r.edge_overhangs = vec![Some(0.0), Some(1.0)];
+        let o = outline(&r);
+        let want = [(-0.5, 0.0), (5.0, 0.0), (5.0, -1.0), (10.5, -1.0), (10.5, 6.5), (-0.5, 6.5)];
+        let got: Vec<(f64, f64)> = o.points.iter().map(|p| (p.x, p.y)).collect();
+        assert_eq!(got.len(), want.len(), "{got:?}");
+        for (p, w) in o.points.iter().zip(want) {
+            assert!(p.distance(DVec2::new(w.0, w.1)) < 1e-12, "{got:?}");
+        }
+        assert_eq!(o.own, vec![None, Some(0.0), None, None, None, None]);
+        assert_eq!(o.overhangs, vec![0.0, 1.0, 1.0, 0.5, 0.5, 0.5]);
+        // The edge with no overhang starts a quarter meter up; the one reaching 1 m
+        // out is the lowest eave, 0.25 m below the base; the step is a gable.
+        let slopes = edge_slopes(&o.points, 0.5, None, &o.own);
+        let (starts, low) = eave_starts(&slopes, &o.overhangs, 0.5, false);
+        assert!((low + 0.25).abs() < 1e-12, "{low}");
+        assert_eq!(starts, vec![0.5, 0.0, 0.0, 0.25, 0.25, 0.25]);
+        // Its slab is closed: as much volume as plan area times its thickness.
+        let weights = eave_weights(std::slice::from_ref(&o.points), 0.5, None, &o.own);
+        let sk = crate::skeleton::skeleton_with_starts(std::slice::from_ref(&o.points), &weights, &[starts]).unwrap();
+        assert!(!sk.late_eaves.is_empty());
+        let mut s = Solid::new(ElementId(1), Category::Roof, [0; 3]);
+        add_skeleton_roof(&mut s, &sk, low, 0.2);
+        let area = polygon::area(&o.points);
+        assert!((s.volume() - area * 0.2).abs() < 1e-6, "{} {}", s.volume(), area * 0.2);
+        // Every plane passes its wall line half a meter's rise (0.25 m) over the base.
+        for (plane, pts) in &sk.faces {
+            for p in pts {
+                let walls = [p.y, 10.0 - p.x, 6.0 - p.y, p.x];
+                let want = 0.25 + 0.5 * walls.iter().copied().fold(f64::INFINITY, f64::min);
+                assert!((low + sk.face_height(*plane, *p) - want).abs() < 1e-9, "{p}");
+            }
+        }
     }
 }

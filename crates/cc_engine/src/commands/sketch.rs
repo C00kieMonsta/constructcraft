@@ -346,6 +346,7 @@ impl Command for SketchSet {
                 let p = profile(&sketch)?;
                 if p.outline.len() != r.footprint.len() {
                     r.edge_slopes.clear();
+                    r.edge_overhangs.clear();
                 }
                 (r.footprint, r.holes) = (p.outline, p.openings);
                 check_roof_holes(r)?;

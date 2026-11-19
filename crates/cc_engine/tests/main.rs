@@ -58,6 +58,7 @@ mod regions;
 mod render;
 mod render_settings;
 mod ring_footings;
+mod roof_edge_overhangs;
 mod schedule_def;
 mod section_marks;
 mod shaft;

@@ -144,7 +144,10 @@ fn patched(
             }
             super::foundation::check_strip_arc(p, type_id.unwrap_or(element.type_id), &f.shape)?;
         }
-        cc_core::ElementKind::Roof(r) => super::create::check_roof_holes(r)?,
+        cc_core::ElementKind::Roof(r) => {
+            super::create::check_roof_holes(r)?;
+            super::create::check_roof_edges(r)?;
+        }
         cc_core::ElementKind::Floor(f) => super::create::check_openings(&f.boundary, &f.openings)?,
         cc_core::ElementKind::DetailLine(l) => {
             if let cc_core::ElementKind::DetailLine(old) = &element.kind {
