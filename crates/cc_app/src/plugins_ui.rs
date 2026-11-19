@@ -195,7 +195,7 @@ fn agent() -> ureq::Agent {
 }
 
 /// GET an https `url`, at most `limit` bytes.
-fn get(url: &str, limit: usize) -> Result<Vec<u8>, String> {
+pub(crate) fn get(url: &str, limit: usize) -> Result<Vec<u8>, String> {
     if !url.starts_with("https://") {
         return Err(format!("not an https link: {url}"));
     }
@@ -209,7 +209,7 @@ fn get(url: &str, limit: usize) -> Result<Vec<u8>, String> {
 
 /// Run `work` in a background thread; the receiver gets its result and
 /// `ctx` repaints then.
-fn spawn<T: Send + 'static>(
+pub(crate) fn spawn<T: Send + 'static>(
     ctx: &Context,
     name: &str,
     work: impl FnOnce() -> Result<T, String> + Send + 'static,

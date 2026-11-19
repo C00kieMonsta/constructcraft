@@ -16,6 +16,7 @@ mod commands;
 mod component_env;
 mod component_sketch;
 mod connection_ui;
+mod crafthouse;
 mod curtain_ui;
 mod design_options_ui;
 mod detail_component_ui;
