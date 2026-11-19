@@ -204,6 +204,8 @@ pub struct AppState {
     pub close_with_last_view: bool,
     /// Close every view tab but this one on the next frame.
     pub close_others_than: Option<ViewId>,
+    /// The open views list of the tab bars: tabs drawn, to reveal and to close.
+    pub tab_bar: crate::tab_list::TabBar,
     pub dialogs: Dialogs,
     pub ribbon_tab: RibbonTab,
     /// The ribbon shows only its tabs; clicking one shows its panel over the views (`ribbon_peek`).
@@ -339,6 +341,7 @@ impl AppState {
             open_tabs: 0,
             close_with_last_view: false,
             close_others_than: None,
+            tab_bar: Default::default(),
             dialogs: Dialogs::default(),
             ribbon_tab: RibbonTab::default(),
             ribbon_collapsed: false,

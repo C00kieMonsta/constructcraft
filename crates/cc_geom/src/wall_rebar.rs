@@ -124,7 +124,12 @@ pub(crate) fn wall_bars(g: &WallGeom, r: &Rebar, d: f64, sets: &WallSets) -> Vec
                         }
                         let (u0, u1) = (a + from / k, a + to / k);
                         let points = g.path(u0, u1, v).into_iter().map(|p| p.extend(z)).collect();
-                        bars.push(Bar { points, closed: false, true_length: g.arc.is_some().then_some(to - from) });
+                        bars.push(Bar {
+                            points,
+                            closed: false,
+                            true_length: g.arc.is_some().then_some(to - from),
+                            hooks: None,
+                        });
                     }
                 }
             }
@@ -198,7 +203,7 @@ pub(crate) fn wall_bars(g: &WallGeom, r: &Rebar, d: f64, sets: &WallSets) -> Vec
                         continue;
                     }
                     let points = vec![g.world(u, v0).extend(z), g.world(u, v1).extend(z)];
-                    bars.push(Bar { points, closed: false, true_length: Some((v0 - v1).abs() + hooks) });
+                    bars.push(Bar { points, closed: false, true_length: Some((v0 - v1).abs() + hooks), hooks: None });
                 }
             }
             bars

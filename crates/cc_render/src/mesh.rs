@@ -29,6 +29,16 @@ impl Vertex {
     pub fn plain(pos: [f32; 3], normal: [f32; 3], color: [f32; 4]) -> Self {
         Self { pos, normal, color, fg: [0.0; 4], bg: [0.0; 4], tex: [0.0; 4], plane: [0.0; 2] }
     }
+
+    /// An end of an edge between two facets of a curved surface, whose
+    /// normals are `normal` and `other`: the edge shader (`vs_edge`) draws
+    /// it only where it is a silhouette, one facet turned to the eye and the
+    /// other away, as seen from the edge's `middle` (so both ends agree).
+    /// It reads `other` in `fg`, `middle` in `bg` and the mark in `tex.w`.
+    pub fn seam(pos: [f32; 3], middle: [f32; 3], normal: [f32; 3], other: [f32; 3], color: [f32; 4]) -> Self {
+        let wide = |v: [f32; 3]| [v[0], v[1], v[2], 0.0];
+        Self { fg: wide(other), bg: wide(middle), tex: [0.0, 0.0, 0.0, 1.0], ..Self::plain(pos, normal, color) }
+    }
 }
 
 /// GPU-ready triangles and edge lines.
@@ -145,6 +155,23 @@ struct SolidTess {
     triangles: Vec<u32>,
     /// Outline segments (pairs of points) with their face's normal.
     edges: Vec<([f32; 3], [f32; 3])>,
+    /// The edges between the facets of its curved surfaces, each once: its
+    /// ends and the normals of the two facets. One is drawn only as a
+    /// silhouette (see [`Vertex::seam`]).
+    seams: Vec<[[f32; 3]; 4]>,
+}
+
+impl SolidTess {
+    /// The vertices of its edge lines in `color`: its outlines, then the
+    /// edges that show as silhouettes.
+    fn edge_vertices(&self, color: [f32; 4]) -> impl Iterator<Item = Vertex> + '_ {
+        let outlines = self.edges.iter().map(move |&(pos, normal)| Vertex::plain(pos, normal, color));
+        let seams = self.seams.iter().flat_map(move |&[a, b, normal, other]| {
+            let middle = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5];
+            [a, b].map(|pos| Vertex::seam(pos, middle, normal, other, color))
+        });
+        outlines.chain(seams)
+    }
 }
 
 /// The axes a texture is laid along on a face (moved to `cc_geom`, which the
@@ -169,6 +196,7 @@ impl Tessellation {
                 faces: Vec::new(),
                 triangles: Vec::new(),
                 edges: Vec::new(),
+                seams: Vec::new(),
             };
             // One part for the solid's own material, one per paint.
             let mut parts: Vec<SolidTess> = vec![part(solid.look())];
@@ -210,6 +238,16 @@ impl Tessellation {
                     for (a, b) in edges {
                         first.edges.push((a.as_vec3().to_array(), normal));
                         first.edges.push((b.as_vec3().to_array(), normal));
+                    }
+                }
+                // Each edge between smooth facets is listed by both: keep one.
+                for (face, seams) in solid.faces.iter().zip(solid.smooth_edges()) {
+                    let n = face.normal;
+                    for (a, b, other) in seams {
+                        if (n.x, n.y, n.z) < (other.x, other.y, other.z) {
+                            let p = |v: glam::DVec3| v.as_vec3().to_array();
+                            first.seams.push([p(a), p(b), p(n), p(other)]);
+                        }
                     }
                 }
             }
@@ -379,7 +417,7 @@ impl SceneMesh {
                 let textured = visual == V::Textures && st.color.is_none() && !st.halftone && !sel;
                 mesh.add_faces(solid, color, textured, textures);
             }
-            mesh.edges.extend(solid.edges.iter().map(|&(pos, normal)| Vertex::plain(pos, normal, edge_color)));
+            mesh.edges.extend(solid.edge_vertices(edge_color));
             mesh.spans.push(Span {
                 element: solid.element,
                 part,
@@ -407,7 +445,7 @@ impl SceneMesh {
             if !span.indices.is_empty() || !span.transparent.is_empty() {
                 mesh.add_faces(solid, color, false, &TextureSet::default());
             }
-            mesh.edges.extend(solid.edges.iter().map(|&(pos, normal)| Vertex::plain(pos, normal, SELECTED_EDGE)));
+            mesh.edges.extend(solid.edge_vertices(SELECTED_EDGE));
         }
         let shown = Shown {
             indices: complement(hidden.iter().map(|s| s.indices.clone())),
@@ -538,8 +576,44 @@ fn member_lines(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// A round column, 1 m in radius and 4 m tall, of 24 smooth facets (no ends).
+    pub(crate) fn column() -> ModelGeometry {
+        use glam::DVec3;
+        let at = |k: usize, z: f64| {
+            let t = std::f64::consts::TAU * (k as f64 + 0.25) / 24.0;
+            DVec3::new(t.cos(), t.sin(), z)
+        };
+        let mut solid = cc_geom::Solid::new(ElementId(1), cc_core::Category::Column, [200, 200, 200]);
+        solid.add_polygons((0..24).map(|k| vec![at(k, 0.0), at(k + 1, 0.0), at(k + 1, 4.0), at(k, 4.0)]));
+        solid.smooth_curved(0);
+        ModelGeometry { solids: vec![solid], ..Default::default() }
+    }
+
+    /// The edges between the facets of a curved surface go to the edge
+    /// lines once each, marked as seams (drawn only as silhouettes), after
+    /// the outlines; a selection draws them too.
+    #[test]
+    fn curved_surfaces_carry_their_seams() {
+        let tess = Tessellation::new(&column());
+        let mesh = SceneMesh::build_plain(&tess, &BTreeSet::new());
+        let seams: Vec<&Vertex> = mesh.edges.iter().filter(|v| v.tex[3] > 0.5).collect();
+        assert_eq!(seams.len(), 24 * 2);
+        // The two rims are outlines.
+        assert_eq!(mesh.edges.len() - seams.len(), 24 * 2 * 2);
+        for pair in seams.chunks(2) {
+            let (a, b) = (pair[0], pair[1]);
+            // Both ends decide alike: the same middle and normals, which differ.
+            assert_eq!((a.bg, a.fg, a.normal), (b.bg, b.fg, b.normal));
+            assert_ne!([a.fg[0], a.fg[1], a.fg[2]], a.normal);
+            assert!((a.bg[2] - 2.0).abs() < 1e-6 && a.pos[2] != b.pos[2]);
+        }
+        let all: BTreeSet<ElementId> = [ElementId(1)].into();
+        let highlight = SceneMesh::highlight(&tess, &mesh.spans, &all);
+        assert_eq!(highlight.mesh.edges.len(), mesh.edges.len());
+    }
 
     #[test]
     fn transparent_materials_go_to_the_blended_pass() {

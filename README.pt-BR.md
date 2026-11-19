@@ -7,6 +7,7 @@
 [![Platforms](https://img.shields.io/badge/plataformas-Windows_%C2%B7_macOS_%C2%B7_Linux-lightgrey.svg)](#executar)
 [![DCO](https://img.shields.io/badge/DCO-commits_assinados-brightgreen.svg)](CONTRIBUTING.md)
 [![Discord](https://img.shields.io/badge/Discord-entrar-5865F2.svg?logo=discord&logoColor=white)](https://discord.gg/y8ySJZjpK)
+[![Sponsor](https://img.shields.io/badge/Apoiar-%E2%9D%A4-ea4aaa.svg?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/francisreboucas)
 
 Software livre de **Modelagem de Informações da Construção (BIM)**, escrito em Rust e independente de qualquer fornecedor comercial.
 
@@ -225,7 +226,11 @@ python scripts/validate_ifc.py casa_simples.ifc
 
 ## Apoie o projeto
 
-O ConstructCraft é gratuito e desenvolvido no tempo livre. Se ele é útil para você, um café ajuda a manter o trabalho andando:
+O ConstructCraft é gratuito e desenvolvido no tempo livre. Se ele é útil para você, você pode patrocinar o desenvolvimento pelo [GitHub Sponsors](https://github.com/sponsors/francisreboucas):
+
+<a href="https://github.com/sponsors/francisreboucas"><img src="https://img.shields.io/badge/Patrocinar_no_GitHub-%E2%9D%A4-ea4aaa.svg?logo=githubsponsors&logoColor=white" alt="Patrocinar no GitHub" height="32"></a>
+
+Um café também ajuda a manter o trabalho andando:
 
 <a href="https://www.buymeacoffee.com/francisreboucas"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy me a coffee" height="48"></a>
 
