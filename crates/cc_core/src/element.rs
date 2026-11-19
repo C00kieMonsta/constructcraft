@@ -1490,6 +1490,88 @@ pub enum RebarLayout {
         #[serde(default)]
         diagonals: bool,
     },
+    /// The bottom bars of a pile cap over its piles, laid out for whatever
+    /// layout the cap's type has: in a cap of three or four piles, a band of
+    /// `count` bars between each two neighbouring piles (along the sides of
+    /// the triangle or the square, and with `diagonals` across a square's
+    /// diagonals too), as wide as a pile; in a cap of two piles or of a line,
+    /// `count` bars along the line of the piles across the cap's width; in
+    /// any other (a single pile, a round or a ring cap) a mesh of bars
+    /// `spacing` apart both ways. They lie on the piles' heads, at least the
+    /// cover above the cap's bottom, and their ends turn up the side faces by
+    /// `bend` (at most to the top less the cover; 0 for straight ends).
+    CapBottom {
+        count: u32,
+        spacing: f64,
+        #[serde(default)]
+        diagonals: bool,
+        #[serde(default)]
+        bend: f64,
+    },
+    /// The top mesh of a pile cap: bars `spacing` apart both ways under its
+    /// top, their ends turned down the side faces by `bend` (0: straight).
+    CapTop {
+        spacing: f64,
+        #[serde(default)]
+        bend: f64,
+    },
+    /// The side (skin) bars of a pile cap: horizontal closed loops around
+    /// its outline (around both faces of a ring), at most `spacing` apart
+    /// over the height between its bottom and top bars, closed by `hooks` at
+    /// a corner as stirrups are (none: the closed loop alone).
+    CapSides {
+        spacing: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hooks: Option<StirrupHooks>,
+    },
+    /// The longitudinal bars of a pile around its section: `count` of them,
+    /// or with a count of 0 as many as keep them at most `spacing` apart,
+    /// from `length` below the pile's head (0: down to its toe, less the
+    /// cover) to `projection` above it, into the cap (under a cap, at most up
+    /// to the cap's top less the cover).
+    PileLongitudinal {
+        count: u32,
+        #[serde(default)]
+        spacing: f64,
+        #[serde(default)]
+        length: f64,
+        #[serde(default)]
+        projection: f64,
+    },
+    /// A spiral (a helix) around a pile's bars, rising `pitch` each turn,
+    /// from the cover below the pile's head down `length` (0: the whole
+    /// pile, to the cover above its toe); in a square pile, on the circle
+    /// inside its sides.
+    PileSpiral {
+        pitch: f64,
+        #[serde(default)]
+        length: f64,
+    },
+    /// Closed ties around a pile's bars every `spacing`, from the pile's
+    /// head down `length` (0: the whole pile), closed by `hooks` at a corner
+    /// as stirrups are (none: the closed loop alone).
+    PileTies {
+        spacing: f64,
+        #[serde(default)]
+        length: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hooks: Option<StirrupHooks>,
+    },
+}
+
+/// Limits of the reinforcement of pile caps and piles.
+pub mod pile_bars {
+    /// Most bars in one band of a cap's bottom bars.
+    pub const MAX_BAND: u32 = 50;
+    /// Most bars around a pile.
+    pub const MAX_AROUND: u32 = 200;
+    /// Longest bent end of a cap's bars, and longest projection of a pile's
+    /// bars above its head, meters.
+    pub const MAX_BEND: f64 = 10.0;
+    /// Longest reinforced length of a pile, meters (the longest pile).
+    pub const MAX_LENGTH: f64 = crate::pile::MAX_PILE_LENGTH;
+    /// Largest pitch of a spiral, meters.
+    pub const MAX_PITCH: f64 = 2.0;
 }
 
 /// Limits of slab reinforcement.
@@ -1545,6 +1627,28 @@ impl RebarLayout {
                 | RebarLayout::WallTies { .. }
                 | RebarLayout::SlabTrim { .. }
                 | RebarLayout::StripTransverse { .. }
+                | RebarLayout::CapSides { .. }
+                | RebarLayout::PileSpiral { .. }
+                | RebarLayout::PileTies { .. }
+        )
+    }
+
+    /// Whether the set is one of a pile cap's own (bottom, top or side bars).
+    pub fn in_cap(&self) -> bool {
+        matches!(self, RebarLayout::CapBottom { .. } | RebarLayout::CapTop { .. } | RebarLayout::CapSides { .. })
+    }
+
+    /// Whether a pile cap may host the set: its own layouts, and stirrups
+    /// (laid out across a cap of two piles or of a line, as a beam's).
+    pub fn fits_cap(&self) -> bool {
+        self.in_cap() || matches!(self, RebarLayout::Stirrups { .. })
+    }
+
+    /// Whether the set reinforces a pile.
+    pub fn in_pile(&self) -> bool {
+        matches!(
+            self,
+            RebarLayout::PileLongitudinal { .. } | RebarLayout::PileSpiral { .. } | RebarLayout::PileTies { .. }
         )
     }
 
@@ -1606,6 +1710,8 @@ impl RebarLayout {
     /// Whether the values are usable (finite and within their limits).
     pub fn is_valid(&self) -> bool {
         let spaced = |s: f64| s.is_finite() && s >= wall_bars::MIN_SPACING;
+        let bend_ok = |v: f64| v.is_finite() && (0.0..=pile_bars::MAX_BEND).contains(&v);
+        let length_ok = |v: f64| v.is_finite() && (0.0..=pile_bars::MAX_LENGTH).contains(&v);
         match self {
             RebarLayout::Longitudinal { count, .. } => (1..=200).contains(count),
             RebarLayout::Stirrups { spacing, hooks } => spaced(*spacing) && hooks.is_none_or(|h| h.is_valid()),
@@ -1652,6 +1758,26 @@ impl RebarLayout {
                 (1..=wall_bars::MAX_EVERY).contains(every_horizontal)
                     && (1..=wall_bars::MAX_EVERY).contains(every_vertical)
                     && hooks.iter().all(|a| wall_bars::HOOK_ANGLES.contains(a))
+            }
+            RebarLayout::CapBottom { count, spacing, bend, .. } => {
+                (1..=pile_bars::MAX_BAND).contains(count) && spaced(*spacing) && bend_ok(*bend)
+            }
+            RebarLayout::CapTop { spacing, bend } => spaced(*spacing) && bend_ok(*bend),
+            RebarLayout::CapSides { spacing, hooks } => spaced(*spacing) && hooks.is_none_or(|h| h.is_valid()),
+            RebarLayout::PileLongitudinal { count, spacing, length, projection } => {
+                *count <= pile_bars::MAX_AROUND
+                    && spacing.is_finite()
+                    && (*count > 0 || spaced(*spacing))
+                    && length_ok(*length)
+                    && bend_ok(*projection)
+            }
+            RebarLayout::PileSpiral { pitch, length } => {
+                pitch.is_finite()
+                    && (wall_bars::MIN_SPACING..=pile_bars::MAX_PITCH).contains(pitch)
+                    && length_ok(*length)
+            }
+            RebarLayout::PileTies { spacing, length, hooks } => {
+                spaced(*spacing) && length_ok(*length) && hooks.is_none_or(|h| h.is_valid())
             }
         }
     }
@@ -1870,8 +1996,9 @@ impl Anchorage {
     }
 }
 
-/// A set of reinforcing bars in a beam, column, wall or slab (`host`), `cover`
-/// from its faces; the type gives the bar diameter. The bars follow their host.
+/// A set of reinforcing bars in a beam, column, wall, slab, footing, pile cap
+/// or pile (`host`), `cover` from its faces; the type gives the bar diameter.
+/// The bars follow their host.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Rebar {
     pub host: ElementId,

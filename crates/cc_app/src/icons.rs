@@ -106,6 +106,8 @@ pub enum Icon {
     Brace,
     Connection,
     Rebar,
+    RebarPileCap,
+    RebarPile,
     RebarView,
     StructuralPlan,
     NumberMarks,
@@ -213,7 +215,7 @@ pub enum Icon {
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 198] = [
+    pub const ALL: [Icon; 200] = [
         Icon::New,
         Icon::Open,
         Icon::Save,
@@ -309,6 +311,8 @@ impl Icon {
         Icon::Brace,
         Icon::Connection,
         Icon::Rebar,
+        Icon::RebarPileCap,
+        Icon::RebarPile,
         Icon::RebarView,
         Icon::StructuralPlan,
         Icon::NumberMarks,
@@ -512,6 +516,8 @@ impl Icon {
             Icon::Brace => include_str!("../../../assets/icons/ui/brace.svg"),
             Icon::Connection => include_str!("../../../assets/icons/ui/connection.svg"),
             Icon::Rebar => include_str!("../../../assets/icons/ui/rebar.svg"),
+            Icon::RebarPileCap => include_str!("../../../assets/icons/ui/rebar-pile-cap.svg"),
+            Icon::RebarPile => include_str!("../../../assets/icons/ui/rebar-pile.svg"),
             Icon::RebarView => include_str!("../../../assets/icons/ui/rebar-view.svg"),
             Icon::StructuralPlan => include_str!("../../../assets/icons/ui/structural-plan.svg"),
             Icon::NumberMarks => include_str!("../../../assets/icons/ui/number-marks.svg"),

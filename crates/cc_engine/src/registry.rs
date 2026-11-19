@@ -241,6 +241,8 @@ registry![
         wall_rebar::WallRebarCreate,
         slab_rebar::SlabRebarCreate,
         strip_rebar::StripRebarCreate,
+        pile_rebar::PileCapRebarCreate,
+        pile_rebar::PileRebarCreate,
         bar_marks::BarMarksList,
         bar_marks::BarMarksUpdate,
         bar_marks::BarMarksRenumber,

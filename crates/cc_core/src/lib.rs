@@ -110,7 +110,7 @@ pub use element::{
     AnchorHook, Anchorage, BarEnd, BarFace, Beam, BeamLateral, BeamVertical, Ceiling, Column, Component, Dimension,
     DimensionKind, Element, ElementKind, FaceBars, Floor, Foundation, FoundationShape, Grid, Hosted, Leader,
     LeaderSymbol, LocationLine, Railing, Ramp, Rebar, RebarLayout, Roof, RoofShape, Room, ShapedRebar, SpacingZone,
-    Splice, Stagger, Stair, StirrupHooks, TextNote, Wall, WallSide, WallTop, slab_bars, wall_bars,
+    Splice, Stagger, Stair, StirrupHooks, TextNote, Wall, WallSide, WallTop, pile_bars, slab_bars, wall_bars,
 };
 pub use fill_pattern::{FillPattern, FillPatternKind, PatternLine};
 pub use graphics::{

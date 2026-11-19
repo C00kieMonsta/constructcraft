@@ -725,7 +725,9 @@ fn structure_tab(ui: &mut Ui, state: &mut AppState) {
             group(ui, t!("group-structure"), |ui| {
                 command_buttons(ui, state, &[column, beam, place(Category::Floor)]);
             });
-            group(ui, t!("group-reinforcement"), |ui| stacks(ui, state, &[&[TypicalRebar, RebarView, SteelSchedule]]));
+            group(ui, t!("group-reinforcement"), |ui| {
+                stacks(ui, state, &[&[TypicalRebar, PileCapRebar, PileRebar], &[RebarView, SteelSchedule]]);
+            });
         }
         M::Steel => {
             group(ui, t!("group-structure"), |ui| command_buttons(ui, state, &[column, beam, Bracing]));

@@ -156,6 +156,7 @@ fn key(s: &ShapeSummary) -> Vec<i64> {
             q(l.sweep.to_degrees(), 10.0),
             q(l.bend.to_degrees(), 10.0),
             i64::from(l.hook),
+            q(l.pitch, 1e4),
         ]);
     }
     out
@@ -198,6 +199,7 @@ pub fn to_mark_shape(s: &ShapeSummary) -> Option<MarkShape> {
             sweep: l.sweep.to_degrees(),
             bend: l.bend.to_degrees(),
             hook: l.hook,
+            pitch: l.pitch,
         })
         .collect();
     Some(MarkShape { closed: s.closed, legs }).filter(|m| m.legs.len() <= MAX_MARK_LEGS && m.is_valid())
@@ -214,6 +216,7 @@ pub fn from_mark_shape(m: &MarkShape) -> ShapeSummary {
             sweep: l.sweep.to_radians(),
             bend: l.bend.to_radians(),
             hook: l.hook,
+            pitch: l.pitch,
         })
         .collect();
     ShapeSummary { closed: m.closed, legs }

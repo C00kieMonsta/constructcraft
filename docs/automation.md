@@ -420,6 +420,16 @@ A ring footing under a cylindrical wall: an inverted-T strip type, an arc strip,
 {"command": "foundation_slab_create", "args": {"curves": [{"kind": "circle", "center": [0, 0], "radius": 2.5}]}}
 ```
 
+`pile_cap_rebar_create` reinforces pile caps (the given `caps`, or the caps of a `level` or of the project that have no reinforcement yet), one set per family in one undo step, laid out from each cap's layout so that they follow its type: `bottom` bars over the piles (a band of `count` bars between each two piles of a three- or four-pile cap, along the sides of the triangle or the square, and with `diagonals` across a square's diagonals; `count` bars along the line of a two-pile or line cap; a mesh `spacing` apart in a single-pile, round or ring cap), lying on the piles' heads, their ends bent up the side faces by `bend`; a `top` mesh; `sides` loops around the outline; and `stirrups` across a two-pile or line cap. Each family takes its values or `false`; caps too small for the cover come back in `skipped`. `pile_rebar_create` reinforces piles (`piles`, the piles of `caps`, or those of a level or of the project without reinforcement): `count` bars (or `spacing`) around the section from `length` below the head (0: the whole pile) up to `projection` above it, at most to the cap's top less the cover, and a spiral of `pitch` (its exact coil length in the bending schedule) or ties (`transverse`). A three-pile cap and its piles:
+
+```text
+{"command": "pile_cap_type_create", "args": {"layout": "triangle", "spacing": 1.2, "edge_distance": 0.4, "thickness": 0.8}}
+{"command": "pile_cap_create", "args": {"position": [0, 0], "type": 42}}
+{"command": "pile_cap_rebar_create", "args": {"caps": [43], "type": "Barra Ø 12,5 mm", "cover": 0.05, "bottom": {"count": 4, "bend": 0.3}, "sides": {"spacing": 0.2}}}
+{"command": "pile_rebar_create", "args": {"caps": [43], "count": 6, "length": 6.0, "transverse": "spiral", "pitch": 0.1, "cover": 0.05}}
+{"command": "bending_schedule_create", "args": {}}
+```
+
 `bracing_create` braces one bay of a frame: a host element whose braces are ordinary beams, made in one undo step and returned as `{id, members}`. The bay is `start` to `end` (the two column axes) or the two `columns`, whose base and height it then takes; `pattern` is `x`, `diagonal` (with `flip` and `alternate`), `v`, `chevron` or `k`; `stories` storeys of `height` stand one above the other from `base_offset`; `material` (`steel` or `timber`) picks the catalog row of the default brace type. `element_set` changes its parameters and regenerates the braces with their ids kept.
 
 ```text

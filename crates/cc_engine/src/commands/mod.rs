@@ -44,6 +44,7 @@ pub mod niche;
 pub mod pad;
 pub mod paint;
 pub mod phases;
+pub mod pile_rebar;
 pub mod piles;
 pub mod pipes;
 pub mod profiles;

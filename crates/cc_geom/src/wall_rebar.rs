@@ -129,6 +129,7 @@ pub(crate) fn wall_bars(g: &WallGeom, r: &Rebar, d: f64, sets: &WallSets) -> Vec
                             closed: false,
                             true_length: g.arc.is_some().then_some(to - from),
                             hooks: None,
+                            helix: None,
                         });
                     }
                 }
@@ -203,7 +204,13 @@ pub(crate) fn wall_bars(g: &WallGeom, r: &Rebar, d: f64, sets: &WallSets) -> Vec
                         continue;
                     }
                     let points = vec![g.world(u, v0).extend(z), g.world(u, v1).extend(z)];
-                    bars.push(Bar { points, closed: false, true_length: Some((v0 - v1).abs() + hooks), hooks: None });
+                    bars.push(Bar {
+                        points,
+                        closed: false,
+                        true_length: Some((v0 - v1).abs() + hooks),
+                        hooks: None,
+                        helix: None,
+                    });
                 }
             }
             bars

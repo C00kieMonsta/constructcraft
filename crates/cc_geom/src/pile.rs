@@ -132,6 +132,21 @@ pub fn cap_geom(project: &Project, e: &cc_core::Element) -> Option<CapGeom> {
     })
 }
 
+/// Why pile cap `e` has no room for reinforcement `cover` inside its faces:
+/// a plan or a depth the cover (and its piles' embedment) leaves nothing
+/// of; `None` when it has room, or it is no pile cap.
+pub fn cap_room_problem(project: &Project, e: &cc_core::Element, cover: f64) -> Option<&'static str> {
+    let c = project.pile_cap(e)?;
+    crate::cap_rebar::room_problem(&c.cap.outline(), c.thickness, c.cap.embedment, cover)
+}
+
+/// Whether the bottom bars of a cap of `layout` with `piles` piles run
+/// along the line of its piles and it takes stirrups, as a beam (two piles,
+/// or a line of them).
+pub fn cap_is_beam_like(layout: cc_core::pile::PileLayout, piles: usize) -> bool {
+    crate::cap_rebar::is_beam_like(layout, piles)
+}
+
 /// The circle of `radius` around `center` as `n` points, counter-clockwise from +X.
 fn circle(center: DVec2, radius: f64, n: usize) -> Vec<DVec2> {
     (0..n).map(|i| center + DVec2::from_angle(i as f64 / n as f64 * TAU) * radius).collect()
