@@ -216,6 +216,8 @@ impl Tessellation {
             // Curved surfaces shade smoothly across their facets, and their
             // plane coordinates run on from one facet to the next.
             let shifts = facet_shifts(solid);
+            // Faces between the slices of one body are inside it.
+            let inner = solid.inner_faces();
             for (fi, (face, normals)) in solid.faces.iter().zip(solid.vertex_normals()).enumerate() {
                 let Some(s) = part_of.get(fi).and_then(|i| parts.get_mut(*i)) else { continue };
                 let (u, v) = plane_axes(face.normal);
@@ -228,6 +230,9 @@ impl Tessellation {
                         .zip(normals)
                         .map(|(p, n)| (p.as_vec3().to_array(), n.as_vec3().to_array(), [p.dot(u) + du, p.dot(v) + dv])),
                 );
+                if inner.get(fi) == Some(&true) {
+                    continue;
+                }
                 for [a, b, c] in face.triangulate() {
                     s.triangles.extend([start + a as u32, start + b as u32, start + c as u32]);
                 }
