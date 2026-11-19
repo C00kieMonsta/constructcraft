@@ -2468,6 +2468,12 @@ fn rebar_props(ui: &mut Ui, state: &mut AppState, el: &Element, r: &cc_core::Reb
                 x.cover = v.max(0.0);
             }
         });
+        // A beam's bars along it may run into the supports its ends frame into.
+        let beam = matches!(state.project().element(r.host).map(|h| &h.kind), Some(ElementKind::Beam(_)));
+        if beam && cc_core::Anchorage::fits(&r.layout) {
+            let sides = matches!(r.layout, cc_core::RebarLayout::Sides { .. });
+            anchorage_rows(ui, state, id, r.anchorage, sides);
+        }
         // A column's vertical bars cut in lifts may splice every other bar higher.
         let column = matches!(state.project().element(r.host).map(|h| &h.kind), Some(ElementKind::Column(_)));
         if column
@@ -2478,6 +2484,49 @@ fn rebar_props(ui: &mut Ui, state: &mut AppState, el: &Element, r: &cc_core::Reb
         }
     });
     rebar_dimensions(ui, state, id);
+}
+
+/// Whether a beam's bars run into the columns and pile caps its ends frame
+/// into, and how top and bottom bars bend where a support is too shallow for
+/// the straight anchorage (side bars never bend).
+fn anchorage_rows(
+    ui: &mut Ui,
+    state: &mut AppState,
+    id: ElementId,
+    anchorage: Option<cc_core::Anchorage>,
+    sides: bool,
+) {
+    use cc_core::{AnchorHook, Anchorage};
+    let set = |state: &mut AppState, anchorage: Option<Anchorage>| {
+        crate::engine_edit::element(state, id, None, |e| {
+            if let ElementKind::Rebar(x) = &mut e.kind {
+                x.anchorage = anchorage;
+            }
+        });
+    };
+    let mut on = anchorage.is_some();
+    if row(ui, &t!("prop-rebar-anchor"), |ui| crate::table::checkbox(ui, &mut on)).changed() {
+        set(state, on.then(Anchorage::default));
+        return;
+    }
+    let Some(a) = anchorage.filter(|_| !sides) else { return };
+    let name = |h: AnchorHook| match h {
+        AnchorHook::None => t!("value-none"),
+        AnchorHook::Down => t!("anchor-hook-down"),
+        AnchorHook::Up => t!("anchor-hook-up"),
+        AnchorHook::Auto => t!("anchor-hook-auto"),
+    };
+    let mut hook = a.hook;
+    row(ui, &t!("prop-anchor-hook"), |ui| {
+        egui::ComboBox::from_id_salt(("anchor-hook", id.0)).selected_text(name(hook)).show_ui(ui, |ui| {
+            for choice in AnchorHook::ALL {
+                ui.selectable_value(&mut hook, choice, name(choice));
+            }
+        });
+    });
+    if hook != a.hook {
+        set(state, Some(Anchorage { hook, ..a }));
+    }
 }
 
 /// How much higher every other vertical bar of a column splices: none,

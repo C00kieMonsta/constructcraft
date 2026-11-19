@@ -309,6 +309,7 @@ The *Beam* tool has two modes in the options bar, as the wall tool has: *Line* d
 - **Layers**: top and bottom bars that do not fit side by side, keeping a clear distance of the bar diameter and at least 2 cm, go in a second layer above the bottom bars or below the top ones (up to four layers).
 - **Side bars**: *Add side bars* puts one bar on each side face at mid height; `rebar_create` with the `sides` layout takes a `count` per face, or a `spacing` that puts as many as keep them that far apart over the height.
 - **Lap splices**: a bar along a beam longer than the stock length (12 m, or 40' in imperial projects) is made of the fewest equal pieces, lapping by 40 bar diameters, and the splices of neighbouring bars are staggered by half a piece. `rebar_create` takes `max_length` (0 keeps whole bars) and `lap`. Schedules count and measure the pieces.
+- **Anchorage into supports**: *Anchor into Supports* in the properties of a beam's top, bottom or side bars runs them on into the columns and pile caps the beam frames into, up to the support's far face less the cover and at most 40 bar diameters (`rebar_create` `anchor` takes another length). *Anchorage Hook* (none, down, up or automatic: top bars down, bottom bars up) bends top and bottom bars by 90° where the support is too shallow for the straight length. Between two beams in line, the bars of both lap inside the support. The anchorage counts in the bars' length.
 
 ## Column sections and their reinforcement
 
