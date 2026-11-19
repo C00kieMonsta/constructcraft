@@ -2321,10 +2321,10 @@ fn rebar_layout_row(ui: &mut Ui, state: &mut AppState, id: ElementId, label: &st
             }
             finish(state, &r);
         }
-        L::Stirrups { spacing } | L::Ties { spacing } => {
+        L::Stirrups { spacing, .. } | L::Ties { spacing } => {
             length_row(ui, state, label, id, "rebar-spacing", spacing, |e, v| {
                 if let ElementKind::Rebar(x) = &mut e.kind
-                    && let L::Stirrups { spacing } | L::Ties { spacing } = &mut x.layout
+                    && let L::Stirrups { spacing, .. } | L::Ties { spacing } = &mut x.layout
                 {
                     *spacing = v.max(0.02);
                 }
@@ -2430,7 +2430,7 @@ fn reinforcement(ui: &mut Ui, state: &mut AppState, host: ElementId) {
                     cc_engine::commands::slab_rebar::SlabRebarCreate { slabs: vec![host.0], ..Default::default() };
                 crate::actions::run_command(state, command);
             } else {
-                let command = cc_engine::commands::rebar::RebarTypical { elements: vec![host.0], level: None };
+                let command = cc_engine::commands::rebar::RebarTypical { elements: vec![host.0], ..Default::default() };
                 crate::actions::run_command(state, command);
             }
         }
@@ -2460,6 +2460,9 @@ fn rebar_props(ui: &mut Ui, state: &mut AppState, el: &Element, r: &cc_core::Reb
             .map_or(String::new(), |h| if h.mark.is_empty() { tr(h.category().key()) } else { h.mark.clone() });
         readonly_row(ui, &t!("col-host"), host);
         rebar_layout_row(ui, state, id, &rebar_role(&r.layout), &r.layout);
+        if let cc_core::RebarLayout::Stirrups { hooks, .. } = r.layout {
+            stirrup_hook_rows(ui, state, id, hooks);
+        }
         length_row(ui, state, &t!("prop-cover"), id, "rebar-cover", r.cover, |e, v| {
             if let ElementKind::Rebar(x) = &mut e.kind {
                 x.cover = v.max(0.0);
@@ -2467,6 +2470,43 @@ fn rebar_props(ui: &mut Ui, state: &mut AppState, el: &Element, r: &cc_core::Reb
         });
     });
     rebar_dimensions(ui, state, id);
+}
+
+/// The hooks that close a set's stirrups: their angle (none, 90° or 135°)
+/// and, when there are hooks, their straight end in bar diameters.
+fn stirrup_hook_rows(ui: &mut Ui, state: &mut AppState, id: ElementId, hooks: Option<cc_core::StirrupHooks>) {
+    // A pick is one undo step; a dragged tail merges into one.
+    let set = |state: &mut AppState, merge: Option<u64>, hooks: Option<cc_core::StirrupHooks>| {
+        crate::engine_edit::element(state, id, merge, |e| {
+            if let ElementKind::Rebar(x) = &mut e.kind
+                && let cc_core::RebarLayout::Stirrups { hooks: h, .. } = &mut x.layout
+            {
+                *h = hooks;
+            }
+        });
+    };
+    let angle_text = |a: Option<f64>| a.map_or_else(|| t!("value-none"), |a| format!("{}°", format::trimmed(a, 0)));
+    let mut angle = hooks.map(|h| h.angle);
+    row(ui, &t!("prop-stirrup-hook"), |ui| {
+        egui::ComboBox::from_id_salt(("stirrup-hook", id.0)).selected_text(angle_text(angle)).show_ui(ui, |ui| {
+            for choice in [None, Some(90.0), Some(135.0)] {
+                ui.selectable_value(&mut angle, choice, angle_text(choice));
+            }
+        });
+    });
+    if angle != hooks.map(|h| h.angle) {
+        let base = hooks.unwrap_or_default();
+        set(state, None, angle.map(|angle| cc_core::StirrupHooks { angle, ..base }));
+    }
+    let Some(h) = hooks else { return };
+    let mut tail = h.tail;
+    let r = row(ui, &t!("prop-stirrup-tail"), |ui| {
+        ui.add(DragValue::new(&mut tail).range(0.0..=cc_core::StirrupHooks::MAX_TAIL).speed(0.1).suffix(" Ø"))
+    });
+    if r.changed() {
+        set(state, Some(key((id, "stirrup-tail"))), Some(cc_core::StirrupHooks { tail, ..h }));
+    }
+    finish(state, &r);
 }
 
 /// Count, lengths and weight of a set of bars.

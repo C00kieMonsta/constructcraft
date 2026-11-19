@@ -125,7 +125,11 @@ fn bars_by_face_share_the_corner_bars() {
     let side = ((ro * reach(ro).cos() - ri * reach(ri).cos()).powi(2)
         + (ro * reach(ro).sin() - ri * reach(ri).sin()).powi(2))
     .sqrt();
-    let exact = 2.0 * ro * reach(ro) + 2.0 * ri * reach(ri) + 2.0 * side;
+    // And the two hooks that close it: each a 135° (3/4 pi) bend around a pin, its center
+    // line 2 diameters out, and a straight end of 10 diameters, at least 5 cm.
+    let d = loops.diameter;
+    let hooks = 2.0 * (0.75 * std::f64::consts::PI * 2.0 * d + (10.0 * d).max(0.05));
+    let exact = 2.0 * ro * reach(ro) + 2.0 * ri * reach(ri) + 2.0 * side + hooks;
     assert!((tie.length() - exact).abs() < 1e-9, "{} vs {exact}", tie.length());
     assert_eq!(loops.count(), ((height - 0.06) / 0.15).floor() as usize + 1);
     // The schedule's weight is the hand calculation's.
@@ -233,7 +237,11 @@ fn a_polygon_section_has_a_face_per_side() {
     let r = s.geom().rebar[&ties].clone();
     assert_eq!(r.bars[0].points.len(), 6);
     let c = 0.03 + r.diameter / 2.0;
-    assert!(close(r.bars[0].length(), 2.4 - 8.0 * c), "{}", r.bars[0].length());
+    // Closed by two 135° hooks (3/4 pi around a pin, center line 2 diameters out) with
+    // straight ends of 10 diameters, at least 5 cm.
+    let d = r.diameter;
+    let hooks = 2.0 * (0.75 * std::f64::consts::PI * 2.0 * d + (10.0 * d).max(0.05));
+    assert!(close(r.bars[0].length(), 2.4 - 8.0 * c + hooks), "{}", r.bars[0].length());
 }
 
 #[test]
@@ -294,10 +302,14 @@ fn overlapping_stirrups_go_around_the_rectangles_of_the_section() {
     let (one, two) = (&geom.rebar[&one], &geom.rebar[&two]);
     assert_eq!(two.count(), 2 * one.count());
     let c = 0.03 + two.diameter / 2.0;
+    // Each closed by two 135° hooks: a bend of 3/4 pi around a pin (center line 2 diameters
+    // out) and a straight end of 10 diameters, at least 5 cm.
+    let d = two.diameter;
+    let hooks = 2.0 * (0.75 * std::f64::consts::PI * 2.0 * d + (10.0 * d).max(0.05));
     for bar in &two.bars {
         // Each leg of the L: 60 x 20 cm less the cover all around, closed, with four square corners.
         assert!(bar.closed && bar.points.len() == 4, "{bar:?}");
-        assert!(close(bar.length(), 2.0 * (0.6 + 0.2) - 8.0 * c), "{}", bar.length());
+        assert!(close(bar.length(), 2.0 * (0.6 + 0.2) - 8.0 * c + hooks), "{}", bar.length());
     }
     // The two of a level cross: one lies along X, the other along Y.
     let wide = |b: &cc_geom::rebar::Bar| (b.points[1] - b.points[0]).length() > (b.points[2] - b.points[1]).length();

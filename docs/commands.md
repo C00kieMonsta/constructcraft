@@ -838,7 +838,7 @@ No parameters.
 
 ### `rebar_create`
 
-*edit* — Add a set of bars to a beam or column: `layout` is `top` or `bottom` (beams), `perimeter` (columns) with `count` bars, `sides` (beams: `count` side bars on each side face, or as many as keep them `spacing` apart over the height), or `stirrups` every `spacing`. The bars are `cover` inside the faces (default 2.5 cm) and follow the host: along an arc beam they follow the arc, each at its own radius, and the stirrups are radial. Top and bottom bars that do not fit side by side (a clear distance of the bar diameter, at least 2 cm) go in a second layer. Bars along a beam longer than `max_length` are made of pieces overlapping by `lap`, the splices of neighbouring bars staggered. A column's `perimeter` bars are `count` spread around its section, or given face by face with `faces` (a bar count for each face of the section, its two corner bars included, the corner bars shared between faces; the column's `derived.faces` lists the faces in order) or `face_spacing`; on a curved face they stand at even angles. Its `stirrups` follow the section's outline, and `ties` adds cross-ties every `spacing`: a hooked bar from each bar between the corners to the bar opposite. With `max_length` a column's vertical bars are cut in lifts that lap by `lap`. `same_type` gives the set to every column (or beam) of the host's type.
+*edit* — Add a set of bars to a beam or column: `layout` is `top` or `bottom` (beams), `perimeter` (columns) with `count` bars, `sides` (beams: `count` side bars on each side face, or as many as keep them `spacing` apart over the height), or `stirrups` every `spacing`. The bars are `cover` inside the faces (default 2.5 cm) and follow the host: along an arc beam they follow the arc, each at its own radius, and the stirrups are radial. Top and bottom bars that do not fit side by side (a clear distance of the bar diameter, at least 2 cm) go in a second layer. Bars along a beam longer than `max_length` are made of pieces overlapping by `lap`, the splices of neighbouring bars staggered. A column's `perimeter` bars are `count` spread around its section, or given face by face with `faces` (a bar count for each face of the section, its two corner bars included, the corner bars shared between faces; the column's `derived.faces` lists the faces in order) or `face_spacing`; on a curved face they stand at even angles. Its `stirrups` follow the section's outline, and `ties` adds cross-ties every `spacing`: a hooked bar from each bar between the corners to the bar opposite. With `max_length` a column's vertical bars are cut in lifts that lap by `lap`. `same_type` gives the set to every column (or beam) of the host's type. Stirrups are closed by two hooks at one corner, bent into the section by `hook` degrees with straight ends of `tail` bar diameters (at least 5 cm), counted in their length and weight.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -848,6 +848,7 @@ No parameters.
 | `cover` | number | optional | Concrete cover, meters (default 0.025; 1 1/2" in imperial projects). |
 | `face_spacing` | number | optional | Columns, `perimeter`: instead of `faces`, the largest distance between bars on every face, meters. |
 | `faces` | [id, …] | optional | Columns, `perimeter`: the number of bars on each face of the section, in the order of the column's `derived.faces`, the two corner bars of a face included (at least 2). |
+| `hook` | number | optional | `stirrups`: the angle the two hooks that close each stirrup are bent by, degrees, 90 to 180 (default 135); 0 for none (the closed outline alone). |
 | `lap` | number | optional | Lap length of the splices, meters (default: 40 bar diameters). |
 | `lap_at_joins` | boolean | optional | Beams, bars along the beam: run them half a lap past each end joined to another beam that carries on in the same line (the beams of a ring), so the bars of the two lap there (default false: they stop the cover short of the end). The lap is `lap`, or 40 bar diameters where bars are kept whole (`max_length` 0). |
 | `lifts` | [number, …] | optional | Columns, `perimeter`: heights above the column's base where its vertical bars are cut, rising (the construction joints): the bars of each lift run `lap` past the next height. Instead of the equal lifts of `max_length`. |
@@ -856,16 +857,19 @@ No parameters.
 | `partition` | string | optional | The part of the structure the sets belong to (e.g. "FOUNDATION", "WALL"), which schedules filter and group by (default: none). |
 | `same_type` | boolean | optional | Also give the set to every other column (or beam) of the host's type (default false). |
 | `spacing` | number | optional | Stirrup spacing, meters (default 0.15; 6" in imperial projects), or the largest distance between side bars over the height when no `count` is given. |
+| `tail` | number | optional | `stirrups`: the straight end of each hook, in bar diameters (default 10; at least 5 cm). |
 | `type` | id or name | optional | Bar type id or name (default: the type nearest 10 mm, or 5 mm for stirrups; 1/2" and 3/8" in imperial projects). |
 
 ### `rebar_typical`
 
-*edit* — Give beams and columns without reinforcement a typical one: beams two (three when 20 cm wide or more) 10 mm bars at the bottom, two 8 mm at the top (both lap spliced past the stock length) and 5 mm stirrups every 15 cm; columns four 10 mm bars (six in round ones) and 5 mm ties every 15 cm. Default: every beam and column of `level` (or of the project).
+*edit* — Give beams and columns without reinforcement a typical one: beams two (three when 20 cm wide or more) 10 mm bars at the bottom, two 8 mm at the top (both lap spliced past the stock length) and 5 mm stirrups every 15 cm; columns four 10 mm bars (six in round ones) and 5 mm ties every 15 cm. The stirrups are closed by two hooks (`hook`, `tail`). Default: every beam and column of `level` (or of the project).
 
 | Parameter | Type | | Description |
 |---|---|---|---|
 | `elements` | [id, …] | optional | Beam and column ids (default: all of `level`, or of the project). |
+| `hook` | number | optional | The angle the two hooks that close each stirrup are bent by, degrees, 90 to 180 (default 135); 0 for none. |
 | `level` | id or name | optional | Level id or name, when no elements are given. |
+| `tail` | number | optional | The straight end of each hook, in bar diameters (default 10; at least 5 cm). |
 
 ### `rebar_copy`
 
@@ -927,7 +931,7 @@ No parameters.
 
 ### `strip_rebar_create`
 
-*edit* — Reinforce strip footings, straight or arc: bars across the footing (`transverse_spacing` apart along it; radial in an arc strip) and bars along it (`longitudinal_spacing` apart across it; ring bars in an arc strip, each as long as the arc at its own radius), in the bottom and top `layers`. A top bar across the footing follows its top, up the slopes of a haunched section and flat between the faces of its beam, and its ends turn down to the bottom layer, closing the edges. The bars along a haunched footing follow the slopes, and leave the beam to its own: `beam` gives it stirrups over the full height of the section, top, bottom and side bars (a haunched strip gets stirrups and two top bars by default; `false` for none). Bars along the strip longer than `max_length` are lap spliced, neighbouring splices staggered. One set per layer and direction, in one undo step; the bars follow the strip.
+*edit* — Reinforce strip footings, straight or arc: bars across the footing (`transverse_spacing` apart along it; radial in an arc strip) and bars along it (`longitudinal_spacing` apart across it; ring bars in an arc strip, each as long as the arc at its own radius), in the bottom and top `layers`. A top bar across the footing follows its top, up the slopes of a haunched section and flat between the faces of its beam, and its ends turn down to the bottom layer, closing the edges. The bars along a haunched footing follow the slopes, and leave the beam to its own: `beam` gives it stirrups over the full height of the section (closed by two hooks, `hook` and `tail`), top, bottom and side bars (a haunched strip gets stirrups and two top bars by default; `false` for none). Bars along the strip longer than `max_length` are lap spliced, neighbouring splices staggered. One set per layer and direction, in one undo step; the bars follow the strip.
 
 | Parameter | Type | | Description |
 |---|---|---|---|

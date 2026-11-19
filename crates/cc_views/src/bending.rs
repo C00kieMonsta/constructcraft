@@ -12,7 +12,9 @@
 //! The shape of a mark is written as a code (CSV, the app's table):
 //! `straight 500`, `L 30-470`, `U 30-470-30`, `Z …`, `bent …`,
 //! `stirrup 14x44`, `ring R=50 L=314`, `closed …`, `arc R=220 L=345`, legs
-//! of arcs as `(R=… L=…)`; lengths as [`format::bar_length`] writes them.
+//! of arcs as `(R=… L=…)`, and a loop closed by hooks as the loop's code with
+//! each hook's angle and straight end (`stirrup 14x44 hook 135° 5 hook 135°
+//! 5`); lengths as [`format::bar_length`] writes them.
 //! Sheets draw a sketch instead ([`BarSketch`]): the bar's legs laid flat in
 //! order, to proportion (very short straight legs drawn longer), normalized
 //! into the cell, each leg labelled with its length.
@@ -60,6 +62,16 @@ fn arc_text(l: &LegSummary) -> String {
 
 /// The code of a shape (see the module's documentation).
 pub fn shape_code(shape: &ShapeSummary) -> String {
+    // A loop closed by hooks: the loop's code, then each hook's angle and straight end.
+    if let Some((closed, hooks)) = shape.hooked_loop() {
+        let hooks: Vec<String> = hooks
+            .iter()
+            .map(|h| {
+                format!("hook {}° {}", format::trimmed(h.bend.abs().to_degrees(), 0), format::bar_length(h.length))
+            })
+            .collect();
+        return format!("{} {}", shape_code(&closed), hooks.join(" "));
+    }
     // The shorter end leg first.
     let (first, last) = (shape.legs.first().map_or(0.0, |l| l.length), shape.legs.last().map_or(0.0, |l| l.length));
     let s = if !shape.closed && first > last + 1e-9 { shape.reversed() } else { shape.clone() };
@@ -95,15 +107,19 @@ pub fn shape_code(shape: &ShapeSummary) -> String {
 /// another, each bend turning the way the bar turns, the longest straight
 /// leg along x and the rest above it, short straight legs of open bars
 /// drawn longer, each leg labelled with its length (arcs also with their
-/// radius).
+/// radius). A loop closed by hooks is drawn closed, its hooks bent into it
+/// at its closing corner (drawn longer when short, and not labelled).
 pub fn sketch_of(shape: &ShapeSummary) -> BarSketch {
     let longest = shape.legs.iter().filter(|l| l.radius.is_none()).map(|l| l.length).fold(0.0, f64::max);
+    let hooked = shape.hooked_loop().is_some();
     let least = if shape.closed { 0.0 } else { SHORTEST_LEG * longest };
     let mut at = DVec2::ZERO;
     let mut heading = 0.0_f64;
     let mut legs: Vec<Vec<DVec2>> = Vec::new();
     for leg in shape.legs.iter().take(MAX_SKETCH_LEGS) {
         let dir = DVec2::from_angle(heading);
+        // The legs of a hooked loop keep their lengths, so that it closes.
+        let least = if hooked && !leg.hook { 0.0 } else { least };
         let points = match leg.radius.filter(|r| r.is_finite() && *r > 0.0 && leg.sweep != 0.0) {
             Some(radius) => {
                 // Around the center on the side the arc turns to.
@@ -128,7 +144,7 @@ pub fn sketch_of(shape: &ShapeSummary) -> BarSketch {
         .legs
         .iter()
         .enumerate()
-        .filter(|(i, l)| l.radius.is_none() && *i < legs.len())
+        .filter(|(i, l)| l.radius.is_none() && !l.hook && *i < legs.len())
         .max_by(|a, b| a.1.length.total_cmp(&b.1.length))
         .map(|(i, _)| i);
     let ends = |legs: &[Vec<DVec2>], i: usize| legs.get(i).and_then(|ps| ps.first().copied().zip(ps.last().copied()));
@@ -151,6 +167,10 @@ pub fn sketch_of(shape: &ShapeSummary) -> BarSketch {
     let centroid = centroid_of(&legs);
     let mut labels = Vec::new();
     for (leg, pts) in shape.legs.iter().zip(&legs) {
+        // A stirrup's hooks are written in its code, not dimensioned as legs.
+        if hooked && leg.hook {
+            continue;
+        }
         let (Some(&a), Some(&b)) = (pts.first(), pts.last()) else { continue };
         let (at, dir) = match leg.radius {
             Some(_) => {
@@ -476,6 +496,42 @@ mod tests {
         let stirrup = [[0.0, 0.0, 0.0], [0.14, 0.0, 0.0], [0.14, 0.0, 0.44], [0.0, 0.0, 0.44]];
         assert_eq!(code(&stirrup, true), "stirrup 14x44");
         assert_eq!(code(&[], false), "");
+    }
+
+    /// A 5 mm stirrup closed by two hooks: 135 degrees, straight ends of 10
+    /// diameters (5 cm), or 90 degrees.
+    fn hooked(angle_deg: f64) -> ShapeSummary {
+        let points = [[0.0, 0.0, 0.0], [0.14, 0.0, 0.0], [0.14, 0.0, 0.44], [0.0, 0.0, 0.44]];
+        let hooks = cc_geom::rebar::LoopHooks { angle: angle_deg.to_radians(), radius: 0.01, tail: 0.05 };
+        let bar = Bar { hooks: Some(hooks), ..Bar::new(points.iter().map(|p| DVec3::from_array(*p)).collect(), true) };
+        summary(&bar)
+    }
+
+    #[test]
+    fn hooked_stirrups_have_codes_and_sketches() {
+        format::set_units(&cc_core::Units::default());
+        assert_eq!(shape_code(&hooked(135.0)), "stirrup 14x44 hook 135° 5 hook 135° 5");
+        assert_eq!(shape_code(&hooked(90.0)), "stirrup 14x44 hook 90° 5 hook 90° 5");
+        // The canonical reading the marks keep reads the same.
+        assert_eq!(shape_code(&cc_geom::bar_marks::canonical(&hooked(135.0))), "stirrup 14x44 hook 135° 5 hook 135° 5");
+        // The sketch: the loop closed, two hooks at its closing corner, only the sides labelled.
+        let s = sketch_of(&hooked(135.0));
+        assert_eq!(s.legs.len(), 6);
+        let texts: Vec<&str> = s.labels.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(texts, ["14", "44", "14", "44"]);
+        let corner = s.legs[1][0];
+        assert!(
+            s.legs[4][1].distance(corner) < 1e-9
+                && s.legs[0][1].distance(corner) < 1e-9
+                && s.legs[5][0].distance(corner) < 1e-9
+        );
+        // Each hook points into the loop.
+        let (lo, hi) = s.legs[1..5]
+            .iter()
+            .flatten()
+            .fold((DVec2::INFINITY, DVec2::NEG_INFINITY), |(a, b), p| (a.min(*p), b.max(*p)));
+        let inside = |p: DVec2| p.x > lo.x - 1e-9 && p.x < hi.x + 1e-9 && p.y > lo.y - 1e-9 && p.y < hi.y + 1e-9;
+        assert!(inside(s.legs[0][0]) && inside(s.legs[5][1]), "{:?}", s.legs);
     }
 
     #[test]

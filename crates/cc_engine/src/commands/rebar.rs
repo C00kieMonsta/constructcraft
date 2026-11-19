@@ -7,7 +7,8 @@ use crate::registry::{Command, CommandKind};
 use crate::session::Session;
 use crate::t;
 use cc_core::{
-    BarFace, Category, ElementId, ElementKind, ElementTypeId, FaceBars, Project, Rebar, RebarLayout, Splice, TypeData,
+    BarFace, Category, ElementId, ElementKind, ElementTypeId, FaceBars, Project, Rebar, RebarLayout, Splice,
+    StirrupHooks, TypeData,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -72,6 +73,24 @@ fn face_bars(p: &Project, host: ElementId, counts: Option<&[u32]>, spacing: Opti
         }
         (None, None) => Ok(Vec::new()),
     }
+}
+
+/// The hooks of new stirrups: bent by `hook` degrees (default 135; 0 for
+/// none), with straight ends of `tail` bar diameters (default 10).
+pub(crate) fn stirrup_hooks(hook: Option<f64>, tail: Option<f64>) -> Result<Option<StirrupHooks>> {
+    let defaults = StirrupHooks::default();
+    let angle = finite(hook.unwrap_or(defaults.angle), "hook")?;
+    if angle == 0.0 {
+        return Ok(None);
+    }
+    let hooks = StirrupHooks { angle, tail: finite(tail.unwrap_or(defaults.tail), "tail")? };
+    if !hooks.is_valid() {
+        return Err(EngineError::invalid(format!(
+            "hook must be 90 to 180 degrees (or 0 for none) and tail 0 to {} bar diameters",
+            StirrupHooks::MAX_TAIL
+        )));
+    }
+    Ok(Some(hooks))
 }
 
 /// Stock length of bars, meters: 12 m, or 40' in imperial projects.
@@ -142,6 +161,10 @@ pub(crate) fn splice(
 /// opposite. With `max_length` a column's vertical bars are cut in lifts
 /// that lap by `lap`. `same_type` gives the set to every column (or beam) of
 /// the host's type.
+///
+/// Stirrups are closed by two hooks at one corner, bent into the section
+/// by `hook` degrees with straight ends of `tail` bar diameters (at least
+/// 5 cm), counted in their length and weight.
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RebarCreate {
@@ -202,6 +225,13 @@ pub struct RebarCreate {
     /// Also give the set to every other column (or beam) of the host's type (default false).
     #[serde(default)]
     pub same_type: Option<bool>,
+    /// `stirrups`: the angle the two hooks that close each stirrup are bent by, degrees, 90 to
+    /// 180 (default 135); 0 for none (the closed outline alone).
+    #[serde(default)]
+    pub hook: Option<f64>,
+    /// `stirrups`: the straight end of each hook, in bar diameters (default 10; at least 5 cm).
+    #[serde(default)]
+    pub tail: Option<f64>,
 }
 
 impl Command for RebarCreate {
@@ -245,7 +275,7 @@ impl Command for RebarCreate {
                 match self.layout.as_str() {
                     "ties" if beam => return Err(EngineError::invalid("cross-ties go in columns")),
                     "ties" => RebarLayout::Ties { spacing },
-                    _ => RebarLayout::Stirrups { spacing },
+                    _ => RebarLayout::Stirrups { spacing, hooks: stirrup_hooks(self.hook, self.tail)? },
                 }
             }
             other => {
@@ -254,6 +284,9 @@ impl Command for RebarCreate {
                 )));
             }
         };
+        if (self.hook.is_some() || self.tail.is_some()) && !matches!(layout, RebarLayout::Stirrups { .. }) {
+            return Err(EngineError::invalid("`hook` and `tail` go with `stirrups`"));
+        }
         let by_face = self.faces.is_some() || self.face_spacing.is_some();
         if by_face && (beam || !matches!(layout, RebarLayout::Longitudinal { face: BarFace::Perimeter, .. })) {
             return Err(EngineError::invalid("`faces` and `face_spacing` go with the `perimeter` bars of a column"));
@@ -351,8 +384,9 @@ impl Command for RebarCreate {
 /// Give beams and columns without reinforcement a typical one: beams two
 /// (three when 20 cm wide or more) 10 mm bars at the bottom, two 8 mm at the
 /// top (both lap spliced past the stock length) and 5 mm stirrups every 15 cm; columns four 10 mm bars (six in round
-/// ones) and 5 mm ties every 15 cm. Default: every beam and column of
-/// `level` (or of the project).
+/// ones) and 5 mm ties every 15 cm. The stirrups are closed by two hooks
+/// (`hook`, `tail`). Default: every beam and column of `level` (or of the
+/// project).
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RebarTypical {
@@ -362,6 +396,13 @@ pub struct RebarTypical {
     /// Level id or name, when no elements are given.
     #[serde(default)]
     pub level: Option<Ref>,
+    /// The angle the two hooks that close each stirrup are bent by, degrees, 90 to 180
+    /// (default 135); 0 for none.
+    #[serde(default)]
+    pub hook: Option<f64>,
+    /// The straight end of each hook, in bar diameters (default 10; at least 5 cm).
+    #[serde(default)]
+    pub tail: Option<f64>,
 }
 
 impl Command for RebarTypical {
@@ -385,6 +426,7 @@ impl Command for RebarTypical {
         };
         let [cover, spacing, main_bar, top_bar, stirrup_bar] = p.defaults().rebar;
         let (main, top, ties) = (bar_type(p, main_bar)?, bar_type(p, top_bar)?, bar_type(p, stirrup_bar)?);
+        let hooks = stirrup_hooks(self.hook, self.tail)?;
         let mut todo = Vec::new();
         let mut skipped = 0;
         for (id, beam) in hosts {
@@ -393,7 +435,7 @@ impl Command for RebarTypical {
                 skipped += 1;
                 continue;
             }
-            let stirrups = RebarLayout::Stirrups { spacing };
+            let stirrups = RebarLayout::Stirrups { spacing, hooks };
             if beam {
                 let wide = matches!(p.element_type(e.type_id).map(|t| &t.data), Some(TypeData::Beam { width, .. }) if *width >= 0.2 - 1e-9);
                 let bottom = RebarLayout::Longitudinal { face: BarFace::Bottom, count: if wide { 3 } else { 2 } };

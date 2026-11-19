@@ -402,7 +402,10 @@ fn the_metric_scene_reads_as_before() {
         ";Ø 20 mm;3,05;CW;0,0 %;",
         ";Descida;Ø 8,0 mm;",
         ";1,20;8,3 %;",
-        ";;22;;17,60;5,48 kg;",
+        // The rebar totals: 2 bars of 3 m (3.70 kg) and 20 stirrups of 5 mm, each around a
+        // 0.145 m square and closed by two 135° hooks (2 x (3/4 pi x 0.01 + 0.05) m): 20 x
+        // 0.7271 = 14.54 m, 2.24 kg (they were 11.60 m and 1.79 kg without the hooks).
+        ";;22;;20,54;5,94 kg;",
     ] {
         assert!(within(want), "{want}");
     }
