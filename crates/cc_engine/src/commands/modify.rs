@@ -272,6 +272,50 @@ impl Command for ElementFlip {
     }
 }
 
+/// Flip walls: swap their exterior and interior sides, their location line
+/// staying where it is (the Space key on selected walls). The wall is
+/// walked the other way: its layers mirror about the location line (a wall
+/// located by a finish face keeps that face on the line, its body goes to
+/// the other side); arcs keep their circle and splines their curve; its
+/// doors, windows and niches stay in place facing the same way; its
+/// profile and curtain grid are reversed along it; its reinforcement stays
+/// on the faces looking the same way; dimensions keep their points. One
+/// undo step; pinned walls are left alone. A wall that cannot be flipped
+/// (an arc or spline too tight for its body on the other side) fails the
+/// command and nothing changes.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WallFlip {
+    /// Ids of the walls.
+    pub walls: Vec<u64>,
+}
+
+/// A wall that cannot be flipped, as a command error.
+fn flip_error(id: ElementId, e: cc_core::wall_flip::FlipError) -> EngineError {
+    match e {
+        cc_core::wall_flip::FlipError::NotWall => EngineError::invalid(format!("element {} is not a wall", id.0)),
+        e => EngineError::rejected(format!("wall {} cannot be flipped: {e}", id.0)),
+    }
+}
+
+impl Command for WallFlip {
+    const NAME: &'static str = "wall_flip";
+    const KIND: CommandKind = CommandKind::Edit;
+    fn run(self, s: &mut Session) -> Result<Value> {
+        let ids = refs::elements(s.project(), &self.walls)?;
+        for id in &ids {
+            s.project().check_wall_flip(*id).map_err(|e| flip_error(*id, e))?;
+        }
+        let (free, pinned) = unpinned(s.project(), ids);
+        let changed = if free.is_empty() {
+            Vec::new()
+        } else {
+            edit(s, t!("tx-wall-flip"), |e| e.flip_walls(&free).map_err(|(id, err)| flip_error(id, err)))?
+        };
+        Ok(json!({ "changed": ids_json(&changed), "walls": ids_json(&free), "pinned_skipped": ids_json(&pinned) }))
+    }
+}
+
 /// Allow or disallow joining at one end of a wall or beam. A wall end joins
 /// other walls; a beam end stops at the face of a structural column it lies
 /// in, or meets other beams at the same depth (mitered corners, butt joints).
@@ -832,8 +876,11 @@ impl Command for GridsAlignEnds {
 }
 
 /// Turn elements a quarter: components and columns rotate 90° about their
-/// insertion point; doors and windows flip to the other side of their wall
-/// (the Space key on a selection). Others and pinned elements are left alone.
+/// insertion point; doors and windows flip to the other side of their wall;
+/// walls swap their exterior and interior sides as `wall_flip` does, their
+/// doors, windows and niches going with them, selected or not (the Space
+/// key on a selection), in the same undo step. Others, pinned elements and
+/// walls that cannot be flipped (`not_flipped`) are left alone.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ElementsTurn {
@@ -847,6 +894,14 @@ impl Command for ElementsTurn {
     fn run(self, s: &mut Session) -> Result<Value> {
         let ids = refs::elements(s.project(), &self.ids)?;
         let (free, pinned) = unpinned(s.project(), ids);
+        let (walls, free): (Vec<ElementId>, Vec<ElementId>) =
+            free.into_iter().partition(|id| s.project().element(*id).is_some_and(|e| e.as_wall().is_some()));
+        let (walls, not_flipped): (Vec<ElementId>, Vec<ElementId>) =
+            walls.into_iter().partition(|id| s.project().check_wall_flip(*id).is_ok());
+        // Doors, windows and niches of a flipped wall go with it.
+        let with_wall = |id: &ElementId| {
+            s.project().element(*id).and_then(|e| e.as_hosted()).is_some_and(|h| walls.contains(&h.host))
+        };
         let turnable: Vec<ElementId> = free
             .into_iter()
             .filter(|id| {
@@ -859,10 +914,17 @@ impl Command for ElementsTurn {
                             | ElementKind::Window(_)
                             | ElementKind::Niche(_)
                     )
-                )
+                ) && !with_wall(id)
             })
             .collect();
-        edit(s, t!("tx-rotate"), |e| {
+        if turnable.is_empty() && walls.is_empty() {
+            return Ok(
+                json!({ "changed": [], "pinned_skipped": ids_json(&pinned), "not_flipped": ids_json(&not_flipped) }),
+            );
+        }
+        let name = if turnable.is_empty() { t!("tx-wall-flip") } else { t!("tx-rotate") };
+        edit(s, name, |e| {
+            e.flip_walls(&walls).map_err(|(id, err)| flip_error(id, err))?;
             for id in &turnable {
                 let Some(el) = e.element_mut(*id) else { continue };
                 match &mut el.kind {
@@ -876,7 +938,12 @@ impl Command for ElementsTurn {
             }
             Ok(())
         })?;
-        Ok(json!({ "changed": ids_json(&turnable), "pinned_skipped": ids_json(&pinned) }))
+        let changed: Vec<ElementId> = walls.into_iter().chain(turnable).collect();
+        Ok(json!({
+            "changed": ids_json(&changed),
+            "pinned_skipped": ids_json(&pinned),
+            "not_flipped": ids_json(&not_flipped),
+        }))
     }
 }
 

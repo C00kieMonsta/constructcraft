@@ -563,6 +563,23 @@ pub fn detach_tops(state: &mut AppState) {
     }
 }
 
+/// Flip Walls: swap the exterior and interior sides of the selected walls
+/// (`wall_flip`, one undo step); an error goes to the status bar.
+pub fn flip_walls(state: &mut AppState) {
+    let walls: Vec<u64> = state
+        .selection
+        .iter()
+        .filter(|id| state.project().element(**id).is_some_and(|e| e.as_wall().is_some()))
+        .map(|id| id.0)
+        .collect();
+    if walls.is_empty() {
+        return;
+    }
+    if crate::actions::run_command(state, cmd::WallFlip { walls }).is_some() {
+        state.message = t!("msg-walls-flipped");
+    }
+}
+
 /// A click of the join tool on `hovered` (a joinable element or nothing):
 /// the first pick stays, each further one is joined with it (or unjoined).
 pub(crate) fn join_pick(state: &mut AppState, hovered: Option<ElementId>, unjoin: bool) {

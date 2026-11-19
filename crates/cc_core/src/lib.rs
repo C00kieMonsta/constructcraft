@@ -87,6 +87,7 @@ mod types;
 pub mod units;
 mod view;
 pub mod view_mark;
+pub mod wall_flip;
 pub mod wall_framing;
 pub mod wall_ops;
 pub mod wall_profile;
