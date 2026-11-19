@@ -342,6 +342,8 @@ pub(crate) fn shortcuts(ctx: &egui::Context, state: &mut AppState) {
             state.typed.clear();
         } else if crate::detail_ui::escape(state) {
             // The curve being drawn was dropped; the tool stays.
+        } else if crate::tools::spline_wall_escape(state) {
+            // The spline wall being drawn was ended where it was.
         } else if !state.interaction.is_idle() {
             state.interaction = Default::default();
         } else if state.tool != Tool::Select {
