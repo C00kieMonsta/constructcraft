@@ -1289,7 +1289,8 @@ impl Project {
 
     /// Whether set `r` has a host that takes its layout: wall bars in walls
     /// (not spline ones), slab bars in floors and foundation slabs, strip bars
-    /// in strip footings, the other layouts in beams and columns.
+    /// in strip footings, a cap's bars (and stirrups) in pile caps, pile bars
+    /// in piles, the other layouts in beams and columns.
     pub fn rebar_host_fits(&self, r: &crate::Rebar) -> bool {
         self.element(r.host).is_some_and(|h| match &h.kind {
             ElementKind::Wall(w) => r.layout.in_wall() && w.spline.is_none(),
@@ -1297,10 +1298,15 @@ impl Project {
             ElementKind::Foundation(f) => match f.shape {
                 crate::FoundationShape::Slab { .. } => r.layout.in_slab(),
                 crate::FoundationShape::Strip { .. } => r.layout.fits_strip(),
-                crate::FoundationShape::Pad { .. } => false,
+                crate::FoundationShape::Pad { .. } => r.layout.fits_cap() && self.pile_cap(h).is_some(),
             },
+            ElementKind::Pile(_) => r.layout.in_pile(),
             ElementKind::Beam(_) | ElementKind::Column(_) => {
-                !r.layout.in_wall() && !r.layout.in_slab() && !r.layout.in_strip()
+                !r.layout.in_wall()
+                    && !r.layout.in_slab()
+                    && !r.layout.in_strip()
+                    && !r.layout.in_cap()
+                    && !r.layout.in_pile()
             }
             _ => false,
         })

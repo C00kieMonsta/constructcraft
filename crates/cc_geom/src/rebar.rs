@@ -59,6 +59,30 @@ pub struct Bar {
     /// The hooks that close a closed bar (a stirrup), counted in its length
     /// but not drawn in its center line.
     pub hooks: Option<LoopHooks>,
+    /// The coil an open bar winds along when it is a spiral (its center line
+    /// is the coil in chords and `true_length` the coil's exact length).
+    pub helix: Option<Helix>,
+}
+
+/// A spiral's coil: its center-line radius, its rise per turn and its
+/// number of turns (meters, and turns not necessarily whole).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Helix {
+    pub radius: f64,
+    pub pitch: f64,
+    pub turns: f64,
+}
+
+impl Helix {
+    /// Whether the values are finite and above zero.
+    pub fn is_valid(&self) -> bool {
+        [self.radius, self.pitch, self.turns].iter().all(|v| v.is_finite() && *v > 0.0)
+    }
+
+    /// The exact length of the coil: each turn `sqrt((2πr)² + pitch²)`.
+    pub fn length(&self) -> f64 {
+        self.turns * (std::f64::consts::TAU * self.radius).hypot(self.pitch)
+    }
 }
 
 /// The two hooks that close a stirrup, both at its first corner
@@ -94,7 +118,7 @@ impl LoopHooks {
 impl Bar {
     /// A bar along straight segments.
     pub fn new(points: Vec<DVec3>, closed: bool) -> Self {
-        Self { points, closed, true_length: None, hooks: None }
+        Self { points, closed, true_length: None, hooks: None, helix: None }
     }
 
     /// The length of the bar: its center line (or true length) and its hooks.
@@ -228,15 +252,23 @@ pub fn build_rebar(
     beams: &BTreeMap<ElementId, BeamGeom>,
     walls: &BTreeMap<ElementId, crate::WallGeom>,
     foundations: &BTreeMap<ElementId, crate::FoundationGeom>,
+    piles: &BTreeMap<ElementId, crate::pile::PileGeom>,
 ) -> BTreeMap<ElementId, RebarGeom> {
-    // The largest stirrup of each host: longitudinal bars sit inside it.
+    // The largest stirrup of each host: longitudinal bars sit inside it. A
+    // cap's side loops, and a pile's spiral and ties, are kept apart.
     let mut stirrup: BTreeMap<ElementId, f64> = BTreeMap::new();
+    let mut skin: BTreeMap<ElementId, f64> = BTreeMap::new();
+    let mut tie: BTreeMap<ElementId, f64> = BTreeMap::new();
     for e in project.elements.values() {
-        if let ElementKind::Rebar(r) = &e.kind
-            && matches!(r.layout, RebarLayout::Stirrups { .. })
-            && let Some(d) = diameter(project, e)
-        {
-            let s = stirrup.entry(r.host).or_insert(0.0);
+        let ElementKind::Rebar(r) = &e.kind else { continue };
+        let map = match r.layout {
+            RebarLayout::Stirrups { .. } => &mut stirrup,
+            RebarLayout::CapSides { .. } => &mut skin,
+            RebarLayout::PileSpiral { .. } | RebarLayout::PileTies { .. } => &mut tie,
+            _ => continue,
+        };
+        if let Some(d) = diameter(project, e) {
+            let s = map.entry(r.host).or_insert(0.0);
             *s = s.max(d);
         }
     }
@@ -336,6 +368,38 @@ pub fn build_rebar(
                     beam_bars(&part, data.foundation_depth(), r, d, ds, beam_past(r, d, g, &strip_ends), [None, None])
                 }
             }
+            // A pile cap: its own bars, and stirrups across a cap of two piles or a line.
+            ElementKind::Foundation(_) if foundations.get(&r.host).is_some_and(|f| f.cap.is_some()) => {
+                let Some(f) = foundations.get(&r.host) else { continue };
+                let Some(cap) = f.cap.as_ref() else { continue };
+                let Some(placed) = project.pile_cap(host) else { continue };
+                let pile_size = project
+                    .cap_pile_type(placed.cap)
+                    .and_then(|t| project.element_type(t))
+                    .and_then(|t| match t.data {
+                        TypeData::Pile { section, .. } => Some(section.size()),
+                        _ => None,
+                    })
+                    .unwrap_or(cc_core::pile::DEFAULT_DIAMETER);
+                let input = crate::cap_rebar::CapInput {
+                    cap,
+                    layout: placed.cap.layout,
+                    z: f.z_range,
+                    embedment: placed.cap.embedment,
+                    pile_size,
+                    stirrup: ds,
+                    skin: skin.get(&r.host).copied().unwrap_or(0.0),
+                };
+                crate::cap_rebar::cap_bars(&input, r, d)
+            }
+            // A pile: its bars reach into its cap, at most to the cap's top less the cover.
+            ElementKind::Pile(_) => {
+                let Some(g) = piles.get(&r.host) else { continue };
+                let cap_top = g.cap.and_then(|c| foundations.get(&c)).map(|f| f.z_range.1);
+                let input =
+                    crate::pile_rebar::PileInput { pile: g, cap_top, tie: tie.get(&r.host).copied().unwrap_or(0.0) };
+                crate::pile_rebar::pile_bars(&input, r, d)
+            }
             ElementKind::Floor(_) | ElementKind::Foundation(_) => {
                 let Some(slab) = crate::slab_rebar::Slab::of(project, host) else { continue };
                 // The largest bar of the other sets of the layer that an inner set lies inside.
@@ -418,7 +482,7 @@ fn half_lap(r: &Rebar, d: f64) -> f64 {
 }
 
 /// The lap of the set `r` of bars `d` thick: its splices', else 40 diameters.
-fn lap_of(r: &Rebar, d: f64) -> f64 {
+pub(crate) fn lap_of(r: &Rebar, d: f64) -> f64 {
     r.splice.filter(Splice::is_valid).map_or(40.0 * d, |s| s.lap)
 }
 
@@ -787,7 +851,7 @@ fn layers(count: usize, across: f64, d: f64) -> Vec<usize> {
 /// Heights of side bars between `lo` and `hi` (the lowest and highest bar
 /// lines of the section): `count` evenly spread, or with a count of 0 as
 /// many as keep them at most `spacing` apart.
-fn side_heights(count: u32, spacing: f64, lo: f64, hi: f64) -> Vec<f64> {
+pub(crate) fn side_heights(count: u32, spacing: f64, lo: f64, hi: f64) -> Vec<f64> {
     if hi <= lo {
         return Vec::new();
     }
@@ -898,7 +962,13 @@ fn beam_bars(
         | RebarLayout::SlabRadial { .. }
         | RebarLayout::SlabTrim { .. }
         | RebarLayout::StripTransverse { .. }
-        | RebarLayout::StripLongitudinal { .. } => Vec::new(),
+        | RebarLayout::StripLongitudinal { .. }
+        | RebarLayout::CapBottom { .. }
+        | RebarLayout::CapTop { .. }
+        | RebarLayout::CapSides { .. }
+        | RebarLayout::PileLongitudinal { .. }
+        | RebarLayout::PileSpiral { .. }
+        | RebarLayout::PileTies { .. } => Vec::new(),
         RebarLayout::Stirrups { spacing, hooks } => {
             let inset = cover + d / 2.0;
             let (v, z0, z1) = ((g.half - inset).max(0.0), inset, (height - inset).max(inset));
@@ -1009,7 +1079,7 @@ pub(crate) fn hook(turn: f64, d: f64) -> f64 {
 /// `outline` (a closed loop, counter-clockwise) from its sharpest convex
 /// corner, where a stirrup's hooks go: the corner that turns furthest
 /// inward, the first of those alike (a loop without one as it is).
-fn from_convex_corner(outline: Vec<DVec2>) -> Vec<DVec2> {
+pub(crate) fn from_convex_corner(outline: Vec<DVec2>) -> Vec<DVec2> {
     let n = outline.len();
     if n < 3 {
         return outline;
@@ -1098,7 +1168,13 @@ fn column_bars(
         | RebarLayout::SlabRadial { .. }
         | RebarLayout::SlabTrim { .. }
         | RebarLayout::StripTransverse { .. }
-        | RebarLayout::StripLongitudinal { .. } => Vec::new(),
+        | RebarLayout::StripLongitudinal { .. }
+        | RebarLayout::CapBottom { .. }
+        | RebarLayout::CapTop { .. }
+        | RebarLayout::CapSides { .. }
+        | RebarLayout::PileLongitudinal { .. }
+        | RebarLayout::PileSpiral { .. }
+        | RebarLayout::PileTies { .. } => Vec::new(),
         RebarLayout::Stirrups { spacing, hooks } => {
             let inset = r.cover + d / 2.0;
             let hooks = hooks.and_then(|h| LoopHooks::of(&h, d));
@@ -1144,6 +1220,7 @@ fn column_bars(
                     closed: true,
                     true_length: length,
                     hooks,
+                    helix: None,
                 })
                 .collect()
         }

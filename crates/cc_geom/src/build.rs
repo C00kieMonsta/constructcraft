@@ -454,7 +454,7 @@ impl ModelGeometry {
         geom.build_foundations(project);
         geom.build_piles(project);
         geom.build_structure(project);
-        geom.rebar = crate::rebar::build_rebar(project, &geom.beams, &geom.walls, &geom.foundations);
+        geom.rebar = crate::rebar::build_rebar(project, &geom.beams, &geom.walls, &geom.foundations, &geom.piles);
         geom.build_connections(project);
         geom.build_components(project);
         geom.build_masses(project);

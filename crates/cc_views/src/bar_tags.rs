@@ -37,7 +37,10 @@ fn spacing(project: &Project, set: ElementId) -> Option<Spacing> {
         | RebarLayout::SlabStraight { spacing, .. }
         | RebarLayout::SlabRing { spacing, .. }
         | RebarLayout::StripTransverse { spacing, .. }
-        | RebarLayout::StripLongitudinal { spacing, .. } => Some(Spacing::One(*spacing)),
+        | RebarLayout::StripLongitudinal { spacing, .. }
+        | RebarLayout::CapTop { spacing, .. }
+        | RebarLayout::PileTies { spacing, .. }
+        | RebarLayout::PileSpiral { pitch: spacing, .. } => Some(Spacing::One(*spacing)),
         RebarLayout::SlabTrim { spacing, count, .. } if *count > 1 => Some(Spacing::One(*spacing)),
         RebarLayout::WallHorizontal { zones, .. } => {
             let first = zones.first()?.spacing;

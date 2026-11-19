@@ -47,6 +47,7 @@ mod niche;
 mod obj;
 mod pad;
 mod phases;
+mod pile_rebar;
 mod piles;
 mod pipes;
 mod profiles;

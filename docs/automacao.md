@@ -420,6 +420,16 @@ Uma sapata em anel sob uma parede cilíndrica: um tipo de sapata corrida em T in
 {"command": "foundation_slab_create", "args": {"curves": [{"kind": "circle", "center": [0, 0], "radius": 2.5}]}}
 ```
 
+`pile_cap_rebar_create` arma blocos sobre estacas (os `caps` indicados, ou os blocos de um `level` ou do projeto ainda sem armadura), um conjunto por família num só passo de desfazer, dispostos a partir da disposição de cada bloco, de modo que acompanham o seu tipo: barras inferiores `bottom` sobre as estacas (uma faixa de `count` barras entre cada duas estacas de um bloco de três ou quatro estacas, ao longo dos lados do triângulo ou do quadrado e, com `diagonals`, nas diagonais do quadrado; `count` barras ao longo da linha de um bloco de duas estacas ou em linha; uma malha a cada `spacing` num bloco de uma estaca, circular ou anelar), apoiadas nas cabeças das estacas, com as pontas dobradas para cima nas faces laterais por `bend`; uma malha superior `top`; barras de pele `sides` em volta do contorno; e estribos `stirrups` num bloco de duas estacas ou em linha. Cada família recebe os seus valores ou `false`; blocos pequenos demais para o cobrimento voltam em `skipped`. `pile_rebar_create` arma estacas (`piles`, as estacas de `caps`, ou as de um nível ou do projeto ainda sem armadura): `count` barras (ou `spacing`) em volta da seção, de `length` abaixo da cabeça (0: a estaca inteira) até `projection` acima dela, no máximo até o topo do bloco menos o cobrimento, e uma espiral de passo `pitch` (com o comprimento exato da hélice na tabela de dobramento) ou estribos (`transverse`). Um bloco de três estacas e as suas estacas:
+
+```text
+{"command": "pile_cap_type_create", "args": {"layout": "triangle", "spacing": 1.2, "edge_distance": 0.4, "thickness": 0.8}}
+{"command": "pile_cap_create", "args": {"position": [0, 0], "type": 42}}
+{"command": "pile_cap_rebar_create", "args": {"caps": [43], "type": "Barra Ø 12,5 mm", "cover": 0.05, "bottom": {"count": 4, "bend": 0.3}, "sides": {"spacing": 0.2}}}
+{"command": "pile_rebar_create", "args": {"caps": [43], "count": 6, "length": 6.0, "transverse": "spiral", "pitch": 0.1, "cover": 0.05}}
+{"command": "bending_schedule_create", "args": {}}
+```
+
 `bracing_create` contraventa um vão de pórtico: um elemento hospedeiro cujas barras são vigas comuns, criado em um passo de desfazer e devolvido como `{id, members}`. O vão vai de `start` a `end` (os eixos dos dois pilares) ou fica entre os dois `columns`, de quem toma a base e a altura; `pattern` é `x`, `diagonal` (com `flip` e `alternate`), `v`, `chevron` ou `k`; `stories` pavimentos de altura `height` ficam um sobre o outro a partir de `base_offset`; `material` (`steel` ou `timber`) escolhe a linha de catálogo do tipo padrão das barras. `element_set` muda seus parâmetros e regenera as barras mantendo seus ids.
 
 ```text
