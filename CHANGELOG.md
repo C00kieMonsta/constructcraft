@@ -33,6 +33,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Floor plans drew the pieces of a component through each other, and curves traced twice zigzagged (#378). Edges covered by a piece above them are now hidden, except in the wireframe style.
 - A niche component with no pieces could not be created, and one saved to a `.ccomp` file did not load (#373).
 - Type Properties stayed in front of the component environment after *Edit Component* (#385).
+- IFC import swapped the project's name and number, made a new bar type for each source type name instead of using the project's type of the same size, and gave bars the other program's numeric element id as their mark (#369). The project name now comes from `LongName` and the number from `Name` (export writes them the same way), a bar takes the project's bar type of its nominal diameter and grade when there is one, a new bar type keeps the file's steel grade, and a purely numeric tag is not taken as a mark.
 - Schedules filtered and sorted diameters and slopes as text, so a rebar schedule filtered by a diameter of at least 0.008 showed no rows and sorted Ø 12.5 before Ø 5.0 (#367). Diameters (bars, pipes, conduits, bolts) now compare as numbers in meters and slopes as rise over run, a filter's value may be a JSON number, and the host column is titled Host instead of Wall.
 
 ## [0.12.0] - 2026-11-14

@@ -35,6 +35,7 @@ pub(crate) fn check(original: &Project) {
     let (imported, report) = round_trip(original);
     assert_eq!(report.schema, "IFC4");
     assert_eq!(imported.info.name, original.info.name);
+    assert_eq!(imported.info.number, original.info.number);
     assert_eq!(imported.info.uid, original.info.uid);
     assert_eq!(imported.levels.len(), original.levels.len());
     for (a, b) in original.levels.iter().zip(&imported.levels) {

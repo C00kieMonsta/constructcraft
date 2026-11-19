@@ -867,10 +867,18 @@ impl<'a> Importer<'a> {
 
     fn read_project_info(&mut self) {
         let Some(e) = self.f.get(self.project_id) else { return };
-        if let Some(name) = e.arg(2).as_str().filter(|s| !s.is_empty()) {
+        // `Name` is the short identifier (the project number) and `LongName`
+        // the full name (#369). With only one of them (or both the same), it
+        // is the name.
+        let text = |i: usize| e.arg(i).as_str().map(str::trim).filter(|s| !s.is_empty());
+        let (name, number) = match (text(2), text(5)) {
+            (Some(short), Some(long)) if short != long => (Some(long), short),
+            (short, long) => (short.or(long), ""),
+        };
+        if let Some(name) = name {
             self.p.info.name = name.to_string();
         }
-        self.p.info.number = e.arg(5).as_str().unwrap_or_default().to_string();
+        self.p.info.number = number.to_string();
         self.p.info.uid = e.arg(0).as_str().and_then(guid::decode).map(Uid).unwrap_or_default();
         self.p.info.client.clear();
         self.p.info.author.clear();
@@ -2990,6 +2998,8 @@ impl<'a> Importer<'a> {
             text.filter(|t| !t.is_empty() && t.chars().count() <= cc_core::bar_marks::MAX_MARK_TEXT)
         };
         let (partition, bar_mark, own_grade) = (own("Partition"), own("BarMark"), own("Grade"));
+        // Whether this program wrote the set (its tag is then the mark given to it).
+        let ours = partition.is_some() || bar_mark.is_some() || own_grade.is_some() || own("Mark").is_some();
         // Another program's sets say their part of the structure in a property of that name.
         let partition = partition.or_else(|| self.foreign_partition(id)).unwrap_or_default();
         let rebar = ShapedRebar { bars, properties: self.property_sets(id), partition, bar_mark };
@@ -3021,31 +3031,77 @@ impl<'a> Importer<'a> {
         let size = format!("Ø {:.1} mm", diameter * 1000.0);
         // The type's steel grade: this program's own, else the bar's.
         let fits = |g: &String| g.chars().count() <= cc_core::bar_marks::MAX_MARK_TEXT;
+        // This program's grade is its type's: only a type of that grade keeps it.
+        let strict_grade = own_grade.is_some();
         let type_grade = own_grade.or_else(|| grade.clone().filter(fits)).unwrap_or_default();
         let wanted_grade = type_grade.clone();
         let fallback = grade.map_or_else(|| size.clone(), |g| format!("{size} {g}"));
         let name = self.type_entity(id).and_then(|t| t.arg(2).as_str()).map(clean_name).filter(|s| !s.is_empty());
         let uid = self.type_uid(id);
-        let type_id = self.find_or_add_type(
-            Category::Rebar,
-            name,
-            fallback,
-            uid,
-            |t| match t {
-                // A bar of a grade takes a type of that grade.
-                TypeData::Rebar { diameter: d, material: m, grade: g, .. } => {
-                    (d - diameter).abs() <= 1e-5
-                        && material.as_ref().is_none_or(|want| m == want)
-                        && (wanted_grade.is_empty() || *g == wanted_grade)
-                }
-                _ => false,
-            },
-            || TypeData::Rebar { diameter, material: fallback_material, grade: type_grade, mass_per_meter: None },
-        );
-        // The bar mark: the tag, else the name.
-        let mark = Some(Self::tag(e)).filter(|t| !t.is_empty()).or_else(|| e.arg(2).as_str().map(clean_name));
+        // A bar of a grade takes a type of that grade.
+        let same = |t: &TypeData| match t {
+            TypeData::Rebar { diameter: d, material: m, grade: g, .. } => {
+                (d - diameter).abs() <= 1e-5
+                    && material.as_ref().is_none_or(|want| m == want)
+                    && (wanted_grade.is_empty() || *g == wanted_grade)
+            }
+            _ => false,
+        };
+        // The type the file's type object names (a round trip), else a bar
+        // type of the project of the same nominal size and grade (#369), else
+        // a new one.
+        let named = name
+            .as_deref()
+            .and_then(|n| self.p.types_of(Category::Rebar).find(|t| t.name == n && same(&t.data)))
+            .map(|t| t.id);
+        let type_id = match named.or_else(|| self.nominal_bar_type(diameter, &wanted_grade, strict_grade)) {
+            Some(type_id) => type_id,
+            None => self.find_or_add_type(Category::Rebar, name, fallback, uid, same, || TypeData::Rebar {
+                diameter,
+                material: fallback_material,
+                grade: type_grade,
+                mass_per_meter: None,
+            }),
+        };
+        // The bar mark: the tag, else the name. A purely numeric tag of
+        // another program is its element id, not a mark (#369).
+        let tag = Self::tag(e);
+        let foreign_id = !ours && !tag.trim().is_empty() && tag.trim().chars().all(|c| c.is_ascii_digit());
+        let mark = if foreign_id {
+            None
+        } else {
+            Some(tag).filter(|t| !t.is_empty()).or_else(|| e.arg(2).as_str().map(clean_name))
+        };
         self.add_element(id, e, level, type_id, mark.unwrap_or_default(), ElementKind::ShapedRebar(rebar));
         true
+    }
+
+    /// The project's bar type of nominal `diameter` (within 0.05 mm) whose
+    /// grade is `grade` or, unless `strict`, that has none (any type when
+    /// `grade` is empty): one of that very grade first, then the closest
+    /// size, then the first.
+    fn nominal_bar_type(&self, diameter: f64, grade: &str, strict: bool) -> Option<ElementTypeId> {
+        const TOLERANCE: f64 = 0.05e-3;
+        let key =
+            |g: &str| -> String { g.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_uppercase).collect() };
+        let wanted = key(grade);
+        self.p
+            .types_of(Category::Rebar)
+            .filter_map(|t| match &t.data {
+                TypeData::Rebar { diameter: d, grade: g, .. } if (d - diameter).abs() <= TOLERANCE => {
+                    let g = key(g);
+                    (wanted.is_empty() || (g.is_empty() && !strict) || g == wanted).then_some((
+                        t,
+                        g == wanted,
+                        (d - diameter).abs(),
+                    ))
+                }
+                _ => None,
+            })
+            .min_by(|(a, a_same, a_d), (b, b_same, b_d)| {
+                b_same.cmp(a_same).then(a_d.total_cmp(b_d)).then(a.id.0.cmp(&b.id.0))
+            })
+            .map(|(t, ..)| t.id)
     }
 
     fn import_generic(&mut self, id: u32, e: &Entity) -> bool {

@@ -406,20 +406,18 @@ impl<'a> Exporter<'a> {
         self.axis_ctx = sub(w, "Axis", "GRAPH_VIEW");
         let info = &self.project.info;
         let name = if info.name.is_empty() { "ConstructCraft" } else { info.name.as_str() };
+        // IFC's `Name` is the short identifier (the project number) and
+        // `LongName` the full name (#369); without a number, `Name` holds the
+        // name and `LongName` is left out.
+        let (short, long) = if info.number.trim().is_empty() {
+            (name.to_string(), Value::Null)
+        } else {
+            (info.number.clone(), Value::from(name))
+        };
         let gid = self.guid_of(self.project.info.uid, "project");
         self.w.add(
             "IFCPROJECT",
-            args![
-                gid,
-                Value::Null,
-                name,
-                Value::Null,
-                Value::Null,
-                opt_str(&info.number),
-                Value::Null,
-                vec![model],
-                units
-            ],
+            args![gid, Value::Null, short, Value::Null, Value::Null, long, Value::Null, vec![model], units],
         )
     }
 
