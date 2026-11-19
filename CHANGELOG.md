@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- IFC export wrote round and arched slabs as polylines of 120 points, and stirrups came back from a file without their beam and a diameter short (#368). Floors, foundation slabs, ceilings and flat roofs drawn with circles or arcs are now written with exact curves: a lone circle as `IfcCircleProfileDef`, other outlines and their openings as composite curves of polylines and trimmed circles. Import reads them back as the same circles and arcs (a trimmed circle is one arc, a circle in two halves one circle), so areas and volumes are exact, and ceilings and flat roofs keep their curves too. A reinforcement set laid out in a beam, column, wall, strip or slab carries its host and layout in `ConstructCAD_Rebar`, and comes back as a set of that host, laid out again with its true bar lengths; without its host it comes in as shaped bars, stirrups closed to their whole length.
 - Walls on the same corners at heights that do not overlap, such as a foundation wall under a parapet, lost their corner joins (#387). Each wall now joins only the walls of its level that overlap it in height.
 - Floor plans drew the pieces of a component through each other, and curves traced twice zigzagged (#378). Edges covered by a piece above them are now hidden, except in the wireframe style.
 - A niche component with no pieces could not be created, and one saved to a `.ccomp` file did not load (#373).

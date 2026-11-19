@@ -334,6 +334,26 @@ fn ring_sector(curves: &[cc_core::sketch::SketchCurve]) -> Option<RingSector> {
     Some(RingSector { center, r_in, r_out, sweep, axis })
 }
 
+/// Close a stirrup as this program writes it (see the export's `directrix`):
+/// from the middle of its first side round to that side's start, and back
+/// along it at most a diameter (`2 * radius`) towards where it started.
+fn close_stirrup(path: &mut [DVec3], radius: f64) {
+    if path.len() < 4 {
+        return;
+    }
+    let [first, .., corner, last] = path else { return };
+    let (side, back) = (*corner - *first, *last - *first);
+    let length = side.length();
+    if !(length > 1e-9 && radius.is_finite()) {
+        return;
+    }
+    let along = back.dot(side) / length;
+    let off = (back - side * (along / length)).length();
+    if along > 1e-9 && along <= 2.0 * radius + 1e-6 && off <= 1e-6 {
+        *last = *first;
+    }
+}
+
 /// Entities that are not physical objects: spatial structure, zones,
 /// features cut from their hosts, ports, annotations and analysis models.
 fn is_non_physical(name: &str) -> bool {
@@ -405,6 +425,9 @@ struct Importer<'a> {
     /// Piles this program wrote under a cap: the pile, the cap's GlobalId and
     /// the pile's place in its layout (linked when the import ends).
     cap_piles: Vec<(ElementId, String, u32)>,
+    /// Bar sets this program wrote laid out in a host: the shaped bars they
+    /// came in as, the host's GlobalId and the set (restored when the import ends).
+    bar_sets: Vec<(ElementId, String, cc_core::Rebar)>,
     /// Pile cap types and the name of their piles' type (resolved when the import ends).
     cap_types: Vec<(ElementTypeId, String)>,
     /// Curtain walls imported as such: their plates and members come in with them.
@@ -534,6 +557,7 @@ impl<'a> Importer<'a> {
             has_parts: HashMap::new(),
             framed_roofs: Default::default(),
             cap_piles: Vec::new(),
+            bar_sets: Vec::new(),
             cap_types: Vec::new(),
             curtain_walls: Default::default(),
             products: Vec::new(),
@@ -1266,6 +1290,7 @@ impl<'a> Importer<'a> {
 
     fn finish(&mut self) {
         self.link_piles();
+        let swapped = self.restore_bar_sets();
         self.import_design_options();
         self.import_phases();
         let levels: Vec<(LevelId, String)> = self.p.levels.iter().map(|l| (l.id, l.name.clone())).collect();
@@ -1288,6 +1313,7 @@ impl<'a> Importer<'a> {
             v.phase_filter = v.phase_filter.or(filter);
         }
         self.p.repair();
+        self.check_bar_sets(swapped);
     }
 
     // --- Lookups ---
@@ -2148,6 +2174,16 @@ impl<'a> Importer<'a> {
         (footprint.len() >= 3 && polygon::area(&footprint) > 1e-4).then_some((footprint, z0, z1, thickness))
     }
 
+    /// The outline of a body that is one vertical extrusion of a profile
+    /// drawn with arcs or circles and no voids, and the sketch of those
+    /// curves, which draws it (#368).
+    fn curved_outline(body: &Body) -> Option<(Vec<DVec2>, Sketch)> {
+        let ex = body.sole_extrusion().filter(|e| e.is_vertical())?;
+        let sketch = Sketch { curves: ex.footprint_curves()? };
+        let outline = sketch.outline().ok()?;
+        (outline.len() >= 3 && polygon::area(&outline) > 1e-4).then_some((outline, sketch))
+    }
+
     /// Openings voiding a product that a native element (other than a wall,
     /// whose doors and windows cut it) could not show.
     fn has_openings(&self, id: u32) -> bool {
@@ -2323,7 +2359,11 @@ impl<'a> Importer<'a> {
             |d| matches!(d, TypeData::Ceiling { thickness: t, .. } if (t - thickness).abs() < TYPE_TOL),
             || TypeData::Ceiling { thickness, material },
         );
-        let ceiling = Ceiling { boundary, height_offset: z0 - elevation, cuts: Vec::new(), sketch: None };
+        let (boundary, sketch) = match Self::curved_outline(&body) {
+            Some((outline, sketch)) => (outline, Some(sketch)),
+            None => (boundary, None),
+        };
+        let ceiling = Ceiling { boundary, height_offset: z0 - elevation, cuts: Vec::new(), sketch };
         self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Ceiling(ceiling));
         true
     }
@@ -2363,7 +2403,19 @@ impl<'a> Importer<'a> {
             return self.add_roof(id, e, footprint, z0, thickness, shape);
         }
         if let Some((footprint, z0, _, thickness)) = Self::sketch(&body, false) {
-            return self.add_roof(id, e, footprint, z0, thickness, RoofShape::Flat);
+            // An outline of arcs and circles keeps them as the roof's sketch (#368).
+            let Some((outline, sketch)) = Self::curved_outline(&body) else {
+                return self.add_roof(id, e, footprint, z0, thickness, RoofShape::Flat);
+            };
+            if !self.add_roof(id, e, outline, z0, thickness, RoofShape::Flat) {
+                return false;
+            }
+            if let Some(&(roof, _)) = self.products.last()
+                && let Some(ElementKind::Roof(r)) = self.p.elements.get_mut(&roof).map(|e| &mut e.kind)
+            {
+                r.sketch = Some(sketch);
+            }
+            return true;
         }
         // Roofs as written by this program: one closed body whose vertical
         // faces (eaves and gables) outline the roof and its openings, and
@@ -2990,7 +3042,6 @@ impl<'a> Importer<'a> {
             return false;
         }
         let (level, elevation) = self.level_for(id, z0);
-        let bars = lines.into_iter().map(|l| l.into_iter().map(|p| p - DVec3::Z * elevation).collect()).collect();
         // The partition and the mark given by hand, as this program writes them.
         let own = |name: &str| {
             let is_set = |n: &str| n == crate::export::REBAR_PSET;
@@ -2998,8 +3049,24 @@ impl<'a> Importer<'a> {
             text.filter(|t| !t.is_empty() && t.chars().count() <= cc_core::bar_marks::MAX_MARK_TEXT)
         };
         let (partition, bar_mark, own_grade) = (own("Partition"), own("BarMark"), own("Grade"));
+        // A set laid out in a host: the host's GlobalId and the layout (#368).
+        let laid_out = {
+            let is_set = |n: &str| n == crate::export::REBAR_PSET;
+            let first = |name: &str| self.pset_texts(id, &is_set, name).first().map(|t| t.to_string());
+            first("Host").zip(first("Layout"))
+        };
         // Whether this program wrote the set (its tag is then the mark given to it).
-        let ours = partition.is_some() || bar_mark.is_some() || own_grade.is_some() || own("Mark").is_some();
+        let ours = partition.is_some()
+            || bar_mark.is_some()
+            || own_grade.is_some()
+            || own("Mark").is_some()
+            || laid_out.is_some();
+        // This program's stirrups stop a diameter short of where they start,
+        // so their disks do not meet: closed again, they have their length.
+        if ours {
+            lines.iter_mut().for_each(|l| close_stirrup(l, radius));
+        }
+        let bars = lines.into_iter().map(|l| l.into_iter().map(|p| p - DVec3::Z * elevation).collect()).collect();
         // Another program's sets say their part of the structure in a property of that name.
         let partition = partition.or_else(|| self.foreign_partition(id)).unwrap_or_default();
         let rebar = ShapedRebar { bars, properties: self.property_sets(id), partition, bar_mark };
@@ -3072,8 +3139,77 @@ impl<'a> Importer<'a> {
         } else {
             Some(tag).filter(|t| !t.is_empty()).or_else(|| e.arg(2).as_str().map(clean_name))
         };
-        self.add_element(id, e, level, type_id, mark.unwrap_or_default(), ElementKind::ShapedRebar(rebar));
+        let element =
+            self.add_element(id, e, level, type_id, mark.unwrap_or_default(), ElementKind::ShapedRebar(rebar));
+        // Laid out again in its host when the import ends, if the host comes in.
+        if let Some((host, layout)) = laid_out
+            && let Some(layout) = cc_core::curtain::from_text::<cc_core::Rebar>(&layout)
+        {
+            self.bar_sets.push((element, host, layout));
+        }
         true
+    }
+
+    /// Sets this program wrote laid out in a host ([`crate::export::REBAR_PSET`]'s
+    /// `Host` and `Layout`) become native sets of the host again when it was
+    /// imported as a native element that takes the layout (#368), so their
+    /// bars have their true lengths and go with the host. The swapped sets
+    /// and what they were, for [`Self::check_bar_sets`].
+    fn restore_bar_sets(&mut self) -> Vec<(ElementId, ElementKind, LevelId)> {
+        let pending = std::mem::take(&mut self.bar_sets);
+        if pending.is_empty() {
+            return Vec::new();
+        }
+        let by_uid: HashMap<Uid, ElementId> =
+            self.p.elements.values().filter(|e| e.uid != Uid::default()).map(|e| (e.uid, e.id)).collect();
+        let mut swapped = Vec::new();
+        for (id, host, mut rebar) in pending {
+            let Some(host) = guid::decode(host.trim()).map(Uid).and_then(|u| by_uid.get(&u).copied()) else {
+                continue;
+            };
+            let Some(ElementKind::ShapedRebar(shaped)) = self.p.element(id).map(|e| &e.kind) else { continue };
+            rebar.host = host;
+            rebar.partition = shaped.partition.clone();
+            rebar.bar_mark = shaped.bar_mark.clone();
+            let Some(host_level) = self.p.element(host).map(|h| h.level) else { continue };
+            if !(rebar.is_valid() && self.p.rebar_host_fits(&rebar)) {
+                continue;
+            }
+            if let Some(e) = self.p.elements.get_mut(&id) {
+                let kind = std::mem::replace(&mut e.kind, ElementKind::Rebar(rebar));
+                swapped.push((id, kind, std::mem::replace(&mut e.level, host_level)));
+            }
+        }
+        swapped
+    }
+
+    /// Sets made native again whose layout no longer draws the bars of the
+    /// file (as many, within a diameter and a centimeter of their bounds)
+    /// go back to the shaped bars they came in as: the host changed.
+    fn check_bar_sets(&mut self, swapped: Vec<(ElementId, ElementKind, LevelId)>) {
+        if swapped.is_empty() {
+            return;
+        }
+        let geom = cc_geom::ModelGeometry::build(&self.p);
+        for (id, shaped, level) in swapped {
+            let elevation = self.p.level_elevation(level);
+            let fits = match (&shaped, geom.rebar.get(&id)) {
+                (ElementKind::ShapedRebar(s), Some(g)) if s.bars.len() == g.bars.len() => {
+                    let bounds = |pts: &mut dyn Iterator<Item = DVec3>| {
+                        pts.fold((DVec3::INFINITY, DVec3::NEG_INFINITY), |(lo, hi), p| (lo.min(p), hi.max(p)))
+                    };
+                    let file = bounds(&mut s.bars.iter().flatten().map(|p| *p + DVec3::Z * elevation));
+                    let laid = bounds(&mut g.bars.iter().flat_map(|b| b.points.iter().copied()));
+                    let tol = g.diameter + 0.01;
+                    file.0.distance(laid.0) <= tol && file.1.distance(laid.1) <= tol
+                }
+                _ => false,
+            };
+            if !fits && let Some(e) = self.p.elements.get_mut(&id) {
+                e.kind = shaped;
+                e.level = level;
+            }
+        }
     }
 
     /// The project's bar type of nominal `diameter` (within 0.05 mm) whose
