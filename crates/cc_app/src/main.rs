@@ -79,6 +79,7 @@ mod steel_building_ui;
 mod sun_overlay;
 mod sun_ui;
 mod systems_dialog;
+mod tab_list;
 mod table;
 mod tag_type_ui;
 mod text_tool;
