@@ -448,7 +448,7 @@ No parameters.
 | `mid` | [x, y] | optional | A point on the arc between the ends: makes an arc wall through the three points. |
 | `profile` | [JSON, …] | optional | An elevation profile (see `wall_profile_set`): the outline of the wall's face as curves in its elevation frame, `[u, z]` meters along `start`→`end` and above its base. Straight walls only. |
 | `radius` | number | optional | Arc walls: the radius in meters, positive when the arc turns counter-clockwise from `start` to `end`, negative clockwise; at least half the distance between the ends. Ignored when `mid` or `bulge` is given. |
-| `structural` | boolean | optional | A structural wall (default: as the wall type says). |
+| `structural` | boolean | optional | A structural wall, one that takes reinforcement (default: as the wall type says; the template's concrete wall types are structural, its masonry and partitions are not). Changing the wall's type later leaves it as it is. |
 | `through` | [[x, y], …] | optional | Spline walls: the points `[x, y]` the wall line passes through between `start` and `end`, in order (at most 63; none makes a straight spline): a smooth curve through them all, whose bends must leave the face inside them a radius of 5 cm at least. |
 | `top_level` | id or name | optional | Level the top is attached to, instead of a height. |
 | `top_offset` | number | optional | Offset of the top from `top_level`, meters. |
@@ -885,7 +885,7 @@ No parameters.
 
 ### `wall_rebar_create`
 
-*edit* — Reinforce walls, straight or arc: `horizontal` bars up the wall (ring bars in an arc wall, each as long as the arc at its own radius) and `vertical` bars along it near each face, and `ties` between the faces. With none of the three given, horizontal and vertical bars every 15 cm on both faces. Bars lie `cover` inside the faces of the wall's structure (its core layers), stop at its ends and around its doors and windows, and those longer than `max_length` are lap spliced, neighbouring splices staggered. Horizontal bars may close up towards the base (`zones`); vertical bars may cover part of the height, start between those of another set (`offset`) and have bent ends. Each call adds sets, so a second call makes the additional bars of a zone. One set per family and face, in one undo step; the bars follow the wall.
+*edit* — Reinforce walls, straight or arc: `horizontal` bars up the wall (ring bars in an arc wall, each as long as the arc at its own radius) and `vertical` bars along it near each face, and `ties` between the faces. With none of the three given, horizontal and vertical bars every 15 cm on both faces. Bars lie `cover` inside the faces of the wall's structure (its core layers), stop at its ends and around its doors and windows, and those longer than `max_length` are lap spliced, neighbouring splices staggered. Horizontal bars may close up towards the base (`zones`); vertical bars may cover part of the height, start between those of another set (`offset`) and have bent ends. Each call adds sets, so a second call makes the additional bars of a zone. One set per family and face, in one undo step; the bars follow the wall. Without `walls`, only structural walls are reinforced: the others that could take bars are listed in `not_structural`, with a `warning` when no wall was reinforced.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -1346,15 +1346,16 @@ No parameters.
 
 ### `sweep_create`
 
-*edit* — Create a swept profile: the profile of its type carried along `path` in plan, `base_offset` above the level, on the left of the path walking along it (`flip` puts it on the right); `closed` runs the path back to its first point (around a room). A project without a sweep type gets one (a baseboard).
+*edit* — Create a swept profile: the profile of its type carried along `path` in plan, `base_offset` above the level, on the left of the path walking along it (`flip` puts it on the right); `closed` runs the path back to its first point (around a room). Instead of points, the path may be drawn with `curves` (lines and arcs chained end to end, or one circle), as `floor_create` takes them: arcs stay arcs (the profile follows them square to the path, and the volume is exact), the path runs the way the first curve runs and is closed when the chain closes; a circle runs counter-clockwise, so the profile is inside it unless flipped. A project without a sweep type gets one (a baseboard).
 
 | Parameter | Type | | Description |
 |---|---|---|---|
-| `path` | [[x, y], …] | required | Points of the path in plan (at least 2; 3 when closed). |
 | `base_offset` | number | optional | Height of the path above the level, meters (default 0). |
-| `closed` | boolean | optional | Run the path back to its first point. |
+| `closed` | boolean | optional | Run the path back to its first point (with `curves`: the curves must close). |
+| `curves` | [JSON, …] | optional | The path drawn with curves instead of points: lines, arcs (`bulge` or `through`) and circles (alone), as in `floor_create`; rectangles and polygons make closed paths of lines. |
 | `flip` | boolean | optional | Put the profile on the right of the path. |
 | `level` | id or name | optional | Level id or name (default: the lowest level). |
+| `path` | [[x, y], …] | optional | Points of the path in plan (at least 2; 3 when closed). Give these or `curves`. |
 | `type` | id or name | optional | Type id or name (default: the category's default type). |
 
 ### `sweep_type_create`

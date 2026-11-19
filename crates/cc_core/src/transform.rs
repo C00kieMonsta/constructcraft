@@ -251,9 +251,11 @@ impl Element {
             }
             ElementKind::Sweep(s) => {
                 s.path.iter_mut().for_each(p);
-                // A mirror keeps the profile on the same side of the wall it follows.
+                // A mirror keeps the profile on the same side of the wall it follows,
+                // and turns the arcs the other way between their mirrored ends.
                 if t.mirror {
                     s.flip = !s.flip;
+                    s.bulges.iter_mut().for_each(|b| *b = -*b);
                 }
             }
             ElementKind::Railing(r) => {
