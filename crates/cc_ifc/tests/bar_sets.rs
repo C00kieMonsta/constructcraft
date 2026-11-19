@@ -47,7 +47,7 @@ fn beam_with_bars() -> (Project, ElementId, ElementId, ElementId) {
     let beam_t = p.default_type(Category::Beam).unwrap();
     assert!(matches!(p.element_type(beam_t).unwrap().data, TypeData::Beam { width: 0.15, height: 0.4, .. }));
     let beam = add(&mut p, beam_t, ElementKind::Beam(Beam::new(DVec2::ZERO, DVec2::new(5.0, 0.0), 3.0)));
-    let stirrups = Rebar::new(beam, RebarLayout::Stirrups { spacing: 0.15 }, 0.025);
+    let stirrups = Rebar::new(beam, RebarLayout::Stirrups { spacing: 0.15, hooks: None }, 0.025);
     let (thin, thick) = (bar_type(&p, 0.005), bar_type(&p, 0.010));
     let stirrups = add(&mut p, thin, ElementKind::Rebar(stirrups));
     let bottom = Rebar::new(beam, RebarLayout::Longitudinal { face: BarFace::Bottom, count: 3 }, 0.025);

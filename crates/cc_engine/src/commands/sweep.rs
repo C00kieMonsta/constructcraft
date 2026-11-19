@@ -9,7 +9,7 @@ use crate::refs::{self, Point, Ref, finite, point};
 use crate::registry::{Command, CommandKind};
 use crate::session::Session;
 use crate::t;
-use cc_core::profile_sweep::{MAX_PATH_POINTS, Sweep, baseboard, check_profile};
+use cc_core::profile_sweep::{MAX_PATH_POINTS, MAX_STATIONS, Sweep, baseboard, check_profile, path_from_curves};
 use cc_core::sketch::Sketch;
 use cc_core::{Category, ElementKind, ElementType, ElementTypeId, Project, TypeData};
 use glam::DVec2;
@@ -59,14 +59,24 @@ fn profile_from(points: Option<&[Point]>, curves: Option<&[CurveArg]>) -> Result
 /// Create a swept profile: the profile of its type carried along `path` in
 /// plan, `base_offset` above the level, on the left of the path walking
 /// along it (`flip` puts it on the right); `closed` runs the path back to
-/// its first point (around a room). A project without a sweep type gets
-/// one (a baseboard).
+/// its first point (around a room). Instead of points, the path may be
+/// drawn with `curves` (lines and arcs chained end to end, or one circle),
+/// as `floor_create` takes them: arcs stay arcs (the profile follows them
+/// square to the path, and the volume is exact), the path runs the way the
+/// first curve runs and is closed when the chain closes; a circle runs
+/// counter-clockwise, so the profile is inside it unless flipped. A
+/// project without a sweep type gets one (a baseboard).
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct SweepCreate {
-    /// Points of the path in plan (at least 2; 3 when closed).
+    /// Points of the path in plan (at least 2; 3 when closed). Give these or `curves`.
+    #[serde(default)]
     pub path: Vec<Point>,
-    /// Run the path back to its first point.
+    /// The path drawn with curves instead of points: lines, arcs (`bulge` or `through`) and
+    /// circles (alone), as in `floor_create`; rectangles and polygons make closed paths of lines.
+    #[serde(default)]
+    pub curves: Option<Vec<CurveArg>>,
+    /// Run the path back to its first point (with `curves`: the curves must close).
     #[serde(default)]
     pub closed: bool,
     /// Level id or name (default: the lowest level).
@@ -87,18 +97,18 @@ impl Command for SweepCreate {
     const NAME: &'static str = "sweep_create";
     const KIND: CommandKind = CommandKind::Edit;
     fn run(self, s: &mut Session) -> Result<Value> {
-        if self.path.len() > MAX_PATH_POINTS {
-            return Err(EngineError::invalid(format!("the path has more than {MAX_PATH_POINTS} points")));
-        }
-        let mut path = self.path.iter().map(|p| point(*p)).collect::<Result<Vec<_>>>()?;
-        path.dedup_by(|a, b| a.distance(*b) < 1e-6);
-        if self.closed && path.len() > 1 && path.first().zip(path.last()).is_some_and(|(a, b)| a.distance(*b) < 1e-6) {
-            path.pop();
-        }
-        let needed = if self.closed { 3 } else { 2 };
-        if path.len() < needed {
-            return Err(EngineError::invalid(format!("the path needs at least {needed} distinct points")));
-        }
+        let (path, bulges, closed) = match &self.curves {
+            Some(_) if !self.path.is_empty() => return Err(EngineError::invalid("give path or curves, not both")),
+            Some(curves) => {
+                let sketch = super::sketch::sketch_of(curves)?;
+                let made = path_from_curves(&sketch.curves).map_err(|e| EngineError::invalid(e.message()))?;
+                if self.closed && !made.closed {
+                    return Err(EngineError::invalid("closed: the curves do not close"));
+                }
+                (made.points, made.bulges, made.closed)
+            }
+            None => (points_path(&self.path, self.closed)?, Vec::new(), self.closed),
+        };
         let p = s.project();
         let level = refs::level_or_first(p, self.level.as_ref())?;
         let base_offset = finite(self.base_offset.unwrap_or(0.0), "base_offset")?;
@@ -106,7 +116,13 @@ impl Command for SweepCreate {
             (None, None) => None,
             (r, _) => Some(refs::type_of(p, Category::Sweep, r.as_ref())?),
         };
-        let sweep = Sweep { path, closed: self.closed, base_offset, flip: self.flip };
+        let sweep = Sweep { path, closed, base_offset, flip: self.flip, bulges };
+        if !sweep.is_valid() {
+            return Err(EngineError::invalid(format!(
+                "the path is too long or too short: at most {MAX_PATH_POINTS} points and {MAX_STATIONS} stations \
+                 (arcs count one every 3°)"
+            )));
+        }
         let id = edit(s, t!("tx-create-sweep"), |e| {
             let type_id = match ty {
                 Some(t) => t,
@@ -119,6 +135,24 @@ impl Command for SweepCreate {
         })?;
         Ok(created(s, id))
     }
+}
+
+/// A path from points: checked, repeated points dropped (and the last when
+/// it repeats the first of a closed path).
+fn points_path(points: &[Point], closed: bool) -> Result<Vec<DVec2>> {
+    if points.len() > MAX_PATH_POINTS {
+        return Err(EngineError::invalid(format!("the path has more than {MAX_PATH_POINTS} points")));
+    }
+    let mut path = points.iter().map(|p| point(*p)).collect::<Result<Vec<_>>>()?;
+    path.dedup_by(|a, b| a.distance(*b) < 1e-6);
+    if closed && path.len() > 1 && path.first().zip(path.last()).is_some_and(|(a, b)| a.distance(*b) < 1e-6) {
+        path.pop();
+    }
+    let needed = if closed { 3 } else { 2 };
+    if path.len() < needed {
+        return Err(EngineError::invalid(format!("the path needs at least {needed} distinct points")));
+    }
+    Ok(path)
 }
 
 /// Create a sweep type: its profile drawn as points `[x, y]` (x across, to

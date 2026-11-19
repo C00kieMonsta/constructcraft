@@ -35,6 +35,9 @@ pub(crate) struct TemplateSpec {
     pub masonry: [Sized2; 2],
     /// The gypsum partition: key, thickness.
     pub partition: Sized1,
+    /// The reinforced concrete walls (one structure layer, structural):
+    /// key, thickness.
+    pub concrete_walls: [Sized1; 3],
     /// The swing doors: key, width, height.
     pub doors: [Sized2; 2],
     /// The fixed windows: key, width, height, sill.
@@ -110,6 +113,11 @@ const METRIC: TemplateSpec = TemplateSpec {
     first_level: 3.0,
     masonry: [("tpl-type-masonry-15", 0.02, 0.11), ("tpl-type-masonry-25", 0.025, 0.20)],
     partition: ("tpl-type-drywall-10", 0.10),
+    concrete_walls: [
+        ("tpl-type-concrete-wall-15", 0.15),
+        ("tpl-type-concrete-wall-20", 0.20),
+        ("tpl-type-concrete-wall-25", 0.25),
+    ],
     doors: [("tpl-type-door-80", 0.8, 2.1), ("tpl-type-door-90", 0.9, 2.1)],
     windows: [("tpl-type-window-120", 1.2, 1.2, 1.0), ("tpl-type-window-150", 1.5, 1.0, 1.1)],
     operable: [
@@ -174,6 +182,11 @@ const IMPERIAL: TemplateSpec = TemplateSpec {
         ("tpl-imp-type-masonry-10", 0.75 * INCH, 8.5 * INCH),
     ],
     partition: ("tpl-imp-type-drywall-4", 4.875 * INCH),
+    concrete_walls: [
+        ("tpl-imp-type-concrete-wall-6", 6.0 * INCH),
+        ("tpl-imp-type-concrete-wall-8", 8.0 * INCH),
+        ("tpl-imp-type-concrete-wall-10", 10.0 * INCH),
+    ],
     doors: [("tpl-imp-type-door-32", 32.0 * INCH, 80.0 * INCH), ("tpl-imp-type-door-36", 36.0 * INCH, 80.0 * INCH)],
     windows: [
         ("tpl-imp-type-window-48", 48.0 * INCH, 48.0 * INCH, 36.0 * INCH),
@@ -432,9 +445,19 @@ mod tests {
         assert_eq!(p.units, crate::Units::default());
         let levels: Vec<_> = p.levels.iter().map(|l| (l.id, l.elevation)).collect();
         assert_eq!(levels, [(LevelId(1), 0.0), (LevelId(2), 3.0)]);
-        assert_eq!((p.types.len(), p.views.len(), p.materials.len(), p.profiles.len()), (73, 15, 13, 6));
-        // The two pipe series take ids 110 and 111, the niche type (issue #304) the last one.
-        assert_eq!(p.next_id(), 113);
+        assert_eq!((p.types.len(), p.views.len(), p.materials.len(), p.profiles.len()), (76, 15, 13, 6));
+        // The two pipe series take ids 110 and 111, the niche type (issue #304) 112 and
+        // the concrete wall types (issue #366) the last ones.
+        assert_eq!(p.next_id(), 116);
+        for (id, name, thickness) in [
+            (113, "Parede de concreto 15 cm", 0.15),
+            (114, "Parede de concreto 20 cm", 0.2),
+            (115, "Parede de concreto 25 cm", 0.25),
+        ] {
+            let t = &p.types[&ElementTypeId(id)];
+            assert_eq!((t.category(), t.name.as_str(), t.thickness()), (Category::Wall, name, thickness));
+            assert!(t.structural_wall());
+        }
         let niche = &p.types[&ElementTypeId(112)];
         assert_eq!((niche.category(), niche.name.as_str()), (Category::Niche, "Nicho 60x60x10"));
         assert_eq!(niche.opening_size(), Some((0.6, 0.6)));

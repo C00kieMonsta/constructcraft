@@ -380,8 +380,11 @@ fn component_pieces<'a>(
     for e in project.elements.values().filter(|e| e.level == level) {
         // Swept profiles (baseboards, crown moldings) cut and show like mesh pieces.
         if let ElementKind::Sweep(sw) = &e.kind {
-            if let Some(faces) = cc_geom::profile_sweep::sweep_faces(project, e, sw) {
-                out.push(mesh_piece(e.id, &faces, &[], (cut_z, false), cover.as_deref_mut()));
+            // Along arcs the curved sides' facets are known (no lines across them); a
+            // straight sweep's are found from the faces, as before.
+            if let Some(mesh) = cc_geom::profile_sweep::sweep_mesh(project, e, sw) {
+                let smooth: &[bool] = if sw.is_curved() { &mesh.smooth } else { &[] };
+                out.push(mesh_piece(e.id, &mesh.faces, smooth, (cut_z, false), cover.as_deref_mut()));
             }
             continue;
         }

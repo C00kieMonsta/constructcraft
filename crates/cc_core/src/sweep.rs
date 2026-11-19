@@ -17,7 +17,7 @@ use glam::{DVec2, DVec3};
 /// Points of each blend outline after resampling: at least this many.
 const BLEND_SAMPLES: usize = 48;
 /// The miter scale at a sharp corner stops growing here (about 150° turns).
-const MAX_MITER: f64 = 4.0;
+pub const MAX_MITER: f64 = 4.0;
 /// Most points of a path or outline after arcs are divided.
 const MAX_POINTS: usize = 4096;
 
