@@ -9,6 +9,8 @@ struct Uniforms {
     /// y what a face square to the light adds, z a cast shadow's (never
     /// lighter than the face); w the opacity of the ground's shadows.
     shading: vec4<f32>,
+    /// xyz: where the viewer is.
+    eye: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -157,6 +159,30 @@ fn surface(color: vec3<f32>, plane: vec2<f32>, fg: vec4<f32>, bg: vec4<f32>, tex
 
 // The shaded style's grey of a face at `facing` (the cosine of its angle to
 // the light), as displayed: white square to it, the ambient grey turned away.
+// The ends of edge lines. An edge between two facets of a curved surface
+// (`tex.w` 1: the other facet's normal in `fg`, the edge's middle in `bg`)
+// is drawn only as a silhouette: where, seen from its middle, one facet is
+// turned to the viewer and the other away. Elsewhere both its ends go to
+// one point outside the view.
+@vertex
+fn vs_edge(v: VsIn) -> VsOut {
+    var o: VsOut;
+    o.clip = u.view_proj * vec4<f32>(v.pos, 1.0);
+    o.normal = v.normal;
+    o.color = v.color;
+    o.plane = v.plane;
+    o.fg = vec4<f32>(0.0);
+    o.bg = vec4<f32>(0.0);
+    o.tex = vec4<f32>(0.0);
+    if v.tex.w > 0.5 {
+        let to_eye = u.eye.xyz - v.bg.xyz;
+        if dot(v.normal, to_eye) * dot(v.fg.xyz, to_eye) > 0.0 {
+            o.clip = vec4<f32>(0.0, 0.0, 2.0, 1.0);
+        }
+    }
+    return o;
+}
+
 fn shaded_grey(facing: f32) -> f32 {
     return u.shading.x + u.shading.y * clamp(facing, 0.0, 1.0);
 }
