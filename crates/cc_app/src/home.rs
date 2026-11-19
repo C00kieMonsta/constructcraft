@@ -210,7 +210,7 @@ fn card(ui: &mut Ui, name: &str, thumbnail: Option<&Path>, enabled: bool) -> Res
 }
 
 /// Load a thumbnail PNG as a texture, cached per file and modification time.
-fn load_thumbnail(ctx: &egui::Context, file: &Path) -> Option<egui::TextureHandle> {
+pub(crate) fn load_thumbnail(ctx: &egui::Context, file: &Path) -> Option<egui::TextureHandle> {
     let modified = std::fs::metadata(file).ok()?.modified().ok()?;
     let id = egui::Id::new(("thumbnail", file, modified));
     if let Some(texture) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {

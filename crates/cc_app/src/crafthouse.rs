@@ -4,7 +4,8 @@
 //! folder, from where the engine loads it like any component file.
 //!
 //! The network is used only here and only once the user picks this source:
-//! the catalog, then the file of the component picked, over HTTPS in
+//! the catalog, then the files of the components the list shows (for their
+//! thumbnails) and of the one picked, over HTTPS in
 //! background threads with bounded sizes (see [`crate::plugins_ui::get`]).
 //! The catalog is hostile input: only files under `components/<folder>/`
 //! with plain names are listed, so a download never leaves the cache folder.
@@ -12,7 +13,7 @@
 use crate::library::Entry;
 use crate::plugins_ui::{get, spawn};
 use egui::Context;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
 
@@ -26,6 +27,8 @@ const MAX_CATALOG: usize = 8 << 20;
 const MAX_COMPONENT: usize = 16 << 20;
 /// Most components listed from a catalog.
 const MAX_ENTRIES: usize = 10_000;
+/// Most components waiting to be downloaded for their thumbnails.
+const MAX_WANTED: usize = 64;
 /// Longest text taken from the catalog (a name, a description).
 const MAX_TEXT: usize = 200;
 
@@ -72,8 +75,13 @@ pub struct CraftHouse {
     download: Option<Download>,
     /// The components downloaded: catalog path → local file.
     downloaded: BTreeMap<PathBuf, PathBuf>,
-    /// The download that failed last, and why.
-    failed: Option<(PathBuf, String)>,
+    /// The downloads that failed, and why.
+    failed: BTreeMap<PathBuf, String>,
+    /// The components to download for their thumbnails, in the order asked
+    /// (see [`CraftHouse::want`]); the component picked goes before them.
+    wanted: VecDeque<PathBuf>,
+    /// Files kept from earlier runs are downloaded again (after Refresh).
+    fresh: bool,
 }
 
 impl CraftHouse {
@@ -100,22 +108,47 @@ impl CraftHouse {
 
     /// How the download of the catalog's `file` stands.
     pub fn file_status(&self, file: &Path) -> FileStatus {
-        match (self.local(file), &self.failed) {
+        match (self.local(file), self.failed.get(file)) {
             (Some(path), _) => FileStatus::Ready(path.clone()),
-            (None, Some((failed, message))) if failed == file => FileStatus::Failed(message.clone()),
+            (None, Some(message)) => FileStatus::Failed(message.clone()),
             _ => FileStatus::Downloading,
         }
     }
 
-    /// Forget the catalog and the downloads, to read them again.
+    /// Ask for the catalog's `file`, to show its thumbnail: a copy kept
+    /// from an earlier run is taken as it is; else the file joins the
+    /// downloads [`CraftHouse::sync`] makes, one at a time.
+    pub fn want(&mut self, file: &Path) {
+        if self.downloaded.contains_key(file) || self.failed.contains_key(file) {
+            return;
+        }
+        if let Some(path) = self.kept(file) {
+            self.downloaded.insert(file.to_path_buf(), path);
+        } else if self.wanted.len() < MAX_WANTED && !self.wanted.iter().any(|w| w == file) {
+            self.wanted.push_back(file.to_path_buf());
+        }
+    }
+
+    /// The copy of the catalog's `file` kept from an earlier run, unless
+    /// the catalog was read again to bring the library up to date. Tests
+    /// see no kept copies.
+    fn kept(&self, file: &Path) -> Option<PathBuf> {
+        if self.fresh || cfg!(test) {
+            return None;
+        }
+        let path = cache_dir()?.join(file_url(file)?.1);
+        path.is_file().then_some(path)
+    }
+
+    /// Forget the catalog and the downloads, to read them again from the site.
     pub fn reset(&mut self) {
-        *self = Self::default();
+        *self = Self { fresh: true, ..Self::default() };
     }
 
     /// Check the background work and start what is missing: the catalog,
-    /// then the file of `selected`. Returns the catalog's components when
-    /// it has just been read, and the local file of `selected` when it has
-    /// just arrived.
+    /// then the file of `selected`, then those asked for their thumbnails.
+    /// Returns the catalog's components when it has just been read, and
+    /// the local file of `selected` when it has just arrived.
     pub fn sync(&mut self, ctx: &Context, selected: Option<&Path>) -> (Option<Vec<Entry>>, Option<PathBuf>) {
         let mut read = None;
         self.catalog = match std::mem::take(&mut self.catalog) {
@@ -134,6 +167,14 @@ impl CraftHouse {
             other => other,
         };
         let mut arrived = None;
+        // A copy of the component picked, kept from an earlier run, is there at once.
+        if let Some(file) = selected
+            && !self.downloaded.contains_key(file)
+            && let Some(path) = self.kept(file)
+        {
+            self.downloaded.insert(file.to_path_buf(), path.clone());
+            arrived = Some(path);
+        }
         if let Some(download) = self.download.take() {
             match download.result.try_recv() {
                 Ok(Ok(path)) => {
@@ -142,17 +183,32 @@ impl CraftHouse {
                     }
                     self.downloaded.insert(download.file, path);
                 }
-                Ok(Err(message)) => self.failed = Some((download.file, message)),
+                Ok(Err(message)) => _ = self.failed.insert(download.file, message),
                 Err(TryRecvError::Empty) => self.download = Some(download),
-                Err(TryRecvError::Disconnected) => self.failed = Some((download.file, String::new())),
+                Err(TryRecvError::Disconnected) => _ = self.failed.insert(download.file, String::new()),
             }
         }
-        if let (None, Some(file)) = (&self.download, selected)
-            && self.file_status(file) == FileStatus::Downloading
-            && let Some(url) = file_url(file)
-        {
-            let result = spawn(ctx, "crafthouse-download", move || download(&url.0, &url.1));
-            self.download = Some(Download { file: file.to_path_buf(), result });
+        if self.download.is_none() {
+            let waiting = |house: &Self, file: &Path| house.file_status(file) == FileStatus::Downloading;
+            let next = match selected {
+                Some(file) if waiting(self, file) => Some(file.to_path_buf()),
+                _ => {
+                    let mut next = None;
+                    while let Some(file) = self.wanted.pop_front() {
+                        if waiting(self, &file) {
+                            next = Some(file);
+                            break;
+                        }
+                    }
+                    next
+                }
+            };
+            if let Some(file) = next
+                && let Some(url) = file_url(&file)
+            {
+                let result = spawn(ctx, "crafthouse-download", move || download(&url.0, &url.1));
+                self.download = Some(Download { file, result });
+            }
         }
         (read, arrived)
     }

@@ -64,6 +64,8 @@ pub struct Library {
     pub save_folder: Option<PathBuf>,
     /// The folders the entries were read from (read again when the preference changes).
     listed: Vec<PathBuf>,
+    /// The component files whose thumbnail was asked for since the window opened.
+    thumbnails_asked: std::collections::BTreeSet<PathBuf>,
 }
 
 /// Open the library window, reading the folders.
@@ -300,17 +302,60 @@ fn folders(ui: &mut Ui, state: &mut AppState, lib: &mut Library) {
     }
 }
 
-fn list(ui: &mut Ui, state: &AppState, lib: &mut Library, shown: &[usize]) {
+/// The size of a component's 3D thumbnail in the list (3:2, as rendered).
+const THUMBNAIL: egui::Vec2 = vec2(60.0, 40.0);
+
+/// The 3D thumbnail of the component file `file` in `rect` of the list,
+/// or a placeholder while there is none: the file is not downloaded yet,
+/// its thumbnail is still to be rendered (asked here, once per window),
+/// or it has nothing to show in 3D.
+fn row_thumbnail(ui: &Ui, state: &mut AppState, lib: &mut Library, rect: egui::Rect, file: Option<&std::path::Path>) {
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 3.0, PALETTE.paper);
+    let picture = file.and_then(crate::thumbnails::component_file);
+    let texture = picture.as_deref().filter(|p| p.exists()).and_then(|p| crate::home::load_thumbnail(ui.ctx(), p));
+    if let Some(texture) = texture {
+        let uv = egui::Rect::from_min_max(Pos2::ZERO, egui::pos2(1.0, 1.0));
+        painter.image(texture.id(), rect.shrink(1.0), uv, egui::Color32::WHITE);
+        return;
+    }
+    let icon = egui::Rect::from_center_size(rect.center(), vec2(20.0, 20.0));
+    crate::icons::paint(&painter, icon, crate::icons::Icon::Component, PALETTE.border_strong);
+    if let (Some(file), Some(_)) = (file, picture)
+        && lib.thumbnails_asked.insert(file.to_path_buf())
+    {
+        state.thumbnail_jobs.push(crate::thumbnails::Job::Component(file.to_path_buf()));
+    }
+}
+
+fn list(ui: &mut Ui, state: &mut AppState, lib: &mut Library, shown: &[usize]) {
     egui::Frame::new().stroke(Stroke::new(1.0, PALETTE.border)).show(ui, |ui| {
         egui::ScrollArea::vertical().id_salt("lib-list").max_height(360.0).auto_shrink([false, false]).show(ui, |ui| {
             if shown.is_empty() {
                 ui.label(theme::muted(t!("lib-none")));
             }
             for &i in shown {
-                let Some(e) = lib.entries.get(i) else { continue };
+                let Some(e) = lib.entries.get(i).cloned() else { continue };
                 let selected = lib.selected.as_ref() == Some(&e.path);
                 let text = format!("{}  ·  {}", e.component, kind_label(&e.kind));
-                let r = ui.selectable_label(selected, text).on_hover_text(e.path.display().to_string());
+                let (picture, r) = ui
+                    .horizontal(|ui| {
+                        let (rect, _) = ui.allocate_exact_size(THUMBNAIL, Sense::hover());
+                        (rect, ui.add(egui::Button::selectable(selected, text).truncate()))
+                    })
+                    .inner;
+                // Only the rows in sight get a thumbnail; online, their files are downloaded for it.
+                if ui.is_rect_visible(picture) {
+                    let file = match lib.source {
+                        Source::Folders => Some(e.path.clone()),
+                        Source::Online => {
+                            state.crafthouse.want(&e.path);
+                            state.crafthouse.local(&e.path).cloned()
+                        }
+                    };
+                    row_thumbnail(ui, state, lib, picture, file.as_deref());
+                }
+                let r = r.on_hover_text(e.path.display().to_string());
                 if r.clicked() && !selected {
                     lib.selected = Some(e.path.clone());
                     // Online, the plan shows once the file is downloaded.

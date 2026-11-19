@@ -44,7 +44,7 @@ pub struct View3DState {
 /// Cameras kept for "previous" and "next".
 const HISTORY: usize = 50;
 /// Half the vertical field of view.
-const HALF_FOV_DEG: f64 = 22.5;
+pub(crate) const HALF_FOV_DEG: f64 = 22.5;
 
 /// Smooth turn of the camera to new angles.
 #[derive(Debug, Clone, Copy)]

@@ -507,7 +507,7 @@ impl ConstructApp {
             }
         }
         if let Some(rs) = frame.wgpu_render_state() {
-            crate::thumbnails::process(&mut self.state, rs);
+            crate::thumbnails::process(&mut self.state, rs, &ctx);
         }
         self.shortcuts(&ctx);
         crate::cad_ui::dropped_files(&ctx, &mut self.state);
