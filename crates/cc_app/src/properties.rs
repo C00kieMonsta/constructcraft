@@ -829,8 +829,8 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
                     readonly_row(ui, &t!("col-pile-count"), piles.to_string());
                 }
             });
-            // A foundation slab takes a mesh, like a floor; a strip its own bars.
-            if !matches!(f.shape, cc_core::FoundationShape::Pad { .. }) {
+            // A foundation slab takes a mesh, like a floor; a strip and a pile cap their own bars.
+            if !matches!(f.shape, cc_core::FoundationShape::Pad { .. }) || state.project().pile_cap(&el).is_some() {
                 reinforcement(ui, state, id);
             }
         }
@@ -1809,6 +1809,7 @@ fn pile_props(ui: &mut Ui, state: &mut AppState, el: &Element, p: &cc_core::pile
             readonly_row(ui, &t!("col-host"), name);
         }
     });
+    reinforcement(ui, state, id);
 }
 
 /// A building pad: its elevation, its slopes (its own or its type's), its
@@ -2307,6 +2308,50 @@ fn rebar_layout_row(ui: &mut Ui, state: &mut AppState, id: ElementId, label: &st
         L::SlabRadial { count, .. } | L::SlabTrim { count, .. } => {
             readonly_row(ui, label, format!("{count} ×"));
         }
+        // A pile cap's top mesh, side loops and a pile's ties by their spacing, a spiral by its pitch...
+        L::CapTop { spacing, .. }
+        | L::CapSides { spacing, .. }
+        | L::PileTies { spacing, .. }
+        | L::PileSpiral { pitch: spacing, .. } => {
+            length_row(ui, state, label, id, "rebar-spacing", spacing, |e, v| {
+                if let ElementKind::Rebar(x) = &mut e.kind
+                    && let L::CapTop { spacing, .. }
+                    | L::CapSides { spacing, .. }
+                    | L::PileTies { spacing, .. }
+                    | L::PileSpiral { pitch: spacing, .. } = &mut x.layout
+                {
+                    *spacing = v.max(cc_core::wall_bars::MIN_SPACING);
+                }
+            });
+        }
+        // ...its bottom bars by the bars in a band, a pile's bars by their count around it.
+        L::CapBottom { count, .. } | L::PileLongitudinal { count, .. } if count > 0 => {
+            let most = match layout {
+                L::CapBottom { .. } => cc_core::pile_bars::MAX_BAND,
+                _ => cc_core::pile_bars::MAX_AROUND,
+            };
+            let mut n = count;
+            let r = row(ui, label, |ui| ui.add(DragValue::new(&mut n).range(1..=most).suffix(" ×")));
+            if r.changed() {
+                modify(state, id, "rebar-count", |e| {
+                    if let ElementKind::Rebar(x) = &mut e.kind
+                        && let L::CapBottom { count, .. } | L::PileLongitudinal { count, .. } = &mut x.layout
+                    {
+                        *count = n;
+                    }
+                });
+            }
+            finish(state, &r);
+        }
+        L::CapBottom { spacing, .. } | L::PileLongitudinal { spacing, .. } => {
+            length_row(ui, state, label, id, "rebar-spacing", spacing, |e, v| {
+                if let ElementKind::Rebar(x) = &mut e.kind
+                    && let L::CapBottom { spacing, .. } | L::PileLongitudinal { spacing, .. } = &mut x.layout
+                {
+                    *spacing = v.max(cc_core::wall_bars::MIN_SPACING);
+                }
+            });
+        }
         L::Longitudinal { count, .. } => {
             let mut n = count;
             let r = row(ui, label, |ui| ui.add(DragValue::new(&mut n).range(1..=200).suffix(" ×")));
@@ -2381,6 +2426,12 @@ fn rebar_role(layout: &cc_core::RebarLayout) -> String {
             format!("{} · {}", t!("bars-wall-horizontal"), tr(side.key()))
         }
         cc_core::RebarLayout::WallVertical { side, .. } => format!("{} · {}", t!("bars-wall-vertical"), tr(side.key())),
+        cc_core::RebarLayout::CapBottom { .. } => t!("bars-bottom"),
+        cc_core::RebarLayout::CapTop { .. } => t!("bars-top"),
+        cc_core::RebarLayout::CapSides { .. } => t!("bars-sides"),
+        cc_core::RebarLayout::PileLongitudinal { .. } => t!("bars-perimeter"),
+        cc_core::RebarLayout::PileSpiral { .. } => t!("bars-pile-spiral"),
+        cc_core::RebarLayout::PileTies { .. } => t!("bars-stirrups"),
     }
 }
 
@@ -2416,8 +2467,18 @@ fn reinforcement(ui: &mut Ui, state: &mut AppState, host: ElementId) {
                 &kind,
                 Some(ElementKind::Foundation(f)) if matches!(f.shape, cc_core::FoundationShape::Strip { .. })
             );
-            let slab = !strip && matches!(&kind, Some(ElementKind::Floor(_) | ElementKind::Foundation(_)));
-            if strip {
+            let cap = state.project().is_pile_cap(host);
+            let pile = matches!(&kind, Some(ElementKind::Pile(_)));
+            let slab = !strip && !cap && matches!(&kind, Some(ElementKind::Floor(_) | ElementKind::Foundation(_)));
+            if cap {
+                let command =
+                    cc_engine::commands::pile_rebar::PileCapRebarCreate { caps: vec![host.0], ..Default::default() };
+                crate::actions::run_command(state, command);
+            } else if pile {
+                let command =
+                    cc_engine::commands::pile_rebar::PileRebarCreate { piles: vec![host.0], ..Default::default() };
+                crate::actions::run_command(state, command);
+            } else if strip {
                 let command =
                     cc_engine::commands::strip_rebar::StripRebarCreate { strips: vec![host.0], ..Default::default() };
                 crate::actions::run_command(state, command);
@@ -2460,9 +2521,13 @@ fn rebar_props(ui: &mut Ui, state: &mut AppState, el: &Element, r: &cc_core::Reb
             .map_or(String::new(), |h| if h.mark.is_empty() { tr(h.category().key()) } else { h.mark.clone() });
         readonly_row(ui, &t!("col-host"), host);
         rebar_layout_row(ui, state, id, &rebar_role(&r.layout), &r.layout);
-        if let cc_core::RebarLayout::Stirrups { hooks, .. } = r.layout {
+        if let cc_core::RebarLayout::Stirrups { hooks, .. }
+        | cc_core::RebarLayout::CapSides { hooks, .. }
+        | cc_core::RebarLayout::PileTies { hooks, .. } = r.layout
+        {
             stirrup_hook_rows(ui, state, id, hooks);
         }
+        pile_rebar_rows(ui, state, id, &r.layout);
         length_row(ui, state, &t!("prop-cover"), id, "rebar-cover", r.cover, |e, v| {
             if let ElementKind::Rebar(x) = &mut e.kind {
                 x.cover = v.max(0.0);
@@ -2484,6 +2549,65 @@ fn rebar_props(ui: &mut Ui, state: &mut AppState, el: &Element, r: &cc_core::Reb
         }
     });
     rebar_dimensions(ui, state, id);
+}
+
+/// The values of a pile cap's or a pile's set besides its count or spacing:
+/// the mesh spacing, the diagonals and the bent ends of a cap's bottom bars,
+/// the bent ends of its top mesh, and the length reinforced below a pile's
+/// head with the bars' projection above it.
+fn pile_rebar_rows(ui: &mut Ui, state: &mut AppState, id: ElementId, layout: &cc_core::RebarLayout) {
+    use cc_core::RebarLayout as L;
+    if let L::CapBottom { spacing, diagonals, .. } = *layout {
+        length_row(ui, state, &t!("prop-rebar-mesh-spacing"), id, "rebar-spacing", spacing, |e, v| {
+            if let ElementKind::Rebar(x) = &mut e.kind
+                && let L::CapBottom { spacing, .. } = &mut x.layout
+            {
+                *spacing = v.max(cc_core::wall_bars::MIN_SPACING);
+            }
+        });
+        let mut on = diagonals;
+        if row(ui, &t!("prop-rebar-diagonals"), |ui| crate::table::checkbox(ui, &mut on)).changed() {
+            crate::engine_edit::element(state, id, None, |e| {
+                if let ElementKind::Rebar(x) = &mut e.kind
+                    && let L::CapBottom { diagonals, .. } = &mut x.layout
+                {
+                    *diagonals = on;
+                }
+            });
+        }
+    }
+    match *layout {
+        L::CapBottom { bend, .. } | L::CapTop { bend, .. } => {
+            length_row(ui, state, &t!("prop-rebar-bend"), id, "rebar-bend", bend, |e, v| {
+                if let ElementKind::Rebar(x) = &mut e.kind
+                    && let L::CapBottom { bend, .. } | L::CapTop { bend, .. } = &mut x.layout
+                {
+                    *bend = v.clamp(0.0, cc_core::pile_bars::MAX_BEND);
+                }
+            });
+        }
+        L::PileLongitudinal { length, .. } | L::PileSpiral { length, .. } | L::PileTies { length, .. } => {
+            length_row(ui, state, &t!("prop-rebar-length"), id, "rebar-length", length, |e, v| {
+                if let ElementKind::Rebar(x) = &mut e.kind
+                    && let L::PileLongitudinal { length, .. }
+                    | L::PileSpiral { length, .. }
+                    | L::PileTies { length, .. } = &mut x.layout
+                {
+                    *length = v.clamp(0.0, cc_core::pile_bars::MAX_LENGTH);
+                }
+            });
+        }
+        _ => {}
+    }
+    if let L::PileLongitudinal { projection, .. } = *layout {
+        length_row(ui, state, &t!("prop-rebar-projection"), id, "rebar-projection", projection, |e, v| {
+            if let ElementKind::Rebar(x) = &mut e.kind
+                && let L::PileLongitudinal { projection, .. } = &mut x.layout
+            {
+                *projection = v.clamp(0.0, cc_core::pile_bars::MAX_BEND);
+            }
+        });
+    }
 }
 
 /// Whether a beam's bars run into the columns and pile caps its ends frame
@@ -2583,7 +2707,9 @@ fn stirrup_hook_rows(ui: &mut Ui, state: &mut AppState, id: ElementId, hooks: Op
     let set = |state: &mut AppState, merge: Option<u64>, hooks: Option<cc_core::StirrupHooks>| {
         crate::engine_edit::element(state, id, merge, |e| {
             if let ElementKind::Rebar(x) = &mut e.kind
-                && let cc_core::RebarLayout::Stirrups { hooks: h, .. } = &mut x.layout
+                && let cc_core::RebarLayout::Stirrups { hooks: h, .. }
+                | cc_core::RebarLayout::CapSides { hooks: h, .. }
+                | cc_core::RebarLayout::PileTies { hooks: h, .. } = &mut x.layout
             {
                 *h = hooks;
             }

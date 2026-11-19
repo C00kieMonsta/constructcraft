@@ -140,6 +140,10 @@ pub enum UiCommand {
     /// Brace the bay between two selected columns, else start the Bracing tool.
     Bracing,
     TypicalRebar,
+    /// Reinforce the selected pile caps, else the active level's caps without reinforcement.
+    PileCapRebar,
+    /// Reinforce the selected piles and the selected caps' piles, else the active level's.
+    PileRebar,
     /// Place connections of a kind on the selected members, else the active level's.
     Connection(cc_core::connection::ConnectionKind),
     RebarView,
@@ -384,7 +388,8 @@ impl UiCommand {
             StructuralSchedules,
         ]);
         all.extend([FootingsUnderColumns, StripFootingsUnderWalls, FoundationSlab, SlabJoinSupports]);
-        all.extend([AnalyticalView, AnalyticalExport, Truss, Bracing, TypicalRebar, RebarView, SteelSchedule]);
+        all.extend([AnalyticalView, AnalyticalExport, Truss, Bracing, TypicalRebar, PileCapRebar, PileRebar]);
+        all.extend([RebarView, SteelSchedule]);
         all.extend(cc_core::connection::ConnectionKind::ALL.map(Connection));
         all.extend([StructuralPlan, NumberStructure, StructureTags]);
         all.extend([PlaceFixture, PlaceDevice, MepConnect, Systems, MepSizing, PlumbingPlan, ElectricalPlan]);
@@ -570,7 +575,7 @@ impl UiCommand {
             AnalyticalView | AnalyticalExport => Icon::Analytical,
             Truss => Icon::Truss,
             Bracing => Icon::Brace,
-            TypicalRebar => Icon::Rebar,
+            TypicalRebar | PileCapRebar | PileRebar => Icon::Rebar,
             Connection(_) => Icon::Connection,
             RebarView => Icon::RebarView,
             SteelSchedule => Icon::Schedule,
@@ -796,6 +801,8 @@ impl UiCommand {
             Truss => t!("tool-truss"),
             Bracing => t!("action-bracing"),
             TypicalRebar => t!("action-rebar-typical"),
+            PileCapRebar => t!("action-pile-cap-rebar"),
+            PileRebar => t!("action-pile-rebar"),
             Connection(kind) => crate::i18n::tr(kind.key()),
             RebarView => t!("action-rebar-view"),
             SteelSchedule => t!("action-steel-schedule"),
@@ -1013,6 +1020,8 @@ impl UiCommand {
             Truss => t!("cmd-desc-truss"),
             Bracing => t!("cmd-desc-bracing"),
             TypicalRebar => t!("cmd-desc-rebar-typical"),
+            PileCapRebar => t!("cmd-desc-pile-cap-rebar"),
+            PileRebar => t!("cmd-desc-pile-rebar"),
             Connection(kind) => match kind {
                 cc_core::connection::ConnectionKind::BasePlate => t!("cmd-desc-base-plate"),
                 cc_core::connection::ConnectionKind::EndPlate => t!("cmd-desc-end-plate"),
@@ -1331,6 +1340,8 @@ impl UiCommand {
             Truss => "truss_create",
             Bracing => "bracing_create",
             TypicalRebar => "rebar_typical",
+            PileCapRebar => "pile_cap_rebar_create",
+            PileRebar => "pile_rebar_create",
             Connection(_) => "connections_create",
             RebarView | SteelSchedule | StructuralPlan => "view_create",
             NumberStructure => "structure_number",
@@ -1565,7 +1576,9 @@ impl UiCommand {
             Bracing if state.prefs.structure_material == cc_core::StructuralMaterial::Concrete => {
                 Some(t!("msg-bracing-material"))
             }
-            TypicalRebar if project.default_type(Category::Rebar).is_none() => Some(t!("msg-no-rebar-type")),
+            TypicalRebar | PileCapRebar | PileRebar if project.default_type(Category::Rebar).is_none() => {
+                Some(t!("msg-no-rebar-type"))
+            }
             StructuralPlan | PlumbingPlan | ElectricalPlan | CommunicationsPlan | LightningPlan | EarthRing
                 if project.levels.is_empty() =>
             {
@@ -2043,6 +2056,8 @@ pub fn run(state: &mut AppState, ctx: &egui::Context, command: UiCommand) {
         }
         Bracing => crate::bracing_ui::start(state),
         TypicalRebar => crate::actions::typical_rebar(state),
+        PileCapRebar => crate::actions::pile_cap_rebar(state),
+        PileRebar => crate::actions::pile_rebar(state),
         Connection(kind) => crate::connection_ui::place(state, kind),
         RebarView => crate::actions::open_rebar_view(state),
         SteelSchedule => {
