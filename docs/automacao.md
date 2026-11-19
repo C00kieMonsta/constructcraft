@@ -361,7 +361,7 @@ Tipos de pilar e de viga são desenhados e construídos com um perfil estrutural
 {"command": "element_set", "args": {"id": 42, "params": {"spacing": 0.4}}}
 ```
 
-`beam_create` desenha uma viga em arco com `mid` (um ponto do arco), `bulge` ou `radius` (positivo no sentido anti-horário; `major_arc` escolhe o arco maior), como `wall_create` desenha paredes em arco; `element_get` devolve então `center`, `radius`, `sweep` e o `true_length` ao longo do arco. `rebar_create` arma uma viga ou pilar: `top`, `bottom` (vigas) ou `perimeter` (pilares) com um `count`, `sides` (barras de pele nas duas faces laterais de uma viga: um `count` por face, ou um `spacing` ao longo da altura) e `stirrups` a cada `spacing`. Em uma viga em arco as barras seguem o arco, cada uma com o comprimento do arco no seu raio, e os estribos são radiais. As barras que não cabem lado a lado vão para uma segunda camada, e as barras ao longo de uma viga mais compridas que `max_length` (padrão 12 m; 0 para barras inteiras) são emendadas com traspasse `lap` (padrão 40 diâmetros), com as emendas vizinhas defasadas.
+`beam_create` desenha uma viga em arco com `mid` (um ponto do arco), `bulge` ou `radius` (positivo no sentido anti-horário; `major_arc` escolhe o arco maior), como `wall_create` desenha paredes em arco; `element_get` devolve então `center`, `radius`, `sweep` e o `true_length` ao longo do arco. `rebar_create` arma uma viga ou pilar: `top`, `bottom` (vigas) ou `perimeter` (pilares) com um `count`, `sides` (barras de pele nas duas faces laterais de uma viga: um `count` por face, ou um `spacing` ao longo da altura) e `stirrups` a cada `spacing`, cada estribo fechado por dois ganchos em um canto (`hook`: 135 graus por padrão, de 90 a 180, 0 para nenhum; `tail`: a ponta reta, 10 diâmetros da barra por padrão, no mínimo 5 cm) que entram no seu comprimento e aparecem na tabela de dobramento (`stirrup 14x44 hook 135° 5 hook 135° 5`). Em uma viga em arco as barras seguem o arco, cada uma com o comprimento do arco no seu raio, e os estribos são radiais. As barras que não cabem lado a lado vão para uma segunda camada, e as barras ao longo de uma viga mais compridas que `max_length` (padrão 12 m; 0 para barras inteiras) são emendadas com traspasse `lap` (padrão 40 diâmetros), com as emendas vizinhas defasadas.
 
 ```text
 {"command": "beam_create", "args": {"start": [2.5, 0], "end": [0, 2.5], "radius": 2.5}}
@@ -379,6 +379,12 @@ Um pilar que continua uma parede cilíndrica tem um perfil `annular_sector`; `re
 {"command": "rebar_create", "args": {"host": 42, "layout": "perimeter", "faces": [7, 3, 7, 3], "same_type": true}}
 {"command": "rebar_create", "args": {"host": 42, "layout": "stirrups", "spacing": 0.15}}
 {"command": "rebar_create", "args": {"host": 42, "layout": "ties", "spacing": 0.30}}
+```
+
+As barras verticais de um pilar cortadas em lances (`max_length`, ou `lifts` em alturas dadas) são todas emendadas nas mesmas alturas; `stagger` emenda uma barra sim, outra não, em volta da seção, mais acima: `half_lap` (meio traspasse) ou um deslocamento em metros, no máximo `(max_length - lap) / 2`. Cada barra continua indo da base ao topo, então o primeiro pedaço de uma barra defasada é mais comprido pelo deslocamento e o último mais curto (uma emenda que fique a menos de um traspasse do topo é retirada); com `max_length` os lances são encurtados quando o primeiro pedaço mais comprido não caberia na barra comercial. Os pedaços defasados têm posições próprias. `element_set` a altera (`{"splice": {"stagger": "half_lap"}}`, `{"offset": 0.3}` ou `"none"`):
+
+```text
+{"command": "rebar_create", "args": {"host": 42, "layout": "perimeter", "count": 8, "max_length": 4, "lap": 0.5, "stagger": "half_lap"}}
 ```
 
 `wall_rebar_create` arma paredes, retas ou em arco: barras horizontais (de anel) com um espaçamento ou `zones` por altura, barras verticais com pontas dobradas e conjuntos adicionais, e grampos, junto às duas faces com um cobrimento para cada. Uma parede cilíndrica recebe as suas quatro famílias de barras em um comando:

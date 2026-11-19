@@ -6195,3 +6195,88 @@ fn trimming_a_spline_wall_says_why_not() {
     assert!(crate::actions::run_command(&mut state, command).is_none());
     assert_eq!(state.message, t!("msg-spline-wall"));
 }
+
+/// The view tabs of the app, with the open views list of each tab bar (#371).
+struct Tabs {
+    dock: egui_dock::DockState<cc_core::ViewId>,
+    state: AppState,
+}
+
+fn tabs_harness(views: &[cc_core::ViewId]) -> Harness<'static, Tabs> {
+    let mut state = sample_state();
+    let mut dock = egui_dock::DockState::new(views.iter().take(1).copied().collect());
+    if let Some(path) = views.first().and_then(|v| dock.find_tab(v)) {
+        dock.set_focused_node_and_surface(path.node_path());
+    }
+    views.iter().for_each(|v| state.open_view(*v));
+    let mut themed = false;
+    let mut harness = Harness::builder().with_size(egui::vec2(520.0, 420.0)).build_ui_state(
+        move |ui, tabs: &mut Tabs| {
+            if !themed {
+                crate::theme::apply(ui.ctx());
+                themed = true;
+                return;
+            }
+            crate::theme::sync(ui.ctx());
+            crate::app::sync_tabs(&mut tabs.dock, &mut tabs.state);
+            crate::app::show_views(ui, &mut tabs.dock, &mut tabs.state, None);
+        },
+        Tabs { dock, state },
+    );
+    harness.run();
+    harness
+}
+
+/// The button at the end of the tab bar lists every open view; picking one
+/// brings its tab to the front, scrolled into view, and Close Other Views
+/// leaves only the active tab.
+#[test]
+fn the_tab_bar_lists_the_open_views() {
+    let project = sample_state().session.doc.project;
+    let mut views: Vec<(cc_core::ViewId, String)> = Vec::new();
+    for category in [cc_core::ViewCategory::FloorPlan, cc_core::ViewCategory::Elevation] {
+        for v in project.views_of(category) {
+            let label = cc_core::browser::label(v);
+            if !views.iter().any(|(_, l)| *l == label) {
+                views.push((v.id, label));
+            }
+        }
+    }
+    assert!(views.len() >= 5, "enough views to crowd the bar");
+    let ids: Vec<_> = views.iter().map(|(id, _)| *id).collect();
+    let mut harness = tabs_harness(&ids);
+    let last = *ids.last().unwrap();
+    assert_eq!(harness.state().state.active_view, Some(last));
+    // Whether a tab is inside its bar, short of the button at its end.
+    let shown = |h: &Harness<'static, Tabs>, id| {
+        let bar = h.state().dock.iter_leaves().next().unwrap().1.rect;
+        let tab = h.state().state.tab_bar.tab_rects[&id];
+        tab.left() >= bar.left() - 0.5 && tab.right() <= bar.right() - f32::from(crate::tab_list::BUTTON_WIDTH) + 0.5
+    };
+    assert!(shown(&harness, last), "the last view opened was scrolled into view");
+    assert!(!shown(&harness, ids[0]), "the bar is crowded");
+
+    harness.get_by_role_and_label(Role::Button, &t!("tabs-open-views")).click();
+    harness.run();
+    for (_, label) in &views {
+        assert!(harness.query_by_label(label).is_some(), "{label} is listed");
+    }
+    // The active tab is checked.
+    let (_, last_label) = views.last().unwrap();
+    let toggled = |label: &str| harness.get_by_label(label).accesskit_node().toggled();
+    assert_eq!(toggled(last_label), Some(egui::accesskit::Toggled::True));
+    assert_eq!(toggled(&views[0].1), Some(egui::accesskit::Toggled::False));
+    // Picking the first view, scrolled out of the crowded bar, brings it back.
+    harness.get_by_label(&views[0].1).click();
+    harness.run();
+    assert_eq!(harness.state().state.active_view, Some(ids[0]));
+    assert!(shown(&harness, ids[0]), "its tab is in view");
+
+    harness.get_by_role_and_label(Role::Button, &t!("tabs-open-views")).click();
+    harness.run();
+    harness.get_by_label(&t!("action-close-other-views")).click();
+    harness.run();
+    let open: Vec<_> = harness.state().dock.iter_all_tabs().map(|(_, t)| *t).collect();
+    assert_eq!(open, [ids[0]]);
+    assert_eq!(harness.state().state.open_tabs, 1);
+}

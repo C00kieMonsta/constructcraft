@@ -7,7 +7,8 @@ use crate::registry::{Command, CommandKind};
 use crate::session::Session;
 use crate::t;
 use cc_core::{
-    BarFace, Category, ElementId, ElementKind, ElementTypeId, FaceBars, Project, Rebar, RebarLayout, Splice, TypeData,
+    BarFace, Category, ElementId, ElementKind, ElementTypeId, FaceBars, Project, Rebar, RebarLayout, Splice, Stagger,
+    StirrupHooks, TypeData,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -74,6 +75,24 @@ fn face_bars(p: &Project, host: ElementId, counts: Option<&[u32]>, spacing: Opti
     }
 }
 
+/// The hooks of new stirrups: bent by `hook` degrees (default 135; 0 for
+/// none), with straight ends of `tail` bar diameters (default 10).
+pub(crate) fn stirrup_hooks(hook: Option<f64>, tail: Option<f64>) -> Result<Option<StirrupHooks>> {
+    let defaults = StirrupHooks::default();
+    let angle = finite(hook.unwrap_or(defaults.angle), "hook")?;
+    if angle == 0.0 {
+        return Ok(None);
+    }
+    let hooks = StirrupHooks { angle, tail: finite(tail.unwrap_or(defaults.tail), "tail")? };
+    if !hooks.is_valid() {
+        return Err(EngineError::invalid(format!(
+            "hook must be 90 to 180 degrees (or 0 for none) and tail 0 to {} bar diameters",
+            StirrupHooks::MAX_TAIL
+        )));
+    }
+    Ok(Some(hooks))
+}
+
 /// Stock length of bars, meters: 12 m, or 40' in imperial projects.
 fn stock_length(p: &Project) -> f64 {
     match p.measurement_system() {
@@ -82,9 +101,6 @@ fn stock_length(p: &Project) -> f64 {
     }
 }
 
-/// The lap splices of bars of `type_id` running along a beam: `max_length`
-/// (default: the stock length; 0 for whole bars) and `lap` (default: 40 bar
-/// diameters).
 /// A partition as it is kept: trimmed, at most [`cc_core::bar_marks::MAX_MARK_TEXT`] characters.
 pub(crate) fn partition_arg(text: Option<&str>) -> Result<String> {
     let text = text.unwrap_or("").trim();
@@ -97,6 +113,52 @@ pub(crate) fn partition_arg(text: Option<&str>) -> Result<String> {
     Ok(text.to_string())
 }
 
+/// A stagger of a column's splices as commands take it.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum StaggerArg {
+    /// An offset, meters.
+    Offset(f64),
+    /// `none` or `half_lap`.
+    Name(String),
+}
+
+impl StaggerArg {
+    fn stagger(&self) -> Result<Stagger> {
+        match self {
+            StaggerArg::Offset(o) => Ok(Stagger::Offset(finite(*o, "stagger")?)),
+            StaggerArg::Name(n) => match n.as_str() {
+                "none" => Ok(Stagger::None),
+                "half_lap" => Ok(Stagger::HalfLap),
+                other => Err(EngineError::invalid(format!(
+                    "stagger must be none, half_lap or an offset in meters, not '{other}'"
+                ))),
+            },
+        }
+    }
+}
+
+/// `splice` staggered by `stagger`, checked against its stock and lap.
+fn staggered(splice: Splice, stagger: Stagger) -> Result<Splice> {
+    let out = Splice { stagger, ..splice };
+    check_stagger(&out)?;
+    Ok(out)
+}
+
+/// A stagger offset is above zero and at most half of what a piece holds past its lap.
+pub(crate) fn check_stagger(splice: &Splice) -> Result<()> {
+    if splice.stagger_is_valid() {
+        return Ok(());
+    }
+    Err(EngineError::invalid(format!(
+        "stagger must be above 0 and at most (max_length - lap) / 2 = {:.3} m",
+        splice.max_stagger()
+    )))
+}
+
+/// The lap splices of bars of `type_id` running along a beam: `max_length`
+/// (default: the stock length; 0 for whole bars) and `lap` (default: 40 bar
+/// diameters).
 pub(crate) fn splice(
     p: &Project,
     type_id: ElementTypeId,
@@ -112,7 +174,7 @@ pub(crate) fn splice(
         _ => 0.01,
     };
     let lap = finite(lap.unwrap_or(40.0 * diameter), "lap")?.max(Splice::MIN_LAP);
-    let splice = Splice { max_length, lap };
+    let splice = Splice::new(max_length, lap);
     if !splice.is_valid() {
         return Err(EngineError::invalid(
             "max_length must be at least 1 (or 0 for whole bars) and lap at most half of it",
@@ -140,8 +202,14 @@ pub(crate) fn splice(
 /// `stirrups` follow the section's outline, and `ties` adds cross-ties every
 /// `spacing`: a hooked bar from each bar between the corners to the bar
 /// opposite. With `max_length` a column's vertical bars are cut in lifts
-/// that lap by `lap`. `same_type` gives the set to every column (or beam) of
-/// the host's type.
+/// that lap by `lap`, all at the same heights unless `stagger` moves the
+/// splices of every other bar around the section up (half a lap, or an
+/// offset). `same_type` gives the set to every column (or beam) of the
+/// host's type.
+///
+/// Stirrups are closed by two hooks at one corner, bent into the section
+/// by `hook` degrees with straight ends of `tail` bar diameters (at least
+/// 5 cm), counted in their length and weight.
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RebarCreate {
@@ -191,6 +259,15 @@ pub struct RebarCreate {
     /// height. Instead of the equal lifts of `max_length`.
     #[serde(default)]
     pub lifts: Option<Vec<f64>>,
+    /// Columns, `perimeter` cut in lifts (`max_length` or `lifts`): splice every other bar
+    /// around the section higher, so neighbouring bars do not lap at the same heights:
+    /// `none` (default), `half_lap` (half the lap length) or an offset in meters, above 0 and
+    /// at most `(max_length - lap) / 2`. A staggered bar still runs from the base to the top:
+    /// its first piece is longer by the offset and its last shorter (a splice moved to less
+    /// than a lap below the top is left out); with `max_length` the lifts are made shorter
+    /// where needed so the longer first piece stays within it.
+    #[serde(default)]
+    pub stagger: Option<StaggerArg>,
     /// Columns, `perimeter`: the number of bars on each face of the section, in the order of
     /// the column's `derived.faces`, the two corner bars of a face included (at least 2).
     #[serde(default)]
@@ -202,6 +279,13 @@ pub struct RebarCreate {
     /// Also give the set to every other column (or beam) of the host's type (default false).
     #[serde(default)]
     pub same_type: Option<bool>,
+    /// `stirrups`: the angle the two hooks that close each stirrup are bent by, degrees, 90 to
+    /// 180 (default 135); 0 for none (the closed outline alone).
+    #[serde(default)]
+    pub hook: Option<f64>,
+    /// `stirrups`: the straight end of each hook, in bar diameters (default 10; at least 5 cm).
+    #[serde(default)]
+    pub tail: Option<f64>,
 }
 
 impl Command for RebarCreate {
@@ -245,7 +329,7 @@ impl Command for RebarCreate {
                 match self.layout.as_str() {
                     "ties" if beam => return Err(EngineError::invalid("cross-ties go in columns")),
                     "ties" => RebarLayout::Ties { spacing },
-                    _ => RebarLayout::Stirrups { spacing },
+                    _ => RebarLayout::Stirrups { spacing, hooks: stirrup_hooks(self.hook, self.tail)? },
                 }
             }
             other => {
@@ -254,6 +338,9 @@ impl Command for RebarCreate {
                 )));
             }
         };
+        if (self.hook.is_some() || self.tail.is_some()) && !matches!(layout, RebarLayout::Stirrups { .. }) {
+            return Err(EngineError::invalid("`hook` and `tail` go with `stirrups`"));
+        }
         let by_face = self.faces.is_some() || self.face_spacing.is_some();
         if by_face && (beam || !matches!(layout, RebarLayout::Longitudinal { face: BarFace::Perimeter, .. })) {
             return Err(EngineError::invalid("`faces` and `face_spacing` go with the `perimeter` bars of a column"));
@@ -307,6 +394,20 @@ impl Command for RebarCreate {
             (false, None) => super::rebar::splice(p, type_id, None, self.lap)?,
             (_, splice) => splice,
         };
+        // Staggered splices: a column's vertical bars cut in lifts.
+        let stagger = self.stagger.as_ref().map(StaggerArg::stagger).transpose()?.unwrap_or_default();
+        let splice = match (stagger.is_none(), splice) {
+            (true, splice) => splice,
+            (false, _) if beam || !matches!(layout, RebarLayout::Longitudinal { face: BarFace::Perimeter, .. }) => {
+                return Err(EngineError::invalid("`stagger` goes with the `perimeter` bars of a column"));
+            }
+            (false, None) => {
+                return Err(EngineError::invalid(
+                    "`stagger` needs the bars cut in lifts: give `max_length` or `lifts`",
+                ));
+            }
+            (false, Some(splice)) => Some(staggered(splice, stagger)?),
+        };
         let partition = partition_arg(self.partition.as_deref())?;
         let set = |host| {
             let (layout, faces, lifts) = (layout.clone(), faces.clone(), lifts.clone());
@@ -351,8 +452,9 @@ impl Command for RebarCreate {
 /// Give beams and columns without reinforcement a typical one: beams two
 /// (three when 20 cm wide or more) 10 mm bars at the bottom, two 8 mm at the
 /// top (both lap spliced past the stock length) and 5 mm stirrups every 15 cm; columns four 10 mm bars (six in round
-/// ones) and 5 mm ties every 15 cm. Default: every beam and column of
-/// `level` (or of the project).
+/// ones) and 5 mm ties every 15 cm. The stirrups are closed by two hooks
+/// (`hook`, `tail`). Default: every beam and column of `level` (or of the
+/// project).
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RebarTypical {
@@ -362,6 +464,13 @@ pub struct RebarTypical {
     /// Level id or name, when no elements are given.
     #[serde(default)]
     pub level: Option<Ref>,
+    /// The angle the two hooks that close each stirrup are bent by, degrees, 90 to 180
+    /// (default 135); 0 for none.
+    #[serde(default)]
+    pub hook: Option<f64>,
+    /// The straight end of each hook, in bar diameters (default 10; at least 5 cm).
+    #[serde(default)]
+    pub tail: Option<f64>,
 }
 
 impl Command for RebarTypical {
@@ -385,6 +494,7 @@ impl Command for RebarTypical {
         };
         let [cover, spacing, main_bar, top_bar, stirrup_bar] = p.defaults().rebar;
         let (main, top, ties) = (bar_type(p, main_bar)?, bar_type(p, top_bar)?, bar_type(p, stirrup_bar)?);
+        let hooks = stirrup_hooks(self.hook, self.tail)?;
         let mut todo = Vec::new();
         let mut skipped = 0;
         for (id, beam) in hosts {
@@ -393,7 +503,7 @@ impl Command for RebarTypical {
                 skipped += 1;
                 continue;
             }
-            let stirrups = RebarLayout::Stirrups { spacing };
+            let stirrups = RebarLayout::Stirrups { spacing, hooks };
             if beam {
                 let wide = matches!(p.element_type(e.type_id).map(|t| &t.data), Some(TypeData::Beam { width, .. }) if *width >= 0.2 - 1e-9);
                 let bottom = RebarLayout::Longitudinal { face: BarFace::Bottom, count: if wide { 3 } else { 2 } };

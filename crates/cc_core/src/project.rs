@@ -492,7 +492,40 @@ impl Project {
         p.link_template_pipes(system, &|key| vec![n(key)]);
         // The niche type (issue #304), last so the ids above stay as they were.
         p.add_template_niche(&names, &n);
+        // The concrete wall types (issue #366), last for the same reason.
+        p.add_template_concrete_walls(&s.concrete_walls, &n);
         p
+    }
+
+    /// The template's reinforced concrete wall types: one structure layer of
+    /// the template's concrete, made structural (walls drawn with them take
+    /// reinforcement without being told), shown in its legend.
+    fn add_template_concrete_walls(&mut self, walls: &[crate::template_spec::Sized1; 3], n: &dyn Fn(&str) -> String) {
+        let concrete = n("tpl-mat-concrete");
+        let mut added = Vec::new();
+        for (key, thickness) in walls.iter().copied() {
+            let layer = Layer {
+                material: concrete.clone(),
+                thickness,
+                function: LayerFunction::Structure,
+                ..Default::default()
+            };
+            let data = TypeData::Wall {
+                layers: vec![layer],
+                function: WallFunction::Exterior,
+                curtain: None,
+                structural: true,
+            };
+            let id = ElementTypeId(self.alloc_id());
+            let uid = crate::Uid::generate();
+            self.types.insert(id, ElementType { id, name: n(key), data, info: Default::default(), uid });
+            added.push(id);
+        }
+        for view in self.views.values_mut() {
+            if let ViewKind::Legend { types } = &mut view.kind {
+                types.extend(added.iter().copied());
+            }
+        }
     }
 
     /// The template's niche type, sized by [`crate::Defaults::niche`].
@@ -1254,6 +1287,25 @@ impl Project {
         })
     }
 
+    /// Whether set `r` has a host that takes its layout: wall bars in walls
+    /// (not spline ones), slab bars in floors and foundation slabs, strip bars
+    /// in strip footings, the other layouts in beams and columns.
+    pub fn rebar_host_fits(&self, r: &crate::Rebar) -> bool {
+        self.element(r.host).is_some_and(|h| match &h.kind {
+            ElementKind::Wall(w) => r.layout.in_wall() && w.spline.is_none(),
+            ElementKind::Floor(_) => r.layout.in_slab(),
+            ElementKind::Foundation(f) => match f.shape {
+                crate::FoundationShape::Slab { .. } => r.layout.in_slab(),
+                crate::FoundationShape::Strip { .. } => r.layout.fits_strip(),
+                crate::FoundationShape::Pad { .. } => false,
+            },
+            ElementKind::Beam(_) | ElementKind::Column(_) => {
+                !r.layout.in_wall() && !r.layout.in_slab() && !r.layout.in_strip()
+            }
+            _ => false,
+        })
+    }
+
     /// The bar tags of reinforcement set `set`.
     pub fn bar_tags_of(&self, set: ElementId) -> impl Iterator<Item = (&Element, &crate::bar_tag::BarTag)> {
         self.elements.values().filter_map(move |e| match &e.kind {
@@ -1396,6 +1448,9 @@ pub fn template_default(key: &str) -> &'static str {
         "tpl-type-masonry-15" => "Alvenaria 15 cm",
         "tpl-type-masonry-25" => "Alvenaria 25 cm",
         "tpl-type-drywall-10" => "Divisória gesso 10 cm",
+        "tpl-type-concrete-wall-15" => "Parede de concreto 15 cm",
+        "tpl-type-concrete-wall-20" => "Parede de concreto 20 cm",
+        "tpl-type-concrete-wall-25" => "Parede de concreto 25 cm",
         "tpl-type-door-80" => "Porta 80x210",
         "tpl-type-door-90" => "Porta 90x210",
         "tpl-type-window-120" => "Janela 120x120",
@@ -1575,6 +1630,9 @@ pub fn template_default(key: &str) -> &'static str {
         "tpl-phase-filter-demo-new" => "Mostrar demolição + novo",
         // The imperial template's names.
         "tpl-imp-type-masonry-6" => "Alvenaria 6\"",
+        "tpl-imp-type-concrete-wall-6" => "Parede de concreto 6\"",
+        "tpl-imp-type-concrete-wall-8" => "Parede de concreto 8\"",
+        "tpl-imp-type-concrete-wall-10" => "Parede de concreto 10\"",
         "tpl-imp-type-masonry-10" => "Alvenaria 10\"",
         "tpl-imp-type-drywall-4" => "Divisória gesso 4 7/8\"",
         "tpl-imp-type-door-32" => "Porta 2'-8\" x 6'-8\"",

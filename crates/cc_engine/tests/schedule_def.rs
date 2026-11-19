@@ -350,3 +350,78 @@ fn the_look_on_paper_is_the_schedules_own() {
     let cc_core::ViewKind::Schedule { def, .. } = &back.view(cc_core::ViewId(view)).unwrap().kind else { panic!() };
     assert_eq!((def.sorting.len(), def.appearance.text_size), (4, 2.2));
 }
+
+/// The bar type of `diameter` (meters) the template has.
+fn bar_type(s: &Session, diameter: f64) -> u64 {
+    let found = s
+        .project()
+        .types
+        .values()
+        .find(|t| matches!(t.data, cc_core::TypeData::Rebar { diameter: d, .. } if (d - diameter).abs() < 1e-9));
+    found.map(|t| t.id.0).unwrap_or_else(|| panic!("no bar type of {diameter} m"))
+}
+
+/// A diameter cell (`Ø 12,5 mm` or `Ø 12.5 mm`) read back in millimeters.
+fn diameter_mm(cell: &str) -> f64 {
+    let number = cell.trim_start_matches('Ø').trim_end_matches("mm").trim().replace(',', ".");
+    number.parse().unwrap_or_else(|_| panic!("not a diameter: {cell}"))
+}
+
+/// Rebar schedules (#367): diameters filter and sort as numbers in meters,
+/// whatever text their column shows, and the host column is not called a
+/// wall when its hosts are columns, slabs and footings.
+#[test]
+fn rebar_diameters_filter_and_sort_as_numbers() {
+    let mut s = Session::default();
+    let column = id(&run(&mut s, "column_create", json!({"position": [0, 0]})));
+    let (d5, d8, d12) = (bar_type(&s, 0.005), bar_type(&s, 0.008), bar_type(&s, 0.0125));
+    run(&mut s, "rebar_create", json!({"host": column, "layout": "perimeter", "type": d12}));
+    run(&mut s, "rebar_create", json!({"host": column, "layout": "stirrups", "type": d5}));
+    let floor = id(&run(&mut s, "floor_create", json!({"boundary": [[2, 0], [6, 0], [6, 4], [2, 4]]})));
+    run(&mut s, "slab_rebar_create", json!({"slabs": [floor], "layers": "top", "type": d8}));
+    let strip = id(&run(&mut s, "strip_footing_create", json!({"start": [0, 8], "end": [6, 8]})));
+    run(&mut s, "strip_rebar_create", json!({"strips": [strip], "type": d5, "longitudinal_type": d5}));
+    let view = id(&run(&mut s, "view_create", json!({"kind": "schedule", "category": "rebar"})));
+    let fields = ["Partition", "Diameter", "Count", "Length", "Weight"];
+    run(&mut s, "schedule_set", json!({"view": view, "fields": fields}));
+    let diameters = |s: &mut Session| -> Vec<f64> {
+        rows(s, view).iter().filter(|r| !r.0 && !r.1).map(|r| diameter_mm(&r.2[1])).collect()
+    };
+    let all = diameters(&mut s);
+    assert!([5.0, 8.0, 12.5].iter().all(|d| all.contains(d)), "{all:?}");
+    // Filtered by a number in meters, given as a text or as a JSON number.
+    for value in [json!("0.008"), json!(0.008)] {
+        let filter = json!([{"field": "Diameter", "op": "greater_or_equal", "value": value}]);
+        run(&mut s, "schedule_set", json!({"view": view, "filters": filter}));
+        let got = diameters(&mut s);
+        let want: Vec<f64> = all.iter().copied().filter(|d| *d >= 8.0).collect();
+        assert_eq!(got.len(), want.len(), "{value}: {got:?}");
+        assert!(got.iter().all(|d| *d >= 8.0) && got.contains(&8.0) && got.contains(&12.5), "{value}: {got:?}");
+    }
+    let saved = run(&mut s, "schedule_get", json!({"view": view}))["filters"][0]["value"].clone();
+    assert_eq!(saved, json!("0.008"), "a number is kept as the text of the definition");
+    // Sorted by the number, not the text (`Ø 12,5` after `Ø 5,0` and `Ø 8,0`), both ways.
+    run(&mut s, "schedule_set", json!({"view": view, "filters": [], "sorting": [{"field": "Diameter"}]}));
+    let got = diameters(&mut s);
+    assert!(got.windows(2).all(|w| w[0] <= w[1]), "{got:?}");
+    run(&mut s, "schedule_set", json!({"view": view, "sorting": [{"field": "Diameter", "descending": true}]}));
+    let got = diameters(&mut s);
+    assert!(got.windows(2).all(|w| w[0] >= w[1]), "{got:?}");
+
+    // The default fields: the host column is the hosts', columns, slabs and footings alike.
+    let view = id(&run(&mut s, "view_create", json!({"kind": "schedule", "category": "rebar"})));
+    let table = run(&mut s, "schedule_table", json!({"view": view}));
+    let host = cc_engine::i18n::tr("prop-host");
+    assert_eq!(table["headers"][0], json!(host), "{table}");
+    let hosts: Vec<String> = rows(&mut s, view).iter().map(|r| r.2[0].clone()).collect();
+    for h in [column, floor, strip] {
+        let host = s.project().element(cc_core::ElementId(h)).unwrap();
+        let name = if host.mark.is_empty() { host.id.to_string() } else { host.mark.clone() };
+        assert!(hosts.contains(&name), "{name} in {hosts:?}");
+    }
+    // In every language, the column is titled as the property is ("Host", "Hospedeiro"), not "Wall".
+    for lang in cc_engine::i18n::Language::ALL {
+        let messages = cc_engine::i18n::parse_messages(lang.source());
+        assert_eq!(messages.get("col-host"), messages.get("prop-host"), "{}", lang.code());
+    }
+}

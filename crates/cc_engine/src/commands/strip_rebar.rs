@@ -41,6 +41,13 @@ pub struct StripBeamBars {
     /// none). The stirrups run over the full height of the section, in the width of the beam.
     #[serde(default)]
     pub stirrups: Option<f64>,
+    /// The angle the two hooks that close each stirrup are bent by, degrees, 90 to 180
+    /// (default 135); 0 for none.
+    #[serde(default)]
+    pub hook: Option<f64>,
+    /// The straight end of each stirrup hook, in bar diameters (default 10; at least 5 cm).
+    #[serde(default)]
+    pub tail: Option<f64>,
 }
 
 /// Reinforce strip footings, straight or arc: bars across the footing
@@ -51,7 +58,8 @@ pub struct StripBeamBars {
 /// slopes of a haunched section and flat between the faces of its beam, and
 /// its ends turn down to the bottom layer, closing the edges. The bars
 /// along a haunched footing follow the slopes, and leave the beam to its
-/// own: `beam` gives it stirrups over the full height of the section, top,
+/// own: `beam` gives it stirrups over the full height of the section
+/// (closed by two hooks, `hook` and `tail`), top,
 /// bottom and side bars (a haunched strip gets stirrups and two top bars
 /// by default; `false` for none). Bars along the strip longer than
 /// `max_length` are lap spliced, neighbouring splices staggered. One set
@@ -205,8 +213,10 @@ impl Command for StripRebarCreate {
                 let layout = RebarLayout::Sides { count: sides, spacing: 0.0 };
                 beam_sets.push((ty, layout, splice(p, ty, self.max_length, self.lap)?));
             }
+            let hooks = super::rebar::stirrup_hooks(b.hook, b.tail)?;
             if let Some(step) = spacing(b.stirrups.unwrap_or(default_spacing), "stirrups")? {
-                beam_sets.push((bar(&b.stirrup_type, stirrup_bar)?, RebarLayout::Stirrups { spacing: step }, None));
+                let layout = RebarLayout::Stirrups { spacing: step, hooks };
+                beam_sets.push((bar(&b.stirrup_type, stirrup_bar)?, layout, None));
             }
         }
         let mut todo: Vec<(ElementId, LevelId, ElementTypeId, RebarLayout, Option<Splice>)> = Vec::new();

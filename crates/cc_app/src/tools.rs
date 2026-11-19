@@ -1115,12 +1115,8 @@ fn model_snaps(project: &Project, geom: &ModelGeometry, level: Option<LevelId>) 
             lines.extend(r.path.windows(2).map(|w| (w[0], w[1])));
         } else if let ElementKind::Sweep(sw) = &e.kind {
             ends.extend_from_slice(&sw.path);
-            lines.extend(sw.path.windows(2).map(|w| (w[0], w[1])));
-            if sw.closed
-                && let (Some(a), Some(b)) = (sw.path.last(), sw.path.first())
-            {
-                lines.push((*a, *b));
-            }
+            // The straight segments (an arc's chord is no line of the path).
+            lines.extend(sw.segments().into_iter().filter(|(_, _, arc)| arc.is_none()).map(|(a, b, _)| (a, b)));
         }
         // Outlines as the plan draws them: corners are endpoints, edges lines.
         let outlines: Vec<Vec<DVec2>> = match (&e.kind, project.element_type(e.type_id).map(|t| &t.data)) {
@@ -2883,6 +2879,7 @@ pub fn finish_sweep(state: &mut AppState, level: LevelId, type_id: ElementTypeId
             type_ref: Some(Ref::Id(type_id.0)),
             base_offset: Some(o.base_offset),
             flip: o.flip,
+            curves: None,
         };
         run_create(state, command);
     }

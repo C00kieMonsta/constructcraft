@@ -448,6 +448,13 @@ impl Project {
         // Spline walls: a curve that makes no wall goes (the wall is straight between its ends).
         repairs += self.repair_wall_splines();
 
+        // Sweep paths: their arcs' bulges in range (before the paths are checked).
+        for e in self.elements.values_mut() {
+            if let ElementKind::Sweep(s) = &mut e.kind {
+                repairs += s.repair();
+            }
+        }
+
         // Elements: repeat until stable, since removing a wall orphans what it hosts.
         loop {
             let invalid: Vec<_> = self
@@ -463,19 +470,7 @@ impl Project {
                         }
                         // Wall bars in walls, slab bars in floors and foundation
                         // slabs, the other layouts in beams and columns.
-                        ElementKind::Rebar(r) => self.element(r.host).is_some_and(|h| match &h.kind {
-                            ElementKind::Wall(w) => r.layout.in_wall() && w.spline.is_none(),
-                            ElementKind::Floor(_) => r.layout.in_slab(),
-                            ElementKind::Foundation(f) => match f.shape {
-                                crate::FoundationShape::Slab { .. } => r.layout.in_slab(),
-                                crate::FoundationShape::Strip { .. } => r.layout.fits_strip(),
-                                crate::FoundationShape::Pad { .. } => false,
-                            },
-                            ElementKind::Beam(_) | ElementKind::Column(_) => {
-                                !r.layout.in_wall() && !r.layout.in_slab() && !r.layout.in_strip()
-                            }
-                            _ => false,
-                        }),
+                        ElementKind::Rebar(r) => self.rebar_host_fits(r),
                         ElementKind::Dimension(d) => self.view(d.view).is_some(),
                         ElementKind::Text(t) => self.view(t.view).is_some(),
                         ElementKind::LevelMark(m) => self.view(m.view).is_some(),
@@ -700,6 +695,23 @@ impl Project {
                 && (r.faces.len() > crate::FaceBars::MAX_FACES || r.faces.iter().any(|f| !f.is_valid()))
             {
                 r.faces.clear();
+                repairs += 1;
+            }
+        }
+        // A stagger out of range, or where it does not apply (only a column's
+        // vertical bars are staggered): none, keeping the splices.
+        let columns: std::collections::HashSet<crate::ElementId> =
+            self.elements.values().filter(|e| matches!(e.kind, ElementKind::Column(_))).map(|e| e.id).collect();
+        for e in self.elements.values_mut() {
+            if let ElementKind::Rebar(r) = &mut e.kind
+                && let Some(s) = &mut r.splice
+                && !s.stagger.is_none()
+                && s.lengths_are_valid()
+                && (!s.stagger_is_valid()
+                    || !columns.contains(&r.host)
+                    || !matches!(r.layout, crate::RebarLayout::Longitudinal { .. }))
+            {
+                s.stagger = crate::Stagger::None;
                 repairs += 1;
             }
         }
@@ -1440,11 +1452,7 @@ mod tests {
             ids.push(add(&mut p, beam_t, ElementKind::Beam(beam)));
         }
         let mut bars = Vec::new();
-        for splice in [
-            Splice { max_length: 12.0, lap: 0.5 },
-            Splice { max_length: f64::NAN, lap: 0.5 },
-            Splice { max_length: 2.0, lap: 1.5 },
-        ] {
+        for splice in [Splice::new(12.0, 0.5), Splice::new(f64::NAN, 0.5), Splice::new(2.0, 1.5)] {
             let layout = RebarLayout::Sides { count: 1, spacing: 0.0 };
             let rebar = Rebar { splice: Some(splice), ..Rebar::new(ids[0], layout, 0.025) };
             bars.push(add(&mut p, bar_t, ElementKind::Rebar(rebar)));

@@ -448,7 +448,7 @@ No parameters.
 | `mid` | [x, y] | optional | A point on the arc between the ends: makes an arc wall through the three points. |
 | `profile` | [JSON, …] | optional | An elevation profile (see `wall_profile_set`): the outline of the wall's face as curves in its elevation frame, `[u, z]` meters along `start`→`end` and above its base. Straight walls only. |
 | `radius` | number | optional | Arc walls: the radius in meters, positive when the arc turns counter-clockwise from `start` to `end`, negative clockwise; at least half the distance between the ends. Ignored when `mid` or `bulge` is given. |
-| `structural` | boolean | optional | A structural wall (default: as the wall type says). |
+| `structural` | boolean | optional | A structural wall, one that takes reinforcement (default: as the wall type says; the template's concrete wall types are structural, its masonry and partitions are not). Changing the wall's type later leaves it as it is. |
 | `through` | [[x, y], …] | optional | Spline walls: the points `[x, y]` the wall line passes through between `start` and `end`, in order (at most 63; none makes a straight spline): a smooth curve through them all, whose bends must leave the face inside them a radius of 5 cm at least. |
 | `top_level` | id or name | optional | Level the top is attached to, instead of a height. |
 | `top_offset` | number | optional | Offset of the top from `top_level`, meters. |
@@ -838,7 +838,7 @@ No parameters.
 
 ### `rebar_create`
 
-*edit* — Add a set of bars to a beam or column: `layout` is `top` or `bottom` (beams), `perimeter` (columns) with `count` bars, `sides` (beams: `count` side bars on each side face, or as many as keep them `spacing` apart over the height), or `stirrups` every `spacing`. The bars are `cover` inside the faces (default 2.5 cm) and follow the host: along an arc beam they follow the arc, each at its own radius, and the stirrups are radial. Top and bottom bars that do not fit side by side (a clear distance of the bar diameter, at least 2 cm) go in a second layer. Bars along a beam longer than `max_length` are made of pieces overlapping by `lap`, the splices of neighbouring bars staggered. A column's `perimeter` bars are `count` spread around its section, or given face by face with `faces` (a bar count for each face of the section, its two corner bars included, the corner bars shared between faces; the column's `derived.faces` lists the faces in order) or `face_spacing`; on a curved face they stand at even angles. Its `stirrups` follow the section's outline, and `ties` adds cross-ties every `spacing`: a hooked bar from each bar between the corners to the bar opposite. With `max_length` a column's vertical bars are cut in lifts that lap by `lap`. `same_type` gives the set to every column (or beam) of the host's type.
+*edit* — Add a set of bars to a beam or column: `layout` is `top` or `bottom` (beams), `perimeter` (columns) with `count` bars, `sides` (beams: `count` side bars on each side face, or as many as keep them `spacing` apart over the height), or `stirrups` every `spacing`. The bars are `cover` inside the faces (default 2.5 cm) and follow the host: along an arc beam they follow the arc, each at its own radius, and the stirrups are radial. Top and bottom bars that do not fit side by side (a clear distance of the bar diameter, at least 2 cm) go in a second layer. Bars along a beam longer than `max_length` are made of pieces overlapping by `lap`, the splices of neighbouring bars staggered. A column's `perimeter` bars are `count` spread around its section, or given face by face with `faces` (a bar count for each face of the section, its two corner bars included, the corner bars shared between faces; the column's `derived.faces` lists the faces in order) or `face_spacing`; on a curved face they stand at even angles. Its `stirrups` follow the section's outline, and `ties` adds cross-ties every `spacing`: a hooked bar from each bar between the corners to the bar opposite. With `max_length` a column's vertical bars are cut in lifts that lap by `lap`, all at the same heights unless `stagger` moves the splices of every other bar around the section up (half a lap, or an offset). `same_type` gives the set to every column (or beam) of the host's type. Stirrups are closed by two hooks at one corner, bent into the section by `hook` degrees with straight ends of `tail` bar diameters (at least 5 cm), counted in their length and weight.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -848,6 +848,7 @@ No parameters.
 | `cover` | number | optional | Concrete cover, meters (default 0.025; 1 1/2" in imperial projects). |
 | `face_spacing` | number | optional | Columns, `perimeter`: instead of `faces`, the largest distance between bars on every face, meters. |
 | `faces` | [id, …] | optional | Columns, `perimeter`: the number of bars on each face of the section, in the order of the column's `derived.faces`, the two corner bars of a face included (at least 2). |
+| `hook` | number | optional | `stirrups`: the angle the two hooks that close each stirrup are bent by, degrees, 90 to 180 (default 135); 0 for none (the closed outline alone). |
 | `lap` | number | optional | Lap length of the splices, meters (default: 40 bar diameters). |
 | `lap_at_joins` | boolean | optional | Beams, bars along the beam: run them half a lap past each end joined to another beam that carries on in the same line (the beams of a ring), so the bars of the two lap there (default false: they stop the cover short of the end). The lap is `lap`, or 40 bar diameters where bars are kept whole (`max_length` 0). |
 | `lifts` | [number, …] | optional | Columns, `perimeter`: heights above the column's base where its vertical bars are cut, rising (the construction joints): the bars of each lift run `lap` past the next height. Instead of the equal lifts of `max_length`. |
@@ -856,16 +857,20 @@ No parameters.
 | `partition` | string | optional | The part of the structure the sets belong to (e.g. "FOUNDATION", "WALL"), which schedules filter and group by (default: none). |
 | `same_type` | boolean | optional | Also give the set to every other column (or beam) of the host's type (default false). |
 | `spacing` | number | optional | Stirrup spacing, meters (default 0.15; 6" in imperial projects), or the largest distance between side bars over the height when no `count` is given. |
+| `stagger` | number or string | optional | Columns, `perimeter` cut in lifts (`max_length` or `lifts`): splice every other bar around the section higher, so neighbouring bars do not lap at the same heights: `none` (default), `half_lap` (half the lap length) or an offset in meters, above 0 and at most `(max_length - lap) / 2`. A staggered bar still runs from the base to the top: its first piece is longer by the offset and its last shorter (a splice moved to less than a lap below the top is left out); with `max_length` the lifts are made shorter where needed so the longer first piece stays within it. |
+| `tail` | number | optional | `stirrups`: the straight end of each hook, in bar diameters (default 10; at least 5 cm). |
 | `type` | id or name | optional | Bar type id or name (default: the type nearest 10 mm, or 5 mm for stirrups; 1/2" and 3/8" in imperial projects). |
 
 ### `rebar_typical`
 
-*edit* — Give beams and columns without reinforcement a typical one: beams two (three when 20 cm wide or more) 10 mm bars at the bottom, two 8 mm at the top (both lap spliced past the stock length) and 5 mm stirrups every 15 cm; columns four 10 mm bars (six in round ones) and 5 mm ties every 15 cm. Default: every beam and column of `level` (or of the project).
+*edit* — Give beams and columns without reinforcement a typical one: beams two (three when 20 cm wide or more) 10 mm bars at the bottom, two 8 mm at the top (both lap spliced past the stock length) and 5 mm stirrups every 15 cm; columns four 10 mm bars (six in round ones) and 5 mm ties every 15 cm. The stirrups are closed by two hooks (`hook`, `tail`). Default: every beam and column of `level` (or of the project).
 
 | Parameter | Type | | Description |
 |---|---|---|---|
 | `elements` | [id, …] | optional | Beam and column ids (default: all of `level`, or of the project). |
+| `hook` | number | optional | The angle the two hooks that close each stirrup are bent by, degrees, 90 to 180 (default 135); 0 for none. |
 | `level` | id or name | optional | Level id or name, when no elements are given. |
+| `tail` | number | optional | The straight end of each hook, in bar diameters (default 10; at least 5 cm). |
 
 ### `rebar_copy`
 
@@ -880,7 +885,7 @@ No parameters.
 
 ### `wall_rebar_create`
 
-*edit* — Reinforce walls, straight or arc: `horizontal` bars up the wall (ring bars in an arc wall, each as long as the arc at its own radius) and `vertical` bars along it near each face, and `ties` between the faces. With none of the three given, horizontal and vertical bars every 15 cm on both faces. Bars lie `cover` inside the faces of the wall's structure (its core layers), stop at its ends and around its doors and windows, and those longer than `max_length` are lap spliced, neighbouring splices staggered. Horizontal bars may close up towards the base (`zones`); vertical bars may cover part of the height, start between those of another set (`offset`) and have bent ends. Each call adds sets, so a second call makes the additional bars of a zone. One set per family and face, in one undo step; the bars follow the wall.
+*edit* — Reinforce walls, straight or arc: `horizontal` bars up the wall (ring bars in an arc wall, each as long as the arc at its own radius) and `vertical` bars along it near each face, and `ties` between the faces. With none of the three given, horizontal and vertical bars every 15 cm on both faces. Bars lie `cover` inside the faces of the wall's structure (its core layers), stop at its ends and around its doors and windows, and those longer than `max_length` are lap spliced, neighbouring splices staggered. Horizontal bars may close up towards the base (`zones`); vertical bars may cover part of the height, start between those of another set (`offset`) and have bent ends. Each call adds sets, so a second call makes the additional bars of a zone. One set per family and face, in one undo step; the bars follow the wall. Without `walls`, only structural walls are reinforced: the others that could take bars are listed in `not_structural`, with a `warning` when no wall was reinforced.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -927,7 +932,7 @@ No parameters.
 
 ### `strip_rebar_create`
 
-*edit* — Reinforce strip footings, straight or arc: bars across the footing (`transverse_spacing` apart along it; radial in an arc strip) and bars along it (`longitudinal_spacing` apart across it; ring bars in an arc strip, each as long as the arc at its own radius), in the bottom and top `layers`. A top bar across the footing follows its top, up the slopes of a haunched section and flat between the faces of its beam, and its ends turn down to the bottom layer, closing the edges. The bars along a haunched footing follow the slopes, and leave the beam to its own: `beam` gives it stirrups over the full height of the section, top, bottom and side bars (a haunched strip gets stirrups and two top bars by default; `false` for none). Bars along the strip longer than `max_length` are lap spliced, neighbouring splices staggered. One set per layer and direction, in one undo step; the bars follow the strip.
+*edit* — Reinforce strip footings, straight or arc: bars across the footing (`transverse_spacing` apart along it; radial in an arc strip) and bars along it (`longitudinal_spacing` apart across it; ring bars in an arc strip, each as long as the arc at its own radius), in the bottom and top `layers`. A top bar across the footing follows its top, up the slopes of a haunched section and flat between the faces of its beam, and its ends turn down to the bottom layer, closing the edges. The bars along a haunched footing follow the slopes, and leave the beam to its own: `beam` gives it stirrups over the full height of the section (closed by two hooks, `hook` and `tail`), top, bottom and side bars (a haunched strip gets stirrups and two top bars by default; `false` for none). Bars along the strip longer than `max_length` are lap spliced, neighbouring splices staggered. One set per layer and direction, in one undo step; the bars follow the strip.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -1341,15 +1346,16 @@ No parameters.
 
 ### `sweep_create`
 
-*edit* — Create a swept profile: the profile of its type carried along `path` in plan, `base_offset` above the level, on the left of the path walking along it (`flip` puts it on the right); `closed` runs the path back to its first point (around a room). A project without a sweep type gets one (a baseboard).
+*edit* — Create a swept profile: the profile of its type carried along `path` in plan, `base_offset` above the level, on the left of the path walking along it (`flip` puts it on the right); `closed` runs the path back to its first point (around a room). Instead of points, the path may be drawn with `curves` (lines and arcs chained end to end, or one circle), as `floor_create` takes them: arcs stay arcs (the profile follows them square to the path, and the volume is exact), the path runs the way the first curve runs and is closed when the chain closes; a circle runs counter-clockwise, so the profile is inside it unless flipped. A project without a sweep type gets one (a baseboard).
 
 | Parameter | Type | | Description |
 |---|---|---|---|
-| `path` | [[x, y], …] | required | Points of the path in plan (at least 2; 3 when closed). |
 | `base_offset` | number | optional | Height of the path above the level, meters (default 0). |
-| `closed` | boolean | optional | Run the path back to its first point. |
+| `closed` | boolean | optional | Run the path back to its first point (with `curves`: the curves must close). |
+| `curves` | [JSON, …] | optional | The path drawn with curves instead of points: lines, arcs (`bulge` or `through`) and circles (alone), as in `floor_create`; rectangles and polygons make closed paths of lines. |
 | `flip` | boolean | optional | Put the profile on the right of the path. |
 | `level` | id or name | optional | Level id or name (default: the lowest level). |
+| `path` | [[x, y], …] | optional | Points of the path in plan (at least 2; 3 when closed). Give these or `curves`. |
 | `type` | id or name | optional | Type id or name (default: the category's default type). |
 
 ### `sweep_type_create`
@@ -3228,7 +3234,7 @@ No parameters.
 
 ### `schedule_set`
 
-*edit* — Change a schedule's definition; every part is optional and replaces the part it names, the others staying as they are. `fields` are the columns in order. `filters` keep the rows that pass every one: each compares a `field` with a `value` by `op` (`equals`, `not_equals`, `contains`, `not_contains`, `begins_with`, `not_begins_with`, `greater`, `greater_or_equal`, `less`, `less_or_equal`, `has_value`, `has_no_value`); numbers compare as numbers in SI units (lengths in meters), texts without case. `sorting` orders the rows by up to four levels, the first outermost; a level with `header`, `footer` or `blank_line` groups the rows alike in it under a heading, over a footer (the group's count and totals) or apart by a blank line. With `itemize` false, the elements alike in every sorting level share one row (with no sorting, those alike in every column shown but `Count` and the totaled ones): values that differ among them read as varying and totaled columns add up (the `Count` field says how many). `columns` formats the columns of the fields named (`heading`, `align`: `Auto`, `Left`, `Center`, `Right`; `hidden`: a hidden field still sorts and filters; `total`: add the column up in footers and totals), `totals` shows or hides the totals row, and `appearance` is how the table is drawn on sheets and exports (`grid_lines`, `outline`, `show_title`, `show_headers`, and the `title_size`, `header_size` and `text_size` in millimeters). One undo step; returns the definition as `schedule_get` does.
+*edit* — Change a schedule's definition; every part is optional and replaces the part it names, the others staying as they are. `fields` are the columns in order. `filters` keep the rows that pass every one: each compares a `field` with a `value` by `op` (`equals`, `not_equals`, `contains`, `not_contains`, `begins_with`, `not_begins_with`, `greater`, `greater_or_equal`, `less`, `less_or_equal`, `has_value`, `has_no_value`); numbers compare as numbers in SI units (lengths and diameters in meters, slopes as rise over run), also when the column writes them otherwise (`Ø 12.5`), texts without case; a `value` may be a JSON number or a text. `sorting` orders the rows by up to four levels, the first outermost; a level with `header`, `footer` or `blank_line` groups the rows alike in it under a heading, over a footer (the group's count and totals) or apart by a blank line. With `itemize` false, the elements alike in every sorting level share one row (with no sorting, those alike in every column shown but `Count` and the totaled ones): values that differ among them read as varying and totaled columns add up (the `Count` field says how many). `columns` formats the columns of the fields named (`heading`, `align`: `Auto`, `Left`, `Center`, `Right`; `hidden`: a hidden field still sorts and filters; `total`: add the column up in footers and totals), `totals` shows or hides the totals row, and `appearance` is how the table is drawn on sheets and exports (`grid_lines`, `outline`, `show_title`, `show_headers`, and the `title_size`, `header_size` and `text_size` in millimeters). One undo step; returns the definition as `schedule_get` does.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -3236,7 +3242,7 @@ No parameters.
 | `appearance` | JSON | optional | How the table looks on paper: a patch over `{grid_lines, outline, show_title, show_headers, title_size, header_size, text_size}`. |
 | `columns` | JSON | optional | Column formats, `[{"field": "Area", "heading": "Net area", "align": "Right", "total": true}, …]`: the fields named take the format given, the others keep theirs (`[]` clears every format). |
 | `fields` | [string, …] | optional | The fields shown, in order (names as `schedule_get` lists them in `available`). |
-| `filters` | JSON | optional | The filters, `[{"field": "Level", "op": "equals", "value": "Térreo"}, …]` (at most 8; `[]` for none). |
+| `filters` | JSON | optional | The filters, `[{"field": "Level", "op": "equals", "value": "Térreo"}, {"field": "Diameter", "op": "greater_or_equal", "value": 0.008}, …]` (at most 8; `[]` for none). |
 | `itemize` | boolean | optional | One row per element (default true); false gathers the elements alike in every sorting level in one row (with no sorting, those alike in every column shown but the count and the totaled ones). |
 | `sorting` | JSON | optional | The sorting levels, `[{"field": "Type", "header": true, "footer": true}, …]` (at most 4; `[]` for none). |
 | `totals` | boolean | optional | Show the totals row. |

@@ -47,26 +47,65 @@ pub struct Bar {
     pub points: Vec<DVec3>,
     pub closed: bool,
     /// The bar's true length when its center line is drawn with chords (a
-    /// bar following an arc): the arc's length at the bar's radius.
+    /// bar following an arc): the arc's length at the bar's radius. The
+    /// hooks of a closed bar (`hooks`) come on top of it.
     pub true_length: Option<f64>,
+    /// The hooks that close a closed bar (a stirrup), counted in its length
+    /// but not drawn in its center line.
+    pub hooks: Option<LoopHooks>,
+}
+
+/// The two hooks that close a stirrup, both at its first corner
+/// (`points[0]`), bent into the section the way the loop turns there: each
+/// turns by `angle` radians around a pin, its center line at `radius`, then
+/// runs `tail` straight. The loop's sides are measured to the sharp corner,
+/// and each hook adds its bend and its straight end, as a tie's hooks do.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LoopHooks {
+    pub angle: f64,
+    pub radius: f64,
+    pub tail: f64,
+}
+
+impl LoopHooks {
+    /// The hooks of a stirrup of bars `d` thick (none for unusable values).
+    pub fn of(hooks: &cc_core::StirrupHooks, d: f64) -> Option<Self> {
+        let usable = hooks.is_valid() && d.is_finite() && d > 0.0;
+        usable.then(|| Self { angle: hooks.angle.to_radians(), radius: PIN_RADIUS * d, tail: hooks.tail_length(d) })
+    }
+
+    /// Length of one hook: its bend and its straight end.
+    pub fn hook_length(&self) -> f64 {
+        self.angle * self.radius + self.tail
+    }
+
+    /// Length of the two hooks.
+    pub fn length(&self) -> f64 {
+        2.0 * self.hook_length()
+    }
 }
 
 impl Bar {
     /// A bar along straight segments.
     pub fn new(points: Vec<DVec3>, closed: bool) -> Self {
-        Self { points, closed, true_length: None }
+        Self { points, closed, true_length: None, hooks: None }
     }
 
+    /// The length of the bar: its center line (or true length) and its hooks.
     pub fn length(&self) -> f64 {
+        let hooks = match (self.closed, self.hooks) {
+            (true, Some(h)) => h.length(),
+            _ => 0.0,
+        };
         if let Some(length) = self.true_length {
-            return length;
+            return length + hooks;
         }
         let open: f64 = self.points.windows(2).map(|w| w[0].distance(w[1])).sum();
         let closing = match (self.closed, self.points.first(), self.points.last()) {
             (true, Some(a), Some(b)) => a.distance(*b),
             _ => 0.0,
         };
-        open + closing
+        open + closing + hooks
     }
 }
 
@@ -519,7 +558,7 @@ fn beam_bars(g: &BeamGeom, height: f64, r: &Rebar, d: f64, ds: f64, past: (f64, 
                     Some(arc) => {
                         let n = cc_core::arc::segments((b - a) / arc.radius.max(1e-9), cc_core::arc::ARC_STEP);
                         let points = (0..=n).map(|i| at(a + (b - a) * i as f64 / n as f64, v, z)).collect();
-                        Bar { points, closed: false, true_length: Some(to - from) }
+                        Bar { true_length: Some(to - from), ..Bar::new(points, false) }
                     }
                     None => Bar::new(vec![at(a, v, z), at(b, v, z)], false),
                 });
@@ -560,12 +599,16 @@ fn beam_bars(g: &BeamGeom, height: f64, r: &Rebar, d: f64, ds: f64, past: (f64, 
         | RebarLayout::SlabTrim { .. }
         | RebarLayout::StripTransverse { .. }
         | RebarLayout::StripLongitudinal { .. } => Vec::new(),
-        RebarLayout::Stirrups { spacing } => {
+        RebarLayout::Stirrups { spacing, hooks } => {
             let inset = cover + d / 2.0;
             let (v, z0, z1) = ((g.half - inset).max(0.0), inset, (height - inset).max(inset));
+            let hooks = hooks.and_then(|h| LoopHooks::of(&h, d));
             stations(u0, u1, spacing)
                 .into_iter()
-                .map(|u| Bar::new(vec![at(u, -v, z0), at(u, v, z0), at(u, v, z1), at(u, -v, z1)], true))
+                .map(|u| Bar {
+                    hooks,
+                    ..Bar::new(vec![at(u, -v, z0), at(u, v, z0), at(u, v, z1), at(u, -v, z1)], true)
+                })
                 .collect()
         }
     }
@@ -652,11 +695,62 @@ struct ColumnFrame {
     z: (f64, f64),
 }
 
+/// The center-line radius of a hook's bend, bar diameters: around a pin
+/// three bar diameters across.
+const PIN_RADIUS: f64 = 2.0;
+
 /// Length of a tie's hook bent by `turn` radians: the bend around a pin
 /// three bar diameters across, then a straight end of five diameters (at
 /// least 5 cm).
 pub(crate) fn hook(turn: f64, d: f64) -> f64 {
-    turn * 2.0 * d + (5.0 * d).max(0.05)
+    turn * PIN_RADIUS * d + (5.0 * d).max(cc_core::StirrupHooks::MIN_TAIL_LENGTH)
+}
+
+/// `outline` (a closed loop, counter-clockwise) from its sharpest convex
+/// corner, where a stirrup's hooks go: the corner that turns furthest
+/// inward, the first of those alike (a loop without one as it is).
+fn from_convex_corner(outline: Vec<DVec2>) -> Vec<DVec2> {
+    let n = outline.len();
+    if n < 3 {
+        return outline;
+    }
+    let turn = |i: usize| {
+        let (Some(a), Some(b), Some(c)) = (outline.get((i + n - 1) % n), outline.get(i), outline.get((i + 1) % n))
+        else {
+            return 0.0;
+        };
+        let (u, v) = (*b - *a, *c - *b);
+        u.perp_dot(v).atan2(u.dot(v))
+    };
+    let mut best = 0;
+    for i in 1..n {
+        if turn(i) > turn(best) + 1e-9 {
+            best = i;
+        }
+    }
+    let mut out = outline;
+    out.rotate_left(best);
+    out
+}
+
+/// Whether each of a column's vertical bars `placed` is an odd one in the
+/// order the bars stand around the section (the staggered ones): the order
+/// they are given in, except a plain box's, whose corners come first and
+/// are put in order by their angle about the middle.
+fn around_parity(shape: &ColumnShape, r: &Rebar, placed: &[FaceBar]) -> Vec<bool> {
+    if shape.round || !shape.boxed || !r.faces.is_empty() {
+        return (0..placed.len()).map(|i| i % 2 == 1).collect();
+    }
+    let mut order: Vec<usize> = (0..placed.len()).collect();
+    let angle = |i: usize| placed.get(i).map_or(0.0, |b| b.at.y.atan2(b.at.x));
+    order.sort_by(|a, b| angle(*a).total_cmp(&angle(*b)).then(a.cmp(b)));
+    let mut odd = vec![false; placed.len()];
+    for (rank, i) in order.into_iter().enumerate() {
+        if let Some(o) = odd.get_mut(i) {
+            *o = rank % 2 == 1;
+        }
+    }
+    odd
 }
 
 /// Bars of a column: vertical bars around the section over its height
@@ -676,15 +770,16 @@ fn column_bars(
     let (w, depth) = shape.size;
     match r.layout {
         RebarLayout::Longitudinal { .. } => {
-            // Every bar is cut at the same heights: the lifts the column is cast
-            // in, at the heights given or equal ones under the stock length.
-            let lifts = match r.lifts.is_empty() {
-                false => Rebar::lift_pieces(&r.lifts, top - base, lap_of(r, d)),
-                true => r.splice.map_or_else(|| vec![(0.0, top - base)], |s| s.pieces(top - base, 0)),
-            };
+            // The bars are cut in the lifts the column is cast in, at the heights
+            // given or equal ones under the stock length; with a stagger, every
+            // other bar around the section is cut that much higher.
+            let lap = lap_of(r, d);
+            let plain = r.column_pieces(top - base, lap, false);
+            let staggered = r.column_pieces(top - base, lap, true);
+            let placed = shape.bars(r, d, ds);
             let mut bars = Vec::new();
-            for bar in shape.bars(r, d, ds) {
-                for (from, to) in &lifts {
+            for (bar, odd) in placed.iter().zip(around_parity(shape, r, &placed)) {
+                for (from, to) in if odd { &staggered } else { &plain } {
                     if bars.len() >= MAX_BARS {
                         return bars;
                     }
@@ -704,8 +799,9 @@ fn column_bars(
         | RebarLayout::SlabTrim { .. }
         | RebarLayout::StripTransverse { .. }
         | RebarLayout::StripLongitudinal { .. } => Vec::new(),
-        RebarLayout::Stirrups { spacing } => {
+        RebarLayout::Stirrups { spacing, hooks } => {
             let inset = r.cover + d / 2.0;
+            let hooks = hooks.and_then(|h| LoopHooks::of(&h, d));
             // Overlapping stirrups: one around each rectangle the section is made of.
             let rects = if r.overlapping && !shape.round { faces::rectangles(&shape.outline) } else { Vec::new() };
             if rects.len() > 1 {
@@ -721,7 +817,7 @@ fn column_bars(
                         if out.len() >= MAX_BARS {
                             return out;
                         }
-                        out.push(Bar::new(l.iter().map(|p| place(*p, z)).collect(), true));
+                        out.push(Bar { hooks, ..Bar::new(l.iter().map(|p| place(*p, z)).collect(), true) });
                     }
                 }
                 return out;
@@ -739,12 +835,15 @@ fn column_bars(
             if outline.len() < 3 {
                 return Vec::new();
             }
+            // The hooks close the stirrup at a convex corner.
+            let outline = if hooks.is_some() { from_convex_corner(outline) } else { outline };
             stations(base + r.cover, top - r.cover, spacing)
                 .into_iter()
                 .map(|z| Bar {
                     points: outline.iter().map(|p| place(*p, z)).collect(),
                     closed: true,
                     true_length: length,
+                    hooks,
                 })
                 .collect()
         }
@@ -781,7 +880,7 @@ fn column_bars(
                         return out;
                     }
                     let points = vec![place(*a, z), place(*b, z)];
-                    out.push(Bar { points, closed: false, true_length: Some(a.distance(*b) + hooks) });
+                    out.push(Bar { true_length: Some(a.distance(*b) + hooks), ..Bar::new(points, false) });
                 }
             }
             out
@@ -836,7 +935,7 @@ mod tests {
 
     #[test]
     fn long_bars_are_cut_in_the_fewest_pieces_and_staggered() {
-        let s = Splice { max_length: 12.0, lap: 0.5 };
+        let s = Splice::new(12.0, 0.5);
         // Within the stock: one piece, whatever the bar.
         assert_eq!(s.pieces(12.0, 0), vec![(0.0, 12.0)]);
         assert_eq!(s.pieces(8.0, 1), vec![(0.0, 8.0)]);
@@ -857,8 +956,8 @@ mod tests {
         assert!(odd.windows(2).all(|w| (w[0].1 - w[1].0 - 0.5).abs() < 1e-9), "{odd:?}");
         assert!(((odd[0].1 - odd[0].0) - (odd[3].1 - odd[3].0)).abs() < 1e-9);
         // Values a file may hold: no splices rather than a loop.
-        assert_eq!(Splice { max_length: 0.0, lap: 0.5 }.pieces(30.0, 0), vec![(0.0, 30.0)]);
-        assert_eq!(Splice { max_length: 12.0, lap: 12.0 }.pieces(30.0, 0), vec![(0.0, 30.0)]);
+        assert_eq!(Splice::new(0.0, 0.5).pieces(30.0, 0), vec![(0.0, 30.0)]);
+        assert_eq!(Splice::new(12.0, 12.0).pieces(30.0, 0), vec![(0.0, 30.0)]);
         assert_eq!(s.pieces(f64::NAN, 0).len(), 1);
         assert!(s.pieces(1e9, 0).len() <= 10_001);
     }

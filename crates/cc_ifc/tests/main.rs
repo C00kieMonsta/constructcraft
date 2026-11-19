@@ -5,8 +5,12 @@
 // Test helpers outside #[test] functions may fail loudly.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod bar_sets;
 mod classes;
 mod connections;
+mod curved_elements;
+mod curved_profiles;
+mod foreign_bars;
 mod rebar;
 mod round_trip;
 mod spline_walls;

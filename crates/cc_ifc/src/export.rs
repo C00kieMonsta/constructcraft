@@ -5,11 +5,24 @@ use crate::guid::{encode, guid};
 use crate::schema::{ElementClass, TypeLayout, element_class};
 use crate::step::{Header, Id, StepWriter, Value, opt_str, reals};
 use cc_core::connection::ConnectionKind;
+use cc_core::sketch::{Sketch, SketchCurve};
 use cc_core::structural_profile::{ProfileMaterial, ProfileShape, SectionOutline};
-use cc_core::{Element, ElementId, ElementKind, ElementTypeId, LevelId, Project, RoofShape, TypeData, Uid};
+use cc_core::{
+    Element, ElementId, ElementKind, ElementTypeId, FoundationShape, LevelId, Project, RoofShape, TypeData, Uid,
+};
 use cc_geom::{FRAME_COLOR, ModelGeometry, WallGeom, opening_parts, polygon};
 use glam::{DVec2, DVec3};
 use std::collections::{BTreeMap, HashMap};
+
+/// The outline and the openings of a profile as loops of sketch curves.
+type CurveProfile = (Vec<SketchCurve>, Vec<Vec<SketchCurve>>);
+
+/// The curves of `sketch` when it has arcs or circles and still draws
+/// `outline` and `openings` (`None`: the points are written as they are).
+fn curve_profile(sketch: Option<&Sketch>, outline: &[DVec2], openings: &[Vec<DVec2>]) -> Option<CurveProfile> {
+    let sketch = sketch.filter(|s| s.is_curved() && s.makes(outline, openings))?;
+    sketch.curve_profile().ok()
+}
 
 /// Openings extend this far beyond each wall face so the boolean cut is clean.
 const OPENING_CLEARANCE: f64 = 0.05;
@@ -406,20 +419,18 @@ impl<'a> Exporter<'a> {
         self.axis_ctx = sub(w, "Axis", "GRAPH_VIEW");
         let info = &self.project.info;
         let name = if info.name.is_empty() { "ConstructCraft" } else { info.name.as_str() };
+        // IFC's `Name` is the short identifier (the project number) and
+        // `LongName` the full name (#369); without a number, `Name` holds the
+        // name and `LongName` is left out.
+        let (short, long) = if info.number.trim().is_empty() {
+            (name.to_string(), Value::Null)
+        } else {
+            (info.number.clone(), Value::from(name))
+        };
         let gid = self.guid_of(self.project.info.uid, "project");
         self.w.add(
             "IFCPROJECT",
-            args![
-                gid,
-                Value::Null,
-                name,
-                Value::Null,
-                Value::Null,
-                opt_str(&info.number),
-                Value::Null,
-                vec![model],
-                units
-            ],
+            args![gid, Value::Null, short, Value::Null, Value::Null, long, Value::Null, vec![model], units],
         )
     }
 
@@ -605,6 +616,102 @@ impl<'a> Exporter<'a> {
             self.w.add("IFCARBITRARYPROFILEDEFWITHVOIDS", args![Value::Enum("AREA"), Value::Null, curve, inner])
         };
         self.w.add("IFCEXTRUDEDAREASOLID", args![profile, position, dir, depth])
+    }
+
+    /// The extrusion of a profile drawn with arcs or circles (in `position`
+    /// coordinates, which are the plan's), so other programs get its exact
+    /// area (#368): a lone circle as an `IfcCircleProfileDef` placed at its
+    /// center, else its outline and openings as curve loops (see
+    /// [`Self::curve_loop`]), with `voids` (shafts' cuts, clockwise) as polylines.
+    fn extrude_curves(
+        &mut self,
+        profile: &CurveProfile,
+        voids: &[Vec<DVec2>],
+        position: Id,
+        dir: Id,
+        depth: f64,
+    ) -> Id {
+        let (outline, openings) = profile;
+        let area = Value::Enum("AREA");
+        let solid = openings.is_empty() && voids.is_empty();
+        let def = match outline.as_slice() {
+            [SketchCurve::Circle { center, radius }] if solid => {
+                let location = self.point2(*center);
+                let position2 = self.w.add("IFCAXIS2PLACEMENT2D", args![location, Value::Null]);
+                self.w.add("IFCCIRCLEPROFILEDEF", args![area, Value::Null, position2, *radius])
+            }
+            _ if solid => {
+                let curve = self.curve_loop(outline, true);
+                self.w.add("IFCARBITRARYCLOSEDPROFILEDEF", args![area, Value::Null, curve])
+            }
+            _ => {
+                let curve = self.curve_loop(outline, true);
+                let mut inner: Vec<Id> = openings.iter().map(|o| self.curve_loop(o, false)).collect();
+                inner.extend(voids.iter().map(|v| self.polyline(v)));
+                self.w.add("IFCARBITRARYPROFILEDEFWITHVOIDS", args![area, Value::Null, curve, inner])
+            }
+        };
+        self.w.add("IFCEXTRUDEDAREASOLID", args![def, position, dir, depth])
+    }
+
+    /// A closed loop of sketch curves, in order end to end, as an
+    /// `IfcCompositeCurve`: straight runs as polylines, each arc as its
+    /// circle trimmed at its ends (the sense its turn), a whole circle as two
+    /// halves turning counter-clockwise when `ccw` (else clockwise), and
+    /// ellipses and splines as polylines of their points. The loop closes, so
+    /// every segment is continuous with the next.
+    fn curve_loop(&mut self, curves: &[SketchCurve], ccw: bool) -> Id {
+        let mut parts: Vec<Id> = Vec::new();
+        let mut run: Vec<DVec2> = Vec::new();
+        for curve in curves {
+            let arc = match *curve {
+                SketchCurve::Arc { a, b, bulge } => cc_core::arc::Arc::from_bulge(a, b, bulge).map(|arc| (arc, a, b)),
+                _ => None,
+            };
+            if let Some((arc, a, b)) = arc {
+                self.flush_run(&mut run, &mut parts);
+                let part = self.trimmed_circle(arc.center, arc.radius, a, b, arc.sweep > 0.0);
+                parts.push(part);
+                continue;
+            }
+            if let SketchCurve::Circle { center, radius } = *curve {
+                self.flush_run(&mut run, &mut parts);
+                let (east, west) = (center + DVec2::X * radius, center - DVec2::X * radius);
+                let first = self.trimmed_circle(center, radius, east, west, ccw);
+                let second = self.trimmed_circle(center, radius, west, east, ccw);
+                parts.extend([first, second]);
+                continue;
+            }
+            // Lines, flat arcs, ellipses and splines: points, the joint written once.
+            let pts = curve.points();
+            let skip = usize::from(!run.is_empty());
+            run.extend(pts.into_iter().skip(skip));
+        }
+        self.flush_run(&mut run, &mut parts);
+        let segments: Vec<Id> = parts
+            .into_iter()
+            .map(|part| self.w.add("IFCCOMPOSITECURVESEGMENT", args![Value::Enum("CONTINUOUS"), true, part]))
+            .collect();
+        self.w.add("IFCCOMPOSITECURVE", args![segments, false])
+    }
+
+    /// The points gathered in `run` as an open polyline part of a curve loop.
+    fn flush_run(&mut self, run: &mut Vec<DVec2>, parts: &mut Vec<Id>) {
+        let pts = std::mem::take(run);
+        if pts.len() >= 2 {
+            let ids: Vec<Id> = pts.iter().map(|&p| self.point2(p)).collect();
+            parts.push(self.w.add("IFCPOLYLINE", args![ids]));
+        }
+    }
+
+    /// The circle about `center` from `a` to `b`, counter-clockwise when
+    /// `ccw` (the circle's own sense), trimmed by those points.
+    fn trimmed_circle(&mut self, center: DVec2, radius: f64, a: DVec2, b: DVec2, ccw: bool) -> Id {
+        let location = self.point2(center);
+        let position = self.w.add("IFCAXIS2PLACEMENT2D", args![location, Value::Null]);
+        let circle = self.w.add("IFCCIRCLE", args![position, radius]);
+        let (a, b) = (self.point2(a), self.point2(b));
+        self.w.add("IFCTRIMMEDCURVE", args![circle, vec![a], vec![b], ccw, Value::Enum("CARTESIAN")])
     }
 
     /// Axis-aligned box between `min` and `max`, as a rectangle extruded upwards.
@@ -1077,10 +1184,19 @@ impl<'a> Exporter<'a> {
                         self.faceted_brep(&s.faces, level_z)
                     });
                     let brep = shell.is_some();
-                    let item = match (shell, &g.arc) {
-                        (Some(shell), _) => shell,
+                    // A slab drawn with arcs or circles: its curves (#368).
+                    let curves = match &e.kind {
+                        ElementKind::Foundation(f) => match &f.shape {
+                            FoundationShape::Slab { boundary } => curve_profile(f.sketch.as_ref(), boundary, &[]),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    let item = match (shell, &g.arc, &curves) {
+                        (None, None, Some(curves)) => self.extrude_curves(curves, &[], position, self.dir_z, depth),
+                        (Some(shell), ..) => shell,
                         // An arc strip: its outline of arcs and lines extruded.
-                        (None, Some(a)) => {
+                        (None, Some(a), _) => {
                             let (h, l, r) = (a.half, a.left, a.right);
                             let profile = self.arc_band_profile([
                                 a.world(r.0, -h),
@@ -1092,7 +1208,7 @@ impl<'a> Exporter<'a> {
                             ]);
                             self.w.add("IFCEXTRUDEDAREASOLID", args![profile, position, self.dir_z, depth])
                         }
-                        (None, None) => match g.cap.as_ref().and_then(|c| self.cap_item(c, position, depth)) {
+                        (None, None, None) => match g.cap.as_ref().and_then(|c| self.cap_item(c, position, depth)) {
                             // A round or ring pile cap: its true circles extruded.
                             Some(item) => item,
                             None => self.extrude_polygon(&g.footprint, position, self.dir_z, depth),
@@ -1471,6 +1587,16 @@ impl<'a> Exporter<'a> {
             }
             if !set.grade.is_empty() {
                 props.push(("Grade", label(&set.grade)));
+            }
+            // A set laid out in a host: the host and the layout, for importers to
+            // lay the set out again in the host they import (#368).
+            if let ElementKind::Rebar(r) = &e.kind
+                && let Some(host) = project.element(r.host)
+                && let Value::Str(guid) = self.guid_of(host.uid, &format!("element-{}", host.id))
+            {
+                let layout = cc_core::Rebar { partition: String::new(), bar_mark: None, ..r.clone() };
+                props.push(("Host", label(&guid)));
+                props.push(("Layout", Value::Typed("IFCTEXT", Box::new(cc_core::curtain::to_text(&layout).into()))));
             }
             if !props.is_empty() {
                 self.property_set(&format!("rebar-{}", e.id.0), REBAR_PSET, vec![product], props);
@@ -3068,8 +3194,19 @@ impl<'a> Exporter<'a> {
         } else {
             let placement = self.local_placement(Some(storey), frame);
             let dir = self.direction(dir);
-            // Floor openings and shaft cuts: voids of the profile, clockwise.
+            // An outline drawn with arcs or circles, in plan coordinates: its curves (#368).
+            let curves = match &e.kind {
+                ElementKind::Floor(f) => curve_profile(f.sketch.as_ref(), &f.boundary, &f.openings),
+                ElementKind::Ceiling(c) => curve_profile(c.sketch.as_ref(), &c.boundary, &[]),
+                ElementKind::Roof(r) if matches!(r.shape, RoofShape::Flat) && r.overhang == 0.0 => {
+                    curve_profile(r.sketch.as_ref(), &r.footprint, &r.holes)
+                }
+                _ => None,
+            };
+            // Floor openings and shaft cuts: voids of the profile, clockwise
+            // (only the cuts when the curves draw the openings).
             let holes: Vec<&Vec<DVec2>> = match &e.kind {
+                ElementKind::Floor(f) if curves.is_some() => f.cuts.iter().collect(),
                 ElementKind::Floor(f) => f.all_openings().collect(),
                 ElementKind::Ceiling(c) => c.cuts.iter().collect(),
                 _ => Vec::new(),
@@ -3086,7 +3223,10 @@ impl<'a> Exporter<'a> {
                     .collect(),
                 _ => Vec::new(),
             };
-            let body = self.extrude_polygon_with_voids(&profile, &voids, self.identity, dir, depth);
+            let body = match &curves {
+                Some(curves) => self.extrude_curves(curves, &voids, self.identity, dir, depth),
+                None => self.extrude_polygon_with_voids(&profile, &voids, self.identity, dir, depth),
+            };
             let style = self.material_style(ty.main_material());
             self.styled(body, style);
             (placement, self.shape(vec![body], None))
@@ -3518,7 +3658,8 @@ pub fn pile_ifc(kind: cc_core::pile::PileKind) -> (&'static str, &'static str, O
 }
 /// What a reinforcement set says of its bars: `Partition`, `BarMark` (a mark
 /// given by hand), `Mark` (the mark its bars have, when they all have one)
-/// and `Grade` (see `Exporter::write_rebar`).
+/// and `Grade` (see `Exporter::write_rebar`); a set laid out in a host also
+/// its host's GlobalId (`Host`) and its `cc_core::Rebar` as text (`Layout`).
 pub const REBAR_PSET: &str = "ConstructCAD_Rebar";
 
 /// The framing's member sizes in [`ROOFING_PSET`]: member, width and height properties.

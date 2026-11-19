@@ -906,22 +906,22 @@ fn the_showcase_macro_builds_its_project() {
     assert_eq!([count(&mut s, "wall"), count(&mut s, "door"), count(&mut s, "room")], [13, 5, 5]);
     assert!(count(&mut s, "rebar") > 0 && count(&mut s, "pipe") > 0 && count(&mut s, "conduit") > 0);
     let get = |s: &mut Session, id: u64| run(s, "element_get", json!({"id": id}));
-    assert!(get(&mut s, 121)["params"]["bulge"].as_f64().unwrap() > 0.0, "the arc wall");
+    assert!(get(&mut s, 124)["params"]["bulge"].as_f64().unwrap() > 0.0, "the arc wall");
     // Its strip footing follows the arc (#22).
     let foundations = run(&mut s, "elements_list", json!({"category": "foundation"}));
     let ids: Vec<u64> = foundations.as_array().unwrap().iter().map(|f| f["id"].as_u64().unwrap()).collect();
     assert!(ids.iter().any(|&f| get(&mut s, f)["params"]["shape"]["Strip"]["bulge"].as_f64().is_some_and(|b| b > 0.0)));
-    assert!(get(&mut s, 140)["params"]["shape"]["Hip"].is_object(), "the hip roof");
-    assert_eq!(get(&mut s, 118)["phase_demolished"]["id"], 86, "the demolished partition");
-    assert_eq!(get(&mut s, 271)["type"]["id"], 62, "the distribution board");
+    assert!(get(&mut s, 143)["params"]["shape"]["Hip"].is_object(), "the hip roof");
+    assert_eq!(get(&mut s, 121)["phase_demolished"]["id"], 86, "the demolished partition");
+    assert_eq!(get(&mut s, 274)["type"]["id"], 62, "the distribution board");
     let views = run(&mut s, "views_list", json!({}));
     let view = |id: u64| views.as_array().unwrap().iter().find(|v| v["id"] == id).map(|v| v["name"].clone());
-    assert_eq!(view(360), Some(json!("Board diagram")));
-    assert_eq!(view(368), Some(json!("3D North-east")));
-    let loads = run(&mut s, "circuit_loads", json!({"panel": 271}));
+    assert_eq!(view(363), Some(json!("Board diagram")));
+    assert_eq!(view(371), Some(json!("3D North-east")));
+    let loads = run(&mut s, "circuit_loads", json!({"panel": 274}));
     assert!(loads.to_string().contains("Kitchen and bath outlets"));
-    for filter in [367, 369] {
-        assert!(run(&mut s, "filter_elements", json!({"filter": filter, "view": 366}))["count"].as_u64().unwrap() > 0);
+    for filter in [370, 372] {
+        assert!(run(&mut s, "filter_elements", json!({"filter": filter, "view": 369}))["count"].as_u64().unwrap() > 0);
     }
 }
 
@@ -1392,12 +1392,17 @@ fn reinforcement_of_beams_and_columns() {
     // 10 mm bars weigh 0.617 kg/m.
     let weight = bottom["derived"]["weight"].as_f64().unwrap();
     assert!((weight - 2.0 * 4.95 * std::f64::consts::PI * 0.01 * 0.01 / 4.0 * 7850.0).abs() < 1e-9);
-    // Stirrups every 0.15 over 4.95 m: 33 spaces, 34 stirrups, each around a 0.10 x 0.35 loop.
+    // Stirrups every 0.15 over 4.95 m: 33 spaces, 34 stirrups, each around a 0.095 x 0.345 loop
+    // (5 mm bars, their center line 0.025 + 0.0025 inside the faces) closed by two 135° hooks:
+    // each a bend of 3/4 pi around a pin (center line 2 diameters out, 0.01 m) and 10 diameters
+    // (0.05 m) straight.
     let stirrups =
         sets.iter().find(|x| x["params"]["layout"]["Stirrups"].is_object() && x["params"]["host"] == json!(beam));
     let stirrups = stirrups.unwrap();
     assert_eq!(stirrups["derived"]["count"], json!(34));
-    assert!((stirrups["derived"]["bar_length"].as_f64().unwrap() - 2.0 * (0.095 + 0.345)).abs() < 1e-9, "{stirrups}");
+    let hooks = 2.0 * (0.75 * std::f64::consts::PI * 0.01 + 0.05);
+    let length = stirrups["derived"]["bar_length"].as_f64().unwrap();
+    assert!((length - (2.0 * (0.095 + 0.345) + hooks)).abs() < 1e-9, "{stirrups}");
     // A column's bars run its height.
     let bars =
         sets.iter().find(|x| x["params"]["host"] == json!(column) && x["params"]["layout"]["Longitudinal"].is_object());
@@ -1413,7 +1418,8 @@ fn reinforcement_of_beams_and_columns() {
     assert_eq!(fails(&mut s, "rebar_create", json!({"host": wall, "layout": "top"})), ErrorCode::InvalidArguments);
     assert_eq!(fails(&mut s, "rebar_create", json!({"host": column, "layout": "zigzag"})), ErrorCode::InvalidArguments);
     let ties = run(&mut s, "rebar_create", json!({"host": column, "layout": "stirrups", "spacing": 0.2}));
-    assert_eq!(ties["params"]["layout"], json!({"Stirrups": {"spacing": 0.2}}));
+    let hooks = json!({"angle": 135.0, "tail": 10.0});
+    assert_eq!(ties["params"]["layout"], json!({"Stirrups": {"spacing": 0.2, "hooks": hooks}}));
     // The steel schedule.
     run(&mut s, "view_create", json!({"kind": "schedule", "category": "rebar"}));
 }

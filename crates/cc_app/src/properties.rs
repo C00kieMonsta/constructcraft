@@ -2321,10 +2321,10 @@ fn rebar_layout_row(ui: &mut Ui, state: &mut AppState, id: ElementId, label: &st
             }
             finish(state, &r);
         }
-        L::Stirrups { spacing } | L::Ties { spacing } => {
+        L::Stirrups { spacing, .. } | L::Ties { spacing } => {
             length_row(ui, state, label, id, "rebar-spacing", spacing, |e, v| {
                 if let ElementKind::Rebar(x) = &mut e.kind
-                    && let L::Stirrups { spacing } | L::Ties { spacing } = &mut x.layout
+                    && let L::Stirrups { spacing, .. } | L::Ties { spacing } = &mut x.layout
                 {
                     *spacing = v.max(0.02);
                 }
@@ -2430,7 +2430,7 @@ fn reinforcement(ui: &mut Ui, state: &mut AppState, host: ElementId) {
                     cc_engine::commands::slab_rebar::SlabRebarCreate { slabs: vec![host.0], ..Default::default() };
                 crate::actions::run_command(state, command);
             } else {
-                let command = cc_engine::commands::rebar::RebarTypical { elements: vec![host.0], level: None };
+                let command = cc_engine::commands::rebar::RebarTypical { elements: vec![host.0], ..Default::default() };
                 crate::actions::run_command(state, command);
             }
         }
@@ -2460,13 +2460,108 @@ fn rebar_props(ui: &mut Ui, state: &mut AppState, el: &Element, r: &cc_core::Reb
             .map_or(String::new(), |h| if h.mark.is_empty() { tr(h.category().key()) } else { h.mark.clone() });
         readonly_row(ui, &t!("col-host"), host);
         rebar_layout_row(ui, state, id, &rebar_role(&r.layout), &r.layout);
+        if let cc_core::RebarLayout::Stirrups { hooks, .. } = r.layout {
+            stirrup_hook_rows(ui, state, id, hooks);
+        }
         length_row(ui, state, &t!("prop-cover"), id, "rebar-cover", r.cover, |e, v| {
             if let ElementKind::Rebar(x) = &mut e.kind {
                 x.cover = v.max(0.0);
             }
         });
+        // A column's vertical bars cut in lifts may splice every other bar higher.
+        let column = matches!(state.project().element(r.host).map(|h| &h.kind), Some(ElementKind::Column(_)));
+        if column
+            && matches!(r.layout, cc_core::RebarLayout::Longitudinal { .. })
+            && let Some(splice) = r.splice
+        {
+            splice_stagger_rows(ui, state, id, splice);
+        }
     });
     rebar_dimensions(ui, state, id);
+}
+
+/// How much higher every other vertical bar of a column splices: none,
+/// half a lap or an offset, and the offset itself.
+fn splice_stagger_rows(ui: &mut Ui, state: &mut AppState, id: ElementId, splice: cc_core::Splice) {
+    use cc_core::Stagger;
+    let set = |state: &mut AppState, merge: Option<u64>, stagger: Stagger| {
+        crate::engine_edit::element(state, id, merge, |e| {
+            if let ElementKind::Rebar(x) = &mut e.kind
+                && let Some(s) = &mut x.splice
+            {
+                s.stagger = stagger;
+            }
+        });
+    };
+    let name = |s: Stagger| match s {
+        Stagger::None => t!("value-none"),
+        Stagger::HalfLap => t!("prop-stagger-half-lap"),
+        Stagger::Offset(_) => t!("prop-stagger-offset"),
+    };
+    // Picking an offset starts at half a lap, which always fits.
+    let offset = match splice.stagger {
+        Stagger::Offset(o) => o,
+        _ => splice.lap * 0.5,
+    };
+    let mut pick = splice.stagger;
+    row(ui, &t!("prop-splice-stagger"), |ui| {
+        egui::ComboBox::from_id_salt(("splice-stagger", id.0)).selected_text(name(pick)).show_ui(ui, |ui| {
+            for choice in [Stagger::None, Stagger::HalfLap, Stagger::Offset(offset)] {
+                let selected = std::mem::discriminant(&pick) == std::mem::discriminant(&choice);
+                if ui.selectable_label(selected, name(choice)).clicked() {
+                    pick = choice;
+                }
+            }
+        });
+    });
+    if std::mem::discriminant(&pick) != std::mem::discriminant(&splice.stagger) {
+        set(state, None, pick);
+        return;
+    }
+    let Stagger::Offset(mut o) = splice.stagger else { return };
+    let max = splice.max_stagger().max(0.001);
+    let r = row(ui, &t!("prop-stagger-offset"), |ui| ui.add(length_drag(&mut o).range(0.001..=max).speed(0.01)));
+    if r.changed() {
+        set(state, Some(key((id, "splice-stagger"))), Stagger::Offset(o));
+    }
+    finish(state, &r);
+}
+
+/// The hooks that close a set's stirrups: their angle (none, 90° or 135°)
+/// and, when there are hooks, their straight end in bar diameters.
+fn stirrup_hook_rows(ui: &mut Ui, state: &mut AppState, id: ElementId, hooks: Option<cc_core::StirrupHooks>) {
+    // A pick is one undo step; a dragged tail merges into one.
+    let set = |state: &mut AppState, merge: Option<u64>, hooks: Option<cc_core::StirrupHooks>| {
+        crate::engine_edit::element(state, id, merge, |e| {
+            if let ElementKind::Rebar(x) = &mut e.kind
+                && let cc_core::RebarLayout::Stirrups { hooks: h, .. } = &mut x.layout
+            {
+                *h = hooks;
+            }
+        });
+    };
+    let angle_text = |a: Option<f64>| a.map_or_else(|| t!("value-none"), |a| format!("{}°", format::trimmed(a, 0)));
+    let mut angle = hooks.map(|h| h.angle);
+    row(ui, &t!("prop-stirrup-hook"), |ui| {
+        egui::ComboBox::from_id_salt(("stirrup-hook", id.0)).selected_text(angle_text(angle)).show_ui(ui, |ui| {
+            for choice in [None, Some(90.0), Some(135.0)] {
+                ui.selectable_value(&mut angle, choice, angle_text(choice));
+            }
+        });
+    });
+    if angle != hooks.map(|h| h.angle) {
+        let base = hooks.unwrap_or_default();
+        set(state, None, angle.map(|angle| cc_core::StirrupHooks { angle, ..base }));
+    }
+    let Some(h) = hooks else { return };
+    let mut tail = h.tail;
+    let r = row(ui, &t!("prop-stirrup-tail"), |ui| {
+        ui.add(DragValue::new(&mut tail).range(0.0..=cc_core::StirrupHooks::MAX_TAIL).speed(0.1).suffix(" Ø"))
+    });
+    if r.changed() {
+        set(state, Some(key((id, "stirrup-tail"))), Some(cc_core::StirrupHooks { tail, ..h }));
+    }
+    finish(state, &r);
 }
 
 /// Count, lengths and weight of a set of bars.
