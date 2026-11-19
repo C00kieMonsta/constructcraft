@@ -277,6 +277,8 @@ pub struct AppState {
     pub updates: crate::update::Updates,
     /// The plugins of the plugins folder and the Plugins window.
     pub plugins: crate::plugins_ui::Plugins,
+    /// The 3D CraftHouse catalog and the components downloaded from it.
+    pub crafthouse: crate::crafthouse::CraftHouse,
     /// The open Site Location window.
     pub site: Option<crate::site_ui::SiteDialog>,
     pub thumbnail_jobs: Vec<crate::thumbnails::Job>,
@@ -376,6 +378,7 @@ impl AppState {
             prefs: Default::default(),
             updates: Default::default(),
             plugins: Default::default(),
+            crafthouse: Default::default(),
             site: None,
             thumbnail_jobs: Vec::new(),
             job: None,

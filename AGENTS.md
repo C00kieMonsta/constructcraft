@@ -69,7 +69,7 @@ The detailed notes (types, functions, invariants, commands and app entry points 
 - [`docs/architecture/views.md`](docs/architecture/views.md) — cc_views, Schedule definitions, Phases, Design options, Detail levels, Visual styles, View graphics, Drafting views, Callouts and detail views, Browser organization.
 - [`docs/architecture/annotation.md`](docs/architecture/annotation.md) — Dimensions, Tags, Level marks, Detail lines, Line styles and regions, Fill patterns, Detail components, Title blocks.
 - [`docs/architecture/site-sun-render.md`](docs/architecture/site-sun-render.md) — Site location, Sun studies, Rendering.
-- [`docs/architecture/app.md`](docs/architecture/app.md) — cc_app.
+- [`docs/architecture/app.md`](docs/architecture/app.md) — cc_app, Online component library (3D CraftHouse).
 
 ## UI conventions
 

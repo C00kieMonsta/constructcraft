@@ -3,7 +3,13 @@
 //! search them, see a component's types, parameters, connectors and plan,
 //! load it into the project, and save the project's components into a
 //! library folder. Listing, loading and saving are engine commands.
+//!
+//! The window has a second source, 3D CraftHouse: the open library
+//! published online, listed from its catalog; a component picked there is
+//! downloaded and then loaded like a file of a folder (see
+//! [`crate::crafthouse`]).
 
+use crate::crafthouse::{FileStatus, Status};
 use crate::dialog::Dialog;
 use crate::i18n::tr;
 use crate::state::AppState;
@@ -15,12 +21,26 @@ use egui::{Context, Pos2, RichText, Sense, Stroke, Ui, vec2};
 use glam::DVec2;
 use std::path::PathBuf;
 
-/// A component file found in a library folder (from `component_library_list`).
+/// Where the window's components come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Source {
+    /// The folders of the preferences.
+    #[default]
+    Folders,
+    /// The 3D CraftHouse library, online.
+    Online,
+}
+
+/// A component file found in a library folder (from `component_library_list`)
+/// or listed by the online catalog.
 #[derive(Debug, Clone, Default)]
 pub struct Entry {
+    /// The file; online, its path in the catalog.
     pub path: PathBuf,
     pub component: String,
     pub kind: String,
+    /// Who made it (online only).
+    pub author: String,
     pub types: Vec<(String, String)>,
     pub parameters: Vec<String>,
     pub connectors: Vec<String>,
@@ -29,6 +49,7 @@ pub struct Entry {
 /// State of the open library window.
 #[derive(Debug, Clone, Default)]
 pub struct Library {
+    pub source: Source,
     pub entries: Vec<Entry>,
     /// Files that could not be read.
     pub errors: usize,
@@ -70,6 +91,7 @@ fn refresh(state: &mut AppState, lib: &mut Library) {
             path: PathBuf::from(text(&c["path"])),
             component: text(&c["component"]),
             kind: text(&c["kind"]),
+            author: String::new(),
             types: c["types"]
                 .as_array()
                 .into_iter()
@@ -102,14 +124,43 @@ fn kind_label(kind: &str) -> String {
     ComponentKind::ALL.into_iter().find(|k| format!("{k:?}") == kind).map_or_else(|| kind.to_string(), |k| tr(k.key()))
 }
 
+/// Show the components of `source`: the folders read again, or the online
+/// catalog as far as it is read.
+fn set_source(state: &mut AppState, lib: &mut Library, source: Source) {
+    lib.source = source;
+    lib.selected = None;
+    lib.outlines.clear();
+    match source {
+        Source::Folders => refresh(state, lib),
+        Source::Online => {
+            lib.entries = state.crafthouse.entries();
+            lib.errors = 0;
+        }
+    }
+}
+
+/// The file to load for the component picked: online, once it is downloaded.
+fn picked_file(state: &AppState, lib: &Library) -> Option<PathBuf> {
+    let selected = lib.selected.as_ref()?;
+    match lib.source {
+        Source::Folders => Some(selected.clone()),
+        Source::Online => state.crafthouse.local(selected).cloned(),
+    }
+}
+
 pub fn show(ctx: &Context, state: &mut AppState) {
     let Some(mut lib) = state.dialogs.library.take() else { return };
     let mut load = 0;
+    // Online, a component loads once its file has arrived.
+    let waiting = lib.source == Source::Online && picked_file(state, &lib).is_none();
     let response = Dialog::new("component-library", t!("dlg-library")).width(900.0).show(
         ctx,
         |ui| body(ui, state, &mut lib),
         |f| {
             load = f.primary(t!("lib-load"));
+            if waiting {
+                f.disable(load);
+            }
             f.secondary(t!("action-close"));
         },
     );
@@ -118,7 +169,7 @@ pub fn show(ctx: &Context, state: &mut AppState) {
     }
     match response.clicked {
         Some(i) if i == load => {
-            if let Some(path) = lib.selected.clone() {
+            if let Some(path) = picked_file(state, &lib) {
                 crate::actions::load_component_path(state, path);
                 return;
             }
@@ -130,7 +181,19 @@ pub fn show(ctx: &Context, state: &mut AppState) {
 }
 
 fn body(ui: &mut Ui, state: &mut AppState, lib: &mut Library) {
-    folders(ui, state, lib);
+    let mut source = lib.source;
+    ui.horizontal(|ui| {
+        ui.selectable_value(&mut source, Source::Folders, t!("lib-source-folders"));
+        ui.selectable_value(&mut source, Source::Online, t!("lib-source-online"));
+    });
+    if source != lib.source {
+        set_source(state, lib, source);
+    }
+    ui.add_space(6.0);
+    match lib.source {
+        Source::Folders => folders(ui, state, lib),
+        Source::Online => online(ui, state, lib),
+    }
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.add(egui::TextEdit::singleline(&mut lib.search).hint_text(t!("lib-search")).desired_width(260.0));
@@ -160,13 +223,56 @@ fn body(ui: &mut Ui, state: &mut AppState, lib: &mut Library) {
         .collect();
     crate::dialog::two_columns(ui, [340.0, 540.0], |ui, column| {
         if column == 0 {
-            list(ui, lib, &shown);
+            list(ui, state, lib, &shown);
         } else {
-            details(ui, lib);
+            details(ui, state, lib);
         }
     });
-    ui.add_space(8.0);
-    save_section(ui, state, lib);
+    if lib.source == Source::Folders {
+        ui.add_space(8.0);
+        save_section(ui, state, lib);
+    }
+}
+
+/// The online library: what it is, a link to its site, a button to read
+/// its catalog again, and how the reading stands. Reads the catalog and
+/// downloads the component picked (see [`crate::crafthouse::CraftHouse::sync`]).
+fn online(ui: &mut Ui, state: &mut AppState, lib: &mut Library) {
+    let (read, arrived) = state.crafthouse.sync(ui.ctx(), lib.selected.as_deref());
+    if let Some(entries) = read {
+        lib.entries = entries;
+    }
+    if let Some(path) = arrived {
+        lib.outlines = outlines(&path);
+    }
+    ui.horizontal_wrapped(|ui| {
+        ui.label(theme::title(t!("lib-source-online")));
+        ui.label(theme::muted(t!("lib-online-about")).size(12.0));
+    });
+    let mut again = false;
+    ui.horizontal(|ui| {
+        if ui.button(t!("lib-online-site")).clicked() {
+            ui.ctx().open_url(egui::OpenUrl::new_tab(crate::crafthouse::SITE));
+        }
+        again = ui.button(t!("lib-refresh")).clicked();
+        match state.crafthouse.status() {
+            Status::Reading => {
+                ui.spinner();
+                ui.label(theme::muted(t!("lib-online-reading")).size(12.0));
+            }
+            Status::Failed(message) => {
+                let text = t!("lib-online-failed", "message" => message);
+                ui.add(egui::Label::new(RichText::new(text).color(PALETTE.warning).size(12.0)).truncate());
+            }
+            Status::Ready(count) => {
+                ui.label(theme::muted(t!("lib-online-count", "count" => count)).size(12.0));
+            }
+        }
+    });
+    if again {
+        state.crafthouse.reset();
+        set_source(state, lib, Source::Online);
+    }
 }
 
 /// How many library folders are read, a button to manage them in the
@@ -194,7 +300,7 @@ fn folders(ui: &mut Ui, state: &mut AppState, lib: &mut Library) {
     }
 }
 
-fn list(ui: &mut Ui, lib: &mut Library, shown: &[usize]) {
+fn list(ui: &mut Ui, state: &AppState, lib: &mut Library, shown: &[usize]) {
     egui::Frame::new().stroke(Stroke::new(1.0, PALETTE.border)).show(ui, |ui| {
         egui::ScrollArea::vertical().id_salt("lib-list").max_height(360.0).auto_shrink([false, false]).show(ui, |ui| {
             if shown.is_empty() {
@@ -207,23 +313,42 @@ fn list(ui: &mut Ui, lib: &mut Library, shown: &[usize]) {
                 let r = ui.selectable_label(selected, text).on_hover_text(e.path.display().to_string());
                 if r.clicked() && !selected {
                     lib.selected = Some(e.path.clone());
-                    lib.outlines = outlines(&e.path);
+                    // Online, the plan shows once the file is downloaded.
+                    lib.outlines = match lib.source {
+                        Source::Folders => outlines(&e.path),
+                        Source::Online => state.crafthouse.local(&e.path).map(|p| outlines(p)).unwrap_or_default(),
+                    };
                 }
             }
         });
     });
 }
 
-fn details(ui: &mut Ui, lib: &Library) {
+fn details(ui: &mut Ui, state: &AppState, lib: &Library) {
     let Some(e) = lib.selected.as_ref().and_then(|p| lib.entries.iter().find(|e| &e.path == p)) else {
         ui.label(theme::muted(t!("lib-pick")));
         return;
     };
     ui.label(theme::title(&e.component));
-    ui.label(theme::muted(format!("{} · {}", kind_label(&e.kind), e.path.display())).size(11.5));
+    // A folder's component says where its file is; an online one, who made it.
+    let origin = if lib.source == Source::Online { e.author.clone() } else { e.path.display().to_string() };
+    let line = if origin.is_empty() { kind_label(&e.kind) } else { format!("{} · {origin}", kind_label(&e.kind)) };
+    ui.add(egui::Label::new(theme::muted(line).size(11.5)).truncate());
     ui.add_space(6.0);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 150.0), Sense::hover());
     thumbnail(ui, rect, &lib.outlines);
+    if lib.source == Source::Online {
+        let text = match state.crafthouse.file_status(&e.path) {
+            FileStatus::Downloading => Some(theme::muted(t!("lib-online-downloading"))),
+            FileStatus::Failed(message) => {
+                Some(RichText::new(t!("lib-online-download-failed", "message" => message)).color(PALETTE.warning))
+            }
+            FileStatus::Ready(_) => None,
+        };
+        if let Some(text) = text {
+            ui.add(egui::Label::new(text.size(12.0)).truncate());
+        }
+    }
     ui.add_space(6.0);
     egui::ScrollArea::vertical().id_salt("lib-details").max_height(170.0).show(ui, |ui| {
         ui.label(RichText::new(t!("lib-types")).strong());

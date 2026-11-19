@@ -1077,6 +1077,91 @@ fn component_library_loads_a_component() {
     assert!(matches!(harness.state().tool, crate::tools::Tool::Hosted { .. }), "doors are placed in walls");
 }
 
+/// A catalog entry of the online library, as `crafthouse::parse_catalog` gives it.
+fn online_entry(file: &str, component: &str) -> crate::library::Entry {
+    crate::library::Entry {
+        path: file.into(),
+        component: component.into(),
+        kind: "Door".into(),
+        author: "Ana".into(),
+        ..Default::default()
+    }
+}
+
+/// The component library's 3D CraftHouse source lists the online catalog
+/// and loads the component picked from its downloaded file.
+#[test]
+fn component_library_loads_a_component_from_the_online_library() {
+    let mut state = sample_state();
+    let dir = std::env::temp_dir().join(format!("ccad-crafthouse-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let door = state
+        .project()
+        .component_types()
+        .find(|t| t.category() == cc_core::Category::Door)
+        .and_then(|t| match &t.data {
+            cc_core::TypeData::Component { component, .. } => Some(component.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let path = dir.join("porta.ccomp");
+    state.session.run(cc_engine::commands::io::ComponentSave { component: door, path: path.clone() }).unwrap();
+    let file = std::path::Path::new("components/doors/porta-online.ccomp");
+    state.crafthouse.set_catalog(vec![online_entry("components/doors/porta-online.ccomp", "Porta online")]);
+    state.crafthouse.set_downloaded(file, path);
+    crate::library::open(&mut state);
+    let before = state.project().types.len();
+    let mut harness = themed_harness(state, egui::vec2(1000.0, 760.0), egui::Theme::Light, |ui, state| {
+        crate::library::show(ui.ctx(), state)
+    });
+    assert!(harness.query_by_label_contains("Porta online").is_none(), "the folders are shown first");
+    harness.get_by_label(&t!("lib-source-online")).click();
+    harness.run();
+    let lib = harness.state().dialogs.library.as_ref().unwrap();
+    assert_eq!((lib.source, lib.entries.len()), (crate::library::Source::Online, 1));
+    harness.get_by_label(&t!("lib-online-count", "count" => 1));
+    harness.get_by_label_contains("Porta online").click();
+    harness.run();
+    harness.get_by_label(&t!("lib-load")).click();
+    harness.run();
+    crate::jobs::wait(harness.state_mut());
+    assert!(harness.state().dialogs.library.is_none());
+    assert!(harness.state().project().types.len() > before, "the door's types joined the project");
+}
+
+/// A component of the online library that cannot be downloaded (tests are
+/// offline) says so and is not loaded.
+#[test]
+fn an_online_component_that_does_not_download_says_why() {
+    let mut state = sample_state();
+    let file = std::path::Path::new("components/doors/porta-online.ccomp");
+    state.crafthouse.set_catalog(vec![online_entry("components/doors/porta-online.ccomp", "Porta online")]);
+    crate::library::open(&mut state);
+    let before = state.project().types.len();
+    let mut harness = themed_harness(state, egui::vec2(1000.0, 760.0), egui::Theme::Light, |ui, state| {
+        crate::library::show(ui.ctx(), state)
+    });
+    harness.get_by_label(&t!("lib-source-online")).click();
+    harness.run();
+    harness.get_by_label_contains("Porta online").click();
+    harness.run();
+    let failed = crate::crafthouse::FileStatus::Failed("offline".into());
+    for _ in 0..200 {
+        if harness.state().crafthouse.file_status(file) == failed {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        harness.run();
+    }
+    assert_eq!(harness.state().crafthouse.file_status(file), failed);
+    harness.run();
+    harness.get_by_label(&t!("lib-online-download-failed", "message" => "offline"));
+    harness.get_by_label(&t!("lib-load")).click();
+    harness.run();
+    assert!(harness.state().dialogs.library.is_some(), "nothing to load: the window stays");
+    assert_eq!(harness.state().project().types.len(), before);
+}
+
 /// The ribbon, the app's shortcuts and the dialogs (Preferences among them).
 fn app_harness(state: AppState) -> Harness<'static, AppState> {
     themed_harness(state, egui::vec2(1200.0, 760.0), egui::Theme::Light, |ui, state| {
