@@ -1521,11 +1521,18 @@ impl<'a> Exporter<'a> {
                     | cc_core::RebarLayout::SlabRing { .. }
                     | cc_core::RebarLayout::SlabRadial { .. }
                     | cc_core::RebarLayout::StripTransverse { .. }
-                    | cc_core::RebarLayout::StripLongitudinal { .. } => ("MAIN", &[][..]),
-                    cc_core::RebarLayout::Sides { .. } | cc_core::RebarLayout::SlabTrim { .. } => ("EDGE", &[][..]),
+                    | cc_core::RebarLayout::StripLongitudinal { .. }
+                    | cc_core::RebarLayout::CapBottom { .. }
+                    | cc_core::RebarLayout::CapTop { .. }
+                    | cc_core::RebarLayout::PileLongitudinal { .. } => ("MAIN", &[][..]),
+                    cc_core::RebarLayout::Sides { .. }
+                    | cc_core::RebarLayout::SlabTrim { .. }
+                    | cc_core::RebarLayout::CapSides { .. } => ("EDGE", &[][..]),
                     cc_core::RebarLayout::Stirrups { .. }
                     | cc_core::RebarLayout::Ties { .. }
-                    | cc_core::RebarLayout::WallTies { .. } => ("LIGATURE", &[][..]),
+                    | cc_core::RebarLayout::WallTies { .. }
+                    | cc_core::RebarLayout::PileSpiral { .. }
+                    | cc_core::RebarLayout::PileTies { .. } => ("LIGATURE", &[][..]),
                 },
                 ElementKind::ShapedRebar(r) => ("NOTDEFINED", &r.properties[..]),
                 _ => continue,

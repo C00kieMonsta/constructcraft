@@ -24,6 +24,13 @@
 //! deleted, moved and copied with the cap; moved alone they go back. A pile
 //! whose cap is gone (or is no pile cap) is dropped, like a building pad
 //! without its terrain.
+//!
+//! Caps and piles take reinforcement (`RebarLayout::CapBottom`, `CapTop`,
+//! `CapSides` and `Stirrups` in caps, `PileLongitudinal`, `PileSpiral` and
+//! `PileTies` in piles), laid out from their geometry, so a cap's sets follow
+//! its type's layout. A pile kept by a layout change keeps its sets, a pile
+//! removed takes them along, and a pile the change adds takes copies of the
+//! sets of the cap's first reinforced pile.
 
 use crate::{Element, ElementId, ElementKind, ElementTypeId, Project, TypeData};
 use glam::DVec2;

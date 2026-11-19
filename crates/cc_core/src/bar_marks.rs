@@ -100,7 +100,8 @@ pub struct MarkShape {
 
 /// One leg of a [`MarkShape`]: its length (meters), the radius of an arc
 /// leg, the turn along an arc and the bend after the leg (degrees, signed
-/// the way the bar first turns), and whether it is part of a hook.
+/// the way the bar first turns), whether it is part of a hook, and the rise
+/// per turn of a coiled leg (a spiral, whose turn is then many whole turns).
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct MarkLeg {
     pub length: f64,
@@ -112,24 +113,37 @@ pub struct MarkLeg {
     pub bend: f64,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hook: bool,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub pitch: f64,
 }
 
 fn is_zero(v: &f64) -> bool {
     *v == 0.0
 }
 
+/// Most whole turns of a coiled leg a frozen shape keeps.
+pub const MAX_MARK_TURNS: f64 = 10_000.0;
+
 impl MarkShape {
     /// Whether the shape is usable: one to [`MAX_MARK_LEGS`] legs of finite
     /// lengths above 0 and at most [`MAX_MARK_LENGTH`], radii likewise,
-    /// turns within a whole turn either way.
+    /// turns within a whole turn either way (a coiled leg: a pitch from 0 to
+    /// [`MAX_MARK_LENGTH`], at most [`MAX_MARK_TURNS`] turns).
     pub fn is_valid(&self) -> bool {
         let length_ok = |v: f64| v.is_finite() && v > 0.0 && v <= MAX_MARK_LENGTH;
         let angle_ok = |v: f64| v.is_finite() && v.abs() <= 360.0;
+        let sweep_ok = |l: &MarkLeg| {
+            if l.pitch == 0.0 {
+                angle_ok(l.sweep)
+            } else {
+                length_ok(l.pitch) && l.sweep.is_finite() && l.sweep.abs() <= 360.0 * MAX_MARK_TURNS
+            }
+        };
         (1..=MAX_MARK_LEGS).contains(&self.legs.len())
             && self
                 .legs
                 .iter()
-                .all(|l| length_ok(l.length) && l.radius.is_none_or(length_ok) && angle_ok(l.sweep) && angle_ok(l.bend))
+                .all(|l| length_ok(l.length) && l.radius.is_none_or(length_ok) && sweep_ok(l) && angle_ok(l.bend))
     }
 
     /// Length of the bar, meters.

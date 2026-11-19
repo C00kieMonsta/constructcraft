@@ -38,6 +38,9 @@ pub struct LegSummary {
     pub bend: f64,
     /// The leg is part of a hook.
     pub hook: bool,
+    /// The rise per turn of a coiled leg (a spiral, whose sweep is its
+    /// turns), meters; 0 for a leg in a plane.
+    pub pitch: f64,
 }
 
 /// The shape of a bar: see the module.
@@ -98,6 +101,7 @@ impl ShapeSummary {
                 && (a.sweep - sign * b.sweep).abs() <= angle_tol
                 && (a.bend - sign * b.bend).abs() <= angle_tol
                 && a.hook == b.hook
+                && (a.pitch - b.pitch).abs() <= length_tol
         };
         // A closed bar may start at any of its corners (bounded: long ones from their first only).
         let shifts = if self.closed && n <= 64 { n.max(1) } else { 1 };
@@ -121,8 +125,21 @@ impl ShapeSummary {
 /// bar whose true length differs from its center line's (the hooks of a
 /// tie, counted but not drawn) has the difference spread over its legs. A
 /// loop closed by hooks (a stirrup's [`Bar::hooks`]) is read from the corner
-/// they close it at, and opened there by a hook leg at each end.
+/// they close it at, and opened there by a hook leg at each end. A spiral
+/// ([`Bar::helix`]) is one coiled leg: its radius, its turns as the sweep,
+/// its pitch and its exact length.
 pub fn summary(bar: &Bar) -> ShapeSummary {
+    if let Some(h) = bar.helix.filter(|h| h.is_valid() && !bar.closed) {
+        let leg = LegSummary {
+            length: bar.length(),
+            radius: Some(h.radius),
+            sweep: std::f64::consts::TAU * h.turns,
+            bend: 0.0,
+            hook: false,
+            pitch: h.pitch,
+        };
+        return ShapeSummary { closed: false, legs: vec![leg] };
+    }
     let mut pts: Vec<DVec3> = Vec::with_capacity(bar.points.len().min(MAX_POINTS));
     for p in bar.points.iter().take(MAX_POINTS).filter(|p| p.is_finite()) {
         if pts.last().is_none_or(|q| q.distance(*p) > MIN_SEGMENT) {
@@ -191,7 +208,8 @@ pub fn summary(bar: &Bar) -> ShapeSummary {
     let n = lengths.len();
     if n == 1 {
         // A closed line folded onto itself is no loop.
-        let leg = LegSummary { length: lengths.iter().sum(), radius: None, sweep: 0.0, bend: 0.0, hook: false };
+        let leg =
+            LegSummary { length: lengths.iter().sum(), radius: None, sweep: 0.0, bend: 0.0, hook: false, pitch: 0.0 };
         return scaled(ShapeSummary { closed: false, legs: vec![leg] }, bar.true_length);
     }
     // A point where the bar runs on along an arc: equal chords either side, a small turn.
@@ -234,11 +252,18 @@ pub fn summary(bar: &Bar) -> ShapeSummary {
             let sweep = if whole { turn.signum() * std::f64::consts::TAU } else { turn * chords as f64 };
             let last = at(k + run);
             let bend = if whole || !joint(last) { 0.0 } else { turns.get(last).copied().unwrap_or(0.0) };
-            legs.push(LegSummary { length: radius * sweep.abs(), radius: Some(radius), sweep, bend, hook: false });
+            legs.push(LegSummary {
+                length: radius * sweep.abs(),
+                radius: Some(radius),
+                sweep,
+                bend,
+                hook: false,
+                pitch: 0.0,
+            });
             k += chords;
         } else {
             let bend = if joint(first) { turn } else { 0.0 };
-            legs.push(LegSummary { length: chord, radius: None, sweep: 0.0, bend, hook: false });
+            legs.push(LegSummary { length: chord, radius: None, sweep: 0.0, bend, hook: false, pitch: 0.0 });
             k += 1;
         }
     }
@@ -261,7 +286,7 @@ fn hooked(mut shape: ShapeSummary, hooks: &LoopHooks) -> ShapeSummary {
     let total: f64 = shape.legs.iter().map(|l| l.bend + l.sweep).sum();
     let way = if total < 0.0 { -1.0 } else { 1.0 };
     let bend = way * hooks.angle;
-    let hook = |bend: f64| LegSummary { length: hooks.tail, radius: None, sweep: 0.0, bend, hook: true };
+    let hook = |bend: f64| LegSummary { length: hooks.tail, radius: None, sweep: 0.0, bend, hook: true, pitch: 0.0 };
     if let Some(last) = shape.legs.last_mut() {
         last.bend = bend;
     }
@@ -381,19 +406,26 @@ mod tests {
             closed: false,
             true_length: Some(2.5 * FRAC_PI_2),
             hooks: None,
+            helix: None,
         });
         assert_eq!(s.legs.len(), 1);
         let leg = s.legs[0];
         assert!(close(leg.radius.unwrap(), 2.5) && close(leg.length, 2.5 * FRAC_PI_2), "{leg:?}");
         assert!((leg.sweep - FRAC_PI_2).abs() < 1e-9 && close(leg.bend, 0.0));
         // Another radius is another shape; the same arc elsewhere, turning the other way, is the same.
-        let other = summary(&Bar { points: arc(2.6, FRAC_PI_2, 30), closed: false, true_length: None, hooks: None });
+        let other = summary(&Bar {
+            points: arc(2.6, FRAC_PI_2, 30),
+            closed: false,
+            true_length: None,
+            hooks: None,
+            helix: None,
+        });
         assert!(!s.matches(&other, 0.005, 0.01));
         let mirrored: Vec<DVec3> = arc(2.5, FRAC_PI_2, 30).into_iter().map(|p| v(p.x + 3.0, -p.y, 0.0)).collect();
         assert!(s.matches(&summary(&Bar::new(mirrored, false)), 1e-6, 1e-6));
         // A closed ring: one leg, a whole turn, the circle's length.
         let ring: Vec<DVec3> = arc(1.0, TAU, 120).into_iter().take(120).collect();
-        let r = summary(&Bar { points: ring, closed: true, true_length: Some(TAU), hooks: None });
+        let r = summary(&Bar { points: ring, closed: true, true_length: Some(TAU), hooks: None, helix: None });
         assert!(r.closed && r.legs.len() == 1 && close(r.legs[0].radius.unwrap(), 1.0) && close(r.length(), TAU));
         // A round tie drawn with 16 chords is a ring too.
         let tie: Vec<DVec3> = arc(0.2, TAU, 16).into_iter().take(16).collect();
@@ -415,6 +447,7 @@ mod tests {
             closed: false,
             true_length: Some(0.35),
             hooks: None,
+            helix: None,
         };
         let s = summary(&tie);
         assert!(s.is_straight() && close(s.length(), 0.35));

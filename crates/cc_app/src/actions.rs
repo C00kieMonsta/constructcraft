@@ -983,6 +983,40 @@ pub fn typical_rebar(state: &mut AppState) {
     }
 }
 
+/// Reinforce the selected pile caps, or the active level's caps that have no reinforcement.
+pub fn pile_cap_rebar(state: &mut AppState) {
+    let project = state.project();
+    let caps: Vec<u64> = state.selection.iter().filter(|id| project.is_pile_cap(**id)).map(|id| id.0).collect();
+    let level = if caps.is_empty() { state.active_level().map(|l| Ref::Id(l.0)) } else { None };
+    let command = cc_engine::commands::pile_rebar::PileCapRebarCreate { caps, level, ..Default::default() };
+    if let Some(out) = run(state, command) {
+        let count = out["created"].as_array().map_or(0, Vec::len);
+        let skipped = out["skipped"].as_array().map_or(0, Vec::len);
+        state.message = t!("msg-rebar-placed", "count" => count, "skipped" => skipped);
+    }
+}
+
+/// Reinforce the selected piles and the piles of the selected caps, or the
+/// active level's piles that have no reinforcement.
+pub fn pile_rebar(state: &mut AppState) {
+    let project = state.project();
+    let pick = |cap: bool| -> Vec<u64> {
+        let fits = |id: ElementId| match cap {
+            true => project.is_pile_cap(id),
+            false => matches!(project.element(id).map(|e| &e.kind), Some(cc_core::ElementKind::Pile(_))),
+        };
+        state.selection.iter().filter(|id| fits(**id)).map(|id| id.0).collect()
+    };
+    let (piles, caps) = (pick(false), pick(true));
+    let level = if piles.is_empty() && caps.is_empty() { state.active_level().map(|l| Ref::Id(l.0)) } else { None };
+    let command = cc_engine::commands::pile_rebar::PileRebarCreate { piles, caps, level, ..Default::default() };
+    if let Some(out) = run(state, command) {
+        let count = out["created"].as_array().map_or(0, Vec::len);
+        let skipped = out["skipped"].as_array().map_or(0, Vec::len);
+        state.message = t!("msg-rebar-placed", "count" => count, "skipped" => skipped);
+    }
+}
+
 /// Open the first 3D view showing reinforcement, creating one the first time.
 pub fn open_rebar_view(state: &mut AppState) {
     let existing =

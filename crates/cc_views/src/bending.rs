@@ -11,7 +11,9 @@
 //!
 //! The shape of a mark is written as a code (CSV, the app's table):
 //! `straight 500`, `L 30-470`, `U 30-470-30`, `Z …`, `bent …`,
-//! `stirrup 14x44`, `ring R=50 L=314`, `closed …`, `arc R=220 L=345`, legs
+//! `stirrup 14x44`, `ring R=50 L=314`, `closed …`, `arc R=220 L=345`, a
+//! spiral as `spiral R=15 p=10 L=5546` (its radius, rise per turn and exact
+//! length; sketched as a few turns of a zigzag), legs
 //! of arcs as `(R=… L=…)`, and a loop closed by hooks as the loop's code with
 //! each hook's angle and straight end (`stirrup 14x44 hook 135° 5 hook 135°
 //! 5`); lengths as [`format::bar_length`] writes them.
@@ -60,6 +62,19 @@ fn arc_text(l: &LegSummary) -> String {
     format!("R={} L={}", format::bar_length(l.radius.unwrap_or(0.0)), format::bar_length(l.length))
 }
 
+/// A coiled leg's radius, rise per turn and length.
+fn spiral_text(l: &LegSummary) -> String {
+    format!(
+        "R={} p={} L={}",
+        format::bar_length(l.radius.unwrap_or(0.0)),
+        format::bar_length(l.pitch),
+        format::bar_length(l.length)
+    )
+}
+
+/// Turns of a coil drawn in a sketch, at most.
+const SKETCH_TURNS: f64 = 6.0;
+
 /// The code of a shape (see the module's documentation).
 pub fn shape_code(shape: &ShapeSummary) -> String {
     // A loop closed by hooks: the loop's code, then each hook's angle and straight end.
@@ -92,6 +107,7 @@ pub fn shape_code(shape: &ShapeSummary) -> String {
         }
         (true, legs) => format!("closed {}", lengths(legs)),
         (false, []) => String::new(),
+        (false, [one]) if one.radius.is_some() && one.pitch > 0.0 => format!("spiral {}", spiral_text(one)),
         (false, [one]) if one.radius.is_some() => format!("arc {}", arc_text(one)),
         (false, [one]) => format!("straight {}", format::bar_length(one.length)),
         (false, legs @ [_, _]) if straight => format!("L {}", lengths(legs)),
@@ -121,6 +137,18 @@ pub fn sketch_of(shape: &ShapeSummary) -> BarSketch {
         // The legs of a hooked loop keep their lengths, so that it closes.
         let least = if hooked && !leg.hook { 0.0 } else { least };
         let points = match leg.radius.filter(|r| r.is_finite() && *r > 0.0 && leg.sweep != 0.0) {
+            // A coil seen from the side: a zigzag across its diameter, a few turns of it.
+            Some(radius) if leg.pitch > 0.0 => {
+                let turns = (leg.sweep.abs() / std::f64::consts::TAU).ceil().clamp(1.0, SKETCH_TURNS) as usize;
+                let step = dir * (radius * 0.75);
+                let mut points = vec![at];
+                for k in 0..2 * turns {
+                    let side = if k % 2 == 0 { 1.0 } else { -1.0 };
+                    points.push(at + step * (2 * k + 1) as f64 + dir.perp() * (radius * side));
+                }
+                points.push(at + step * (4 * turns) as f64);
+                points
+            }
             Some(radius) => {
                 // Around the center on the side the arc turns to.
                 let center = at + dir.perp() * (radius * leg.sweep.signum());
@@ -186,6 +214,7 @@ pub fn sketch_of(shape: &ShapeSummary) -> BarSketch {
             away = -away;
         }
         let text = match leg.radius {
+            Some(_) if leg.pitch > 0.0 => spiral_text(leg),
             Some(r) => format!("{} R={}", format::bar_length(leg.length), format::bar_length(r)),
             None => format::bar_length(leg.length),
         };

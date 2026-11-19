@@ -847,9 +847,29 @@ impl<'a> EditCtx<'a> {
                 e.kind = crate::ElementKind::Pile(pile);
             }
         }
+        // A pile the layout adds takes the reinforcement of its cap's piles: the
+        // sets of the first of them (in the layout) that has any, as the piles
+        // kept keep theirs and those removed take theirs along.
+        let mut templates: BTreeMap<ElementId, Vec<(crate::ElementTypeId, crate::Rebar)>> = BTreeMap::new();
+        for (_, _, pile) in &plan.add {
+            let Some(cap) = pile.cap.map(|c| c.cap) else { continue };
+            if templates.contains_key(&cap) {
+                continue;
+            }
+            let mut piles: Vec<(u32, ElementId)> =
+                self.project.piles_of(cap).map(|(e, p)| (p.cap.map_or(0, |c| c.index), e.id)).collect();
+            piles.sort();
+            let sets = piles
+                .iter()
+                .map(|(_, id)| self.project.rebar_of(*id).map(|(e, r)| (e.type_id, r.clone())).collect::<Vec<_>>())
+                .find(|sets| !sets.is_empty())
+                .unwrap_or_default();
+            templates.insert(cap, sets);
+        }
         for (level, type_id, pile) in plan.add {
             let id = ElementId(self.alloc_id());
             let mark = self.project.next_mark(crate::Category::Pile);
+            let sets = pile.cap.and_then(|c| templates.get(&c.cap)).cloned().unwrap_or_default();
             self.add_element(Element {
                 id,
                 level,
@@ -863,6 +883,22 @@ impl<'a> EditCtx<'a> {
                 design_option: None,
                 paints: Vec::new(),
             });
+            for (set_type, set) in sets {
+                let set_id = ElementId(self.alloc_id());
+                self.add_element(Element {
+                    id: set_id,
+                    level,
+                    type_id: set_type,
+                    mark: String::new(),
+                    comments: String::new(),
+                    kind: crate::ElementKind::Rebar(crate::Rebar { host: id, ..set }),
+                    uid: Default::default(),
+                    phase_created: Default::default(),
+                    phase_demolished: None,
+                    design_option: None,
+                    paints: Vec::new(),
+                });
+            }
         }
     }
 
