@@ -1776,6 +1776,100 @@ impl Splice {
     }
 }
 
+/// Which way the bars of a beam anchored into a support bend at their ends
+/// where the straight length the support leaves them is short of the
+/// anchorage: a 90° hook down or up, none, or `Auto` (down for top bars, up
+/// for bottom bars). Side bars never bend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnchorHook {
+    None,
+    Down,
+    Up,
+    #[default]
+    Auto,
+}
+
+impl AnchorHook {
+    pub const ALL: [AnchorHook; 4] = [AnchorHook::None, AnchorHook::Down, AnchorHook::Up, AnchorHook::Auto];
+
+    /// The name commands take.
+    pub fn code(self) -> &'static str {
+        match self {
+            AnchorHook::None => "none",
+            AnchorHook::Down => "down",
+            AnchorHook::Up => "up",
+            AnchorHook::Auto => "auto",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<AnchorHook> {
+        Self::ALL.into_iter().find(|h| h.code() == code)
+    }
+
+    /// The direction the hook of a bar on `face` bends: 1 up, -1 down, none
+    /// when it does not bend (side bars, or no hooks).
+    pub fn direction(self, face: Option<BarFace>) -> Option<f64> {
+        match (self, face) {
+            (AnchorHook::None, _) | (_, None) => None,
+            (AnchorHook::Down, _) => Some(-1.0),
+            (AnchorHook::Up, _) => Some(1.0),
+            (AnchorHook::Auto, Some(BarFace::Top)) => Some(-1.0),
+            (AnchorHook::Auto, Some(BarFace::Bottom | BarFace::Perimeter)) => Some(1.0),
+        }
+    }
+}
+
+/// The anchorage of a beam's longitudinal or side bars into the supports
+/// (structural columns, pile caps) its ends frame into: the bars run on into
+/// each support, up to its far face less the cover, for at most `length` bar
+/// diameters past its near face; where that is short of the length a bar
+/// bends by a 90° `hook` whose leg makes up the rest (at least
+/// [`Anchorage::MIN_HOOK`] diameters, inside the support). Where another
+/// beam carries on in line from the other side of the support, the bars of
+/// the two run half a lap past its middle instead, so that they lap there.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Anchorage {
+    #[serde(default = "Anchorage::default_length")]
+    pub length: f64,
+    #[serde(default)]
+    pub hook: AnchorHook,
+}
+
+impl Default for Anchorage {
+    /// 40 bar diameters, hooked where they do not fit.
+    fn default() -> Self {
+        Self { length: Self::DEFAULT_LENGTH, hook: AnchorHook::Auto }
+    }
+}
+
+impl Anchorage {
+    /// The anchorage length when none is given, bar diameters: a usual
+    /// basic anchorage of a deformed bar in ordinary concrete, and the lap
+    /// of bars kept whole.
+    pub const DEFAULT_LENGTH: f64 = 40.0;
+    /// Shortest and longest anchorage, bar diameters.
+    pub const MIN_LENGTH: f64 = 10.0;
+    pub const MAX_LENGTH: f64 = 100.0;
+    /// Shortest leg of a hook, bar diameters: the least straight end of a
+    /// 90° hook.
+    pub const MIN_HOOK: f64 = 8.0;
+
+    fn default_length() -> f64 {
+        Self::DEFAULT_LENGTH
+    }
+
+    /// Whether the length is finite and from [`Self::MIN_LENGTH`] to [`Self::MAX_LENGTH`].
+    pub fn is_valid(&self) -> bool {
+        self.length.is_finite() && (Self::MIN_LENGTH..=Self::MAX_LENGTH).contains(&self.length)
+    }
+
+    /// Whether a set of `layout` may be anchored: a beam's longitudinal or side bars.
+    pub fn fits(layout: &RebarLayout) -> bool {
+        matches!(layout, RebarLayout::Longitudinal { .. } | RebarLayout::Sides { .. })
+    }
+}
+
 /// A set of reinforcing bars in a beam, column, wall or slab (`host`), `cover`
 /// from its faces; the type gives the bar diameter. The bars follow their host.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1798,6 +1892,11 @@ pub struct Rebar {
     /// whole one at the joint, instead of meeting end to end.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub lap_at_joins: bool,
+    /// A beam's longitudinal or side bars run into the columns and pile caps
+    /// its ends frame into (none: they stop the cover short of its ends).
+    /// At an end joined to another beam `lap_at_joins` applies instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchorage: Option<Anchorage>,
     /// A column's stirrups as several closed rectangles that overlap, one
     /// around each of the rectangles a section with only square corners is
     /// made of (two in an L or a T, three in a U), instead of one stirrup
@@ -1832,6 +1931,7 @@ impl Rebar {
             splice: None,
             faces: Vec::new(),
             lap_at_joins: false,
+            anchorage: None,
             overlapping: false,
             lifts: Vec::new(),
             partition: String::new(),

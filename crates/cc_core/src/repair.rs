@@ -715,6 +715,19 @@ impl Project {
                 repairs += 1;
             }
         }
+        // An anchorage out of range, or where it does not apply (only a beam's
+        // longitudinal and side bars are anchored): none, keeping the set.
+        let beams: std::collections::HashSet<crate::ElementId> =
+            self.elements.values().filter(|e| matches!(e.kind, ElementKind::Beam(_))).map(|e| e.id).collect();
+        for e in self.elements.values_mut() {
+            if let ElementKind::Rebar(r) = &mut e.kind
+                && r.anchorage
+                    .is_some_and(|a| !a.is_valid() || !beams.contains(&r.host) || !crate::Anchorage::fits(&r.layout))
+            {
+                r.anchorage = None;
+                repairs += 1;
+            }
+        }
         // Lap splices out of range: whole bars.
         for e in self.elements.values_mut() {
             if let ElementKind::Rebar(r) = &mut e.kind

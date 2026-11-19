@@ -164,7 +164,7 @@ impl BeamGeom {
     }
 
     /// Where the start (`at_end` false) or end face crosses the line `v`.
-    fn face_u(&self, at_end: bool, v: f64) -> f64 {
+    pub(crate) fn face_u(&self, at_end: bool, v: f64) -> f64 {
         let (left, right) = if at_end { self.end_ext } else { self.start_ext };
         let t = if self.half > 0.0 { (v + self.half) / (2.0 * self.half) } else { 0.5 };
         right + (left - right) * t

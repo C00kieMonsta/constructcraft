@@ -316,6 +316,30 @@ pub fn column_outline(project: &Project, data: &TypeData, position: DVec2, rotat
         .unwrap_or_default()
 }
 
+/// What beam ends frame into, as the joins see it: a structural column (the
+/// convex hull of its section: the box of an I, C or L) or a pile cap that
+/// is not a ring, with its plan outline and its bottom and top elevations.
+pub(crate) fn support_input(project: &Project, e: &cc_core::Element) -> Option<ColumnInput> {
+    match (&e.kind, project.element_type(e.type_id).map(|t| &t.data)) {
+        (ElementKind::Column(c), Some(data @ TypeData::Column { .. })) if c.structural => Some(ColumnInput {
+            element: e.id,
+            outline: polygon::convex_hull(&column_outline(project, data, c.position, c.rotation_deg)),
+            z_range: project.column_span(e, c),
+        }),
+        // Tie beams stop at the faces of the pile caps they frame into (not a ring's).
+        (ElementKind::Foundation(_), Some(TypeData::Foundation { thickness, .. })) => {
+            let cap = crate::pile::cap_geom(project, e)?;
+            if matches!(cap.outline, cc_core::pile::CapOutline::Ring { .. }) {
+                return None;
+            }
+            let outline = cap.loops().into_iter().next()?;
+            let top = project.level_elevation(e.level) + project.pile_cap(e).map_or(0.0, |c| c.top_offset);
+            Some(ColumnInput { element: e.id, outline, z_range: (top - thickness, top) })
+        }
+        _ => None,
+    }
+}
+
 /// A `width` x `depth` rectangle (counter-clockwise) centered at `position`,
 /// turned by `rotation_deg`: the footprint of a pad footing.
 pub fn rect_outline(width: f64, depth: f64, position: DVec2, rotation_deg: f64) -> Vec<DVec2> {
@@ -683,25 +707,7 @@ impl ModelGeometry {
                         bulge: b.bulge,
                     });
                 }
-                (ElementKind::Column(c), Some(data @ TypeData::Column { .. })) if c.structural => {
-                    columns.push(ColumnInput {
-                        element: e.id,
-                        // Beams frame into the hull: the box of an I, C or L.
-                        outline: polygon::convex_hull(&column_outline(project, data, c.position, c.rotation_deg)),
-                        z_range: project.column_span(e, c),
-                    });
-                }
-                // Tie beams stop at the faces of the pile caps they frame into (not a ring's).
-                (ElementKind::Foundation(_), Some(TypeData::Foundation { thickness, .. })) => {
-                    let Some(cap) = crate::pile::cap_geom(project, e) else { continue };
-                    if matches!(cap.outline, cc_core::pile::CapOutline::Ring { .. }) {
-                        continue;
-                    }
-                    let Some(outline) = cap.loops().into_iter().next() else { continue };
-                    let top = project.level_elevation(e.level) + project.pile_cap(e).map_or(0.0, |c| c.top_offset);
-                    columns.push(ColumnInput { element: e.id, outline, z_range: (top - thickness, top) });
-                }
-                _ => {}
+                _ => columns.extend(support_input(project, e)),
             }
         }
         self.beams = resolve_beams(&beams, &columns).into_iter().map(|g| (g.element, g)).collect();

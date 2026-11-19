@@ -7,8 +7,8 @@ use crate::registry::{Command, CommandKind};
 use crate::session::Session;
 use crate::t;
 use cc_core::{
-    BarFace, Category, ElementId, ElementKind, ElementTypeId, FaceBars, Project, Rebar, RebarLayout, Splice, Stagger,
-    StirrupHooks, TypeData,
+    AnchorHook, Anchorage, BarFace, Category, ElementId, ElementKind, ElementTypeId, FaceBars, Project, Rebar,
+    RebarLayout, Splice, Stagger, StirrupHooks, TypeData,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -36,8 +36,53 @@ fn host(p: &Project, id: u64) -> Result<(ElementId, bool)> {
     }
 }
 
-fn rebar_kind(host: ElementId, layout: RebarLayout, cover: f64, splice: Option<Splice>) -> ElementKind {
-    ElementKind::Rebar(Rebar { splice, ..Rebar::new(host, layout, cover) })
+fn rebar_kind(
+    host: ElementId,
+    layout: RebarLayout,
+    cover: f64,
+    splice: Option<Splice>,
+    anchorage: Option<Anchorage>,
+) -> ElementKind {
+    ElementKind::Rebar(Rebar { splice, anchorage, ..Rebar::new(host, layout, cover) })
+}
+
+/// The anchorage of a beam's bars as commands take it.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum AnchorArg {
+    /// `true` for the default anchorage (40 bar diameters), `false` for none.
+    On(bool),
+    /// The anchorage length, bar diameters.
+    Diameters(f64),
+}
+
+/// The anchorage `anchor` asks for (none for none or `false`), its bars
+/// bending as `hook` says (`auto` by default).
+pub(crate) fn anchorage(anchor: Option<&AnchorArg>, hook: Option<&str>) -> Result<Option<Anchorage>> {
+    let length = match anchor {
+        None | Some(AnchorArg::On(false)) => {
+            if hook.is_some() {
+                return Err(EngineError::invalid("`anchor_hook` goes with `anchor`"));
+            }
+            return Ok(None);
+        }
+        Some(AnchorArg::On(true)) => Anchorage::DEFAULT_LENGTH,
+        Some(AnchorArg::Diameters(n)) => finite(*n, "anchor")?,
+    };
+    let hook = match hook {
+        None => AnchorHook::Auto,
+        Some(code) => AnchorHook::from_code(code)
+            .ok_or_else(|| EngineError::invalid(format!("anchor_hook must be none, down, up or auto, not '{code}'")))?,
+    };
+    let out = Anchorage { length, hook };
+    if !out.is_valid() {
+        return Err(EngineError::invalid(format!(
+            "anchor must be true, false or {} to {} bar diameters",
+            Anchorage::MIN_LENGTH,
+            Anchorage::MAX_LENGTH
+        )));
+    }
+    Ok(Some(out))
 }
 
 /// The bars of a column face by face: `counts` (one per face of its
@@ -210,6 +255,17 @@ pub(crate) fn splice(
 /// Stirrups are closed by two hooks at one corner, bent into the section
 /// by `hook` degrees with straight ends of `tail` bar diameters (at least
 /// 5 cm), counted in their length and weight.
+///
+/// With `anchor`, a beam's top, bottom and side bars run on into the
+/// columns and pile caps its ends frame into (along an arc beam, on their
+/// own circles): up to the support's far face less the cover, at most the
+/// anchorage length past its near face. Where that does not fit, top and
+/// bottom bars end in a 90° hook (`anchor_hook`) whose leg makes up the
+/// anchorage (at least 8 bar diameters, inside the support's height less
+/// the cover). Where another beam carries on in line from the other side of
+/// the support, the bars of both run half a lap past its middle, so they lap
+/// inside it (or reach its far face less the cover when it is not that
+/// deep). The anchorage counts in the bars' length before they are spliced.
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RebarCreate {
@@ -245,6 +301,19 @@ pub struct RebarCreate {
     /// or 40 bar diameters where bars are kept whole (`max_length` 0).
     #[serde(default)]
     pub lap_at_joins: Option<bool>,
+    /// Beams, `top`, `bottom` and `sides`: anchor the bars into the columns and pile caps the
+    /// beam's ends frame into: `true` for 40 bar diameters past the support's near face, or the
+    /// anchorage length in bar diameters, 10 to 100 (default false: the bars stop the cover short
+    /// of the ends). Where another beam carries on in line beyond the support, the bars of the
+    /// two lap inside it by `lap` (40 bar diameters where bars are kept whole). At an end joined to
+    /// another beam, `lap_at_joins` applies instead.
+    #[serde(default)]
+    pub anchor: Option<AnchorArg>,
+    /// With `anchor`: how top and bottom bars bend where the support is too shallow for the
+    /// straight anchorage: `auto` (default: top bars down, bottom bars up), `down`, `up` or
+    /// `none` (straight to the far face less the cover). Side bars never bend.
+    #[serde(default)]
+    pub anchor_hook: Option<String>,
     /// Columns, `stirrups`: several closed stirrups that overlap, one around each of the
     /// rectangles the section is made of (two in an L or a T, three in a U), instead of one
     /// following the whole outline. The section must have only square corners.
@@ -358,6 +427,11 @@ impl Command for RebarCreate {
             _ => None,
         };
         let lap_at_joins = beam && layout.runs_along() && self.lap_at_joins.unwrap_or(false);
+        // Anchorage into the supports: a beam's bars along it.
+        let anchorage = anchorage(self.anchor.as_ref(), self.anchor_hook.as_deref())?;
+        if anchorage.is_some() && !(beam && Anchorage::fits(&layout)) {
+            return Err(EngineError::invalid("`anchor` goes with the top, bottom and side bars of a beam"));
+        }
         // Overlapping stirrups: in a column whose section is made of rectangles.
         let overlapping = self.overlapping.unwrap_or(false);
         if overlapping {
@@ -416,6 +490,7 @@ impl Command for RebarCreate {
                 splice,
                 faces,
                 lap_at_joins,
+                anchorage,
                 overlapping,
                 lifts,
                 partition,
@@ -453,8 +528,9 @@ impl Command for RebarCreate {
 /// (three when 20 cm wide or more) 10 mm bars at the bottom, two 8 mm at the
 /// top (both lap spliced past the stock length) and 5 mm stirrups every 15 cm; columns four 10 mm bars (six in round
 /// ones) and 5 mm ties every 15 cm. The stirrups are closed by two hooks
-/// (`hook`, `tail`). Default: every beam and column of `level` (or of the
-/// project).
+/// (`hook`, `tail`). With `anchor`, the beams' top and bottom bars run into
+/// the columns and pile caps their ends frame into, as `rebar_create`'s.
+/// Default: every beam and column of `level` (or of the project).
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RebarTypical {
@@ -471,6 +547,15 @@ pub struct RebarTypical {
     /// The straight end of each hook, in bar diameters (default 10; at least 5 cm).
     #[serde(default)]
     pub tail: Option<f64>,
+    /// Anchor the beams' top and bottom bars into the columns and pile caps their ends frame
+    /// into: `true` for 40 bar diameters, or the anchorage length in bar diameters, 10 to 100
+    /// (default false). Columns are not affected.
+    #[serde(default)]
+    pub anchor: Option<AnchorArg>,
+    /// With `anchor`: how the bars bend where a support is too shallow for the straight
+    /// anchorage: `auto` (default: top bars down, bottom bars up), `down`, `up` or `none`.
+    #[serde(default)]
+    pub anchor_hook: Option<String>,
 }
 
 impl Command for RebarTypical {
@@ -495,6 +580,7 @@ impl Command for RebarTypical {
         let [cover, spacing, main_bar, top_bar, stirrup_bar] = p.defaults().rebar;
         let (main, top, ties) = (bar_type(p, main_bar)?, bar_type(p, top_bar)?, bar_type(p, stirrup_bar)?);
         let hooks = stirrup_hooks(self.hook, self.tail)?;
+        let anchorage = anchorage(self.anchor.as_ref(), self.anchor_hook.as_deref())?;
         let mut todo = Vec::new();
         let mut skipped = 0;
         for (id, beam) in hosts {
@@ -507,15 +593,15 @@ impl Command for RebarTypical {
             if beam {
                 let wide = matches!(p.element_type(e.type_id).map(|t| &t.data), Some(TypeData::Beam { width, .. }) if *width >= 0.2 - 1e-9);
                 let bottom = RebarLayout::Longitudinal { face: BarFace::Bottom, count: if wide { 3 } else { 2 } };
-                todo.push((e.level, main, rebar_kind(id, bottom, cover, splice(p, main, None, None)?)));
+                todo.push((e.level, main, rebar_kind(id, bottom, cover, splice(p, main, None, None)?, anchorage)));
                 let upper = RebarLayout::Longitudinal { face: BarFace::Top, count: 2 };
-                todo.push((e.level, top, rebar_kind(id, upper, cover, splice(p, top, None, None)?)));
+                todo.push((e.level, top, rebar_kind(id, upper, cover, splice(p, top, None, None)?, anchorage)));
             } else {
                 let round = p.element_type(e.type_id).is_some_and(|t| p.section_is_round(&t.data));
                 let bars = RebarLayout::Longitudinal { face: BarFace::Perimeter, count: if round { 6 } else { 4 } };
-                todo.push((e.level, main, rebar_kind(id, bars, cover, None)));
+                todo.push((e.level, main, rebar_kind(id, bars, cover, None, None)));
             }
-            todo.push((e.level, ties, rebar_kind(id, stirrups, cover, None)));
+            todo.push((e.level, ties, rebar_kind(id, stirrups, cover, None, None)));
         }
         if todo.is_empty() {
             return Ok(json!({"created": [], "skipped": skipped}));
