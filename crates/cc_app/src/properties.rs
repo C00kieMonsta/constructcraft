@@ -2468,8 +2468,63 @@ fn rebar_props(ui: &mut Ui, state: &mut AppState, el: &Element, r: &cc_core::Reb
                 x.cover = v.max(0.0);
             }
         });
+        // A column's vertical bars cut in lifts may splice every other bar higher.
+        let column = matches!(state.project().element(r.host).map(|h| &h.kind), Some(ElementKind::Column(_)));
+        if column
+            && matches!(r.layout, cc_core::RebarLayout::Longitudinal { .. })
+            && let Some(splice) = r.splice
+        {
+            splice_stagger_rows(ui, state, id, splice);
+        }
     });
     rebar_dimensions(ui, state, id);
+}
+
+/// How much higher every other vertical bar of a column splices: none,
+/// half a lap or an offset, and the offset itself.
+fn splice_stagger_rows(ui: &mut Ui, state: &mut AppState, id: ElementId, splice: cc_core::Splice) {
+    use cc_core::Stagger;
+    let set = |state: &mut AppState, merge: Option<u64>, stagger: Stagger| {
+        crate::engine_edit::element(state, id, merge, |e| {
+            if let ElementKind::Rebar(x) = &mut e.kind
+                && let Some(s) = &mut x.splice
+            {
+                s.stagger = stagger;
+            }
+        });
+    };
+    let name = |s: Stagger| match s {
+        Stagger::None => t!("value-none"),
+        Stagger::HalfLap => t!("prop-stagger-half-lap"),
+        Stagger::Offset(_) => t!("prop-stagger-offset"),
+    };
+    // Picking an offset starts at half a lap, which always fits.
+    let offset = match splice.stagger {
+        Stagger::Offset(o) => o,
+        _ => splice.lap * 0.5,
+    };
+    let mut pick = splice.stagger;
+    row(ui, &t!("prop-splice-stagger"), |ui| {
+        egui::ComboBox::from_id_salt(("splice-stagger", id.0)).selected_text(name(pick)).show_ui(ui, |ui| {
+            for choice in [Stagger::None, Stagger::HalfLap, Stagger::Offset(offset)] {
+                let selected = std::mem::discriminant(&pick) == std::mem::discriminant(&choice);
+                if ui.selectable_label(selected, name(choice)).clicked() {
+                    pick = choice;
+                }
+            }
+        });
+    });
+    if std::mem::discriminant(&pick) != std::mem::discriminant(&splice.stagger) {
+        set(state, None, pick);
+        return;
+    }
+    let Stagger::Offset(mut o) = splice.stagger else { return };
+    let max = splice.max_stagger().max(0.001);
+    let r = row(ui, &t!("prop-stagger-offset"), |ui| ui.add(length_drag(&mut o).range(0.001..=max).speed(0.01)));
+    if r.changed() {
+        set(state, Some(key((id, "splice-stagger"))), Stagger::Offset(o));
+    }
+    finish(state, &r);
 }
 
 /// The hooks that close a set's stirrups: their angle (none, 90° or 135°)

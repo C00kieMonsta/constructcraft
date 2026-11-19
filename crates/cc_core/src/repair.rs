@@ -691,6 +691,23 @@ impl Project {
                 repairs += 1;
             }
         }
+        // A stagger out of range, or where it does not apply (only a column's
+        // vertical bars are staggered): none, keeping the splices.
+        let columns: std::collections::HashSet<crate::ElementId> =
+            self.elements.values().filter(|e| matches!(e.kind, ElementKind::Column(_))).map(|e| e.id).collect();
+        for e in self.elements.values_mut() {
+            if let ElementKind::Rebar(r) = &mut e.kind
+                && let Some(s) = &mut r.splice
+                && !s.stagger.is_none()
+                && s.lengths_are_valid()
+                && (!s.stagger_is_valid()
+                    || !columns.contains(&r.host)
+                    || !matches!(r.layout, crate::RebarLayout::Longitudinal { .. }))
+            {
+                s.stagger = crate::Stagger::None;
+                repairs += 1;
+            }
+        }
         // Lap splices out of range: whole bars.
         for e in self.elements.values_mut() {
             if let ElementKind::Rebar(r) = &mut e.kind
@@ -1428,11 +1445,7 @@ mod tests {
             ids.push(add(&mut p, beam_t, ElementKind::Beam(beam)));
         }
         let mut bars = Vec::new();
-        for splice in [
-            Splice { max_length: 12.0, lap: 0.5 },
-            Splice { max_length: f64::NAN, lap: 0.5 },
-            Splice { max_length: 2.0, lap: 1.5 },
-        ] {
+        for splice in [Splice::new(12.0, 0.5), Splice::new(f64::NAN, 0.5), Splice::new(2.0, 1.5)] {
             let layout = RebarLayout::Sides { count: 1, spacing: 0.0 };
             let rebar = Rebar { splice: Some(splice), ..Rebar::new(ids[0], layout, 0.025) };
             bars.push(add(&mut p, bar_t, ElementKind::Rebar(rebar)));

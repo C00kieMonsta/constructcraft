@@ -1657,12 +1657,46 @@ impl RebarLayout {
     }
 }
 
+/// How much higher every other vertical bar of a column is spliced, so
+/// that neighbouring bars do not lap at the same heights.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Stagger {
+    /// Every bar cut at the same heights.
+    #[default]
+    None,
+    /// Half the lap higher (following the lap when it changes).
+    HalfLap,
+    /// This much higher, meters.
+    Offset(f64),
+}
+
+impl Stagger {
+    pub fn is_none(&self) -> bool {
+        matches!(self, Stagger::None)
+    }
+
+    /// The offset in meters for splices lapping by `lap` (0 for none).
+    pub fn offset(&self, lap: f64) -> f64 {
+        match self {
+            Stagger::None => 0.0,
+            Stagger::HalfLap => lap * 0.5,
+            Stagger::Offset(o) => *o,
+        }
+    }
+}
+
 /// Lap splices: a bar longer than `max_length` (the stock length) is made of
 /// pieces overlapping by `lap`, the splices of neighbouring bars staggered.
+/// In a column, `stagger` moves the splices of every other vertical bar up.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Splice {
     pub max_length: f64,
     pub lap: f64,
+    /// How much higher every other vertical bar of a column is spliced
+    /// (see [`Rebar::column_pieces`]); beams stagger their own way.
+    #[serde(default, skip_serializing_if = "Stagger::is_none")]
+    pub stagger: Stagger,
 }
 
 impl Splice {
@@ -1670,9 +1704,19 @@ impl Splice {
     pub const MIN_LENGTH: f64 = 1.0;
     pub const MIN_LAP: f64 = 0.05;
 
+    /// Whole bars past `max_length` lapping by `lap`, not staggered.
+    pub fn new(max_length: f64, lap: f64) -> Splice {
+        Splice { max_length, lap, stagger: Stagger::None }
+    }
+
     /// Usable: finite, a stock of at least [`Self::MIN_LENGTH`] and a lap
-    /// from [`Self::MIN_LAP`] to half the stock.
+    /// from [`Self::MIN_LAP`] to half the stock, and a usable stagger.
     pub fn is_valid(&self) -> bool {
+        self.lengths_are_valid() && self.stagger_is_valid()
+    }
+
+    /// The stock and the lap alone are usable (see [`Self::is_valid`]).
+    pub fn lengths_are_valid(&self) -> bool {
         self.max_length.is_finite()
             && self.lap.is_finite()
             && self.max_length >= Self::MIN_LENGTH
@@ -1680,16 +1724,47 @@ impl Splice {
             && self.lap <= self.max_length * 0.5
     }
 
+    /// The largest stagger offset, meters: half of what a piece holds past
+    /// its lap, `(max_length - lap) / 2`. Half a lap always fits, since a
+    /// lap is at most half the stock.
+    pub fn max_stagger(&self) -> f64 {
+        (self.max_length - self.lap) * 0.5
+    }
+
+    /// A stagger offset, when given, is finite, above zero and at most
+    /// [`Self::max_stagger`].
+    pub fn stagger_is_valid(&self) -> bool {
+        match self.stagger {
+            Stagger::None | Stagger::HalfLap => true,
+            Stagger::Offset(o) => o.is_finite() && o > 0.0 && o <= self.max_stagger() + 1e-9,
+        }
+    }
+
+    /// The offset of the staggered bars' splices, meters (0: none, or not usable).
+    pub fn stagger_offset(&self) -> f64 {
+        if !self.is_valid() {
+            return 0.0;
+        }
+        self.stagger.offset(self.lap)
+    }
+
+    /// Fewest pieces of at most `max_length` lapping by `lap` covering
+    /// `length` when each may only hold `extra` more (at least 2).
+    fn piece_count(&self, length: f64, extra: f64) -> f64 {
+        let room = (self.max_length - self.lap - extra).max(1e-6);
+        (((length - self.lap) / room) - 1e-9).ceil().clamp(2.0, 10_000.0)
+    }
+
     /// The pieces of bar number `index` of a set, `length` long: `(from,
     /// to)` along it. A bar within the stock length is one piece; a longer
     /// one is cut in the fewest equal pieces, and odd bars are cut half a
     /// piece off the even ones so that neighbours never splice together.
     pub fn pieces(&self, length: f64, index: usize) -> Vec<(f64, f64)> {
-        if !self.is_valid() || !length.is_finite() || length <= self.max_length + 1e-9 {
+        if !self.lengths_are_valid() || !length.is_finite() || length <= self.max_length + 1e-9 {
             return vec![(0.0, length)];
         }
         // `n` pieces overlapping by `lap` cover `n * pitch + lap`.
-        let n = (((length - self.lap) / (self.max_length - self.lap)) - 1e-9).ceil().clamp(2.0, 10_000.0);
+        let n = self.piece_count(length, 0.0);
         let pitch = (length - self.lap) / n;
         let n = n as usize;
         let shift = if index % 2 == 1 { pitch * 0.5 } else { 0.0 };
@@ -1784,20 +1859,66 @@ impl Rebar {
     /// cut at `lifts`: each runs from a cut (or the base) to `lap` past the
     /// next one (or to the top). Cuts at or above the top are ignored.
     pub fn lift_pieces(lifts: &[f64], height: f64, lap: f64) -> Vec<(f64, f64)> {
-        let lap = if lap.is_finite() { lap.max(0.0) } else { 0.0 };
-        let cuts: Vec<f64> = lifts.iter().copied().filter(|h| *h > 1e-6 && *h < height - 1e-6).collect();
-        let mut out = Vec::with_capacity(cuts.len() + 1);
-        let mut from = 0.0;
-        for cut in cuts.into_iter().take(Self::MAX_LIFTS) {
-            if cut <= from {
-                continue;
-            }
-            out.push((from, (cut + lap).min(height)));
-            from = cut;
-        }
-        out.push((from, height));
-        out
+        let cuts: Vec<f64> =
+            lifts.iter().copied().filter(|h| *h > 1e-6 && *h < height - 1e-6).take(Self::MAX_LIFTS).collect();
+        lapped(&cuts, height, lap)
     }
+
+    /// The pieces `(from, to)` of a vertical bar of a column `height` high
+    /// whose splices lap by `lap`: cut at `lifts`, else in the equal lifts
+    /// of `splice` when the column is taller than its stock, else whole.
+    ///
+    /// A `staggered` bar (every other one around the section) is cut the
+    /// splice's stagger offset higher at every cut: it still runs from the
+    /// base to the top, so its first piece is longer by the offset and its
+    /// last one shorter by it. A cut moved to less than a lap below the top
+    /// is left out, the piece below it then running to the top (never
+    /// longer than a regular piece). With equal lifts the lifts are made
+    /// short enough for the longer first piece to stay within the stock,
+    /// for every bar: `n = ceil((height - lap) / (max_length - lap -
+    /// offset))` pieces (at least 2) at a pitch `p = (height - lap) / n`,
+    /// each `p + lap` long, the staggered bar's first `p + lap + offset`
+    /// and last `p + lap - offset`. Unstaggered, these are the pieces of
+    /// [`Splice::pieces`].
+    pub fn column_pieces(&self, height: f64, lap: f64, staggered: bool) -> Vec<(f64, f64)> {
+        let lap = if lap.is_finite() { lap.max(0.0) } else { 0.0 };
+        let splice = self.splice.filter(Splice::is_valid);
+        let offset = splice.map_or(0.0, |s| s.stagger_offset());
+        let cuts: Vec<f64> = if !self.lifts.is_empty() {
+            self.lifts.iter().copied().filter(|h| *h > 1e-6 && *h < height - 1e-6).take(Self::MAX_LIFTS).collect()
+        } else if let Some(s) = splice
+            && height.is_finite()
+            && height > s.max_length + 1e-9
+        {
+            let n = s.piece_count(height, offset);
+            let pitch = (height - s.lap) / n;
+            (1..n as usize).map(|i| pitch * i as f64).collect()
+        } else {
+            Vec::new()
+        };
+        let cuts: Vec<f64> = match staggered && offset > 0.0 {
+            true => cuts.into_iter().map(|c| c + offset).filter(|c| *c <= height - lap + 1e-9).collect(),
+            false => cuts,
+        };
+        lapped(&cuts, height, lap)
+    }
+}
+
+/// The pieces of a bar `height` long cut at `cuts` (rising): each runs from
+/// a cut (or 0) to `lap` past the next one (or to the end).
+fn lapped(cuts: &[f64], height: f64, lap: f64) -> Vec<(f64, f64)> {
+    let lap = if lap.is_finite() { lap.max(0.0) } else { 0.0 };
+    let mut out = Vec::with_capacity(cuts.len() + 1);
+    let mut from = 0.0;
+    for &cut in cuts {
+        if cut <= from || cut >= height {
+            continue;
+        }
+        out.push((from, (cut + lap).min(height)));
+        from = cut;
+    }
+    out.push((from, height));
+    out
 }
 
 /// Reinforcing bars of any shape (bars bent to a schedule's shape codes,

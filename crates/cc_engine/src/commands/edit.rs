@@ -175,6 +175,20 @@ fn patched(
             }
         }
         cc_core::ElementKind::Pile(pile) => super::piles::check(pile)?,
+        // Only a column's vertical bars are staggered.
+        cc_core::ElementKind::Rebar(r) => {
+            if let Some(splice) = r.splice
+                && !splice.stagger.is_none()
+            {
+                let column = matches!(p.element(r.host).map(|h| &h.kind), Some(cc_core::ElementKind::Column(_)));
+                if !column || !matches!(r.layout, cc_core::RebarLayout::Longitudinal { .. }) {
+                    return Err(EngineError::invalid("a stagger goes with the vertical bars of a column"));
+                }
+                if splice.lengths_are_valid() {
+                    super::rebar::check_stagger(&splice)?;
+                }
+            }
+        }
         _ => {}
     }
     Ok(kind)

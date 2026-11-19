@@ -733,6 +733,26 @@ fn from_convex_corner(outline: Vec<DVec2>) -> Vec<DVec2> {
     out
 }
 
+/// Whether each of a column's vertical bars `placed` is an odd one in the
+/// order the bars stand around the section (the staggered ones): the order
+/// they are given in, except a plain box's, whose corners come first and
+/// are put in order by their angle about the middle.
+fn around_parity(shape: &ColumnShape, r: &Rebar, placed: &[FaceBar]) -> Vec<bool> {
+    if shape.round || !shape.boxed || !r.faces.is_empty() {
+        return (0..placed.len()).map(|i| i % 2 == 1).collect();
+    }
+    let mut order: Vec<usize> = (0..placed.len()).collect();
+    let angle = |i: usize| placed.get(i).map_or(0.0, |b| b.at.y.atan2(b.at.x));
+    order.sort_by(|a, b| angle(*a).total_cmp(&angle(*b)).then(a.cmp(b)));
+    let mut odd = vec![false; placed.len()];
+    for (rank, i) in order.into_iter().enumerate() {
+        if let Some(o) = odd.get_mut(i) {
+            *o = rank % 2 == 1;
+        }
+    }
+    odd
+}
+
 /// Bars of a column: vertical bars around the section over its height
 /// (cut in lifts by a splice), horizontal ties up the column following its
 /// outline, and cross-ties between the bars of its longitudinal set `main`.
@@ -750,15 +770,16 @@ fn column_bars(
     let (w, depth) = shape.size;
     match r.layout {
         RebarLayout::Longitudinal { .. } => {
-            // Every bar is cut at the same heights: the lifts the column is cast
-            // in, at the heights given or equal ones under the stock length.
-            let lifts = match r.lifts.is_empty() {
-                false => Rebar::lift_pieces(&r.lifts, top - base, lap_of(r, d)),
-                true => r.splice.map_or_else(|| vec![(0.0, top - base)], |s| s.pieces(top - base, 0)),
-            };
+            // The bars are cut in the lifts the column is cast in, at the heights
+            // given or equal ones under the stock length; with a stagger, every
+            // other bar around the section is cut that much higher.
+            let lap = lap_of(r, d);
+            let plain = r.column_pieces(top - base, lap, false);
+            let staggered = r.column_pieces(top - base, lap, true);
+            let placed = shape.bars(r, d, ds);
             let mut bars = Vec::new();
-            for bar in shape.bars(r, d, ds) {
-                for (from, to) in &lifts {
+            for (bar, odd) in placed.iter().zip(around_parity(shape, r, &placed)) {
+                for (from, to) in if odd { &staggered } else { &plain } {
                     if bars.len() >= MAX_BARS {
                         return bars;
                     }
@@ -914,7 +935,7 @@ mod tests {
 
     #[test]
     fn long_bars_are_cut_in_the_fewest_pieces_and_staggered() {
-        let s = Splice { max_length: 12.0, lap: 0.5 };
+        let s = Splice::new(12.0, 0.5);
         // Within the stock: one piece, whatever the bar.
         assert_eq!(s.pieces(12.0, 0), vec![(0.0, 12.0)]);
         assert_eq!(s.pieces(8.0, 1), vec![(0.0, 8.0)]);
@@ -935,8 +956,8 @@ mod tests {
         assert!(odd.windows(2).all(|w| (w[0].1 - w[1].0 - 0.5).abs() < 1e-9), "{odd:?}");
         assert!(((odd[0].1 - odd[0].0) - (odd[3].1 - odd[3].0)).abs() < 1e-9);
         // Values a file may hold: no splices rather than a loop.
-        assert_eq!(Splice { max_length: 0.0, lap: 0.5 }.pieces(30.0, 0), vec![(0.0, 30.0)]);
-        assert_eq!(Splice { max_length: 12.0, lap: 12.0 }.pieces(30.0, 0), vec![(0.0, 30.0)]);
+        assert_eq!(Splice::new(0.0, 0.5).pieces(30.0, 0), vec![(0.0, 30.0)]);
+        assert_eq!(Splice::new(12.0, 12.0).pieces(30.0, 0), vec![(0.0, 30.0)]);
         assert_eq!(s.pieces(f64::NAN, 0).len(), 1);
         assert!(s.pieces(1e9, 0).len() <= 10_001);
     }

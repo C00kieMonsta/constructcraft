@@ -381,6 +381,12 @@ A column that continues a cylindrical wall has an `annular_sector` profile; `reb
 {"command": "rebar_create", "args": {"host": 42, "layout": "ties", "spacing": 0.30}}
 ```
 
+A column's vertical bars cut in lifts (`max_length`, or `lifts` at given heights) are all spliced at the same heights; `stagger` splices every other bar around the section higher: `half_lap` (half the lap length) or an offset in meters, at most `(max_length - lap) / 2`. Each bar still runs from the base to the top, so a staggered bar's first piece is longer by the offset and its last one shorter (a splice moved to less than a lap below the top is left out); with `max_length` the lifts are shortened where the longer first piece would not fit the stock. The staggered pieces have their own bar marks. `element_set` changes it (`{"splice": {"stagger": "half_lap"}}`, `{"offset": 0.3}` or `"none"`):
+
+```text
+{"command": "rebar_create", "args": {"host": 42, "layout": "perimeter", "count": 8, "max_length": 4, "lap": 0.5, "stagger": "half_lap"}}
+```
+
 `wall_rebar_create` reinforces walls, straight or arc: horizontal (ring) bars with a spacing or `zones` by height, vertical bars with bent ends and additional sets, and ties, near both faces with a cover each. A cylindrical wall gets its four bar families in one command:
 
 ```text
