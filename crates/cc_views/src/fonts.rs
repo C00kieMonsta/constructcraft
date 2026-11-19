@@ -1,5 +1,6 @@
 //! Fallback fonts for the scripts Inter lacks (Chinese, Japanese, Korean,
-//! Lao), found among the fonts operating systems usually ship and read once.
+//! Lao), found among the fonts operating systems usually ship (and Noto Sans
+//! Lao where it is installed, which goes first) and read once.
 //! Nothing is bundled, so a system without them shows missing glyphs as
 //! boxes, as before.
 
@@ -121,36 +122,62 @@ fn candidates() -> Vec<(PathBuf, u32)> {
     out
 }
 
-/// Usual fonts with Lao letters.
+/// The file names Noto Sans Lao is installed under: the static regular
+/// face, its UI variant, and the variable font as downloaded and as
+/// packaged.
+const NOTO_LAO: [&str; 4] = [
+    "NotoSansLao-Regular.ttf",
+    "NotoSansLaoUI-Regular.ttf",
+    "NotoSansLao-VariableFont_wdth,wght.ttf",
+    "NotoSansLao[wdth,wght].ttf",
+];
+
+/// Usual fonts with Lao letters: Noto Sans Lao where the user or the
+/// system has it installed (it is not bundled; issue #417), then the
+/// fonts the system ships.
 fn lao_candidates() -> Vec<(PathBuf, u32)> {
-    let names: Vec<PathBuf> = if cfg!(windows) {
-        let dir = std::env::var_os("WINDIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    let env = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from);
+    let paths = |names: &[&str]| names.iter().map(PathBuf::from).collect::<Vec<_>>();
+    let (installed, system): (Vec<PathBuf>, Vec<PathBuf>) = if cfg!(windows) {
+        let fonts = env("WINDIR").unwrap_or_else(|| PathBuf::from(r"C:\Windows")).join("Fonts");
+        // Fonts installed for one user go to the local application data.
+        let user = env("LOCALAPPDATA").map(|d| d.join("Microsoft").join("Windows").join("Fonts"));
         // Leelawadee UI (Windows 10 and later), Lao UI (7 and 8), DokChampa (older).
-        ["LeelawUI.ttf", "LaoUI.ttf", "DokChamp.ttf"].iter().map(|n| dir.join("Fonts").join(n)).collect()
+        let system = ["LeelawUI.ttf", "LaoUI.ttf", "DokChamp.ttf"].iter().map(|n| fonts.join(n)).collect();
+        (user.into_iter().chain([fonts]).collect(), system)
     } else if cfg!(target_os = "macos") {
-        [
+        let user = env("HOME").map(|d| d.join("Library").join("Fonts"));
+        let system = paths(&[
             "/System/Library/Fonts/Supplemental/Lao Sangam MN.ttf",
             "/System/Library/Fonts/Supplemental/Lao MN.ttc",
             "/System/Library/Fonts/LaoSangamMN.ttf",
             "/Library/Fonts/Lao Sangam MN.ttf",
-        ]
-        .iter()
-        .map(PathBuf::from)
-        .collect()
+        ]);
+        (user.into_iter().chain([PathBuf::from("/Library/Fonts")]).collect(), system)
     } else {
-        [
-            "/usr/share/fonts/truetype/noto/NotoSansLao-Regular.ttf",
-            "/usr/share/fonts/noto/NotoSansLao-Regular.ttf",
-            "/usr/share/fonts/google-noto/NotoSansLao-Regular.ttf",
-            "/usr/share/fonts/truetype/noto/NotoSansLaoUI-Regular.ttf",
+        let home = env("HOME");
+        let user = [".local/share/fonts", ".fonts"].iter().filter_map(|d| Some(home.as_ref()?.join(d)));
+        let shared = paths(&[
+            "/usr/local/share/fonts",
+            "/usr/share/fonts/truetype/noto",
+            "/usr/share/fonts/noto",
+            "/usr/share/fonts/google-noto",
+            "/usr/share/fonts/google-noto-sans-lao-fonts",
+        ]);
+        let system = paths(&[
             "/usr/share/fonts/truetype/lao/Phetsarath_OT.ttf",
             "/usr/share/fonts/truetype/fonts-lao/Phetsarath_OT.ttf",
-        ]
-        .iter()
-        .map(PathBuf::from)
-        .collect()
+        ]);
+        (user.chain(shared).collect(), system)
     };
-    names.into_iter().map(|p| (p, 0)).collect()
+    lao_order(&installed, system)
+}
+
+/// Noto Sans Lao in each of the font folders `installed`, then the
+/// `system` fonts, all at their first face.
+fn lao_order(installed: &[PathBuf], system: Vec<PathBuf>) -> Vec<(PathBuf, u32)> {
+    let noto = installed.iter().flat_map(|dir| NOTO_LAO.iter().map(move |name| dir.join(name)));
+    noto.chain(system).map(|p| (p, 0)).collect()
 }
 
 #[cfg(test)]
@@ -177,6 +204,22 @@ mod tests {
         // Inter has no ideographs, kana or Hangul, nor Lao letters.
         assert!(load_covering(&candidates, &PROBES).is_empty());
         assert!(load_covering(&candidates, &[LAO_PROBE]).is_empty());
+    }
+
+    /// Issue #417: Noto Sans Lao, where it is installed, goes before the
+    /// fonts the system ships, in the user's folder first.
+    #[test]
+    fn noto_sans_lao_goes_before_the_system_fonts() {
+        let (user, shared) = (PathBuf::from("user"), PathBuf::from("shared"));
+        let system = PathBuf::from("system").join("LeelawUI.ttf");
+        let order = lao_order(&[user.clone(), shared.clone()], vec![system.clone()]);
+        assert_eq!(order.len(), 2 * NOTO_LAO.len() + 1);
+        assert_eq!(order.first(), Some(&(user.join("NotoSansLao-Regular.ttf"), 0)));
+        assert_eq!(order.get(NOTO_LAO.len()), Some(&(shared.join("NotoSansLao-Regular.ttf"), 0)));
+        assert_eq!(order.last(), Some(&(system, 0)));
+        // This system's own list starts with Noto Sans Lao too.
+        let first = lao_candidates().into_iter().next().and_then(|(p, _)| Some(p.file_name()?.to_owned()));
+        assert_eq!(first.as_deref(), Some(std::ffi::OsStr::new("NotoSansLao-Regular.ttf")));
     }
 
     /// A system with a Lao font (Windows 10 and later have Leelawadee UI)
