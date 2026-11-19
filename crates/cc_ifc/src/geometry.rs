@@ -170,11 +170,67 @@ impl Extrusion {
     }
 }
 
+/// A profile revolved about an axis, in world coordinates.
+#[derive(Debug, Clone)]
+pub struct Revolution {
+    pub profile: Profile,
+    /// Profile plane to world.
+    pub xf: DAffine3,
+    /// A point of the axis and its unit direction.
+    pub origin: DVec3,
+    pub axis: DVec3,
+    /// The turn about the axis (radians, right-handed), within one full turn.
+    pub angle: f64,
+}
+
+impl Revolution {
+    /// The profile's outline in the half plane of the axis: distance from the
+    /// axis and height along it (`None` when the plane does not hold the axis,
+    /// the placement is not a similarity, or the outline reaches the axis).
+    pub fn section(&self) -> Option<Vec<DVec2>> {
+        let (x, y, z) = (self.xf.matrix3.x_axis, self.xf.matrix3.y_axis, self.xf.matrix3.z_axis);
+        let scale = x.length();
+        let normal = x.cross(y).try_normalize()?;
+        let tol = 1e-9 * scale * scale;
+        let lengths = [y, z].iter().all(|v| (v.length() - scale).abs() <= 1e-9 * scale);
+        let square = x.dot(y).abs() <= tol && y.dot(z).abs() <= tol && z.dot(x).abs() <= tol;
+        let similar = scale > 1e-12 && lengths && square;
+        // The axis lies in the profile's plane.
+        let planar = normal.dot(self.axis).abs() < 1e-6 && normal.dot(self.origin - self.xf.translation).abs() < 1e-6;
+        if !(similar && planar) {
+            return None;
+        }
+        let across = self.axis.cross(normal);
+        let pts: Vec<DVec2> = self
+            .profile
+            .pts
+            .iter()
+            .map(|p| {
+                let w = self.xf.transform_point3(p.extend(0.0)) - self.origin;
+                DVec2::new(w.dot(across), w.dot(self.axis))
+            })
+            .collect();
+        // All on one side of the axis, clear of it.
+        let side = pts.first()?.x.signum();
+        let clear = pts.iter().all(|p| p.x * side > 1e-6 && p.is_finite());
+        clear.then(|| pts.into_iter().map(|p| DVec2::new(p.x * side, p.y)).collect())
+    }
+
+    /// The unit direction from the axis towards the profile, square to the
+    /// axis (where the turn starts).
+    pub fn start_direction(&self) -> Option<DVec3> {
+        let p = self.xf.transform_point3(self.profile.pts.first()?.extend(0.0)) - self.origin;
+        (p - self.axis * p.dot(self.axis)).try_normalize()
+    }
+}
+
 /// A representation item resolved to world coordinates.
 #[derive(Debug, Clone, Default)]
 pub struct Solid {
     /// The extruded profile, when the item is a plain extrusion.
     pub extrusion: Option<Extrusion>,
+    /// The revolved profile, when the item is a plain revolution of one profile.
+    pub revolution: Option<Revolution>,
     /// Faces in world coordinates.
     pub mesh: Vec<Polygon>,
     /// Every vertex of the faces.
@@ -196,7 +252,17 @@ pub struct Solid {
 impl Solid {
     fn new(item: u32, mesh: Vec<Polygon>, extrusion: Option<Extrusion>) -> Self {
         let points = mesh.iter().flatten().copied().collect();
-        Self { extrusion, mesh, points, item, clipped: false, cuts: Vec::new(), other_cut: false, disk: None }
+        Self {
+            extrusion,
+            revolution: None,
+            mesh,
+            points,
+            item,
+            clipped: false,
+            cuts: Vec::new(),
+            other_cut: false,
+            disk: None,
+        }
     }
 
     /// Replace the faces by a cut version of them; a changed solid is
@@ -291,6 +357,40 @@ fn map_curves(curves: &[SketchCurve], xf: &DAffine3) -> Option<Vec<SketchCurve>>
             SketchCurve::Ellipse { .. } => None,
         })
         .collect()
+}
+
+/// The circle that `curves` draw when they are arcs of it turning one way
+/// all the way round from end to end (a circle written as trimmed halves).
+fn whole_circle(curves: &[SketchCurve]) -> Option<SketchCurve> {
+    if curves.len() < 2 {
+        return None;
+    }
+    let tol = cc_core::sketch::JOIN_TOL;
+    let mut first: Option<cc_core::arc::Arc> = None;
+    let mut sweep = 0.0;
+    let mut end: Option<DVec2> = None;
+    for c in curves {
+        let SketchCurve::Arc { a, b, bulge } = *c else { return None };
+        let arc = cc_core::arc::Arc::from_bulge(a, b, bulge)?;
+        if let Some(f) = &first
+            && (f.center.distance(arc.center) > tol
+                || (f.radius - arc.radius).abs() > tol
+                || f.sweep * arc.sweep <= 0.0)
+        {
+            return None;
+        }
+        if end.is_some_and(|p| p.distance(a) > tol) {
+            return None;
+        }
+        first.get_or_insert(arc);
+        sweep += arc.sweep;
+        end = Some(b);
+    }
+    let first = first?;
+    let start = curves.first().and_then(SketchCurve::ends).map(|(a, _)| a)?;
+    let closes = end.is_some_and(|p| p.distance(start) <= tol) && (sweep.abs() - TAU).abs() < 1e-6;
+    let circle = SketchCurve::Circle { center: first.center, radius: first.radius };
+    (closes && circle.is_valid()).then_some(circle)
 }
 
 /// Points of an arc from `a` through `b` to `c` (a straight segment when collinear),
@@ -827,10 +927,19 @@ impl<'a> Geometry<'a> {
                         return None;
                     }
                 }
-                out
+                // Arcs of one circle that turn all the way round: the circle (#368).
+                match whole_circle(&out) {
+                    Some(circle) => vec![circle],
+                    None => out,
+                }
             }
             "IFCTRIMMEDCURVE" => match f.deref(e.arg(0))?.name.as_str() {
-                "IFCCIRCLE" => arcs(&self.trimmed(e, depth))?,
+                // One arc, or the circle when it turns all the way round, else
+                // arcs through its points.
+                "IFCCIRCLE" => match self.circle_arc(e) {
+                    Some(curve) => vec![curve],
+                    None => arcs(&self.trimmed(e, depth))?,
+                },
                 "IFCLINE" => lines(&self.trimmed(e, depth)),
                 _ => return None,
             },
@@ -859,6 +968,54 @@ impl<'a> Geometry<'a> {
         Some((local.y / b).atan2(local.x / a))
     }
 
+    /// A trimmed circle as one sketch arc in its own coordinates, or its
+    /// circle when it turns all the way round; `None` when it does not trim
+    /// a circle, its radius or trims are unusable, or the arc turns too far
+    /// for one bulge.
+    fn circle_arc(&self, e: &Entity) -> Option<SketchCurve> {
+        let basis = self.f.deref(e.arg(0)).filter(|b| b.name == "IFCCIRCLE")?;
+        let (t0, sweep) = self.conic_trim(e, basis)?;
+        if sweep.abs() >= TAU - 1e-9 {
+            let center = self.axis_placement(basis.arg(0)).transform_point3(DVec3::ZERO).truncate();
+            let circle = SketchCurve::Circle { center, radius: self.positive(basis.arg(1))? };
+            return circle.is_valid().then_some(circle);
+        }
+        let at = |t: f64| self.conic_point(basis, t).map(DVec3::truncate);
+        let (a, m, b) = (at(t0)?, at(t0 + sweep * 0.5)?, at(t0 + sweep)?);
+        let arc = SketchCurve::Arc { a, b, bulge: cc_core::arc::Arc::bulge_through(a, m, b)? };
+        arc.is_valid().then_some(arc)
+    }
+
+    /// Where a trimmed circle or ellipse starts (its parameter, radians) and
+    /// the turn to its end along its sense, within one full turn (equal
+    /// ends make a full turn); `None` when a trim cannot be read.
+    fn conic_trim(&self, e: &Entity, basis: &Entity) -> Option<(f64, f64)> {
+        let sense = e.arg(3).as_bool() != Some(false);
+        let prefer_points = e.arg(4).as_enum() == Some("CARTESIAN");
+        // A trim select: a parameter value and/or a point.
+        let trim = |p: &Param| -> Option<f64> {
+            let mut value = None;
+            let mut point = None;
+            for x in p.as_list() {
+                match x {
+                    Param::Typed(t, v) if t == "IFCPARAMETERVALUE" => value = v.as_f64(),
+                    Param::Ref(_) => point = self.point(x),
+                    _ => {}
+                }
+            }
+            let from_point = point.and_then(|p| self.conic_parameter(basis, p));
+            let from_value = value.map(|v| v * self.angle);
+            if prefer_points { from_point.or(from_value) } else { from_value.or(from_point) }
+        };
+        let (a, b) = (trim(e.arg(1))?, trim(e.arg(2))?);
+        let turn = |d: f64| match d.rem_euclid(TAU) {
+            d if d <= 1e-12 => TAU,
+            d => d,
+        };
+        let sweep = if sense { turn(b - a) } else { -turn(a - b) };
+        (a.is_finite() && b.is_finite() && sweep.is_finite()).then_some((a, sweep))
+    }
+
     fn trimmed(&self, e: &Entity, depth: usize) -> Vec<DVec3> {
         let f = self.f;
         let Some(basis) = f.deref(e.arg(0)) else { return Vec::new() };
@@ -880,22 +1037,7 @@ impl<'a> Geometry<'a> {
         let (t1, t2) = (trim(e.arg(1)), trim(e.arg(2)));
         match basis.name.as_str() {
             "IFCCIRCLE" | "IFCELLIPSE" => {
-                let param = |(v, p): (Option<f64>, Option<DVec3>)| -> Option<f64> {
-                    let from_point = p.and_then(|p| self.conic_parameter(basis, p));
-                    let from_value = v.map(|v| v * self.angle);
-                    if prefer_points { from_point.or(from_value) } else { from_value.or(from_point) }
-                };
-                let (Some(a), Some(b)) = (param(t1), param(t2)) else { return Vec::new() };
-                // The turn from `a` to `b` along the sense, within one full
-                // turn (an equal end is a full turn).
-                let turn = |d: f64| match d.rem_euclid(TAU) {
-                    d if d <= 1e-12 => TAU,
-                    d => d,
-                };
-                let sweep = if sense { turn(b - a) } else { -turn(a - b) };
-                if !(a.is_finite() && b.is_finite() && sweep.is_finite()) {
-                    return Vec::new();
-                }
+                let Some((a, sweep)) = self.conic_trim(e, basis) else { return Vec::new() };
                 let b = a + sweep;
                 let n = self.arc_chords(b - a);
                 (0..=n).filter_map(|i| self.conic_point(basis, a + (b - a) * i as f64 / n as f64)).collect()
@@ -1337,14 +1479,34 @@ impl<'a> Geometry<'a> {
                 let axis = self.axis_placement(e.arg(2));
                 let angle = e.arg(3).as_f64().map(|a| a * self.angle).filter(|a| a.is_finite() && a.abs() > 1e-9);
                 let Some(angle) = angle else { return };
-                for profile in self.profiles(e.arg(0), 0) {
-                    let mesh = revolve(&profile, axis.translation, axis.matrix3.z_axis, angle.clamp(-TAU, TAU));
+                let angle = angle.clamp(-TAU, TAU);
+                let profiles = self.profiles(e.arg(0), 0);
+                let single = profiles.len() == 1;
+                for profile in profiles {
+                    let mesh = revolve(&profile, axis.translation, axis.matrix3.z_axis, angle);
+                    let before = out.len();
                     push(
                         out,
                         mesh.into_iter()
                             .map(|f| f.into_iter().map(|p| position.transform_point3(p)).collect())
                             .collect(),
                     );
+                    // The revolution itself, in world coordinates (a mirror turns it the other way).
+                    let to_world = xf * position;
+                    let turn = if to_world.matrix3.determinant() < 0.0 { -angle } else { angle };
+                    let revolution =
+                        to_world.transform_vector3(axis.matrix3.z_axis).try_normalize().map(|dir| Revolution {
+                            profile: profile.clone(),
+                            xf: to_world,
+                            origin: to_world.transform_point3(axis.translation),
+                            axis: dir,
+                            angle: turn,
+                        });
+                    // A tapered one changes its section on the way round: no plain revolution.
+                    let plain = single && profile.closed && e.name == "IFCREVOLVEDAREASOLID";
+                    if let Some(s) = out.get_mut(before).filter(|_| plain) {
+                        s.revolution = revolution;
+                    }
                 }
             }
             "IFCSWEPTDISKSOLID" | "IFCSWEPTDISKSOLIDPOLYGONAL" => {
@@ -1826,7 +1988,7 @@ fn i_shape(wb: f64, wt: f64, d: f64, tw: f64, tfb: f64, tft: f64) -> Profile {
 }
 
 /// A rectangle's exact parameters when `pts` form one.
-fn rect_kind_of(pts: &[DVec2]) -> ProfileKind {
+pub(crate) fn rect_kind_of(pts: &[DVec2]) -> ProfileKind {
     if let [a, b, c, d] = pts {
         let (ab, bc, cd, da) = (*b - *a, *c - *b, *d - *c, *a - *d);
         let square = |u: DVec2, v: DVec2| u.dot(v).abs() < 1e-6 * u.length().max(1e-9) * v.length().max(1e-9);

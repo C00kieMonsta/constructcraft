@@ -244,8 +244,61 @@ struct ProjectedFace {
     solid: usize,
     face: usize,
     edges: Vec<(DVec2, DVec2)>,
+    /// Where its curved surface turns away: lines drawn once the faces in
+    /// `after` (indices of the faces beside them, see [`beside`]) are painted.
+    silhouettes: Vec<(DVec2, DVec2)>,
+    after: Vec<usize>,
     /// Symbol lines drawn on the face (a window's opening), in their styles.
     marks: Vec<(DVec2, DVec2, LineStyle)>,
+}
+
+/// The silhouettes of a face, held back while faces beside them are unpainted.
+struct Late {
+    lines: Vec<(DVec2, DVec2)>,
+    /// The faces beside them, and how many of those are still to paint.
+    after: Vec<usize>,
+    left: usize,
+}
+
+/// How far from a silhouette (paper millimeters) the facets of its surface
+/// are painted before it: about a pen's width, so the facets a line of that
+/// width lies over do not cover it.
+const SILHOUETTE_REACH_MM: f64 = 0.35;
+/// The most faces a silhouette waits for.
+const SILHOUETTE_FACES: usize = 64;
+
+/// The faces painted before the silhouettes of face `start` of `faces`: the
+/// facets of its curved surface reached across smooth edges (`neighbors`, by
+/// face of the solid, `slots` giving each one's place in `faces`) that come
+/// within `reach` of a silhouette. Painted after it, a facet thinner than
+/// the line's width would cover the line: a rounded edge or a thin bar then
+/// lost its outline on screen.
+fn beside(
+    faces: &[ProjectedFace],
+    start: usize,
+    slots: &[usize],
+    neighbors: &[Vec<(usize, DVec3)>],
+    reach: f64,
+) -> Vec<usize> {
+    let Some(face) = faces.get(start).filter(|f| !f.silhouettes.is_empty()) else { return Vec::new() };
+    let off = |p: DVec2, (a, b): (DVec2, DVec2)| cc_geom::polygon::closest_on_segment(a, b, p).0.distance(p);
+    let near = |f: &ProjectedFace| f.pts.iter().any(|p| face.silhouettes.iter().any(|s| off(*p, *s) <= reach));
+    let mut found = Vec::new();
+    let mut queue = vec![start];
+    while let Some(i) = queue.pop() {
+        let Some(f) = faces.get(i) else { continue };
+        for &(n, _) in neighbors.get(f.face).into_iter().flatten() {
+            let Some(&j) = slots.get(n) else { continue };
+            if j == start || found.contains(&j) || found.len() >= SILHOUETTE_FACES {
+                continue;
+            }
+            if faces.get(j).is_some_and(near) {
+                found.push(j);
+                queue.push(j);
+            }
+        }
+    }
+    found
 }
 
 fn symbol_style(line: cc_core::SymbolLine) -> LineStyle {
@@ -304,13 +357,23 @@ pub fn render(
     for (index, solid) in geom.solids.iter().enumerate().filter(|(_, s)| shown(s)) {
         let edges = solid.feature_edges();
         let seams = solid.smooth_edges();
-        for (face_index, ((face, mut face_edges), seams)) in solid.faces.iter().zip(edges).zip(seams).enumerate() {
+        let first = faces.len();
+        // Where each face of the solid is in `faces` (those the view shows).
+        let mut slots = vec![usize::MAX; solid.faces.len()];
+        for (face_index, ((face, face_edges), seams)) in solid.faces.iter().zip(edges).zip(seams).enumerate() {
             // The wireframe sees through: faces turned away show their edges too.
             if face.normal.dot(frame.forward) > -1e-6 && style.fills() {
                 continue;
             }
             // Where a curved surface turns away, the edge to the hidden facet is its silhouette.
-            face_edges.extend(seams.into_iter().filter(|s| s.2.dot(frame.forward) > -1e-6).map(|(a, b, _)| (a, b)));
+            let turned = seams.into_iter().filter(|s| s.2.dot(frame.forward) > -1e-6).map(|(a, b, _)| (a, b));
+            let shown = |edges: Vec<(DVec3, DVec3)>| -> Vec<(DVec2, DVec2)> {
+                edges
+                    .into_iter()
+                    .filter_map(|(a, b)| planes.iter().try_fold((a, b), |(a, b), &(p, n)| clip_segment(a, b, p, n)))
+                    .map(|(a, b)| (frame.project(a), frame.project(b)))
+                    .collect()
+            };
             let mut verts = face.verts.clone();
             for &(p, n) in &planes {
                 verts = clip_polygon(&verts, p, n);
@@ -318,11 +381,10 @@ pub fn render(
             if verts.len() < 3 {
                 continue;
             }
-            let edges = face_edges
-                .into_iter()
-                .filter_map(|(a, b)| planes.iter().try_fold((a, b), |(a, b), &(p, n)| clip_segment(a, b, p, n)))
-                .map(|(a, b)| (frame.project(a), frame.project(b)))
-                .collect();
+            let (edges, silhouettes) = (shown(face_edges), shown(turned.collect()));
+            if let Some(slot) = slots.get_mut(face_index) {
+                *slot = faces.len();
+            }
             let depth = verts.iter().map(|v| frame.depth(*v)).sum::<f64>() / verts.len() as f64;
             faces.push(ProjectedFace {
                 depth,
@@ -335,8 +397,21 @@ pub fn render(
                 solid: index,
                 face: face_index,
                 edges,
+                silhouettes,
+                after: Vec::new(),
                 marks: Vec::new(),
             });
+        }
+        // The facets beside a silhouette are painted before it (a wireframe paints none).
+        if style.fills() && faces.get(first..).is_some_and(|f| f.iter().any(|f| !f.silhouettes.is_empty())) {
+            let neighbors = solid.smooth_neighbors();
+            let reach = SILHOUETTE_REACH_MM * crate::hatch::paper_unit(look.spacing);
+            for i in first..faces.len() {
+                let after = beside(&faces, i, &slots, &neighbors, reach);
+                if let Some(face) = faces.get_mut(i) {
+                    face.after = after;
+                }
+            }
         }
     }
     // Windows' opening symbols: unfilled faces just off their walls, so
@@ -371,6 +446,8 @@ pub fn render(
             solid: usize::MAX,
             face: 0,
             edges: Vec::new(),
+            silhouettes: Vec::new(),
+            after: Vec::new(),
             marks,
         });
     }
@@ -425,8 +502,37 @@ pub fn render(
     }
     if style.fills() {
         let order = paint_order(frame, &faces);
+        // Silhouettes are held until the faces beside them are painted: a
+        // facet thinner than the line would cover it.
+        let mut late: Vec<Late> = faces
+            .iter_mut()
+            .map(|f| Late { lines: std::mem::take(&mut f.silhouettes), after: std::mem::take(&mut f.after), left: 0 })
+            .collect();
+        let mut waiting: Vec<Vec<usize>> = vec![Vec::new(); late.len()];
+        for (i, l) in late.iter_mut().enumerate() {
+            l.left = l.after.len();
+            for j in &l.after {
+                if let Some(list) = waiting.get_mut(*j) {
+                    list.push(i);
+                }
+            }
+        }
+        let elements: Vec<ElementId> = faces.iter().map(|f| f.element).collect();
+        let mut held: Vec<usize> = Vec::new();
         let mut slots: Vec<Option<ProjectedFace>> = faces.into_iter().map(Some).collect();
         for (i, f) in order.into_iter().filter_map(|i| Some((i, slots[i].take()?))) {
+            // A face over a held silhouette, and not beside it, hides it: the silhouette goes first.
+            held.retain(|&h| {
+                let Some((l, element)) = late.get(h).zip(elements.get(h)) else { return false };
+                let hidden = !l.after.contains(&i)
+                    && l.lines.iter().any(|&(a, b)| cc_geom::polygon::contains(&f.pts, (a + b) * 0.5));
+                if hidden {
+                    for &(a, b) in &l.lines {
+                        d.line(a, b, LineStyle::Projection, Some(*element));
+                    }
+                }
+                !hidden
+            });
             if let Some(color) = f.color {
                 // A shadow is a veil over the face's fill, under its lines; it
                 // belongs to no element (it is neither picked nor overridden).
@@ -454,11 +560,36 @@ pub fn render(
             for (a, b, style) in f.marks {
                 d.line(a, b, style, Some(f.element));
             }
+            // Its own silhouettes, unless faces beside them are still to come,
+            // and those that waited for this face alone.
+            if late.get(i).is_some_and(|l| !l.lines.is_empty()) {
+                held.push(i);
+            }
+            for &h in waiting.get(i).into_iter().flatten() {
+                if let Some(l) = late.get_mut(h) {
+                    l.left = l.left.saturating_sub(1);
+                }
+            }
+            held.retain(|&h| {
+                let Some((l, element)) = late.get(h).zip(elements.get(h)) else { return false };
+                if l.left == 0 {
+                    for &(a, b) in &l.lines {
+                        d.line(a, b, LineStyle::Projection, Some(*element));
+                    }
+                }
+                l.left > 0
+            });
+        }
+        // A cycle in the order may leave some waiting.
+        for (l, element) in held.into_iter().filter_map(|h| late.get(h).zip(elements.get(h))) {
+            for &(a, b) in &l.lines {
+                d.line(a, b, LineStyle::Projection, Some(*element));
+            }
         }
     } else {
         // Every edge, in no particular order: nothing hides anything.
         for f in faces {
-            for (a, b) in f.edges {
+            for (a, b) in f.edges.into_iter().chain(f.silhouettes) {
                 d.line(a, b, LineStyle::Projection, Some(f.element));
             }
             for (a, b, style) in f.marks {
@@ -1060,6 +1191,41 @@ mod tests {
         assert!(roof_top > last_wall, "roof top painted at {roof_top}, a wall face at {last_wall}");
     }
 
+    /// A thin round bar seen from the side (an oven's handle): its facets
+    /// are thinner than a line on screen, so the facets painted after a
+    /// silhouette covered it and the bar lost its outline. Both silhouettes
+    /// are drawn after every facet of the bar.
+    #[test]
+    fn silhouettes_are_drawn_after_the_facets_beside_them() {
+        use cc_geom::Solid;
+        let (r, n) = (0.011, 24);
+        let at = |x: f64, k: usize| {
+            let t = std::f64::consts::TAU * k as f64 / n as f64;
+            DVec3::new(x, r * t.cos(), r * t.sin())
+        };
+        let mut bar = Solid::new(ElementId(1), Category::Component, [200, 200, 200]);
+        bar.add_polygons((0..n).map(|k| vec![at(0.0, k), at(0.0, k + 1), at(0.4, k + 1), at(0.4, k)]));
+        bar.smooth_curved(0);
+        assert!(bar.faces.iter().all(|f| f.smooth));
+        let geom = ModelGeometry { solids: vec![bar], ..Default::default() };
+        let frame = Frame::looking(DVec3::new(0.0, -5.0, 0.0), DVec3::Y);
+        let d = render(&geom, &frame, None, Look::plain(), &Default::default());
+        let last_fill = d.prims.iter().rposition(|p| matches!(p, Prim::Fill { .. })).unwrap();
+        let long = |y: f64| {
+            d.prims.iter().position(|p| {
+                matches!(p, Prim::Line { a, b, .. } if (a.y - y).abs() < 1e-9 && (b.y - y).abs() < 1e-9 && (a.x - b.x).abs() > 0.39)
+            })
+        };
+        for y in [r, -r] {
+            let line = long(y).unwrap_or_else(|| panic!("no silhouette at {y}"));
+            assert!(line > last_fill, "the silhouette at {y} is prim {line}, a facet is painted at {last_fill}");
+        }
+        // The wireframe draws them too, once.
+        let wire = Look { style: VisualStyle::Wireframe, ..Look::plain() };
+        let d = render(&geom, &frame, None, wire, &Default::default());
+        assert!(d.prims.iter().all(|p| matches!(p, Prim::Line { .. })));
+    }
+
     /// Three members lying over one another in a ring (a cycle) under a
     /// large tilted face whose mean depth is the farthest: breaking the cycle
     /// must not paint the large face before the members it hides.
@@ -1079,6 +1245,8 @@ mod tests {
                 solid: 0,
                 face: 0,
                 edges: Vec::new(),
+                silhouettes: Vec::new(),
+                after: Vec::new(),
                 marks: Vec::new(),
             }
         };
@@ -1188,6 +1356,8 @@ mod tests {
                 solid: 0,
                 face: 0,
                 edges: Vec::new(),
+                silhouettes: Vec::new(),
+                after: Vec::new(),
                 marks: Vec::new(),
             });
         }

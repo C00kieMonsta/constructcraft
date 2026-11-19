@@ -27,6 +27,8 @@ pub(crate) struct Uniforms {
     /// cast shadow's (never lighter than the face; see
     /// [`cc_core::ShadingSettings`]); w the opacity of the ground's shadows.
     pub shading: [f32; 4],
+    /// xyz: where the viewer is (the edges that show only as silhouettes).
+    pub eye: [f32; 4],
 }
 
 /// What the unlit styles keep of a color in a cast shadow at the default
@@ -244,14 +246,15 @@ impl Renderer3D {
         let layers = Self::texture_array(device, 1, 2, 1).create_view(&Self::array_view());
         let bind_group = Self::bind(device, &bind_layout, &uniforms, &layers, &sampler);
 
-        let pipeline = |label, topology, fs, bias, blend| {
-            let spec = PipelineSpec { label, topology, vs: "vs_main", fs, vertices: true, cull: None, bias, blend };
+        let pipeline = |label, topology, (vs, fs), bias, blend| {
+            let spec = PipelineSpec { label, topology, vs, fs, vertices: true, cull: None, bias, blend };
             frame_pipeline(device, &layout, &shader, spec)
         };
-        let tri = wgpu::PrimitiveTopology::TriangleList;
-        let faces = pipeline("cc_render faces", tri, "fs_face", FACE_BIAS, None);
-        let blended = pipeline("cc_render blended", tri, "fs_face", FACE_BIAS, Some(wgpu::BlendState::ALPHA_BLENDING));
-        let edges = pipeline("cc_render edges", wgpu::PrimitiveTopology::LineList, "fs_edge", Default::default(), None);
+        let (tri, lines) = (wgpu::PrimitiveTopology::TriangleList, wgpu::PrimitiveTopology::LineList);
+        let face = ("vs_main", "fs_face");
+        let faces = pipeline("cc_render faces", tri, face, FACE_BIAS, None);
+        let blended = pipeline("cc_render blended", tri, face, FACE_BIAS, Some(wgpu::BlendState::ALPHA_BLENDING));
+        let edges = pipeline("cc_render edges", lines, ("vs_edge", "fs_edge"), Default::default(), None);
         Self {
             faces,
             blended,
@@ -528,6 +531,7 @@ impl Renderer3D {
             light_dir: [light.x, light.y, light.z, 0.0],
             style: [f32::from(u8::from(self.unlit)), f32::from(u8::from(self.grey)), unlit_shadow(&self.shading), 0.0],
             shading: shading(&self.shading),
+            eye: camera.eye().as_vec3().extend(1.0).to_array(),
         };
         queue.write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&u));
         if self.light.is_some() && self.sun.is_none() && !self.sun_failed {
@@ -739,8 +743,9 @@ mod shader_tests {
                 assert!(module.entry_points.iter().any(|e| e.name == *entry), "{entry}");
             }
         };
-        validate(include_str!("shader.wgsl"), &["vs_main", "fs_face", "fs_edge"]);
-        let sun_entries = ["vs_main", "fs_edge", "vs_sun", "fs_sun_face", "vs_shadow", "vs_ground", "fs_ground"];
+        validate(include_str!("shader.wgsl"), &["vs_main", "vs_edge", "fs_face", "fs_edge"]);
+        let sun_entries =
+            ["vs_main", "vs_edge", "fs_edge", "vs_sun", "fs_sun_face", "vs_shadow", "vs_ground", "fs_ground"];
         validate(crate::shadow::SUN_SHADER, &sun_entries);
     }
 }
@@ -819,6 +824,45 @@ mod gpu_tests {
         }
         add_box(&mut mesh, Vec3::ZERO, Vec3::new(2.0, 2.0, 4.0), [0.4, 0.5, 0.7, 1.0]);
         mesh
+    }
+
+    /// A round column seen from the side in hidden line: the edges between
+    /// its facets are not drawn, so without its silhouettes nothing set it
+    /// off (a white band with no outline). One line shows on each side.
+    #[test]
+    #[ignore = "needs a GPU adapter"]
+    fn curved_surfaces_show_their_silhouettes() {
+        let Some((device, queue)) = gpu() else {
+            eprintln!("no GPU adapter: nothing checked");
+            return;
+        };
+        let tess = crate::Tessellation::new(&crate::mesh::tests::column());
+        let camera = CameraState { target: DVec3::new(0.0, 0.0, 2.0), yaw_deg: 0.0, pitch_deg: 0.0, distance: 12.0 };
+        for visual in [cc_core::VisualStyle::HiddenLine, cc_core::VisualStyle::Wireframe] {
+            let mesh = SceneMesh::build_styled(
+                &tess,
+                &Default::default(),
+                &mut |_| Some(Default::default()),
+                cc_core::DetailLevel::Medium,
+                visual,
+            );
+            let mut r = Renderer3D::new(&device);
+            r.upload(&device, &mesh);
+            let frame = r.render_to_rgba(&device, &queue, SIZE, &camera).unwrap();
+            // The row of pixels through the column's middle.
+            let row = (SIZE[1] / 2 * SIZE[0] * 4) as usize;
+            let dark: Vec<usize> = (0..SIZE[0] as usize)
+                .filter(|x| {
+                    let at = row + x * 4;
+                    brightness([frame[at], frame[at + 1], frame[at + 2], frame[at + 3]]) < 560
+                })
+                .collect();
+            let middle = SIZE[0] as usize / 2;
+            let (left, right) =
+                (dark.iter().filter(|x| **x < middle).count(), dark.iter().filter(|x| **x > middle).count());
+            assert!((1..=3).contains(&left) && (1..=3).contains(&right), "{visual:?}: dark pixels at {dark:?}");
+            assert!(dark.iter().all(|x| x.abs_diff(middle) > 10), "{visual:?}: a line inside the column, {dark:?}");
+        }
     }
 
     #[test]

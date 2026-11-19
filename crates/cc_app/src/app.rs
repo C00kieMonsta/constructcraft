@@ -213,6 +213,11 @@ impl TabViewer for Tabs<'_> {
         }
     }
 
+    /// Where the tab is, for scrolling it into view (`tab_list`).
+    fn on_tab_button(&mut self, tab: &mut ViewId, response: &egui::Response) {
+        self.state.tab_bar.tab_rects.insert(*tab, response.rect);
+    }
+
     fn scroll_bars(&self, _tab: &ViewId) -> [bool; 2] {
         [false, false]
     }
@@ -606,11 +611,7 @@ impl ConstructApp {
             if self.dock.iter_all_tabs().next().is_none() {
                 ui.centered_and_justified(|ui| ui.label(t!("msg-no-views-open")));
             }
-            DockArea::new(&mut self.dock)
-                .style(theme::dock_style(ui.style()))
-                .show_leaf_collapse_buttons(false)
-                .show_leaf_close_all_buttons(false)
-                .show_inside(ui, &mut Tabs { state: &mut self.state, render_state });
+            show_views(ui, &mut self.dock, &mut self.state, render_state);
         });
         dialogs::show(&ctx, &mut self.state);
         self.recovery.dialog(&ctx, &mut self.state);
@@ -630,10 +631,30 @@ impl ConstructApp {
     }
 }
 
+/// The view tabs, with the open views list at the right end of each tab bar
+/// (`tab_list`), which the bar's right margin keeps free.
+pub(crate) fn show_views(
+    ui: &mut Ui,
+    dock: &mut DockState<ViewId>,
+    state: &mut AppState,
+    render_state: Option<&egui_wgpu::RenderState>,
+) {
+    let mut style = theme::dock_style(ui.style());
+    style.tab_bar.inner_margin.right = style.tab_bar.inner_margin.right.saturating_add(crate::tab_list::BUTTON_WIDTH);
+    state.tab_bar.tab_rects.clear();
+    DockArea::new(dock)
+        .style(style.clone())
+        .show_leaf_collapse_buttons(false)
+        .show_leaf_close_all_buttons(false)
+        .show_inside(ui, &mut Tabs { state, render_state });
+    crate::tab_list::show(ui, dock, state, &style);
+}
+
 /// Bring the view tabs in step with the app: drop tabs of deleted views
-/// (and, after Close Inactive Views, all but one), open requested views,
-/// and record the active view and how many tabs are open.
-fn sync_tabs(dock: &mut DockState<ViewId>, state: &mut AppState) {
+/// (and, after Close Inactive Views, all but one, or those closed from a
+/// tab bar's list), open requested views, and record the active view and
+/// how many tabs are open.
+pub(crate) fn sync_tabs(dock: &mut DockState<ViewId>, state: &mut AppState) {
     // The last view was closed: close the project, asking first when it has unsaved changes.
     if std::mem::take(&mut state.close_with_last_view) {
         actions::guarded(state, PendingAction::Close);
@@ -642,9 +663,10 @@ fn sync_tabs(dock: &mut DockState<ViewId>, state: &mut AppState) {
     let project = &state.session.doc.project;
     // Close Inactive Views (or Close Other Views on a tab) keeps one tab.
     let only = state.close_others_than.take();
+    let closed = std::mem::take(&mut state.tab_bar.close);
     let mut removed = Vec::new();
     dock.retain_tabs(|tab| {
-        let keep = project.views.contains_key(tab) && only.is_none_or(|v| v == *tab);
+        let keep = project.views.contains_key(tab) && only.is_none_or(|v| v == *tab) && !closed.contains(tab);
         if !keep {
             removed.push(*tab);
         }
@@ -670,6 +692,8 @@ fn sync_tabs(dock: &mut DockState<ViewId>, state: &mut AppState) {
             }
             None => dock.push_to_focused_leaf(id),
         }
+        // A tab past the end of a crowded bar is scrolled into view.
+        state.tab_bar.reveal = Some(id);
     }
     state.active_view = active_tab(dock);
     state.open_tabs = dock.iter_all_tabs().count();
