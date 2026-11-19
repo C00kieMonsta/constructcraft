@@ -5,6 +5,7 @@
 // Test helpers outside #[test] functions may fail loudly.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod attached_walls;
 mod bar_sets;
 mod classes;
 mod connections;

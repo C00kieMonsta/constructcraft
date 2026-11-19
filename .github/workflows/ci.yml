@@ -75,6 +75,7 @@ jobs:
           cargo run --locked -p cc_ifc --example export_ifc -- crates/cc_ifc/tests/fixtures/connections.ccad target/ifc/connections.ifc
           cargo run --locked -p cc_ifc --example export_ifc -- crates/cc_ifc/tests/fixtures/wall_profiles.ccad target/ifc/wall_profiles.ifc
           cargo run --locked -p cc_ifc --example export_ifc -- crates/cc_ifc/tests/fixtures/spline_walls.ccad target/ifc/spline_walls.ifc
+          cargo run --locked -p cc_ifc --example export_ifc -- crates/cc_ifc/tests/fixtures/attached_walls.ccad target/ifc/attached_walls.ifc
           cargo run --locked -p cc_ifc --example export_ifc -- crates/cc_ifc/tests/fixtures/classes.ifc target/ifc/classes.ifc
       - name: Validate
         run: |
@@ -91,6 +92,7 @@ jobs:
           python scripts/validate_ifc.py target/ifc/connections.ifc
           python scripts/validate_ifc.py target/ifc/wall_profiles.ifc
           python scripts/validate_ifc.py target/ifc/spline_walls.ifc
+          python scripts/validate_ifc.py target/ifc/attached_walls.ifc
           python scripts/validate_ifc.py target/ifc/classes.ifc
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()

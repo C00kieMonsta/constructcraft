@@ -34,7 +34,7 @@ cargo run -p cc_ifc --example export_ifc -- examples/casa_simples.ccad out.ifc
 python scripts/validate_ifc.py out.ifc
 ```
 
-CI (`.github/workflows/ci.yml`) runs fmt, clippy + tests (`cargo nextest run --profile ci`, then the doctests with `cargo test --doc`) on Linux (x86_64 and arm64)/Windows/macOS, the IFC validation job (exports `examples/casa_simples.ccad`, `crates/cc_ifc/tests/fixtures/features.ccad`, `structure.ccad`, `mep.ccad`, `arcs.ccad`, `roofs.ccad`, `phases.ccad`, `topography.ccad`, `curtains.ccad`, `profiles.ccad`, `connections.ccad`, `wall_profiles.ccad` and `spline_walls.ccad`), and a DCO check on PRs: commits must be signed off (`git commit -s`).
+CI (`.github/workflows/ci.yml`) runs fmt, clippy + tests (`cargo nextest run --profile ci`, then the doctests with `cargo test --doc`) on Linux (x86_64 and arm64)/Windows/macOS, the IFC validation job (exports `examples/casa_simples.ccad`, `crates/cc_ifc/tests/fixtures/features.ccad`, `structure.ccad`, `mep.ccad`, `arcs.ccad`, `roofs.ccad`, `phases.ccad`, `topography.ccad`, `curtains.ccad`, `profiles.ccad`, `connections.ccad`, `wall_profiles.ccad`, `spline_walls.ccad` and `attached_walls.ccad`), and a DCO check on PRs: commits must be signed off (`git commit -s`).
 
 ## Architecture
 
