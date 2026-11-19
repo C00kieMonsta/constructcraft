@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-19
+
 ### Added
 
 - 3D CraftHouse in the Component Library. *Insert → Component Library* has a second source beside the library folders: the open library of parametric components published at [3dcrafthouse.constructcraft.net](https://3dcrafthouse.constructcraft.net) (CC BY 4.0). Picking it reads the catalog from the site; the components are searched and filtered by kind like those of a folder, only the one picked is downloaded, and *Load into Project* brings it in with its types. *Open Site* shows the library in the browser. Nothing is downloaded until the source is picked. The window is a browser in three columns: filters by kind and by folder or author with their counts, a grid of cards with the components' 3D pictures (a double click loads one), and the details of the component picked.
@@ -587,7 +589,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Closing the last open view tab crashed the application.
 - Per-wall volumes in schedules were wrong for walls joined at corners; they are now computed exactly.
 
-[Unreleased]: https://github.com/francisreboucas/constructcraft/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/francisreboucas/constructcraft/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/francisreboucas/constructcraft/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/francisreboucas/constructcraft/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/francisreboucas/constructcraft/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/francisreboucas/constructcraft/compare/v0.10.0...v0.11.0
