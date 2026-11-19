@@ -32,6 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Floor plans drew the pieces of a component through each other, and curves traced twice zigzagged (#378). Edges covered by a piece above them are now hidden, except in the wireframe style.
 - A niche component with no pieces could not be created, and one saved to a `.ccomp` file did not load (#373).
 - Type Properties stayed in front of the component environment after *Edit Component* (#385).
+- Schedules filtered and sorted diameters and slopes as text, so a rebar schedule filtered by a diameter of at least 0.008 showed no rows and sorted Ø 12.5 before Ø 5.0 (#367). Diameters (bars, pipes, conduits, bolts) now compare as numbers in meters and slopes as rise over run, a filter's value may be a JSON number, and the host column is titled Host instead of Wall.
 
 ## [0.12.0] - 2026-11-14
 
