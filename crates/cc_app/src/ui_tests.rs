@@ -6066,13 +6066,59 @@ fn the_wall_tool_draws_spline_walls() {
     assert_eq!(state.session.doc.undo_depth(), depth + 1, "one undo step");
     assert!(matches!(state.tool, crate::tools::Tool::Wall { .. }));
     assert!(state.interaction.points.is_empty(), "ready for the next wall");
-    // Escape drops a wall in progress.
+    // Escape drops a single point: it makes no wall.
     spline_click(&mut harness, [2.5, 0.0]);
     assert_eq!(harness.state().interaction.points.len(), 1);
     harness.key_press(egui::Key::Escape);
     harness.run();
     assert!(harness.state().interaction.points.is_empty());
     assert_eq!(walls_of(harness.state()).len(), walls + 1);
+}
+
+/// Issue #401: Esc ends a spline wall where it is, as it ends a chain of
+/// straight walls, instead of dropping the points clicked; the tool stays,
+/// and the next Esc leaves it.
+#[test]
+fn escape_ends_a_spline_wall_where_it_is() {
+    let mut harness = spline_canvas(spline_state(), egui::Theme::Light);
+    let (walls, depth) = (walls_of(harness.state()).len(), harness.state().session.doc.undo_depth());
+    for p in [[-1.0, 0.0], [0.0, 1.0], [1.0, 0.0]] {
+        spline_click(&mut harness, p);
+    }
+    let picked = harness.state().interaction.points.clone();
+    assert_eq!(picked.len(), 3);
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    let state = harness.state();
+    assert!(state.message.is_empty(), "{}", state.message);
+    let new = walls_of(state);
+    assert_eq!(new.len(), walls + 1, "the wall is made");
+    let wall = new.iter().find(|e| e.as_wall().unwrap().spline.is_some()).expect("a spline wall");
+    let knots: Vec<glam::DVec2> = wall.as_wall().unwrap().spline.clone().unwrap().knots().collect();
+    assert_eq!(knots, picked, "through the points picked");
+    assert_eq!(state.session.doc.undo_depth(), depth + 1, "one undo step");
+    assert!(matches!(state.tool, crate::tools::Tool::Wall { .. }), "the tool stays");
+    assert!(state.interaction.points.is_empty());
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert_eq!(harness.state().tool, crate::tools::Tool::Select, "the next Esc leaves the tool");
+    assert_eq!(walls_of(harness.state()).len(), walls + 1);
+}
+
+/// Esc on a curve that makes no wall drops it and says why (issue #401).
+#[test]
+fn escape_drops_a_spline_wall_that_cannot_be_made() {
+    let mut harness = spline_canvas(spline_state(), egui::Theme::Light);
+    let walls = walls_of(harness.state()).len();
+    for p in [[-0.2, 0.0], [0.0, 0.2], [0.2, 0.0]] {
+        spline_click(&mut harness, p);
+    }
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    let state = harness.state();
+    assert_eq!(state.message, crate::i18n::tr("wall-spline-tight"));
+    assert!(state.interaction.points.is_empty(), "the points are dropped");
+    assert_eq!(walls_of(state).len(), walls);
 }
 
 /// A spline too tight for the wall's thickness is not made: the status bar

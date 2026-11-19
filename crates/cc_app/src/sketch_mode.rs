@@ -832,9 +832,15 @@ pub fn error_text(e: &SketchError) -> String {
     crate::i18n::tr(e.key())
 }
 
-/// Escape: drop the curve being drawn, then leave the drawing tool, then the selection.
+/// Escape: end the spline or drop the curve being drawn, then leave the drawing tool, then the selection.
 pub fn escape(state: &mut AppState) {
-    let Some(s) = state.sketch.as_mut() else { return };
+    if let Some(s) = state.sketch.as_mut() {
+        escape_session(s);
+    }
+}
+
+/// [`escape`] in the sketch `s`.
+fn escape_session(s: &mut Session) {
     // A revolution waiting for its axis goes back to its outline.
     if let Some(p) = s.piece.as_mut().filter(|p| p.axis) {
         p.axis = false;
@@ -843,6 +849,9 @@ pub fn escape(state: &mut AppState) {
     // Typed values go first.
     if !s.typed.is_empty() || s.typed.angle_active {
         s.typed.clear();
+    } else if s.draw == Draw::Spline && s.picks.len() >= 2 {
+        // A spline ends where it is, as a chain of lines does (issue #401).
+        finish_spline(s, false);
     } else if !s.picks.is_empty() || s.picked.is_some() {
         s.picks.clear();
         s.picked = None;
@@ -1896,6 +1905,16 @@ mod tests {
         draw(true, &painter, &mut s, p(9.0, 9.0), &xf, 0.05);
         finish_spline(&mut s, false);
         assert_eq!(s.curves.len(), 3);
+        // Esc ends it where it is too (issue #401), drops a single point, then leaves the tool.
+        draw(true, &painter, &mut s, p(7.0, 7.0), &xf, 0.05);
+        draw(true, &painter, &mut s, p(8.0, 7.0), &xf, 0.05);
+        escape_session(&mut s);
+        assert_eq!((s.curves.len(), s.picks.len(), s.draw), (4, 0, Draw::Spline));
+        draw(true, &painter, &mut s, p(9.0, 9.0), &xf, 0.05);
+        escape_session(&mut s);
+        assert_eq!((s.curves.len(), s.picks.len(), s.draw), (4, 0, Draw::Spline));
+        escape_session(&mut s);
+        assert_eq!((s.curves.len(), s.draw), (4, Draw::Select));
         // Its grips: a point it passes through takes its handles along.
         let spline = s.curves[0].clone();
         let SketchCurve::Spline { points } = &spline else { panic!() };
