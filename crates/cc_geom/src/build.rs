@@ -1467,7 +1467,7 @@ impl ModelGeometry {
                             // Openings keep their eaves at the roof's base.
                             let mut all_starts = vec![starts.clone()];
                             all_starts.extend(holes.iter().map(|h| vec![-low; h.len()]));
-                            match crate::skeleton::skeleton_with_starts(&loops, &weights, &all_starts) {
+                            match crate::skeleton::skeleton_with_seeds(&loops, &weights, &all_starts, &outline.seeds) {
                                 Ok(sk) if sloped => {
                                     crate::roofs::add_skeleton_roof(&mut s, &sk, base, vertical_thk);
                                     self.roof_ridges.insert(e.id, sk.lines);

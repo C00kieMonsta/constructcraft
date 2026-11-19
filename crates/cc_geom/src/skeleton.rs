@@ -131,7 +131,21 @@ struct Sim {
     /// Directed boundary segments of the quads swept by each plane.
     swept: Vec<Vec<(DVec2, DVec2)>>,
     runs: std::collections::BTreeMap<usize, Run>,
+    /// Vertices (by id) that stand still until a time (see [`CornerSeed`]).
+    holds: std::collections::BTreeMap<usize, f64>,
     out: Skeleton,
+}
+
+/// A corner of the outer loop where a sloped plane starts late, as an eave
+/// of no length that comes into being once that plane's wavefront reaches
+/// the corner: a convex corner between two gables lying inside the eave's
+/// line (see [`skeleton_with_seeds`]). `corner` is the corner's point, and
+/// the eave the sloped edge whose line passes through `eave` along `dir`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CornerSeed {
+    pub corner: DVec2,
+    pub eave: DVec2,
+    pub dir: DVec2,
 }
 
 /// Velocity of a vertex between edges of planes `a` (incoming) and `b` (outgoing).
@@ -147,8 +161,8 @@ fn velocity(a: &Plane, b: &Plane) -> DVec2 {
 }
 
 /// Whether two sloped planes are one: their eaves on one line, facing the
-/// same way, rising alike and starting at one height (`tol` the merge distance over a footprint of
-/// `size`).
+/// same way, rising alike and starting at one height (`tol` the merge
+/// distance over a footprint of `size`).
 fn coplanar(a: &Plane, b: &Plane, tol: f64, size: f64) -> bool {
     a.weight > 0.0
         && (a.weight - b.weight).abs() <= 1e-9 * a.weight.max(b.weight)
@@ -172,6 +186,11 @@ impl Sim {
             p.weight = 0.0;
         }
         p
+    }
+
+    /// Whether vertex `id` still stands still (see [`CornerSeed`]).
+    fn held(&self, id: usize) -> bool {
+        self.holds.get(&id).is_some_and(|&t| t > self.time + self.tol * 1e-3)
     }
 
     /// Whether plane `i` has started moving.
@@ -217,7 +236,15 @@ impl Sim {
             .iter()
             .enumerate()
             .map(|(l, lp)| {
-                (0..lp.len()).map(|k| velocity(&self.plane(self.in_plane(l, k)), &self.plane(lp[k].out))).collect()
+                (0..lp.len())
+                    .map(|k| {
+                        if self.held(lp[k].id) {
+                            DVec2::ZERO
+                        } else {
+                            velocity(&self.plane(self.in_plane(l, k)), &self.plane(lp[k].out))
+                        }
+                    })
+                    .collect()
             })
             .collect()
     }
@@ -248,9 +275,11 @@ impl Sim {
     /// of no length would (and as a short one does): of the sloped planes
     /// whose eave lines pass through the corner and run into it, the lowest
     /// along its bisector (the earliest to start first). An eave that starts
-    /// late leaves its seed standing still until it does. `canon` maps each
-    /// plane to the first plane it is one with.
-    fn seed_corners(&mut self, canon: &[usize]) {
+    /// late leaves its seed standing still until it does. The `seeds` given
+    /// also start their eave's plane at corners inside its line, standing
+    /// still until its wavefront gets there. `canon` maps each plane to the
+    /// first plane it is one with.
+    fn seed_corners(&mut self, canon: &[usize], seeds: &[CornerSeed]) {
         // The planes as they will move, whether they have started yet or not.
         let raw = |i: usize| self.planes.get(i).copied();
         for l in 0..self.loops.len() {
@@ -267,27 +296,40 @@ impl Sim {
                     continue;
                 }
                 let rise = |p: &Plane| inward.dot(p.dir.perp()) / p.weight;
+                // Inside the eave's line by `gap` (on it within the tolerance).
+                let gap = |p: &Plane| (v.pos - p.origin).dot(p.dir.perp());
+                let fits = |p: &Plane| {
+                    p.weight > 0.0 && a.dir.perp_dot(p.dir) > 1e-9 && p.dir.perp_dot(b.dir) > 1e-9 && rise(p) > 0.0
+                };
+                let seeded = |p: &Plane| {
+                    l == 0
+                        && seeds.iter().any(|s| {
+                            s.corner.distance(v.pos) <= self.tol
+                                && s.dir.dot(p.dir) > 1.0 - 1e-9
+                                && (s.eave - p.origin).dot(p.dir.perp()).abs() <= self.tol
+                        })
+                };
                 let eave = self
                     .planes
                     .iter()
                     .enumerate()
-                    .filter(|(_, p)| {
-                        p.weight > 0.0
-                            && (v.pos - p.origin).dot(p.dir.perp()).abs() <= self.tol
-                            && a.dir.perp_dot(p.dir) > 1e-9
-                            && p.dir.perp_dot(b.dir) > 1e-9
-                            && rise(p) > 0.0
-                    })
+                    .filter(|(_, p)| fits(p) && (gap(p).abs() <= self.tol || (gap(p) > 0.0 && seeded(p))))
                     .min_by(|(_, p), (_, q)| p.start.total_cmp(&q.start).then(rise(p).total_cmp(&rise(q))))
-                    .map(|(j, _)| j);
-                let Some(eave) = eave else {
+                    .map(|(j, p)| (j, p.start + gap(p).max(0.0) / p.weight));
+                let Some((eave, from)) = eave else {
                     k += 1;
                     continue;
                 };
                 let out = canon.get(eave).copied().unwrap_or(eave);
+                let id = self.next_id;
                 self.loops[l][k] = Vertex { out, grow: true, ..v };
-                self.loops[l].insert(k + 1, Vertex { id: self.next_id, pos: v.pos, out: v.out, grow: false });
+                self.loops[l].insert(k + 1, Vertex { id, pos: v.pos, out: v.out, grow: false });
                 self.next_id += 1;
+                // Off the eave's line: both ends wait for its wavefront.
+                if from > self.time + self.tol {
+                    self.holds.insert(v.id, from);
+                    self.holds.insert(id, from);
+                }
                 k += 2;
             }
         }
@@ -325,9 +367,13 @@ impl Sim {
                 best = Some(dt);
             }
         };
-        // Start events: a plane still on the wavefront begins to move.
+        // Start events: a plane still on the wavefront begins to move, or a
+        // vertex held at a corner.
         for lp in &self.loops {
             for v in lp {
+                if let Some(&t) = self.holds.get(&v.id) {
+                    consider(t - self.time);
+                }
                 if let Some(p) = self.planes.get(v.out)
                     && p.weight > 0.0
                 {
@@ -479,7 +525,10 @@ impl Sim {
                 // A vanished edge: its ends merge (the vertex keeps the next edge's plane).
                 if let Some(k) = (0..n).find(|&k| {
                     self.loops[l][k].pos.distance(self.loops[l][(k + 1) % n].pos) <= self.tol
-                        && !(self.loops[l][k].grow && (self.growing(l, k) || !self.has_started(self.loops[l][k].out)))
+                        && !(self.loops[l][k].grow
+                            && (self.growing(l, k)
+                                || !self.has_started(self.loops[l][k].out)
+                                || self.held(self.loops[l][k].id)))
                 }) {
                     let j = (k + 1) % n;
                     let next = self.loops[l][j];
@@ -703,6 +752,20 @@ pub fn skeleton_with_starts(
     weights: &[Vec<f64>],
     starts: &[Vec<f64>],
 ) -> Result<Skeleton, SkeletonError> {
+    skeleton_with_seeds(loops, weights, starts, &[])
+}
+
+/// [`skeleton_with_starts`] with corners of the outer loop where a sloped
+/// plane comes into being late ([`CornerSeed`]): where an eave of no length
+/// would be, had the outline been grown from a footprint with one there
+/// (roofs with an overhang, see [`crate::roofs::outline`]). A seed that is
+/// not such a corner is ignored.
+pub fn skeleton_with_seeds(
+    loops: &[Vec<DVec2>],
+    weights: &[Vec<f64>],
+    starts: &[Vec<f64>],
+    seeds: &[CornerSeed],
+) -> Result<Skeleton, SkeletonError> {
     let mut planes = Vec::new();
     let mut wave = Vec::new();
     let mut next_id = 0;
@@ -764,12 +827,13 @@ pub fn skeleton_with_starts(
         time: 0.0,
         swept: vec![Vec::new(); n_planes],
         runs: Default::default(),
+        holds: Default::default(),
     };
-    sim.seed_corners(&canon);
+    sim.seed_corners(&canon, seeds);
     // Late starts are events too.
     let mut started = vec![false; n_planes];
     let late = sim.planes.iter().filter(|p| p.start > 0.0).count();
-    let budget = 8 * n_planes + 2 * late + 64;
+    let budget = 8 * n_planes + 2 * late + 2 * sim.holds.len() + 64;
     for _ in 0..budget {
         // Topology changes at the current time.
         let mut settle = 4 * n_planes + 16;
