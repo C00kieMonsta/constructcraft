@@ -3645,8 +3645,8 @@ pub enum WallMode {
 }
 
 /// The wall tool's Spline mode: each click adds a point the wall passes
-/// through; a click on the last point again (a double-click) or Enter
-/// makes the wall. While drawing, the preview shows the wall's faces, or
+/// through; a click on the last point again (a double-click), Enter or
+/// Esc (see [`spline_wall_escape`]) makes the wall. While drawing, the preview shows the wall's faces, or
 /// why the curve makes no wall (marked where it happens); then the wall
 /// is not made and the reason goes to the status bar.
 fn spline_wall_tool(
@@ -3777,6 +3777,22 @@ fn paint_wall_spline(
             Err(e)
         }
     }
+}
+
+/// Esc while a spline wall is being drawn ends it where it is, as it ends
+/// a chain of straight walls (issue #401): the wall through the points
+/// clicked is made. A curve that makes no wall is dropped with the reason
+/// in the status bar; a single point is left to the caller to drop.
+/// Returns whether it did, so the next Esc leaves the tool.
+pub fn spline_wall_escape(state: &mut AppState) -> bool {
+    let Tool::Wall { type_id } = state.tool else { return false };
+    if state.wall_mode != WallMode::Spline || state.interaction.points.len() < 2 {
+        return false;
+    }
+    let Some(level) = state.active_level() else { return false };
+    finish_spline_wall(state, level, type_id);
+    state.interaction = Default::default();
+    true
 }
 
 /// Make the spline wall through the points clicked, or say why not (the

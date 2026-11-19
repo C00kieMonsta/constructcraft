@@ -11,5 +11,5 @@ plugins:
   - jekyll-seo-tag
 relative_links:
   enabled: true
-url: https://francisreboucas.github.io
-baseurl: /constructcraft
+url: https://constructcraft.net
+baseurl: ""

@@ -66,7 +66,7 @@ pub use mesh::{MeshPlan, mesh_plan, plan_edges, top_edges};
 pub use plan_cover::PlanCover;
 pub use ramp::{RampGeom, RampPiece, ramp_geom};
 pub use rooms::{RoomArrangement, outer_boundary, room_boundary};
-pub use solid::{Face, Look, Ray, Solid, plane_axes};
+pub use solid::{Face, Look, Ray, Solid, join_pieces, plane_axes};
 pub use stair::{
     Flight, LandingRect, Pieces, StairGeom, StairLanding, StairStep, StepKind, add_railing, railing_length,
     railing_path, railing_pieces, stair_geom,

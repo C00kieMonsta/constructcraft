@@ -109,6 +109,11 @@ pub struct Solid {
     pub material: Option<String>,
     /// Faces painted with another material, by face index (see [`crate::paint`]).
     pub painted: std::collections::BTreeMap<usize, Look>,
+    /// Faces of the pieces this one runs on into (see [`join_pieces`]). They
+    /// are not its own and no view draws them, but they hide the edges it
+    /// shares with them, and shade and make silhouettes with its facets, as
+    /// its own faces do.
+    pub joined: Vec<Face>,
 }
 
 /// The axes a texture is laid along on a face with normal `n`: plan X and Y
@@ -168,7 +173,71 @@ impl Solid {
             surface: Default::default(),
             material: None,
             painted: Default::default(),
+            joined: Vec::new(),
         }
+    }
+
+    /// Face `i` of the solid, or of [`Self::joined`] (numbered after its own).
+    fn face_or_joined(&self, i: usize) -> Option<&Face> {
+        self.faces.get(i).or_else(|| self.joined.get(i.checked_sub(self.faces.len())?))
+    }
+
+    /// The boundary edges of the solid's faces, then of [`Self::joined`]
+    /// (their faces numbered after its own).
+    fn edges_with_joined(&self) -> Vec<(usize, DVec3, DVec3)> {
+        let own = self.faces.len();
+        let mut edges = boundary_edges(&self.faces);
+        edges.extend(boundary_edges(&self.joined).into_iter().map(|(f, a, b)| (f + own, a, b)));
+        edges
+    }
+
+    /// Which faces lie against the face of a joined piece (see
+    /// [`join_pieces`]): they are inside the body the pieces make, so a view
+    /// has nothing of them to draw.
+    pub fn inner_faces(&self) -> Vec<bool> {
+        if self.joined.is_empty() {
+            return vec![false; self.faces.len()];
+        }
+        let points = |face: &Face| {
+            let mut keys: Vec<(i64, i64, i64)> = face
+                .verts
+                .iter()
+                .map(|p| {
+                    let q = (*p * 1e5).round();
+                    (q.x as i64, q.y as i64, q.z as i64)
+                })
+                .collect();
+            keys.sort_unstable();
+            keys.dedup();
+            keys
+        };
+        let mut against: std::collections::HashMap<_, Vec<DVec3>> = std::collections::HashMap::new();
+        for face in &self.joined {
+            against.entry(points(face)).or_default().push(face.normal);
+        }
+        self.faces
+            .iter()
+            .map(|face| {
+                let others = against.get(&points(face));
+                others.is_some_and(|normals| normals.iter().any(|n| n.dot(face.normal) <= -COPLANAR_COS))
+            })
+            .collect()
+    }
+
+    /// Made of the same thing and shown by the same views: pieces that can
+    /// read as one body (see [`join_pieces`]).
+    fn alike(&self, other: &Solid) -> bool {
+        self.element == other.element
+            && self.category == other.category
+            && self.color == other.color
+            && self.transparency == other.transparency
+            && self.secondary == other.secondary
+            && self.detail == other.detail
+            && self.appearance == other.appearance
+            && self.surface == other.surface
+            && self.material == other.material
+            && self.painted.is_empty()
+            && other.painted.is_empty()
     }
 
     /// An empty solid colored and made transparent like material `name`.
@@ -238,14 +307,23 @@ impl Solid {
     }
 
     /// Visible outline edges grouped by face: the parts of each face boundary
-    /// not shared with a coplanar neighbor face (so split faces read as one).
+    /// not shared with a coplanar neighbor face (so split faces read as one),
+    /// of the solid or of the pieces it is joined to ([`Self::joined`]).
     pub fn feature_edges(&self) -> Vec<Vec<(DVec3, DVec3)>> {
-        let all = boundary_edges(&self.faces);
+        let all = self.edges_with_joined();
+        let own = self.faces.len();
         // Edges of other faces with the same normal (or smooth neighbors) hide what they overlap.
         let joins = |fi: usize, fj: usize| {
-            let (Some(face), Some(other)) = (self.faces.get(fi), self.faces.get(fj)) else { return false };
+            // Only the solid's own edges are drawn.
+            if fi >= own {
+                return false;
+            }
+            let (Some(face), Some(other)) = (self.face_or_joined(fi), self.face_or_joined(fj)) else { return false };
             let cos = other.normal.dot(face.normal);
-            cos >= COPLANAR_COS || (face.smooth && other.smooth && cos > SMOOTH_COS)
+            // A face lying against the face of a joined piece is inside the body: none of its edges show.
+            cos >= COPLANAR_COS
+                || (face.smooth && other.smooth && cos > SMOOTH_COS)
+                || (fj >= own && cos <= -COPLANAR_COS)
         };
         let mut covers: Vec<Vec<(f64, f64)>> = vec![Vec::new(); all.len()];
         for_each_overlap(&all, joins, |i, _, lo, hi| {
@@ -287,7 +365,8 @@ impl Solid {
             (q.x as i64, q.y as i64, q.z as i64)
         };
         let mut at: std::collections::HashMap<(i64, i64, i64), Vec<(usize, f64)>> = std::collections::HashMap::new();
-        for (fi, face) in self.faces.iter().enumerate().filter(|(_, f)| f.smooth) {
+        // The facets of joined pieces shade with the solid's own.
+        for (fi, face) in self.faces.iter().chain(&self.joined).enumerate().filter(|(_, f)| f.smooth) {
             for (p, angle) in face.verts.iter().zip(corner_angles(&face.verts)) {
                 at.entry(key(*p)).or_default().push((fi, angle));
             }
@@ -305,7 +384,7 @@ impl Solid {
                             .get(&key(*p))
                             .into_iter()
                             .flatten()
-                            .filter_map(|(fj, angle)| Some((self.faces.get(*fj)?.normal, *angle)))
+                            .filter_map(|(fj, angle)| Some((self.face_or_joined(*fj)?.normal, *angle)))
                             .filter(|(n, _)| n.dot(face.normal) > SMOOTH_COS)
                             .map(|(n, angle)| n * angle)
                             .sum();
@@ -413,10 +492,14 @@ impl Solid {
         if !self.faces.iter().any(|f| f.smooth) {
             return out;
         }
-        let edges = boundary_edges(&self.faces);
+        let edges = self.edges_with_joined();
+        let own = self.faces.len();
         // Facets in one plane (the pieces of a split facet) make no silhouette.
         let turns = |fi: usize, fj: usize| {
-            let (Some(face), Some(other)) = (self.faces.get(fi), self.faces.get(fj)) else { return false };
+            if fi >= own {
+                return false;
+            }
+            let (Some(face), Some(other)) = (self.face_or_joined(fi), self.face_or_joined(fj)) else { return false };
             let cos = other.normal.dot(face.normal);
             face.smooth && other.smooth && cos > SMOOTH_COS && cos < COPLANAR_COS
         };
@@ -424,7 +507,7 @@ impl Solid {
         // still find each other.
         for_each_neighbor(&edges, turns, |i, j, lo, hi| {
             let (Some(&(fi, a, b)), Some(&(fj, ..))) = (edges.get(i), edges.get(j)) else { return };
-            let (Some(other), Some(list)) = (self.faces.get(fj), out.get_mut(fi)) else { return };
+            let (Some(other), Some(list)) = (self.face_or_joined(fj), out.get_mut(fi)) else { return };
             list.push((a.lerp(b, lo), a.lerp(b, hi), other.normal));
         });
         out
@@ -630,6 +713,133 @@ fn curved(faces: &[Face]) -> Vec<bool> {
         }
     }
     (0..faces.len()).map(|f| region.get(root(&mut parent, f)).copied().unwrap_or(false)).collect()
+}
+
+/// Let the pieces that are slices of one curved body read as that body.
+///
+/// Pieces of one element, alike in material and detail levels, that lie
+/// against each other on a whole face (the same points, turned against each
+/// other) are joined when the body they make bends at one of those seams:
+/// faces of the two pieces meet along it at less than the angle of
+/// [`SMOOTH_COS`] without lying in one plane, as the slices of an oval lid
+/// do. Every piece reached over such seams from a bent one is joined too
+/// (the straight stretches of the body). Pieces that only stand side by
+/// side (boards, doors, tiles) meet in one plane everywhere and keep the
+/// lines between them.
+///
+/// Joined pieces keep their own faces. Each gets in [`Solid::joined`] the
+/// faces of its neighbors at the seams, so no view draws the seams, and the
+/// faces that bend there become smooth.
+pub fn join_pieces(solids: &mut [Solid]) {
+    type Key = (i64, i64, i64);
+    if solids.len() < 2 {
+        return;
+    }
+    let key = |p: DVec3| {
+        let q = (p * 1e5).round();
+        (q.x as i64, q.y as i64, q.z as i64)
+    };
+    let points = |face: &Face| -> Vec<Key> {
+        let mut keys: Vec<Key> = face.verts.iter().map(|p| key(*p)).collect();
+        keys.sort_unstable();
+        keys.dedup();
+        keys
+    };
+    let shared = |a: &[Key], b: &[Key]| a.iter().filter(|k| b.binary_search(k).is_ok()).count();
+    for s in solids.iter_mut() {
+        s.joined.clear();
+    }
+
+    // Faces at the same points, turned against each other, of two pieces alike.
+    let mut at: std::collections::HashMap<Vec<Key>, Vec<(usize, usize)>> = std::collections::HashMap::new();
+    for (si, s) in solids.iter().enumerate() {
+        for (fi, face) in s.faces.iter().enumerate() {
+            let keys = points(face);
+            if keys.len() >= 3 && face.verts.iter().all(|p| p.is_finite()) {
+                at.entry(keys).or_default().push((si, fi));
+            }
+        }
+    }
+    let mut seams: Vec<(usize, usize, usize, usize)> = Vec::new();
+    for group in at.values().filter(|g| g.len() >= 2 && g.len() <= MAX_SHARED) {
+        for (i, &(sa, fa)) in group.iter().enumerate() {
+            for &(sb, fb) in group.iter().skip(i + 1) {
+                let (Some(a), Some(b)) = (solids.get(sa), solids.get(sb)) else { continue };
+                let (Some(f), Some(g)) = (a.faces.get(fa), b.faces.get(fb)) else { continue };
+                if sa != sb && a.alike(b) && f.normal.dot(g.normal) <= -COPLANAR_COS {
+                    seams.push(if sa < sb { (sa, fa, sb, fb) } else { (sb, fb, sa, fa) });
+                }
+            }
+        }
+    }
+    if seams.is_empty() {
+        return;
+    }
+    seams.sort_unstable();
+
+    // The faces of a piece around one of its faces: those sharing an edge with it.
+    let around = |solid: &Solid, face: usize| -> Vec<(usize, Vec<Key>)> {
+        let Some(seam) = solid.faces.get(face).map(points) else { return Vec::new() };
+        let ring = solid.faces.iter().enumerate().filter(|(fi, _)| *fi != face).map(|(fi, f)| (fi, points(f)));
+        ring.filter(|(_, keys)| shared(keys, &seam) >= 2).collect()
+    };
+    // Where the body bends: the faces of the two pieces that meet along a seam at a small angle.
+    let mut rings = Vec::with_capacity(seams.len());
+    let mut bends: Vec<Vec<(usize, usize)>> = Vec::with_capacity(seams.len());
+    let mut parent: Vec<usize> = (0..solids.len()).collect();
+    for &(sa, fa, sb, fb) in &seams {
+        let (ring_a, ring_b) = match (solids.get(sa), solids.get(sb)) {
+            (Some(a), Some(b)) => (around(a, fa), around(b, fb)),
+            _ => (Vec::new(), Vec::new()),
+        };
+        let mut bent = Vec::new();
+        for (ha, keys_a) in &ring_a {
+            for (hb, keys_b) in &ring_b {
+                let normal = |s: usize, h: usize| solids.get(s).and_then(|s| s.faces.get(h)).map(|f| f.normal);
+                let (Some(n), Some(m)) = (normal(sa, *ha), normal(sb, *hb)) else { continue };
+                let cos = n.dot(m);
+                if cos > SMOOTH_COS && cos < COPLANAR_COS && shared(keys_a, keys_b) >= 2 {
+                    bent.push((*ha, *hb));
+                }
+            }
+        }
+        join(&mut parent, sa, sb);
+        rings.push((ring_a, ring_b));
+        bends.push(bent);
+    }
+    let mut curved = vec![false; solids.len()];
+    for (&(sa, ..), bent) in seams.iter().zip(&bends) {
+        if !bent.is_empty()
+            && let Some(slot) = curved.get_mut(root(&mut parent, sa))
+        {
+            *slot = true;
+        }
+    }
+
+    // The facets first, so the faces handed to the neighbors are smooth already.
+    let mut kept = Vec::new();
+    for ((&(sa, fa, sb, fb), bent), (ring_a, ring_b)) in seams.iter().zip(&bends).zip(rings) {
+        if curved.get(root(&mut parent, sa)) != Some(&true) {
+            continue;
+        }
+        for &(ha, hb) in bent {
+            for (s, h) in [(sa, ha), (sb, hb)] {
+                if let Some(face) = solids.get_mut(s).and_then(|s| s.faces.get_mut(h)) {
+                    face.smooth = true;
+                }
+            }
+        }
+        kept.push((sa, sb, fb, ring_b));
+        kept.push((sb, sa, fa, ring_a));
+    }
+    for (to, from, face, ring) in kept {
+        let Some(from) = solids.get(from) else { continue };
+        let faces = std::iter::once(face).chain(ring.into_iter().map(|(fi, _)| fi));
+        let faces: Vec<Face> = faces.filter_map(|fi| from.faces.get(fi).cloned()).collect();
+        if let Some(to) = solids.get_mut(to) {
+            to.joined.extend(faces);
+        }
+    }
 }
 
 /// The representative of `i`'s set in a union-find forest whose parents
@@ -1098,6 +1308,74 @@ mod tests {
             vec![p(5.0, 5.0, 5.0)],
         ]);
         assert_eq!(flags, [true, true, true, false]);
+    }
+
+    /// A slice of a plate 0.1 thick between `x0` and `x1`, as wide as twice `h0` at `x0` and twice `h1` at `x1`.
+    fn slice(x0: f64, x1: f64, h0: f64, h1: f64) -> Solid {
+        let mut s = Solid::new(ElementId(1), Category::Component, [0; 3]);
+        let outline = [DVec2::new(x0, -h0), DVec2::new(x1, -h1), DVec2::new(x1, h1), DVec2::new(x0, h0)];
+        s.add_prism(&outline, |_| 0.0, |_| 0.1);
+        s
+    }
+
+    /// The length of the outline of `s` drawn in the plane `x`.
+    fn lines_at(s: &Solid, x: f64) -> f64 {
+        let on = |p: &DVec3| (p.x - x).abs() < 1e-9;
+        s.feature_edges().iter().flatten().filter(|(a, b)| on(a) && on(b)).map(|(a, b)| a.distance(*b)).sum()
+    }
+
+    #[test]
+    fn slices_of_a_curved_body_read_as_one() {
+        // A plate that widens in two bends, then runs straight in two slices.
+        let mut pieces = [
+            slice(0.0, 1.0, 1.0, 2.0),
+            slice(1.0, 2.0, 2.0, 2.5),
+            slice(2.0, 3.0, 2.5, 2.5),
+            slice(3.0, 4.0, 2.5, 2.5),
+        ];
+        assert!(lines_at(&pieces[0], 1.0) > 8.0, "apart, a slice draws the face it ends on");
+        join_pieces(&mut pieces);
+        for (i, s) in pieces.iter().enumerate() {
+            for x in [1.0, 2.0, 3.0] {
+                assert_eq!(lines_at(s, x), 0.0, "slice {i} draws no seam at x = {x}");
+            }
+            assert_eq!(s.faces.len(), 6, "the slices keep their faces");
+        }
+        // The ends of the body stay: each edge of the face is the boundary of two faces.
+        assert!((lines_at(&pieces[0], 0.0) - 2.0 * (2.0 * 2.0 + 2.0 * 0.1)).abs() < 1e-9);
+        assert!((lines_at(&pieces[3], 4.0) - 2.0 * (2.0 * 5.0 + 2.0 * 0.1)).abs() < 1e-9);
+        // The faces between the slices are inside the body.
+        let inner: Vec<usize> = pieces.iter().map(|s| s.inner_faces().iter().filter(|i| **i).count()).collect();
+        assert_eq!(inner, [1, 2, 2, 1]);
+        // The sides that bend are facets of one surface: smooth, shaded together, a silhouette between them.
+        let side = |f: &&Face| f.normal.y.abs() > 0.1;
+        assert!(pieces[0].faces.iter().filter(side).all(|f| f.smooth));
+        assert!(pieces[0].faces.iter().filter(|f| !side(f)).all(|f| !f.smooth), "the flat faces are not");
+        let seams: f64 = pieces[0].smooth_edges().iter().flatten().map(|(a, b, _)| a.distance(*b)).sum();
+        assert!((seams - 2.0 * 0.1).abs() < 1e-9, "one edge on each side, at x = 1: {seams}");
+        let blended = pieces[0].faces.iter().zip(pieces[0].vertex_normals()).filter(|(f, _)| side(f)).all(|(f, ns)| {
+            f.verts.iter().zip(ns).all(|(p, n)| ((p.x - 1.0).abs() < 1e-9) == (n.dot(f.normal) < 1.0 - 1e-6))
+        });
+        assert!(blended, "normals turn towards the next slice where they meet, and nowhere else");
+    }
+
+    #[test]
+    fn pieces_side_by_side_keep_their_lines() {
+        // Two boards in one plane on every side: nothing bends.
+        let mut boards = [slice(0.0, 1.0, 1.0, 1.0), slice(1.0, 2.0, 1.0, 1.0)];
+        let before = lines_at(&boards[0], 1.0);
+        join_pieces(&mut boards);
+        assert!(boards.iter().all(|s| s.joined.is_empty() && s.faces.iter().all(|f| !f.smooth)));
+        assert_eq!(lines_at(&boards[0], 1.0), before);
+        // Slices of two materials are two bodies.
+        let mut two = [slice(0.0, 1.0, 1.0, 2.0), slice(1.0, 2.0, 2.0, 2.5)];
+        two[1].color = [9; 3];
+        join_pieces(&mut two);
+        assert!(two.iter().all(|s| s.joined.is_empty()));
+        // Neither are slices that do not end on the same face.
+        let mut stepped = [slice(0.0, 1.0, 1.0, 2.0), slice(1.0, 2.0, 2.2, 2.5)];
+        join_pieces(&mut stepped);
+        assert!(stepped.iter().all(|s| s.joined.is_empty()));
     }
 
     #[test]
