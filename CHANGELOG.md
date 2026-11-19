@@ -28,6 +28,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Components whose curved bodies are made of slices (an oval lid, a basin in layers) drew a line at every slice in 3D views, plans, elevations and sections. Pieces of one component and material that lie against each other on a whole face now read as one body where it bends: no lines at the seams, smooth shading across them and a silhouette where the body turns away. Pieces that only stand side by side (boards, doors, tiles) keep the lines between them.
 - Walls on the same corners at heights that do not overlap, such as a foundation wall under a parapet, lost their corner joins (#387). Each wall now joins only the walls of its level that overlap it in height.
 - Floor plans drew the pieces of a component through each other, and curves traced twice zigzagged (#378). Edges covered by a piece above them are now hidden, except in the wireframe style.
 - A niche component with no pieces could not be created, and one saved to a `.ccomp` file did not load (#373).

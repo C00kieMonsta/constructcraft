@@ -546,6 +546,7 @@ impl ModelGeometry {
                 resolved.entry(key).or_insert_with(|| crate::resolve_instance(ty, def, e, Some(c), &[])).clone()
             };
             let parts = place_parts(project, e, c, local);
+            let first = self.solids.len();
             for part in parts.iter().filter(|p| !p.plan_only) {
                 let mut s = Solid::of_material(e.id, e.category(), project, &part.material);
                 s.detail = part.detail;
@@ -553,6 +554,10 @@ impl ModelGeometry {
                 if !s.faces.is_empty() {
                     self.solids.push(s);
                 }
+            }
+            // The slices of a curved body read as one.
+            if let Some(pieces) = self.solids.get_mut(first..) {
+                crate::join_pieces(pieces);
             }
             self.components.insert(e.id, parts);
         }
@@ -1298,6 +1303,7 @@ impl ModelGeometry {
                 // In an arc wall the pieces are square to the wall at the opening's center.
                 let (origin, dir, normal) = wall.frame_at((o.u0 + o.u1) * 0.5);
                 let world = |p: DVec2| origin + dir * (o.u0 + p.x) + normal * p.y;
+                let first = self.solids.len();
                 let mut placed = Vec::with_capacity(parts.len());
                 for mut p in parts {
                     p.footprint = p.footprint.iter().map(|q| world(*q)).collect();
@@ -1324,6 +1330,9 @@ impl ModelGeometry {
                         self.solids.push(s);
                     }
                     placed.push(p);
+                }
+                if let Some(pieces) = self.solids.get_mut(first..) {
+                    crate::join_pieces(pieces);
                 }
                 fills.insert(e.id, placed);
             }
