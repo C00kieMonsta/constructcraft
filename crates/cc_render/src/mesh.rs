@@ -568,7 +568,6 @@ fn member_lines(
         if only_selected && !sel {
             continue;
         }
-        let Some((a, b)) = model.line(m) else { continue };
         let color = if sel {
             SELECTED_EDGE
         } else if m.kind == cc_geom::analytical::MemberKind::Column {
@@ -576,7 +575,10 @@ fn member_lines(
         } else {
             [0.75, 0.08, 0.05, 1.0]
         };
-        line(edges, a, b, color);
+        // An arc member in short chords.
+        for w in model.points(m, cc_core::arc::ARC_STEP).windows(2) {
+            line(edges, w[0], w[1], color);
+        }
     }
 }
 

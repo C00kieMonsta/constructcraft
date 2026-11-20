@@ -4,9 +4,14 @@
 //! axis, a beam ending on another beam ends on that beam's line, a column
 //! standing on or under a beam (a truss's vertical between its chords) ends
 //! on the beam's line, and a member is split wherever another member ends
-//! on it, so connected members share their nodes.
+//! on it, so connected members share their nodes. An arc beam's members
+//! follow its arc: each carries the bulge of its own part of the arc, nodes
+//! where other members connect lie on the arc, and its length is the arc's;
+//! [`AnalyticalModel::split_arcs`] turns them into straight members for
+//! programs that only take those.
 
 use crate::{BeamEnd, ModelGeometry};
+use cc_core::arc::Arc;
 use cc_core::{ElementId, ElementKind, Project, TypeData};
 use glam::{DVec2, DVec3};
 
@@ -30,8 +35,8 @@ pub struct Node {
     pub support: bool,
 }
 
-/// A straight member between two nodes; an element split by connections
-/// gives several members.
+/// A member between two nodes, straight or (part of an arc beam) a circular
+/// arc in plan; an element split by connections gives several members.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Member {
     pub id: usize,
@@ -39,6 +44,9 @@ pub struct Member {
     pub kind: MemberKind,
     pub start: usize,
     pub end: usize,
+    /// The bulge (`cc_core::arc`, `tan(sweep / 4)`) of the member's plan arc
+    /// from its start node to its end node: 0 for a straight member.
+    pub bulge: f64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -51,6 +59,65 @@ impl AnalyticalModel {
     /// The two end points of a member.
     pub fn line(&self, member: &Member) -> Option<(DVec3, DVec3)> {
         Some((self.nodes.get(member.start)?.position, self.nodes.get(member.end)?.position))
+    }
+
+    /// The plan arc of a curved member, from its start node to its end node
+    /// (`None` for a straight one). Its height runs evenly along it from the
+    /// start node's to the end node's.
+    pub fn arc(&self, member: &Member) -> Option<Arc> {
+        let (a, b) = self.line(member)?;
+        Arc::from_bulge(a.truncate(), b.truncate(), member.bulge)
+    }
+
+    /// The length of a member: along its arc for a curved one.
+    pub fn length(&self, member: &Member) -> Option<f64> {
+        let (a, b) = self.line(member)?;
+        Some(match self.arc(member) {
+            Some(arc) => arc.length().hypot(b.z - a.z),
+            None => a.distance(b),
+        })
+    }
+
+    /// The member as a polyline: its two ends, or its arc in chords at most
+    /// `max_step` radians apart.
+    pub fn points(&self, member: &Member, max_step: f64) -> Vec<DVec3> {
+        let Some((a, b)) = self.line(member) else { return Vec::new() };
+        match self.arc(member) {
+            Some(arc) => {
+                let pts = arc.points(0.0, arc.length(), 0.0, max_step);
+                let n = pts.len().saturating_sub(1).max(1) as f64;
+                pts.iter().enumerate().map(|(i, p)| p.extend(a.z + (b.z - a.z) * i as f64 / n)).collect()
+            }
+            None => vec![a, b],
+        }
+    }
+
+    /// Replace every curved member by `segments` straight members (at least
+    /// one) between new nodes on its arc, evenly spaced along it, for
+    /// programs that take only straight members. Members are numbered again
+    /// in order; the existing nodes keep their ids.
+    pub fn split_arcs(&mut self, segments: usize) {
+        let segments = segments.max(1);
+        let mut members = Vec::with_capacity(self.members.len());
+        for m in std::mem::take(&mut self.members) {
+            let (Some(arc), Some((a, b))) = (self.arc(&m), self.line(&m)) else {
+                members.push(Member { id: members.len(), bulge: 0.0, ..m });
+                continue;
+            };
+            let mut chain = vec![m.start];
+            for k in 1..segments {
+                let f = k as f64 / segments as f64;
+                let id = self.nodes.len();
+                let position = arc.point(arc.length() * f).extend(a.z + (b.z - a.z) * f);
+                self.nodes.push(Node { id, position, support: false });
+                chain.push(id);
+            }
+            chain.push(m.end);
+            for w in chain.windows(2) {
+                members.push(Member { id: members.len(), start: w[0], end: w[1], bulge: 0.0, ..m.clone() });
+            }
+        }
+        self.members = members;
     }
 }
 
@@ -68,6 +135,66 @@ struct Line {
     support: bool,
     /// The columns a beam's ends frame into.
     framed: [Option<ElementId>; 2],
+    /// The centerline arc of an arc beam (in plan).
+    curve: Option<Arc>,
+    /// The plan arc from `a` to `b` along `curve` (kept in step by [`Line::set_end`]).
+    arc: Option<Arc>,
+}
+
+impl Line {
+    /// Move an end (`b` when `end`) and fit the arc to the new ends.
+    fn set_end(&mut self, end: bool, q: DVec3) {
+        if end {
+            self.b = q;
+        } else {
+            self.a = q;
+        }
+        self.fit_arc();
+    }
+
+    /// The arc from `a` to `b` through the middle of the part of `curve`
+    /// between them: the curve itself when both ends lie on it.
+    fn fit_arc(&mut self) {
+        self.arc = self.curve.and_then(|c| {
+            let (a, b) = (self.a.truncate(), self.b.truncate());
+            let mid = c.point((c.locate(a).0 + c.locate(b).0) * 0.5);
+            Arc::from_bulge(a, b, Arc::bulge_through(a, mid, b)?)
+        });
+    }
+
+    /// The point of the line nearest `p` in plan, its parameter (0 at `a`,
+    /// 1 at `b`) and plan distance.
+    fn closest_plan(&self, p: DVec2) -> (DVec3, f64, f64) {
+        let (t, d) = match &self.arc {
+            Some(arc) => {
+                let len = arc.length().max(1e-12);
+                let t = (arc.locate(p).0 / len).clamp(0.0, 1.0);
+                (t, arc.point(len * t).distance(p))
+            }
+            None => project_plan(self.a, self.b, p),
+        };
+        (self.at(t), t, d)
+    }
+
+    /// The point at parameter `t` (along the arc for a curved line).
+    fn at(&self, t: f64) -> DVec3 {
+        let z = self.a.z + (self.b.z - self.a.z) * t;
+        match &self.arc {
+            Some(arc) => arc.point(arc.length() * t).extend(z),
+            None => (self.a + (self.b - self.a) * t).truncate().extend(z),
+        }
+    }
+
+    /// Parameter of `p` projected on the line, and its distance to it.
+    fn project(&self, p: DVec3) -> (f64, f64) {
+        match &self.arc {
+            Some(_) => {
+                let (_, t, _) = self.closest_plan(p.truncate());
+                (t, p.distance(self.at(t)))
+            }
+            None => project_on(self.a, self.b, p),
+        }
+    }
 }
 
 /// Whether `p` is inside `hull` or within [`TOL`] of its boundary.
@@ -121,6 +248,8 @@ pub fn analytical_model(project: &Project, geom: &ModelGeometry) -> AnalyticalMo
                 half_depth: 0.0,
                 support: true,
                 framed: [None; 2],
+                curve: None,
+                arc: None,
             });
             column_axes.push((e.id, c.position));
             let outline = project
@@ -171,7 +300,7 @@ pub fn analytical_model(project: &Project, geom: &ModelGeometry) -> AnalyticalMo
             let (z0, z1) = g.z_at(0.0);
             let half_depth = (z1 - z0) * 0.5;
             let column = |end: BeamEnd| if let BeamEnd::Column(c) = end { Some(c) } else { None };
-            lines.push(Line {
+            let mut line = Line {
                 element: g.element,
                 kind: MemberKind::Beam,
                 a,
@@ -180,7 +309,11 @@ pub fn analytical_model(project: &Project, geom: &ModelGeometry) -> AnalyticalMo
                 half_depth,
                 support: false,
                 framed: [column(g.start), column(g.end)],
-            });
+                curve: g.arc,
+                arc: None,
+            };
+            line.fit_arc();
+            lines.push(line);
         }
     }
     // Beam ends that stop on another beam end on its line.
@@ -193,19 +326,14 @@ pub fn analytical_model(project: &Project, geom: &ModelGeometry) -> AnalyticalMo
             let host = (first_beam..lines.len())
                 .filter(|&j| j != i)
                 .filter_map(|j| {
-                    let (t, d) = project_plan(lines[j].a, lines[j].b, p.truncate());
-                    let q = lines[j].a + (lines[j].b - lines[j].a) * t;
+                    let (q, _, d) = lines[j].closest_plan(p.truncate());
                     let near = d <= lines[j].half + REACH
                         && (q.z - p.z).abs() <= lines[i].half.max(lines[j].half) * 4.0 + REACH;
                     near.then_some((q, q.distance(p)))
                 })
                 .min_by(|x, y| x.1.total_cmp(&y.1));
             if let Some((q, _)) = host {
-                if end {
-                    lines[i].b = q;
-                } else {
-                    lines[i].a = q;
-                }
+                lines[i].set_end(end, q);
             }
         }
     }
@@ -219,8 +347,7 @@ pub fn analytical_model(project: &Project, geom: &ModelGeometry) -> AnalyticalMo
             let host = (first_beam..lines.len())
                 .filter(|&j| !lines[j].framed.contains(&Some(lines[i].element)))
                 .filter_map(|j| {
-                    let (t, d) = project_plan(lines[j].a, lines[j].b, p.truncate());
-                    let q = lines[j].a + (lines[j].b - lines[j].a) * t;
+                    let (q, _, d) = lines[j].closest_plan(p.truncate());
                     let near = d <= lines[j].half + REACH && (q.z - p.z).abs() <= lines[j].half_depth + REACH;
                     near.then_some((q, q.distance(p)))
                 })
@@ -258,15 +385,18 @@ pub fn analytical_model(project: &Project, geom: &ModelGeometry) -> AnalyticalMo
             .iter()
             .filter(|n| n.id != s && n.id != e)
             .filter_map(|n| {
-                let (t, d) = project_on(l.a, l.b, n.position);
+                let (t, d) = l.project(n.position);
                 (d < TOL && t > 1e-9 && t < 1.0 - 1e-9).then_some((t, n.id))
             })
             .collect();
         on.sort_by(|x, y| x.0.total_cmp(&y.0));
-        let chain: Vec<usize> = std::iter::once(s).chain(on.into_iter().map(|(_, n)| n)).chain([e]).collect();
+        let chain: Vec<(f64, usize)> = std::iter::once((0.0, s)).chain(on).chain([(1.0, e)]).collect();
         for w in chain.windows(2) {
-            if w[0] != w[1] {
-                members.push(Member { id: members.len(), element: l.element, kind: l.kind, start: w[0], end: w[1] });
+            let ((t0, start), (t1, end)) = (w[0], w[1]);
+            if start != end {
+                // Each part of an arc keeps the bulge of its own part of the arc.
+                let bulge = l.arc.map_or(0.0, |arc| arc.bulge_between(arc.length() * t0, arc.length() * t1));
+                members.push(Member { id: members.len(), element: l.element, kind: l.kind, start, end, bulge });
             }
         }
     }
@@ -281,6 +411,15 @@ mod tests {
     fn frame() -> (Project, Vec<ElementId>) {
         // Two columns 5 m apart and a beam between them, and a beam from the
         // middle of that beam going north.
+        let beams = vec![
+            Beam::new(DVec2::ZERO, DVec2::new(5.0, 0.0), 3.0),
+            Beam::new(DVec2::new(2.5, 0.0), DVec2::new(2.5, 4.0), 3.0),
+        ];
+        structure(&[DVec2::ZERO, DVec2::new(5.0, 0.0)], beams)
+    }
+
+    /// Structural columns 3 m tall at `columns`, then `beams`; the ids in that order.
+    fn structure(columns: &[DVec2], beams: Vec<Beam>) -> (Project, Vec<ElementId>) {
         let mut doc = Document::new(Project::from_template());
         let mut ids = Vec::new();
         doc.edit("frame", |e| {
@@ -304,9 +443,9 @@ mod tests {
                 });
                 ids.push(id);
             };
-            for x in [0.0, 5.0] {
+            for &position in columns {
                 let column = Column {
-                    position: DVec2::new(x, 0.0),
+                    position,
                     rotation_deg: 0.0,
                     base_offset: 0.0,
                     height: 3.0,
@@ -315,8 +454,9 @@ mod tests {
                 };
                 add(e, Category::Column, ElementKind::Column(column));
             }
-            add(e, Category::Beam, ElementKind::Beam(Beam::new(DVec2::ZERO, DVec2::new(5.0, 0.0), 3.0)));
-            add(e, Category::Beam, ElementKind::Beam(Beam::new(DVec2::new(2.5, 0.0), DVec2::new(2.5, 4.0), 3.0)));
+            for beam in beams {
+                add(e, Category::Beam, ElementKind::Beam(beam));
+            }
         });
         (doc.project, ids)
     }
@@ -343,5 +483,49 @@ mod tests {
         assert_eq!(m.nodes.len(), 8);
         assert_eq!(m.nodes.iter().filter(|n| n.support).count(), 2);
         assert!(m.nodes.iter().any(|n| n.position.distance(DVec3::new(0.0, 0.0, 3.0)) < 1e-9));
+    }
+
+    /// A quarter ring beam of radius 2.5 m about the origin between two
+    /// columns, and a radial beam from the origin to its middle.
+    #[test]
+    fn arc_beams_keep_their_arcs() {
+        use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+        let r = 2.5;
+        let mut ring = Beam::new(DVec2::new(r, 0.0), DVec2::new(0.0, r), 3.0);
+        ring.bulge = (PI / 8.0).tan();
+        let mid = DVec2::from_angle(FRAC_PI_4) * r;
+        let radial = Beam::new(DVec2::ZERO, mid, 3.0);
+        let (project, ids) = structure(&[DVec2::new(r, 0.0), DVec2::new(0.0, r)], vec![ring, radial]);
+        let geom = ModelGeometry::build(&project);
+        let mut m = analytical_model(&project, &geom);
+        let parts: Vec<Member> = m.members.iter().filter(|x| x.element == ids[2]).cloned().collect();
+        assert_eq!(parts.len(), 2);
+        let total: f64 = parts.iter().map(|x| m.length(x).unwrap()).sum();
+        assert!((total - r * FRAC_PI_2).abs() < 1e-9, "{total}");
+        for part in &parts {
+            assert!((part.bulge - (PI / 16.0).tan()).abs() < 1e-9, "{}", part.bulge);
+            let (a, b) = m.line(part).unwrap();
+            assert!((a.truncate().length() - r).abs() < 1e-9 && (b.truncate().length() - r).abs() < 1e-9);
+            // Drawn along the arc.
+            let pts = m.points(part, cc_core::arc::ARC_STEP);
+            assert!(pts.len() > 2 && pts.iter().all(|p| (p.truncate().length() - r).abs() < 1e-9));
+        }
+        // The radial beam ends on the arc, at the node splitting it.
+        let (_, end) = m.line(m.members.iter().find(|x| x.element == ids[3]).unwrap()).unwrap();
+        assert!(end.truncate().distance(mid) < 1e-9, "{end}");
+        // Split into straight members: 3 chords per part, nodes on the arc.
+        let nodes = m.nodes.len();
+        m.split_arcs(3);
+        assert_eq!(m.nodes.len(), nodes + 4);
+        let chords: Vec<&Member> = m.members.iter().filter(|x| x.element == ids[2]).collect();
+        assert_eq!(chords.len(), 6);
+        assert!(m.members.iter().enumerate().all(|(i, x)| x.id == i && x.bulge == 0.0));
+        // 15° each: 2 r sin(7.5°).
+        let chord = 2.0 * r * (PI / 24.0).sin();
+        for c in chords {
+            let (a, b) = m.line(c).unwrap();
+            assert!((a.truncate().length() - r).abs() < 1e-9 && (b.truncate().length() - r).abs() < 1e-9);
+            assert!((m.length(c).unwrap() - chord).abs() < 1e-9);
+        }
     }
 }
