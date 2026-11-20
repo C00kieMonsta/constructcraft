@@ -1884,6 +1884,24 @@ impl<'a> Importer<'a> {
         out
     }
 
+    /// Boolean values of property `name` in the property sets of `owner`
+    /// whose name passes `set`.
+    fn pset_bools(&self, owner: u32, set: &dyn Fn(&str) -> bool, name: &str) -> Vec<bool> {
+        let f = self.f;
+        let mut out = Vec::new();
+        for pset in self.psets_of.get(&owner).into_iter().flatten().filter_map(|s| f.get(*s)) {
+            if pset.name != "IFCPROPERTYSET" || !pset.arg(2).as_str().is_some_and(set) {
+                continue;
+            }
+            for prop in pset.arg(4).as_list().iter().filter_map(|p| f.deref(p)) {
+                if prop.name == "IFCPROPERTYSINGLEVALUE" && prop.arg(0).as_str() == Some(name) {
+                    out.extend(prop.arg(2).as_bool());
+                }
+            }
+        }
+        out
+    }
+
     /// Design options as this program writes them ([`crate::export::DESIGN_OPTION_PSET`]):
     /// sets and options by name, the first option of a set its primary (exports
     /// write primary options only); hosted elements then follow their hosts.
@@ -3166,6 +3184,11 @@ impl<'a> Importer<'a> {
 
     fn import_roof(&mut self, id: u32, e: &Entity) -> bool {
         if self.has_openings(id) {
+            return false;
+        }
+        // A body a roof join changed is kept as it is (the join is not rebuilt).
+        let joined = |n: &str| n == crate::export::ROOF_JOIN_PSET;
+        if self.pset_bools(id, &joined, "Joined").contains(&true) {
             return false;
         }
         let (_, body) = self.product(e);

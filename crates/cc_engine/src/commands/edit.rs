@@ -147,6 +147,12 @@ fn patched(
         cc_core::ElementKind::Roof(r) => {
             super::create::check_roof_holes(r)?;
             super::create::check_roof_edges(r)?;
+            // A join set by hand: to another roof, with no loop (one that does not meet just stays inactive).
+            if let Some(to) = r.join_to
+                && !matches!(&element.kind, cc_core::ElementKind::Roof(old) if old.join_to == Some(to))
+            {
+                super::roof_join::check(p, element.id, to)?;
+            }
         }
         cc_core::ElementKind::Floor(f) => super::create::check_openings(&f.boundary, &f.openings)?,
         cc_core::ElementKind::DetailLine(l) => {

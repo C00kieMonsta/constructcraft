@@ -4,7 +4,7 @@ use crate::wall::{EndJoin, LayerGap, Opening, WallGeom, WallLine, core_through, 
 use crate::{Ray, Solid};
 use cc_core::layer_extent::Extent;
 use cc_core::wall_profile::Chains;
-use cc_core::{Category, ElementId, ElementKind, Project, RoofShape, TypeData};
+use cc_core::{Category, ElementId, ElementKind, Project, TypeData};
 use glam::{DVec2, DVec3};
 use std::collections::BTreeMap;
 
@@ -198,6 +198,9 @@ pub struct ModelGeometry {
     pub masses: BTreeMap<ElementId, crate::mass::MassGeom>,
     /// Roofs: their framing members and covering figures.
     pub roof_framing: BTreeMap<ElementId, crate::roof_framing::RoofFramingGeom>,
+    /// Roofs joined to others, and the roofs they cut: what each join made
+    /// of them (see [`crate::roof_join`]).
+    pub roof_joins: BTreeMap<ElementId, crate::roof_join::RoofJoinGeom>,
     /// Terrain surfaces: triangles, elevations, area and volume.
     pub topographies: BTreeMap<ElementId, crate::topography::TopoGeom>,
     /// Building pads graded into their terrains (see [`crate::pad`]).
@@ -954,7 +957,9 @@ impl ModelGeometry {
     /// centerline the top follows the plane of the target's underside above
     /// it (the lowest where several meet, as along a ridge), and keeps its
     /// own height where the target is not above. A wall straddling the
-    /// target's edge counts as under it. Arc walls keep their own top.
+    /// target's edge counts as under it. A roof joined with others counts
+    /// with them (see [`crate::roof_join::joined_group`]). Arc walls keep
+    /// their own top.
     fn attach_wall_tops(&mut self, project: &Project) {
         let attached: Vec<(ElementId, ElementId)> = project
             .walls()
@@ -970,10 +975,13 @@ impl ModelGeometry {
             // Curtain walls keep their grid under a flat top.
             let Some(g) = self.walls.get(&wall).filter(|g| g.curtain.is_none()) else { continue };
             // The target's undersides (faces turned down) as plan outlines,
-            // reaching half the wall further, with their planes.
+            // reaching half the wall further, with their planes; a roof's,
+            // and those of the roofs joined with it.
             let reach = g.half + 0.01;
-            let planes: Vec<(Vec<DVec2>, DVec3, DVec3)> = self
-                .body_of(target)
+            let targets = crate::roof_join::joined_group(&self.roof_joins, target);
+            let planes: Vec<(Vec<DVec2>, DVec3, DVec3)> = targets
+                .iter()
+                .flat_map(|t| self.body_of(*t))
                 .flat_map(|s| s.faces.iter())
                 .filter(|f| f.normal.z < -1e-6 && f.verts.len() >= 3)
                 .map(|f| {
@@ -1368,6 +1376,8 @@ impl ModelGeometry {
     }
 
     fn build_slabs(&mut self, project: &Project) {
+        // Roofs joined to others first: what each keeps (see [`crate::roof_join`]).
+        let joins = crate::roof_join::resolve(project);
         for e in project.elements.values() {
             let Some(ty) = project.element_type(e.type_id) else { continue };
             let level_z = project.level_elevation(e.level);
@@ -1414,77 +1424,20 @@ impl ModelGeometry {
                         s.add_prism_with_holes(&polygon::ccw(&c.boundary), &holes, |_| bottom, |_| bottom + thk);
                     }
                 }
-                ElementKind::Roof(r) => {
-                    // The footprint grown by each edge's overhang.
-                    let outline = crate::roofs::outline(r);
-                    let fp = outline.points.clone();
-                    // Openings shrink by the overhang (the eaves reach over them), clockwise.
-                    let holes: Vec<Vec<DVec2>> = r
-                        .holes
-                        .iter()
-                        .map(|h| {
-                            let mut h = polygon::offset(h, -r.overhang);
-                            h.reverse();
-                            h
-                        })
-                        .filter(|h| h.len() >= 3 && polygon::signed_area(h) < 0.0)
-                        // Shafts cut their own outline: no eaves reach over them.
-                        .chain(r.cuts.iter().map(|c| {
-                            let mut c = polygon::ccw(c);
-                            c.reverse();
-                            c
-                        }))
-                        .collect();
-                    let base = level_z + r.base_offset;
-                    match r.shape {
-                        RoofShape::Flat => s.add_prism_with_holes(&fp, &holes, |_| base, |_| base + thk),
-                        RoofShape::Shed { slope, direction_deg } => {
-                            let a = direction_deg.to_radians();
-                            let d = DVec2::new(a.cos(), a.sin());
-                            // The plane starts at the low eave of the roof's own overhang.
-                            let min = crate::roofs::shed_low(r, d);
-                            let vertical_thk = thk * (1.0 + slope * slope).sqrt();
-                            let bottom = move |p: DVec2| base + slope * (p.dot(d) - min);
-                            s.add_prism_with_holes(&fp, &holes, bottom, move |p| bottom(p) + vertical_thk);
-                        }
-                        RoofShape::Gable { slope, .. } | RoofShape::Hip { slope } => {
-                            let ridge = match r.shape {
-                                RoofShape::Gable { ridge_deg, .. } => Some(DVec2::from_angle(ridge_deg.to_radians())),
-                                _ => None,
-                            };
-                            let vertical_thk = thk * (1.0 + slope * slope).sqrt();
-                            let mut loops = vec![fp.clone()];
-                            loops.extend(holes.iter().cloned());
-                            let own = &outline.own;
-                            let weights = crate::roofs::eave_weights(&loops, slope, ridge, own);
-                            let sloped = weights.iter().flatten().any(|w| *w > 0.0);
-                            // Eaves with an overhang of their own lie higher or lower on
-                            // their planes: they start late, from the lowest eave.
-                            let slopes = crate::roofs::edge_slopes(&fp, slope, ridge, own);
-                            let (starts, low) =
-                                crate::roofs::eave_starts(&slopes, &outline.overhangs, r.overhang, loops.len() > 1);
-                            let base = base + low;
-                            // Openings keep their eaves at the roof's base.
-                            let mut all_starts = vec![starts.clone()];
-                            all_starts.extend(holes.iter().map(|h| vec![-low; h.len()]));
-                            match crate::skeleton::skeleton_with_seeds(&loops, &weights, &all_starts, &outline.seeds) {
-                                Ok(sk) if sloped => {
-                                    crate::roofs::add_skeleton_roof(&mut s, &sk, base, vertical_thk);
-                                    self.roof_ridges.insert(e.id, sk.lines);
-                                }
-                                // Should the skeleton fail, the lowest planes of the outline.
-                                Err(_) if sloped && holes.is_empty() => {
-                                    let mut eaves = crate::roofs::sloped_eaves(&fp, &slopes);
-                                    crate::roofs::raise_eaves(&mut eaves, &fp, &slopes, &starts);
-                                    crate::roofs::add_pitched_roof(&mut s, &fp, &eaves, base, vertical_thk);
-                                    let regions = crate::roofs::roof_regions(&fp, &eaves);
-                                    self.roof_ridges.insert(e.id, crate::roofs::ridge_lines(&fp, &regions));
-                                }
-                                _ => s.add_prism_with_holes(&fp, &holes, |_| base, |_| base + thk),
-                            }
+                ElementKind::Roof(r) => match joins.surfaces.get(&e.id) {
+                    // A roof in a join: its pieces as the join left them.
+                    Some(surface) => {
+                        crate::roof_join::add_pieces(&mut s, &surface.pieces, surface.thickness);
+                        self.roof_ridges.insert(e.id, surface.lines.clone());
+                    }
+                    None => {
+                        let body = crate::roofs::body(r, level_z, thk);
+                        body.add_to(&mut s);
+                        if let Some(lines) = body.lines() {
+                            self.roof_ridges.insert(e.id, lines);
                         }
                     }
-                }
+                },
                 _ => continue,
             }
             // A roof's framing and covering figures, from its sloped faces.
@@ -1504,6 +1457,7 @@ impl ModelGeometry {
             }
             self.solids.push(s);
         }
+        self.roof_joins = joins.joins;
     }
 
     pub fn solids_of(&self, id: ElementId) -> impl Iterator<Item = &Solid> {

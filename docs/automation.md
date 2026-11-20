@@ -288,6 +288,15 @@ Not there yet, and refused by the commands: doors, windows and niches in a splin
 {"command": "element_set", "args": {"id": 14, "params": {"spline": {"control": [[0, 0], [2, 2], [5, 2], [7, 0]]}}}}
 ```
 
+### Roof joins
+
+A cross wing or bay is joined to the roof it meets with `roof_join` (`roof`, the wing; `to`, the main roof): the wing's end runs on into the main roof, or is cut, until it meets the main roof's surface, forming valleys, and the main roof is cut away under it. The wing meets the main roof along its edges that lie on it, or across a gap its nearest edge looks out over (no farther than the wing is wide or long); when the edges beside that end are sloped eaves (a gable wing with its ridge running into the main roof, or a hip wing, which gets a gable there), the end runs on, else it is only cut. A wing lower than the main roof meets it higher up the slope; one higher runs on level until the main roof rises to its eaves. Chains (a bay on a wing on a main roof) and several wings on one roof work. The join stays when either roof changes, and is refused when the roofs do not meet, for a roof joined to itself or when it would close a loop. Walls attached to either roof follow both; areas, tiles, framing, schedules and IFC count each part once. `element_get` gives `derived.join` (`to`, `active`, `issue` when the join does nothing, the `valleys` and their `valley_length`, and `cut_by`, the wings that cut a main roof), and `roof_check` reports a join that does nothing. `roof_unjoin` builds both as drawn again; deleting the main roof frees its wings.
+
+```text
+{"command": "roof_join", "args": {"roof": 21, "to": 12}}
+{"command": "roof_unjoin", "args": {"roof": 21}}
+```
+
 ### Cable trays and valves
 
 `cable_tray_create` draws a cable tray run like `conduit_create` (with `circuits`, `offset`, `end_offset`); a project without a cable tray type gets one (200 × 100 mm, ladder), and `cable_tray_type_create` makes others (`width`, `height`, `style`: `ladder`, `solid_bottom` or `perforated`). Trays join only other trays, and their elbows and tees are listed by `mep_fittings`. `valve_place` puts a valve on a pipe at a `point` near it or a `distance` along it, of a `type` or a `kind` (`gate`, `ball`, `check`, `globe`; a type of that kind is made when there is none); `valve_type_create` makes types of several `kinds` at once. A valve takes its pipe's diameter and system, is a node of its network and follows the pipe; `element_get` shows its `derived.point`, `kind` and `diameter`, and `element_set` moves it along the pipe (`params.at`).

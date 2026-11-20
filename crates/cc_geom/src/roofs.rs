@@ -37,7 +37,7 @@ impl Eave {
 }
 
 /// Keep the part of `poly` where `p · w <= c`.
-fn clip_half_plane(poly: &[DVec2], w: DVec2, c: f64) -> Vec<DVec2> {
+pub(crate) fn clip_half_plane(poly: &[DVec2], w: DVec2, c: f64) -> Vec<DVec2> {
     let mut out = Vec::new();
     let n = poly.len();
     for i in 0..n {
@@ -79,6 +79,12 @@ pub fn ccw_edge_slopes(r: &cc_core::Roof) -> Vec<Option<f64>> {
     }
     // Reversed, edge `j` runs from old point `n-1-j` to `n-2-j`: old edge `n-2-j`.
     (0..n).map(|j| r.edge_slope((2 * n - 2 - j) % n)).collect()
+}
+
+/// A roof's own edge overhangs in the order of its counter-clockwise
+/// outline, as [`ccw_edge_slopes`].
+pub fn ccw_edge_overhangs(r: &cc_core::Roof) -> Vec<Option<f64>> {
+    (0..r.footprint.len()).map(|j| r.edge_overhang(ccw_source(r, j))).collect()
 }
 
 /// The footprint edge (index into `Roof::footprint`) that edge `j` of its
@@ -383,6 +389,184 @@ pub fn add_pitched_roof(solid: &mut Solid, footprint: &[DVec2], eaves: &[Eave], 
             let out = -(q - p).normalize_or_zero().perp();
             let quad = vec![bottom(p), bottom(q), bottom(q) + DVec3::Z * thickness, bottom(p) + DVec3::Z * thickness];
             solid.faces.push(Face::new(quad, DVec3::new(out.x, out.y, 0.0)));
+        }
+    }
+}
+
+/// How a roof's slab is built: its outline, openings and planes, from the
+/// roof, its level's elevation and its type's thickness (see [`body`]).
+#[derive(Debug, Clone)]
+pub enum RoofBody {
+    /// A slab of `thickness` over the outline less its openings, its
+    /// underside at `base` (flat roofs, and pitched ones with no sloped edge
+    /// or whose skeleton failed round openings).
+    Prism { outline: Vec<DVec2>, holes: Vec<Vec<DVec2>>, base: f64, thickness: f64 },
+    /// A shed roof's plane, its underside `base + slope * (p · dir - low)`,
+    /// `thickness` measured vertically.
+    Shed { outline: Vec<DVec2>, holes: Vec<Vec<DVec2>>, base: f64, slope: f64, dir: DVec2, low: f64, thickness: f64 },
+    /// A pitched roof from its skeleton (see [`add_skeleton_roof`]).
+    Skeleton { sk: crate::skeleton::Skeleton, base: f64, thickness: f64 },
+    /// A pitched roof from the lowest planes of its outline, should the
+    /// skeleton fail (see [`add_pitched_roof`]).
+    Planes { outline: Vec<DVec2>, eaves: Vec<Eave>, base: f64, thickness: f64 },
+}
+
+/// How roof `r` on a level at `level_z`, its type `thk` thick, is built:
+/// the outline grown by each edge's overhang ([`outline`]), openings shrunk
+/// by the overhang and shafts' cuts, and its planes.
+pub fn body(r: &cc_core::Roof, level_z: f64, thk: f64) -> RoofBody {
+    use cc_core::RoofShape;
+    // The footprint grown by each edge's overhang.
+    let outline = outline(r);
+    let fp = outline.points.clone();
+    // Openings shrink by the overhang (the eaves reach over them), clockwise.
+    let holes: Vec<Vec<DVec2>> = r
+        .holes
+        .iter()
+        .map(|h| {
+            let mut h = polygon::offset(h, -r.overhang);
+            h.reverse();
+            h
+        })
+        .filter(|h| h.len() >= 3 && polygon::signed_area(h) < 0.0)
+        // Shafts cut their own outline: no eaves reach over them.
+        .chain(r.cuts.iter().map(|c| {
+            let mut c = polygon::ccw(c);
+            c.reverse();
+            c
+        }))
+        .collect();
+    let base = level_z + r.base_offset;
+    match r.shape {
+        RoofShape::Flat => RoofBody::Prism { outline: fp, holes, base, thickness: thk },
+        RoofShape::Shed { slope, direction_deg } => {
+            let a = direction_deg.to_radians();
+            let dir = DVec2::new(a.cos(), a.sin());
+            // The plane starts at the low eave of the roof's own overhang.
+            let low = shed_low(r, dir);
+            let thickness = thk * (1.0 + slope * slope).sqrt();
+            RoofBody::Shed { outline: fp, holes, base, slope, dir, low, thickness }
+        }
+        RoofShape::Gable { slope, .. } | RoofShape::Hip { slope } => {
+            let ridge = match r.shape {
+                RoofShape::Gable { ridge_deg, .. } => Some(DVec2::from_angle(ridge_deg.to_radians())),
+                _ => None,
+            };
+            let vertical_thk = thk * (1.0 + slope * slope).sqrt();
+            let mut loops = vec![fp.clone()];
+            loops.extend(holes.iter().cloned());
+            let own = &outline.own;
+            let weights = eave_weights(&loops, slope, ridge, own);
+            let sloped = weights.iter().flatten().any(|w| *w > 0.0);
+            // Eaves with an overhang of their own lie higher or lower on
+            // their planes: they start late, from the lowest eave.
+            let slopes = edge_slopes(&fp, slope, ridge, own);
+            let (starts, low) = eave_starts(&slopes, &outline.overhangs, r.overhang, loops.len() > 1);
+            let base = base + low;
+            // Openings keep their eaves at the roof's base.
+            let mut all_starts = vec![starts.clone()];
+            all_starts.extend(holes.iter().map(|h| vec![-low; h.len()]));
+            match crate::skeleton::skeleton_with_seeds(&loops, &weights, &all_starts, &outline.seeds) {
+                Ok(sk) if sloped => RoofBody::Skeleton { sk, base, thickness: vertical_thk },
+                // Should the skeleton fail, the lowest planes of the outline.
+                Err(_) if sloped && holes.is_empty() => {
+                    let mut eaves = sloped_eaves(&fp, &slopes);
+                    raise_eaves(&mut eaves, &fp, &slopes, &starts);
+                    RoofBody::Planes { outline: fp, eaves, base, thickness: vertical_thk }
+                }
+                _ => RoofBody::Prism { outline: fp, holes, base, thickness: thk },
+            }
+        }
+    }
+}
+
+impl RoofBody {
+    /// Add the roof's closed slab to `solid`.
+    pub fn add_to(&self, solid: &mut Solid) {
+        match self {
+            RoofBody::Prism { outline, holes, base, thickness } => {
+                let (base, thk) = (*base, *thickness);
+                solid.add_prism_with_holes(outline, holes, |_| base, |_| base + thk);
+            }
+            RoofBody::Shed { outline, holes, base, slope, dir, low, thickness } => {
+                let (base, slope, d, min, vertical_thk) = (*base, *slope, *dir, *low, *thickness);
+                let bottom = move |p: DVec2| base + slope * (p.dot(d) - min);
+                solid.add_prism_with_holes(outline, holes, bottom, move |p| bottom(p) + vertical_thk);
+            }
+            RoofBody::Skeleton { sk, base, thickness } => add_skeleton_roof(solid, sk, *base, *thickness),
+            RoofBody::Planes { outline, eaves, base, thickness } => {
+                add_pitched_roof(solid, outline, eaves, *base, *thickness);
+            }
+        }
+    }
+
+    /// The ridges, hips and valleys in plan, of pitched roofs.
+    pub fn lines(&self) -> Option<Vec<(DVec2, DVec2)>> {
+        match self {
+            RoofBody::Skeleton { sk, .. } => Some(sk.lines.clone()),
+            RoofBody::Planes { outline, eaves, .. } => Some(ridge_lines(outline, &roof_regions(outline, eaves))),
+            RoofBody::Prism { .. } | RoofBody::Shed { .. } => None,
+        }
+    }
+
+    /// The slab's thickness, measured vertically.
+    pub fn thickness(&self) -> f64 {
+        match self {
+            RoofBody::Prism { thickness, .. }
+            | RoofBody::Shed { thickness, .. }
+            | RoofBody::Skeleton { thickness, .. }
+            | RoofBody::Planes { thickness, .. } => *thickness,
+        }
+    }
+
+    /// The slab's underside as pieces of planes (see
+    /// [`crate::roof_join::Piece`]): each face of the skeleton (a face round
+    /// openings as one ring, the openings joined to its outline, or in
+    /// triangles), each flat top, each region of the fallback's planes, or
+    /// the outline less its openings.
+    pub fn pieces(&self) -> Vec<crate::roof_join::Piece> {
+        use crate::roof_join::Piece;
+        let ring = |outer: &[DVec2], holes: &[Vec<DVec2>]| -> Vec<Vec<DVec2>> {
+            let outer = polygon::ccw(outer);
+            if holes.is_empty() {
+                return vec![outer];
+            }
+            match polygon::keyhole(&outer, holes) {
+                Some(r) => vec![r],
+                None => polygon::triangulate_with_holes(&outer, holes).into_iter().map(|t| polygon::ccw(&t)).collect(),
+            }
+        };
+        let flat =
+            |c: f64, rings: Vec<Vec<DVec2>>| rings.into_iter().map(move |plan| Piece { plan, c, g: DVec2::ZERO });
+        match self {
+            RoofBody::Prism { outline, holes, base, .. } => flat(*base, ring(outline, holes)).collect(),
+            RoofBody::Shed { outline, holes, base, slope, dir, low, .. } => ring(outline, holes)
+                .into_iter()
+                .map(|plan| Piece { plan, c: base - slope * low, g: *dir * *slope })
+                .collect(),
+            RoofBody::Skeleton { sk, base, .. } => {
+                let mut out = Vec::new();
+                for (i, (plane, pts)) in sk.faces.iter().enumerate() {
+                    let holes: Vec<Vec<DVec2>> =
+                        sk.face_holes.iter().filter(|(f, _)| *f == i).map(|(_, h)| h.clone()).collect();
+                    // The plane's height is affine in plan: through the origin and along each axis.
+                    let h0 = sk.face_height(*plane, DVec2::ZERO);
+                    let g = DVec2::new(sk.face_height(*plane, DVec2::X) - h0, sk.face_height(*plane, DVec2::Y) - h0);
+                    out.extend(ring(pts, &holes).into_iter().map(|plan| Piece { plan, c: base + h0, g }));
+                }
+                for (height, pts) in &sk.flats {
+                    out.extend(flat(base + height, ring(pts, &[])));
+                }
+                out
+            }
+            RoofBody::Planes { outline, eaves, base, .. } => roof_regions(outline, eaves)
+                .into_iter()
+                .filter_map(|(i, plan)| {
+                    let e = eaves.get(i)?;
+                    let g = e.normal * e.slope;
+                    Some(Piece { plan: polygon::ccw(&plan), c: base - e.a.dot(g), g })
+                })
+                .collect(),
         }
     }
 }

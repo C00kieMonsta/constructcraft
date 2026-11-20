@@ -478,7 +478,10 @@ fn value_cached(project: &Project, geom: &ModelGeometry, e: &Element, field: Sch
             ElementKind::Wall(w) => Value::Area(wall_area(project, e, w, cache)),
             ElementKind::Room(_) => room_boundary.map_or(Value::Missing, |b| Value::Area(polygon::area(b))),
             ElementKind::Foundation(_) => geom.foundations.get(&e.id).map_or(Value::Missing, |g| Value::Area(g.area())),
-            ElementKind::Roof(r) => Value::Area(r.area()),
+            // A joined roof counts the part it keeps (within its walls and its partners').
+            ElementKind::Roof(r) => {
+                Value::Area(geom.roof_joins.get(&e.id).filter(|j| j.active()).map_or_else(|| r.area(), |j| j.area))
+            }
             ElementKind::Floor(f) => Value::Area(f.area()),
             ElementKind::Shaft(s) => Value::Area(polygon::area(&s.outline)),
             ElementKind::Pad(p) => Value::Area(polygon::area(&p.outline)),

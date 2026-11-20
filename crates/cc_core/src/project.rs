@@ -1202,6 +1202,108 @@ impl Project {
         self.joins.iter().filter_map(move |&(a, b)| (a == id).then_some(b).or((b == id).then_some(a)))
     }
 
+    /// The roof that roof `id` is joined to ([`crate::Roof::join_to`]), when
+    /// `id` is a roof joined to one.
+    pub fn roof_join_target(&self, id: ElementId) -> Option<ElementId> {
+        match &self.elements.get(&id)?.kind {
+            ElementKind::Roof(r) => r.join_to,
+            _ => None,
+        }
+    }
+
+    /// The roofs roof `id` is joined to, one after another: the one it is
+    /// joined to, the one that one is joined to, and so on, up to a roof
+    /// joined to none or to a missing element, or to where the walk comes
+    /// back to a roof it has seen (a loop), which is not repeated.
+    pub fn roof_join_chain(&self, id: ElementId) -> Vec<ElementId> {
+        let mut seen = std::collections::BTreeSet::from([id]);
+        let mut chain = Vec::new();
+        let mut at = id;
+        while let Some(next) = self.roof_join_target(at) {
+            if !self.elements.contains_key(&next) || !seen.insert(next) {
+                break;
+            }
+            chain.push(next);
+            at = next;
+        }
+        chain
+    }
+
+    /// Whether joining roof `roof` to roof `to` would close a loop of joins:
+    /// `to` is `roof`, or is joined to it, directly or through others.
+    pub fn roof_join_loops(&self, roof: ElementId, to: ElementId) -> bool {
+        to == roof || self.roof_join_chain(to).contains(&roof)
+    }
+
+    /// The roofs joined with roof `id`, directly or through others, either
+    /// way (`id` included).
+    pub fn roof_join_group(&self, id: ElementId) -> std::collections::BTreeSet<ElementId> {
+        let mut links: BTreeMap<ElementId, Vec<ElementId>> = BTreeMap::new();
+        for e in self.elements.values() {
+            if let ElementKind::Roof(r) = &e.kind
+                && let Some(to) = r.join_to
+                && to != e.id
+            {
+                links.entry(e.id).or_default().push(to);
+                links.entry(to).or_default().push(e.id);
+            }
+        }
+        let mut group = std::collections::BTreeSet::from([id]);
+        let mut todo = vec![id];
+        while let Some(at) = todo.pop() {
+            for next in links.get(&at).into_iter().flatten() {
+                if self.elements.contains_key(next) && group.insert(*next) {
+                    todo.push(*next);
+                }
+            }
+        }
+        group
+    }
+
+    /// The roofs whose join must go: joined to themselves, to a missing
+    /// element or to one that is not a roof, and on each loop of joins the
+    /// roof with the highest id (which breaks the loop).
+    pub fn broken_roof_joins(&self) -> Vec<ElementId> {
+        let is_roof = |id: ElementId| self.elements.get(&id).is_some_and(|e| matches!(e.kind, ElementKind::Roof(_)));
+        let mut broken = Vec::new();
+        let mut next: BTreeMap<ElementId, ElementId> = BTreeMap::new();
+        for e in self.elements.values() {
+            let ElementKind::Roof(r) = &e.kind else { continue };
+            match r.join_to {
+                Some(to) if to == e.id || !is_roof(to) => broken.push(e.id),
+                Some(to) => {
+                    next.insert(e.id, to);
+                }
+                None => {}
+            }
+        }
+        // Each roof joins one other at most: a walk from each finds a loop at most once.
+        let mut done = std::collections::BTreeSet::new();
+        for &start in next.keys() {
+            let mut path: Vec<ElementId> = Vec::new();
+            let mut on_path = std::collections::BTreeSet::new();
+            let mut at = Some(start);
+            while let Some(id) = at {
+                if done.contains(&id) {
+                    break;
+                }
+                if !on_path.insert(id) {
+                    let from = path.iter().position(|p| *p == id).unwrap_or(0);
+                    if let Some(highest) = path.get(from..).and_then(|cycle| cycle.iter().max()) {
+                        broken.push(*highest);
+                    }
+                    break;
+                }
+                path.push(id);
+                at = next.get(&id).copied();
+            }
+            done.extend(path);
+        }
+        broken.sort();
+        broken.dedup();
+        broken
+    }
+
     pub fn element(&self, id: ElementId) -> Option<&Element> {
         self.elements.get(&id)
     }

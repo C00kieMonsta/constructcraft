@@ -695,7 +695,9 @@ impl<'a> EditCtx<'a> {
     }
 
     /// Walls attached to an element this edit deleted (or turned into
-    /// something that is no roof, ceiling or floor) keep their own top.
+    /// something that is no roof, ceiling or floor) keep their own top, and
+    /// roofs joined to one that is no roof are unjoined
+    /// ([`crate::Project::broken_roof_joins`]).
     fn sync_attachments(&mut self) {
         let p = &*self.project;
         let slab = |id: ElementId| {
@@ -715,6 +717,13 @@ impl<'a> EditCtx<'a> {
         for id in stale {
             if let Some(crate::ElementKind::Wall(w)) = self.element_mut(id).map(|e| &mut e.kind) {
                 w.attach_top = None;
+            }
+        }
+        // Roofs joined to a roof this edit deleted (or to themselves, to what
+        // is no roof, or round a loop) are built as drawn.
+        for id in self.project.broken_roof_joins() {
+            if let Some(crate::ElementKind::Roof(r)) = self.element_mut(id).map(|e| &mut e.kind) {
+                r.join_to = None;
             }
         }
     }
@@ -1643,6 +1652,45 @@ mod tests {
         });
         doc.edit("delete", |e| e.remove_element(a));
         assert!(doc.project.element(a).is_none() && doc.project.element(b).is_none());
+    }
+
+    /// Deleting the roof a roof is joined to unjoins it in the same step;
+    /// undoing the delete brings the join back.
+    #[test]
+    fn deleting_a_joined_roof_unjoins_its_wings() {
+        let mut doc = Document::new(Project::from_template());
+        let add_roof = |doc: &mut Document, to: Option<ElementId>| {
+            doc.edit("roof", |e| {
+                let level = e.project().levels[0].id;
+                let type_id = e.project().default_type(Category::Roof).unwrap();
+                let id = ElementId(e.alloc_id());
+                let square = vec![DVec2::ZERO, DVec2::X, DVec2::ONE, DVec2::Y];
+                let mut roof = crate::Roof::new(square, 3.0, 0.0, crate::RoofShape::Hip { slope: 0.5 });
+                roof.join_to = to;
+                e.add_element(Element {
+                    id,
+                    level,
+                    type_id,
+                    mark: String::new(),
+                    comments: String::new(),
+                    uid: Default::default(),
+                    kind: ElementKind::Roof(roof),
+                    phase_created: Default::default(),
+                    phase_demolished: None,
+                    design_option: None,
+                    paints: Vec::new(),
+                })
+            })
+        };
+        let main = add_roof(&mut doc, None);
+        let wing = add_roof(&mut doc, Some(main));
+        assert_eq!(doc.project.roof_join_target(wing), Some(main));
+        let depth = doc.undo_depth();
+        doc.edit("delete", |e| e.remove_element(main));
+        assert_eq!(doc.undo_depth(), depth + 1);
+        assert_eq!(doc.project.roof_join_target(wing), None);
+        doc.undo();
+        assert_eq!(doc.project.roof_join_target(wing), Some(main));
     }
 
     #[test]
