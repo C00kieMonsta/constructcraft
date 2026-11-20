@@ -176,6 +176,74 @@ impl Body {
     }
 }
 
+/// The elevation profile of a straight wall from `start` to `end` with its
+/// base at `base` whose body is one extrusion with its top cut by half
+/// spaces level across the wall (as walls attached to a roof or a slab are
+/// written): its base runs flat, its top along the faces of the body that
+/// look up, carried from the wall's start to its end. `None` when the body
+/// is anything else, or its top is flat.
+fn clipped_top(body: &Body, start: DVec2, end: DVec2, base: f64) -> Option<cc_core::wall_profile::WallProfile> {
+    let [s] = body.solids.as_slice() else { return None };
+    if !s.clipped || !s.cuts.is_empty() || !s.extrusion.as_ref().is_some_and(|x| x.is_vertical()) {
+        return None;
+    }
+    let length = start.distance(end);
+    let dir = (end - start).try_normalize()?;
+    let across = dir.perp().extend(0.0);
+    // Each face that looks up, as a stretch `(u0, u1, z0, z1)` along the wall.
+    let mut tops: Vec<(f64, f64, f64, f64)> = Vec::new();
+    for f in &s.mesh {
+        let normal = (0..f.len()).fold(DVec3::ZERO, |n, i| n + f[i].cross(f[(i + 1) % f.len()]));
+        let Some(n) = normal.try_normalize() else { continue };
+        if n.z < 1e-6 {
+            continue;
+        }
+        if n.dot(across).abs() > 1e-6 {
+            return None;
+        }
+        let u = |p: DVec3| (p.truncate() - start).dot(dir);
+        let slope = -n.truncate().dot(dir) / n.z;
+        let (lo, hi) = f.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| (lo.min(u(*p)), hi.max(u(*p))));
+        let p0 = *f.first()?;
+        let z = |at: f64| p0.z + slope * (at - u(p0));
+        if hi - lo > 1e-9 {
+            tops.push((lo, hi, z(lo), z(hi)));
+        }
+    }
+    if tops.is_empty() || tops.len() > 4_000 {
+        return None;
+    }
+    let mut breaks: Vec<f64> = tops.iter().flat_map(|t| [t.0, t.1]).filter(|u| *u > 0.0 && *u < length).collect();
+    breaks.extend([0.0, length]);
+    breaks.sort_by(f64::total_cmp);
+    breaks.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+    let line = |t: &(f64, f64, f64, f64), u: f64| {
+        if t.1 - t.0 > 1e-12 { t.2 + (t.3 - t.2) * (u - t.0) / (t.1 - t.0) } else { t.2 }
+    };
+    let mut chain: Vec<DVec2> = Vec::new();
+    for w in breaks.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let mid = (a + b) * 0.5;
+        // The highest face over the stretch (the top; below it lie none but its own pieces).
+        let top = tops
+            .iter()
+            .filter(|t| t.0 - 1e-6 <= mid && mid <= t.1 + 1e-6)
+            .max_by(|x, y| line(x, mid).total_cmp(&line(y, mid)))?;
+        for p in [DVec2::new(a, line(top, a) - base), DVec2::new(b, line(top, b) - base)] {
+            if chain.last().is_none_or(|q| q.distance(p) > 1e-9) {
+                chain.push(p);
+            }
+        }
+    }
+    let high = chain.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max);
+    if chain.iter().all(|p| (p.y - high).abs() < 1e-6) {
+        return None;
+    }
+    let mut outline = vec![DVec2::new(0.0, 0.0), DVec2::new(length, 0.0)];
+    outline.extend(chain.into_iter().rev());
+    cc_core::wall_profile::WallProfile::from_outline(outline, length).ok()
+}
+
 /// Outline loops (the outer one first, counter-clockwise; then openings)
 /// and slope of a roof body: its vertical faces stand on the outline, its
 /// sloped faces share one slope (0 when there are none); also the uphill
@@ -2411,7 +2479,9 @@ impl<'a> Importer<'a> {
         if !(start.is_finite() && end.is_finite()) || start.distance(end) < 0.01 || thickness < 0.005 {
             return false;
         }
-        self.add_wall(id, e, (z0, z1), thickness, Wall { start, end, ..Default::default() })
+        // A top cut by half spaces (a wall attached to a roof or a slab): an elevation profile.
+        let profile = clipped_top(&body, start, end, z0);
+        self.add_wall(id, e, (z0, z1), thickness, Wall { start, end, profile, ..Default::default() })
     }
 
     /// A wall with an elevation profile written by this program

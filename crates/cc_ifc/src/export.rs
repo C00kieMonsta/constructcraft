@@ -111,6 +111,106 @@ fn wall_local(g: &WallGeom, p: DVec2) -> DVec2 {
     DVec2::new(d.dot(g.dir), d.dot(g.normal))
 }
 
+/// A stretch of an attached wall's top (see [`WallGeom::top_profile`]):
+/// along the centerline from `u0` to `u1` it runs straight from `z0` to
+/// `z1` (absolute elevations), level across the wall. `bounded` when the
+/// plane through it, carried on along the wall, would cut the wall where
+/// its top runs lower than the body's elsewhere: its half space then
+/// stops at the stretch's ends.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TopCut {
+    u0: f64,
+    u1: f64,
+    z0: f64,
+    z1: f64,
+    bounded: bool,
+}
+
+impl TopCut {
+    fn slope(&self) -> f64 {
+        if self.u1 - self.u0 > 1e-12 { (self.z1 - self.z0) / (self.u1 - self.u0) } else { 0.0 }
+    }
+
+    /// The height of its line at `u`.
+    fn at(&self, u: f64) -> f64 {
+        self.z0 + self.slope() * (u - self.u0)
+    }
+}
+
+/// The stretches of an attached wall's top that cut its body (an extrusion
+/// from `base_z` to `top_z`, the highest point of its top): the segments
+/// of `top_profile` merged where one line runs on, less those that run at
+/// the body's top. Empty for a wall that is not attached (an elevation
+/// profile shapes its body instead; arc, spline and curtain walls keep their
+/// own tops), and for one whose top drops to its base, which the geometry
+/// keeps a sliver high.
+fn top_cuts(g: &WallGeom) -> Vec<TopCut> {
+    if g.top_profile.is_empty() || g.is_profiled() || g.is_curved() || g.curtain.is_some() {
+        return Vec::new();
+    }
+    let finite = g.top_profile.iter().all(|s| [s.0, s.1, s.2, s.3].iter().all(|v| v.is_finite()));
+    if !finite || g.top_profile.iter().any(|s| s.2.min(s.3) < g.base_z + 0.01) {
+        return Vec::new();
+    }
+    let mut merged: Vec<TopCut> = Vec::with_capacity(g.top_profile.len());
+    for &(u0, u1, z0, z1) in &g.top_profile {
+        if u1 - u0 < 1e-9 {
+            continue;
+        }
+        let next = TopCut { u0, u1, z0, z1, bounded: false };
+        match merged.last_mut() {
+            Some(m) if (m.u1 - u0).abs() < 1e-9 && (m.z1 - z0).abs() < 1e-9 && (m.at(u1) - z1).abs() < 1e-9 => {
+                (m.u1, m.z1) = (u1, z1);
+            }
+            _ => merged.push(next),
+        }
+    }
+    // The cuts make the top only where the segments cover the wall without a gap.
+    if merged.windows(2).any(|w| (w[0].u1 - w[1].u0).abs() > 1e-6) {
+        return Vec::new();
+    }
+    let top = g.top_z;
+    let mut cuts: Vec<TopCut> = merged.iter().copied().filter(|c| c.z0.min(c.z1) < top - 1e-9).collect();
+    // A line under the top elsewhere would cut it there too.
+    for c in &mut cuts {
+        c.bounded = merged.iter().any(|m| c.at(m.u0) < m.z0 - 1e-9 || c.at(m.u1) < m.z1 - 1e-9);
+    }
+    cuts
+}
+
+/// An attached wall's top over its centerline from 0 to its length, as
+/// stretches `(a, b, z at a, z at b)` (its first and last segments carried
+/// on to the ends, as the body is); empty when it is not attached.
+fn top_over_length(g: &WallGeom) -> Vec<(f64, f64, f64, f64)> {
+    if g.top_profile.is_empty() || g.is_profiled() || g.is_curved() {
+        return Vec::new();
+    }
+    let last = g.top_profile.len() - 1;
+    let mut out = Vec::with_capacity(g.top_profile.len());
+    for (i, &(u0, u1, z0, z1)) in g.top_profile.iter().enumerate() {
+        let cut = TopCut { u0, u1, z0, z1, bounded: false };
+        let a = if i == 0 { 0.0 } else { u0.max(0.0) };
+        let b = if i == last { g.length } else { u1.min(g.length) };
+        if b > a {
+            out.push((a, b, cut.at(a), cut.at(b)));
+        }
+    }
+    out
+}
+
+/// The area of an attached wall's face, from its base up to its top, and
+/// the height of its highest point over its base; `None` when it is not
+/// attached.
+fn top_face(g: &WallGeom) -> Option<(f64, f64)> {
+    let top = top_over_length(g);
+    if top.is_empty() {
+        return None;
+    }
+    let area: f64 = top.iter().map(|&(a, b, za, zb)| (b - a) * ((za + zb) * 0.5 - g.base_z)).sum();
+    let high = top.iter().map(|s| s.2.max(s.3)).fold(f64::MIN, f64::max);
+    Some((area.max(0.0), high - g.base_z))
+}
+
 struct Exporter<'a> {
     w: StepWriter,
     project: &'a Project,
@@ -2469,6 +2569,50 @@ impl<'a> Exporter<'a> {
         self.w.add("IFCBOOLEANCLIPPINGRESULT", args![Value::Enum("DIFFERENCE"), body, half])
     }
 
+    /// The half spaces that cut an attached wall's body down to its top
+    /// (see [`top_cuts`]), in the wall's placement: a plane through each
+    /// stretch of the top, level across the wall, its material above; one
+    /// that would cut the wall elsewhere too is bounded to its stretch.
+    fn top_half_spaces(&mut self, g: &WallGeom) -> Vec<Id> {
+        let cuts = top_cuts(g);
+        // Where the top starts and ends (a mitered end's far corner).
+        let (first, last) = match (g.top_profile.first(), g.top_profile.last()) {
+            (Some(a), Some(b)) if !cuts.is_empty() => (a.0, b.1),
+            _ => return Vec::new(),
+        };
+        let mut out = Vec::with_capacity(cuts.len());
+        for cut in cuts {
+            let slope = cut.slope();
+            let along = DVec3::new(1.0, 0.0, slope).normalize();
+            let up = DVec3::new(-slope, 0.0, 1.0).normalize();
+            let frame = Frame { origin: DVec3::new(cut.u0, 0.0, cut.z0 - g.base_z), x: along, z: up };
+            let plane = self.placement3(frame);
+            let surface = self.w.add("IFCPLANE", args![plane]);
+            // Its material on the side the normal points to: above the top.
+            let half = if cut.bounded {
+                // Past the wall's ends and faces, so nothing is left at its edges.
+                let reach = g.half + 1.0;
+                let lo = if cut.u0 <= first + 1e-9 { cut.u0 - reach } else { cut.u0 };
+                let hi = if cut.u1 >= last - 1e-9 { cut.u1 + reach } else { cut.u1 };
+                let rect =
+                    [DVec2::new(lo, -reach), DVec2::new(hi, -reach), DVec2::new(hi, reach), DVec2::new(lo, reach)];
+                let boundary = self.polyline(&rect);
+                self.w.add("IFCPOLYGONALBOUNDEDHALFSPACE", args![surface, false, self.identity, boundary])
+            } else {
+                self.w.add("IFCHALFSPACESOLID", args![surface, false])
+            };
+            out.push(half);
+        }
+        out
+    }
+
+    /// `body` less each of the half spaces `cuts`, nested.
+    fn clip_by(&mut self, body: Id, cuts: &[Id]) -> Id {
+        cuts.iter().fold(body, |body, &half| {
+            self.w.add("IFCBOOLEANCLIPPINGRESULT", args![Value::Enum("DIFFERENCE"), body, half])
+        })
+    }
+
     fn write_wall(&mut self, id: ElementId) {
         let project = self.project;
         let Some(e) = project.element(id) else { return };
@@ -2518,14 +2662,19 @@ impl<'a> Exporter<'a> {
             return;
         }
 
-        // Swept solids, or clipped where a profiled wall meets another in a mitered end.
+        // Swept solids, or clipped where a profiled wall meets another in a mitered end or
+        // where an attached wall's top follows what it is attached to.
         let mut kind = "SweptSolid";
+        let top = self.top_half_spaces(g);
+        if !top.is_empty() {
+            kind = "Clipping";
+        }
         // Layers with extents of their own: one item per layer, each in its material.
-        let layered = if g.is_banded() { self.layer_bodies(g, &mut kind) } else { Vec::new() };
+        let layered = if g.is_banded() { self.layer_bodies(g, &top, &mut kind) } else { Vec::new() };
         let (bodies, axis) = if !layered.is_empty() {
             (layered, self.wall_axis(g))
         } else {
-            let (body, axis) = self.wall_body(e, g, &mut kind);
+            let (body, axis) = self.wall_body(e, g, &top, &mut kind);
             (vec![body], axis)
         };
         let shape = self.shape_of_type(bodies, Some(axis), kind);
@@ -2538,8 +2687,9 @@ impl<'a> Exporter<'a> {
     }
 
     /// The body of a wall whose layers span it whole, in its main
-    /// material, and its axis.
-    fn wall_body(&mut self, e: &Element, g: &WallGeom, kind: &mut &'static str) -> (Id, Id) {
+    /// material, and its axis; cut by the half spaces `top` (an attached
+    /// wall's, see [`Self::top_half_spaces`]).
+    fn wall_body(&mut self, e: &Element, g: &WallGeom, top: &[Id], kind: &mut &'static str) -> (Id, Id) {
         let project = self.project;
         let h = g.half;
         // A wall with an elevation profile: the outline swept across the wall, clipped at mitered ends.
@@ -2587,6 +2737,7 @@ impl<'a> Exporter<'a> {
             let axis_end = self.point2(DVec2::new(g.length, 0.0));
             (body, self.w.add("IFCPOLYLINE", args![vec![axis_start, axis_end]]))
         };
+        let body = self.clip_by(body, top);
         if let Some(ty) = project.element_type(e.type_id) {
             let style = self.material_style(ty.main_material());
             self.styled(body, style);
@@ -2621,8 +2772,10 @@ impl<'a> Exporter<'a> {
     /// clipped at mitered ends it reaches (a clipped body has every item
     /// clipped, as its representation type asks: the others at an end they do
     /// not reach, which leaves them whole); otherwise the layer's strip of the
-    /// footprint extruded from its bottom to its top. Openings stay voids.
-    fn layer_bodies(&mut self, g: &WallGeom, kind: &mut &'static str) -> Vec<Id> {
+    /// footprint extruded from its bottom to its top, cut by the half spaces
+    /// `top` of an attached wall (every item, the body being clipped).
+    /// Openings stay voids.
+    fn layer_bodies(&mut self, g: &WallGeom, top: &[Id], kind: &mut &'static str) -> Vec<Id> {
         let h = g.half;
         let last = g.layers.len().saturating_sub(1);
         let across = |(ul, ur): (f64, f64), v: f64| if h > 1e-12 { ur + (ul - ur) * (v + h) / (2.0 * h) } else { ul };
@@ -2683,6 +2836,7 @@ impl<'a> Exporter<'a> {
         }
         let mut out = Vec::with_capacity(items.len());
         for (body, _, material) in items {
+            let body = self.clip_by(body, top);
             let style = self.material_style(&material);
             self.styled(body, style);
             out.push(body);
@@ -2721,9 +2875,11 @@ impl<'a> Exporter<'a> {
         let length = project.wall_length(e, wall);
         // A profiled wall's face is its profile's, and its height its highest point over its lowest.
         let profile = wall.profile.as_ref().filter(|_| g.is_profiled());
-        let (gross, full_height) = match profile {
-            Some(p) => (p.area(), p.z_range().1 - p.z_range().0),
-            None => (length * height, height),
+        // An attached wall's face runs up to its top, and its height is its highest point's.
+        let (gross, full_height) = match (profile, top_face(g)) {
+            (Some(p), _) => (p.area(), p.z_range().1 - p.z_range().0),
+            (None, Some(face)) => face,
+            (None, None) => (length * height, height),
         };
         self.quantities(
             e,

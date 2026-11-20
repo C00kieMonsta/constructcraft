@@ -1572,6 +1572,14 @@ impl<'a> Geometry<'a> {
                                 s.replace_mesh(mesh);
                                 s.other_cut |= s.clipped;
                             }
+                        } else if let Some(cutter) = self.bounded_half_space(e.arg(2), xf, &first) {
+                            // A bounded half space over part of the operand: its solid there, subtracted.
+                            for s in &mut first {
+                                if let Some(mesh) = subtract(&s.mesh, &cutter) {
+                                    s.replace_mesh(mesh);
+                                    s.other_cut |= s.clipped;
+                                }
+                            }
                         } else {
                             let mut second = Vec::new();
                             self.items_at(e.arg(2), xf, depth + 1, &mut second);
@@ -1681,6 +1689,48 @@ impl<'a> Geometry<'a> {
             }
         }
         Some((frame.translation, keep))
+    }
+
+    /// The solid of a polygonal bounded half space where `operand` lies (its
+    /// boundary's prism from below the operand to above it, on the side of
+    /// its plane its material is), as a closed mesh; `None` for other
+    /// items or a boundary that is not a simple loop.
+    fn bounded_half_space(&self, param: &Param, xf: DAffine3, operand: &[Solid]) -> Option<Vec<Polygon>> {
+        let e = self.f.deref(param).filter(|e| e.name == "IFCPOLYGONALBOUNDEDHALFSPACE")?;
+        let plane = self.f.deref(e.arg(0)).filter(|p| p.name == "IFCPLANE")?;
+        let frame = xf * self.axis_placement(plane.arg(0));
+        let normal = frame.matrix3.z_axis.try_normalize()?;
+        // AgreementFlag true: the normal points away from the half space's material.
+        let material = if e.arg(1).as_bool() == Some(false) { normal } else { -normal };
+        let position = xf * self.axis_placement(e.arg(2));
+        let mut boundary: Vec<DVec2> = clean2(self.curve(e.arg(3), 0).into_iter().map(|p| p.truncate()).collect());
+        if boundary.first().zip(boundary.last()).is_some_and(|(a, b)| a.distance(*b) < 1e-9) {
+            boundary.pop();
+        }
+        if boundary.len() < 3 || boundary.len() > MAX_CAP_SEGMENTS || polygon::area(&boundary) < 1e-12 {
+            return None;
+        }
+        let inv = position.inverse();
+        let (lo, hi) = operand
+            .iter()
+            .flat_map(|s| s.points.iter())
+            .map(|p| inv.transform_point3(*p).z)
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), z| (lo.min(z), hi.max(z)));
+        if !(lo.is_finite() && hi.is_finite()) {
+            return None;
+        }
+        let boundary = polygon::ccw(&boundary);
+        let ring = |z: f64| -> Vec<DVec3> {
+            boundary.iter().map(|p| position.transform_point3(DVec3::new(p.x, p.y, z))).collect()
+        };
+        let (bottom, top) = (ring(lo - 1.0), ring(hi + 1.0));
+        let mut prism = Vec::with_capacity(boundary.len() + 2);
+        prism.push(bottom.iter().rev().copied().collect());
+        prism.push(top.clone());
+        bridge(&bottom, &top, true, &mut prism);
+        let prism = orient_outwards(prism);
+        let cutter = clip_mesh(&prism, frame.translation, material);
+        (!cutter.is_empty()).then_some(cutter)
     }
 
     fn primitive(&self, e: &Entity) -> Vec<Polygon> {
