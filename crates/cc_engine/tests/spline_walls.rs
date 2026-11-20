@@ -573,7 +573,8 @@ fn a_file_with_bad_splines_is_repaired_on_opening() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("damaged.ccad");
     let text = cc_core::to_ron(&p).unwrap();
-    assert!(text.contains("format_version: 32"), "spline walls are format 32");
+    let current = format!("format_version: {}", cc_core::FORMAT_VERSION);
+    assert!(text.contains(&current) && cc_core::FORMAT_VERSION >= 32, "spline walls are format 32 on");
     std::fs::write(&path, &text).unwrap();
     let out = run(&mut s, "project_open", json!({"path": path}));
     assert!(out["repairs"].as_u64().unwrap() >= 5, "{out}");
@@ -593,7 +594,7 @@ fn a_file_with_bad_splines_is_repaired_on_opening() {
     assert!(wall(&s, hosting).spline.is_some());
     assert_eq!(s.project().repairs_needed(), 0);
     // A file of the previous format still opens (it has no splines).
-    let old = text.replace("format_version: 32", "format_version: 31");
+    let old = text.replace(&current, "format_version: 31");
     assert!(cc_core::from_ron_with_repairs(&old).is_ok());
     let _ = std::fs::remove_dir_all(&dir);
 }

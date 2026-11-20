@@ -9,7 +9,8 @@ use std::path::Path;
 /// `RisePer12` (`6:12`), which older builds cannot read.
 /// 31 (30 is taken by another change): wall elevation profiles
 /// (`Wall::profile`), which older builds would drop.
-pub const FORMAT_VERSION: u32 = 32;
+/// 33: roof joins (`Roof::join_to`), which older builds would drop.
+pub const FORMAT_VERSION: u32 = 33;
 
 /// Largest project file read, bytes (pictures and textures are kept in it).
 pub const MAX_FILE_BYTES: u64 = 1 << 30;
@@ -301,6 +302,51 @@ mod tests {
             .replace(&format!("format_version: {FORMAT_VERSION}"), "format_version: 22");
         let q = from_ron(&old).unwrap();
         assert!(q.option_sets.is_empty() && q.elements.values().all(|e| e.design_option.is_none()));
+    }
+
+    /// A roof's join is saved and read back; a format-32 file (before roof
+    /// joins) loads with its roofs unjoined.
+    #[test]
+    fn roof_joins_round_trip_and_format_32_files_load() {
+        let mut p = Project::from_template();
+        let level = p.levels[0].id;
+        let type_id = p.default_type(crate::Category::Roof).unwrap();
+        let square = vec![glam::DVec2::ZERO, glam::DVec2::X, glam::DVec2::ONE, glam::DVec2::Y];
+        let mut ids = Vec::new();
+        for _ in 0..2 {
+            let id = crate::ElementId(p.alloc_id());
+            let mut roof = crate::Roof::new(square.clone(), 3.0, 0.0, crate::RoofShape::Hip { slope: 0.5 });
+            roof.join_to = ids.first().copied();
+            p.elements.insert(
+                id,
+                crate::Element {
+                    id,
+                    level,
+                    type_id,
+                    mark: String::new(),
+                    comments: String::new(),
+                    kind: crate::ElementKind::Roof(roof),
+                    uid: Default::default(),
+                    phase_created: Default::default(),
+                    phase_demolished: None,
+                    design_option: None,
+                    paints: Vec::new(),
+                },
+            );
+            ids.push(id);
+        }
+        let text = to_ron(&p).unwrap();
+        let (back, repairs) = from_ron_with_repairs(&text).unwrap();
+        assert_eq!(repairs, 0);
+        assert_eq!(back.roof_join_target(ids[1]), Some(ids[0]));
+        // Older files have no `join_to`: their roofs are unjoined.
+        let unjoined: Vec<&str> = text.lines().filter(|l| !l.trim_start().starts_with("join_to:")).collect();
+        assert_eq!(unjoined.len() + 1, text.lines().count(), "one roof is joined");
+        let unjoined = unjoined.join("\n");
+        let old = unjoined.replace(&format!("format_version: {FORMAT_VERSION}"), "format_version: 32");
+        let (q, repairs) = from_ron_with_repairs(&old).unwrap();
+        assert_eq!(repairs, 0);
+        assert!(ids.iter().all(|id| q.roof_join_target(*id).is_none()));
     }
 
     #[test]
