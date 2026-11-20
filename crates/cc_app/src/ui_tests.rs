@@ -6742,3 +6742,131 @@ fn closing_the_other_views_keeps_a_later_tab_shown() {
     // The view is drawn: its zoom button is there.
     assert!(harness.query_by_label(&t!("canvas-zoom-menu")).is_some());
 }
+
+/// A main gable roof 10 × 8 and a wing 4 wide against its south eave (as
+/// in the engine's roof join tests), away from the sample house.
+fn cross_wing(state: &mut AppState) -> (cc_core::ElementId, cc_core::ElementId) {
+    let mut gable = |boundary: serde_json::Value, ridge_deg: f64| {
+        let out = state
+            .session
+            .execute("roof_create", serde_json::json!({"boundary": boundary, "offset": 3.0, "overhang": 0.0}))
+            .unwrap();
+        let id = out["id"].as_u64().unwrap();
+        let shape = serde_json::json!({"shape": {"Gable": {"slope": 0.5, "ridge_deg": ridge_deg}}});
+        state.session.execute("element_set", serde_json::json!({"id": id, "params": shape})).unwrap();
+        cc_core::ElementId(id)
+    };
+    let main = gable(serde_json::json!([[100, 0], [110, 0], [110, 8], [100, 8]]), 0.0);
+    let wing = gable(serde_json::json!([[103, -6], [107, -6], [107, 0], [103, 0]]), 90.0);
+    (main, wing)
+}
+
+fn joined_to(state: &AppState, roof: cc_core::ElementId) -> Option<cc_core::ElementId> {
+    match &state.project().element(roof).unwrap().kind {
+        cc_core::ElementKind::Roof(r) => r.join_to,
+        _ => None,
+    }
+}
+
+/// Join Roof (#381): the wing picked first, then the roof it meets, joins
+/// them in one undo step; clicks off roofs are ignored, the tool stays for
+/// the next wing, and Esc steps back one pick, then leaves the tool.
+#[test]
+fn join_roof_tool_joins_a_wing_to_the_main_roof() {
+    use crate::commands::UiCommand;
+    use crate::tools::Tool;
+    let mut state = sample_state();
+    let (main, wing) = cross_wing(&mut state);
+    let wall = state.project().walls().next().map(|(e, _)| e.id).unwrap();
+    state.selection.clear();
+    let ctx = egui::Context::default();
+    assert_eq!(UiCommand::JoinRoof.unavailable(&state), None);
+    crate::commands::run(&mut state, &ctx, UiCommand::JoinRoof);
+    assert_eq!(state.tool, Tool::JoinRoof);
+    assert_eq!(state.message, t!("hint-roof-join-first"));
+    // A wall is not picked.
+    assert!(!crate::modify::is_roof(&state, wall));
+    crate::modify::roof_join_pick(&mut state, Some(wall));
+    crate::modify::roof_join_pick(&mut state, None);
+    assert!(state.interaction.targets.is_empty());
+    crate::modify::roof_join_pick(&mut state, Some(wing));
+    assert_eq!(state.interaction.targets, vec![wing]);
+    assert_eq!(state.message, t!("hint-roof-join-second"));
+    crate::modify::roof_join_pick(&mut state, Some(wall));
+    assert_eq!(state.interaction.targets, vec![wing], "the wing stays picked");
+    let depth = state.session.doc.undo_depth();
+    crate::modify::roof_join_pick(&mut state, Some(main));
+    assert_eq!(joined_to(&state, wing), Some(main), "{}", state.message);
+    assert_eq!(state.session.doc.undo_depth(), depth + 1);
+    assert_eq!((&state.tool, state.interaction.targets.is_empty()), (&Tool::JoinRoof, true), "ready for the next wing");
+    state.session.doc.undo();
+    assert_eq!(joined_to(&state, wing), None, "one undo step undoes the join");
+
+    // One roof selected is the wing; Esc steps back to the first pick, then leaves.
+    state.selection = [wing].into_iter().collect();
+    crate::commands::run(&mut state, &ctx, UiCommand::JoinRoof);
+    assert_eq!(state.interaction.targets, vec![wing]);
+    let mut harness = app_harness(state);
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert_eq!(harness.state().tool, Tool::JoinRoof);
+    assert!(harness.state().interaction.targets.is_empty());
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert_eq!(harness.state().tool, Tool::Select);
+}
+
+/// A joined roof's properties name the roof it is joined to, and Unjoin
+/// there (or Unjoin Roof on the selection) clears the join.
+#[test]
+fn joined_roofs_show_and_unjoin_in_the_properties() {
+    use crate::commands::UiCommand;
+    let mut state = sample_state();
+    let (main, wing) = cross_wing(&mut state);
+    state.selection = [wing].into_iter().collect();
+    assert!(UiCommand::UnjoinRoof.unavailable(&state).is_some(), "not joined yet");
+    state.session.run(cc_engine::commands::roof_join::RoofJoin { roof: wing.0, to: main.0 }).unwrap();
+    assert_eq!(UiCommand::UnjoinRoof.unavailable(&state), None);
+    let mut harness = themed_harness(state, egui::vec2(360.0, 1600.0), egui::Theme::Light, |ui, state| {
+        crate::properties::show(ui, state);
+    });
+    harness.run();
+    // Row labels are painted; the value names the roof joined to.
+    let name = format!("{} {}", crate::i18n::tr(cc_core::Category::Roof.key()), main.0);
+    assert!(harness.query_by_label(&name).is_some(), "Joined to: {name}");
+    assert!(harness.query_by_label(&t!("section-roof-edges")).is_some());
+    harness.get_by_role_and_label(Role::Button, &t!("action-roof-unjoin")).click();
+    harness.run();
+    assert_eq!(joined_to(harness.state(), wing), None);
+    assert!(harness.query_by_label(&t!("action-roof-unjoin")).is_none(), "nothing left to unjoin");
+
+    // Unjoin Roof on the selection, one undo step for all.
+    let state = harness.state_mut();
+    state.session.run(cc_engine::commands::roof_join::RoofJoin { roof: wing.0, to: main.0 }).unwrap();
+    let depth = state.session.doc.undo_depth();
+    crate::commands::run(state, &egui::Context::default(), UiCommand::UnjoinRoof);
+    assert_eq!((joined_to(state, wing), state.session.doc.undo_depth()), (None, depth + 1));
+}
+
+/// Flat and shed roofs list an overhang per edge too (#382).
+#[test]
+fn flat_roofs_list_edge_overhangs() {
+    let mut state = sample_state();
+    let boundary = serde_json::json!([[100, 0], [104, 0], [104, 3], [100, 3]]);
+    let out = state.session.execute("roof_create", serde_json::json!({"boundary": boundary, "offset": 3})).unwrap();
+    let roof = cc_core::ElementId(out["id"].as_u64().unwrap());
+    state.session.execute("element_set", serde_json::json!({"id": roof.0, "params": {"shape": "Flat"}})).unwrap();
+    state.selection = [roof].into_iter().collect();
+    let mut harness = themed_harness(state, egui::vec2(360.0, 1600.0), egui::Theme::Light, |ui, state| {
+        crate::properties::show(ui, state);
+    });
+    harness.run();
+    assert!(harness.query_by_label(&t!("section-roof-edges")).is_some());
+    // Row labels are painted; each of the four edges has its overhang choice.
+    let roof_overhang = t!("roof-edge-overhang-default");
+    let rows = harness
+        .query_all_by_role(Role::ComboBox)
+        .filter(|n| n.value().as_deref() == Some(roof_overhang.as_str()))
+        .count();
+    assert_eq!(rows, 4, "an overhang row per edge");
+}

@@ -1135,10 +1135,11 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
                     }
                 });
             });
-            section(ui, "construction", t!("section-construction"), |ui| roof_rows(ui, state, id, r));
-            if matches!(r.shape, RoofShape::Gable { .. } | RoofShape::Hip { .. }) {
-                section(ui, "roof-edges", t!("section-roof-edges"), |ui| roof_edge_rows(ui, state, id, r));
-            }
+            section(ui, "construction", t!("section-construction"), |ui| {
+                roof_rows(ui, state, id, r);
+                roof_join_rows(ui, state, id, r);
+            });
+            section(ui, "roof-edges", t!("section-roof-edges"), |ui| roof_edge_rows(ui, state, id, r));
             if !r.holes.is_empty() {
                 section(ui, "roof-openings", t!("prop-roof-openings"), |ui| {
                     opening_rows(ui, state, id, &r.holes, false)
@@ -3091,13 +3092,21 @@ fn opening_rows(ui: &mut Ui, state: &mut AppState, id: ElementId, openings: &[Ve
 /// the roof's own slope, a gable end or a slope of its own; the roof's
 /// overhang or one of its own.
 fn roof_edge_rows(ui: &mut Ui, state: &mut AppState, id: ElementId, r: &cc_core::Roof) {
+    let n = r.footprint.len();
     let (slope, ridge) = match r.shape {
         RoofShape::Gable { slope, ridge_deg } => (slope, Some(glam::DVec2::from_angle(ridge_deg.to_radians()))),
         RoofShape::Hip { slope } => (slope, None),
-        _ => return,
+        // Flat and shed roofs have no slope per edge, only overhangs.
+        RoofShape::Flat | RoofShape::Shed { .. } => {
+            for i in 0..n {
+                let (a, b) = (r.footprint[i], r.footprint[(i + 1) % n]);
+                let label = t!("prop-roof-edge", "n" => i + 1, "length" => format::length(a.distance(b)));
+                roof_edge_overhang_row(ui, state, id, r, i, &label);
+            }
+            return;
+        }
     };
     let effective = cc_geom::roofs::edge_slopes(&r.footprint, slope, ridge, &r.edge_slopes);
-    let n = r.footprint.len();
     // 0: the roof's slope, 1: a gable end, 2: a slope of its own.
     let labels = [t!("roof-edge-default"), t!("roof-edge-gable"), t!("roof-edge-custom")];
     for i in 0..n {
@@ -3145,18 +3154,48 @@ fn roof_edge_rows(ui: &mut Ui, state: &mut AppState, id: ElementId, r: &cc_core:
             }
             finish(state, &d);
         }
-        roof_edge_overhang_row(ui, state, id, r, i);
+        roof_edge_overhang_row(ui, state, id, r, i, &t!("prop-overhang"));
+    }
+}
+
+/// The roof a roof is joined to, with Unjoin, and why the join is not
+/// built when the roofs do not meet.
+fn roof_join_rows(ui: &mut Ui, state: &mut AppState, id: ElementId, r: &cc_core::Roof) {
+    let target = r.join_to.map(|to| {
+        let name = state.project().element(to).map(|e| {
+            let mark = if e.mark.trim().is_empty() { to.0.to_string() } else { e.mark.clone() };
+            format!("{} {}", tr(e.category().key()), mark)
+        });
+        (to, name.unwrap_or_else(|| to.0.to_string()))
+    });
+    let text = target.as_ref().map_or_else(|| "\u{2014}".to_string(), |(_, name)| name.clone());
+    readonly_row(ui, &t!("prop-roof-joined-to"), text);
+    let Some((to, _)) = target else { return };
+    let inactive = state
+        .session
+        .geom()
+        .roof_joins
+        .get(&id)
+        .and_then(|j| j.state)
+        .is_some_and(|s| s != cc_geom::roof_join::JoinState::Joined);
+    if inactive {
+        // The reason is a sentence: wrapped under the row, not clipped in a cell.
+        padded(ui, |ui| ui.label(RichText::new(t!("msg-roof-join-inactive", "to" => to.0)).color(PALETTE.warning)));
+    }
+    let unjoin = crate::table::button_row(ui, |ui| ui.button(t!("action-roof-unjoin")).clicked());
+    if unjoin {
+        crate::actions::run_command(state, cc_engine::commands::roof_join::RoofUnjoin { roof: id.0 });
     }
 }
 
 /// The overhang of one roof edge: the roof's, or one of its own.
-fn roof_edge_overhang_row(ui: &mut Ui, state: &mut AppState, id: ElementId, r: &cc_core::Roof, i: usize) {
+fn roof_edge_overhang_row(ui: &mut Ui, state: &mut AppState, id: ElementId, r: &cc_core::Roof, i: usize, label: &str) {
     let labels = [t!("roof-edge-overhang-default"), t!("roof-edge-overhang-custom")];
     let current = usize::from(r.edge_overhang(i).is_some());
     let mut choice = current;
     let mut value = r.overhang_of(i);
     let mut drag = None;
-    row(ui, &t!("prop-overhang"), |ui| {
+    row(ui, label, |ui| {
         egui::ComboBox::from_id_salt(("roof-edge-overhang", id.0, i)).selected_text(labels[current].clone()).show_ui(
             ui,
             |ui| {
