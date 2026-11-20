@@ -3302,11 +3302,12 @@ impl<'a> Exporter<'a> {
                     "CEILING",
                 )
             }
-            // Pitched roofs, and any roof with openings, as their computed solid.
+            // Pitched roofs, any roof with openings, and roofs joins change, as their computed solid.
             ElementKind::Roof(r)
                 if matches!(r.shape, RoofShape::Gable { .. } | RoofShape::Hip { .. })
                     || !r.holes.is_empty()
-                    || !r.cuts.is_empty() =>
+                    || !r.cuts.is_empty()
+                    || self.geom.roof_joins.get(&id).is_some_and(|j| j.active()) =>
             {
                 self.write_pitched_roof(e, r, storey);
                 return;
@@ -3472,22 +3473,41 @@ impl<'a> Exporter<'a> {
         let product = self.w.add("IFCROOF", attrs);
         self.products.insert(e.id, product);
         self.register(e, product);
-        let projected = cc_geom::roofs::plan_area(r);
         let slope = match r.shape {
             RoofShape::Gable { slope, .. } | RoofShape::Hip { slope } | RoofShape::Shed { slope, .. } => slope,
             RoofShape::Flat => 0.0,
         };
+        // A roof a join changed counts the part it keeps.
+        let (projected, gross) = match geom.roof_joins.get(&e.id).filter(|j| j.active()) {
+            Some(j) => (j.plan_area, j.sloped_area),
+            None => {
+                let projected = cc_geom::roofs::plan_area(r);
+                (projected, projected * (1.0 + slope * slope).sqrt())
+            }
+        };
         self.quantities(
             e,
             "Qto_RoofBaseQuantities",
-            &[
-                ("GrossArea", Quantity::Area(projected * (1.0 + slope * slope).sqrt())),
-                ("ProjectedArea", Quantity::Area(projected)),
-            ],
+            &[("GrossArea", Quantity::Area(gross)), ("ProjectedArea", Quantity::Area(projected))],
         );
+        self.roof_join_set(e, product);
         if let TypeData::Roof { covering, framing, .. } = &ty.data {
             self.write_roof_framing(e, product, storey, level_z, *covering, framing);
         }
+    }
+
+    /// A roof's join in [`ROOF_JOIN_PSET`]: the GlobalId of the roof it is
+    /// joined to (`JoinedTo`), and whether a join changed its body
+    /// (`Joined`: joined, or cut by a roof joined to it), so importers keep
+    /// that body as it is.
+    fn roof_join_set(&mut self, e: &Element, roof: Id) {
+        let Some(j) = self.geom.roof_joins.get(&e.id) else { return };
+        let label = |s: Value| Value::Typed("IFCLABEL", Box::new(s));
+        let mut props = vec![("Joined", Value::Typed("IFCBOOLEAN", Box::new(j.active().into())))];
+        if let Some(to) = j.to.and_then(|t| self.project.element(t)) {
+            props.push(("JoinedTo", label(self.guid_of(to.uid, &format!("element-{}", to.id)))));
+        }
+        self.property_set(&format!("roof-join-{}", e.id), ROOF_JOIN_PSET, vec![roof], props);
     }
 
     /// A roof's covering and framing: the type's choices in [`ROOFING_PSET`]
@@ -3785,6 +3805,11 @@ pub const WALL_PROFILE_PSET: &str = "ConstructCAD_WallProfile";
 pub const WALL_LAYERS_PSET: &str = "ConstructCAD_WallLayers";
 /// Property set of a roof's covering and framing (see `write_roof_framing`).
 pub const ROOFING_PSET: &str = "ConstructCAD_Roofing";
+/// Property set of a roof joined to another, or cut by one (see
+/// `cc_core::Roof::join_to`): `JoinedTo`, the GlobalId of the roof it is
+/// joined to, and `Joined`, whether a join changed its body (then written
+/// as it is, and imported so).
+pub const ROOF_JOIN_PSET: &str = "ConstructCAD_RoofJoin";
 /// `Category` of the material profile of a cold-formed section (rolled and
 /// cold-formed steel share their materials).
 pub const COLD_FORMED_CATEGORY: &str = "ColdFormed";

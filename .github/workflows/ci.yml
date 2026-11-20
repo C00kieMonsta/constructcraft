@@ -68,6 +68,7 @@ jobs:
           cargo run --locked -p cc_ifc --example export_ifc -- crates/cc_ifc/tests/fixtures/mep.ccad target/ifc/mep.ifc
           cargo run --locked -p cc_ifc --example export_ifc -- crates/cc_ifc/tests/fixtures/arcs.ccad target/ifc/arcs.ifc
           cargo run --locked -p cc_ifc --example export_ifc -- crates/cc_ifc/tests/fixtures/roofs.ccad target/ifc/roofs.ifc
+          cargo run --locked -p cc_ifc --example export_ifc -- crates/cc_ifc/tests/fixtures/roof_joins.ccad target/ifc/roof_joins.ifc
           cargo run --locked -p cc_ifc --example export_ifc -- crates/cc_ifc/tests/fixtures/phases.ccad target/ifc/phases.ifc
           cargo run --locked -p cc_ifc --example export_ifc -- crates/cc_ifc/tests/fixtures/topography.ccad target/ifc/topography.ifc
           cargo run --locked -p cc_ifc --example export_ifc -- crates/cc_ifc/tests/fixtures/curtains.ccad target/ifc/curtains.ifc
@@ -85,6 +86,7 @@ jobs:
           python scripts/validate_ifc.py target/ifc/mep.ifc
           python scripts/validate_ifc.py target/ifc/arcs.ifc
           python scripts/validate_ifc.py target/ifc/roofs.ifc
+          python scripts/validate_ifc.py target/ifc/roof_joins.ifc
           python scripts/validate_ifc.py target/ifc/phases.ifc
           python scripts/validate_ifc.py target/ifc/topography.ifc
           python scripts/validate_ifc.py target/ifc/curtains.ifc
