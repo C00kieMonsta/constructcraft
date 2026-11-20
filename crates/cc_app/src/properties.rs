@@ -3087,8 +3087,9 @@ fn opening_rows(ui: &mut Ui, state: &mut AppState, id: ElementId, openings: &[Ve
     }
 }
 
-/// The slope of each outline edge of a gable or hip roof: the roof's own,
-/// a gable end, or a slope of its own.
+/// The slope and the overhang of each outline edge of a gable or hip roof:
+/// the roof's own slope, a gable end or a slope of its own; the roof's
+/// overhang or one of its own.
 fn roof_edge_rows(ui: &mut Ui, state: &mut AppState, id: ElementId, r: &cc_core::Roof) {
     let (slope, ridge) = match r.shape {
         RoofShape::Gable { slope, ridge_deg } => (slope, Some(glam::DVec2::from_angle(ridge_deg.to_radians()))),
@@ -3130,22 +3131,59 @@ fn roof_edge_rows(ui: &mut Ui, state: &mut AppState, id: ElementId, r: &cc_core:
                 1 => Some(0.0),
                 _ => Some(if slope > 0.0 { slope } else { 0.4 }),
             };
-            crate::actions::run_command(state, cc_engine::commands::create::RoofEdgeSet { id: id.0, edge: i, slope });
+            crate::actions::run_command(
+                state,
+                cc_engine::commands::create::RoofEdgeSet { id: id.0, edge: i, slope: Some(slope), overhang: None },
+            );
         } else if let Some(d) = drag {
             if d.changed() {
                 modify(state, id, &format!("edge-{i}"), |e| {
                     if let ElementKind::Roof(r) = &mut e.kind {
-                        if r.edge_slopes.len() <= i {
-                            r.edge_slopes.resize(i + 1, None);
-                        }
-                        if let Some(s) = r.edge_slopes.get_mut(i) {
-                            *s = Some(ratio.max(0.001));
-                        }
+                        r.set_edge_slope(i, Some(ratio.max(0.001)));
                     }
                 });
             }
             finish(state, &d);
         }
+        roof_edge_overhang_row(ui, state, id, r, i);
+    }
+}
+
+/// The overhang of one roof edge: the roof's, or one of its own.
+fn roof_edge_overhang_row(ui: &mut Ui, state: &mut AppState, id: ElementId, r: &cc_core::Roof, i: usize) {
+    let labels = [t!("roof-edge-overhang-default"), t!("roof-edge-overhang-custom")];
+    let current = usize::from(r.edge_overhang(i).is_some());
+    let mut choice = current;
+    let mut value = r.overhang_of(i);
+    let mut drag = None;
+    row(ui, &t!("prop-overhang"), |ui| {
+        egui::ComboBox::from_id_salt(("roof-edge-overhang", id.0, i)).selected_text(labels[current].clone()).show_ui(
+            ui,
+            |ui| {
+                for (k, l) in labels.iter().enumerate() {
+                    ui.selectable_value(&mut choice, k, l);
+                }
+            },
+        );
+        if current == 1 {
+            drag = Some(ui.add(length_drag(&mut value).speed(0.01)));
+        }
+    });
+    if choice != current {
+        let overhang = (choice == 1).then_some(r.overhang);
+        crate::actions::run_command(
+            state,
+            cc_engine::commands::create::RoofEdgeSet { id: id.0, edge: i, slope: None, overhang: Some(overhang) },
+        );
+    } else if let Some(d) = drag {
+        if d.changed() {
+            modify(state, id, &format!("edge-overhang-{i}"), |e| {
+                if let ElementKind::Roof(r) = &mut e.kind {
+                    r.set_edge_overhang(i, Some(value.max(0.0)));
+                }
+            });
+        }
+        finish(state, &d);
     }
 }
 

@@ -19,6 +19,11 @@
 //! (quadratic per event, cubic overall: footprints have tens of edges),
 //! merges points closer than a tolerance relative to the footprint size,
 //! and gives up with an error after a bounded number of events.
+//!
+//! An edge may also start late ([`skeleton_with_starts`]): its eave lies
+//! above the others (a roof edge with less overhang, its plane fixed by the
+//! wall line), so it stands still like a gable until the wavefront reaches
+//! its height, then moves in at its speed (a *start event*).
 
 use crate::polygon;
 use glam::DVec2;
@@ -42,6 +47,8 @@ pub struct Plane {
     pub length: f64,
     /// Inward horizontal distance per unit of height (0: a vertical gable).
     pub weight: f64,
+    /// Height of its eave, where it starts moving in (0 for most edges).
+    pub start: f64,
 }
 
 impl Plane {
@@ -50,7 +57,7 @@ impl Plane {
         if self.weight <= 0.0 {
             return 0.0;
         }
-        (p - self.origin).dot(self.dir.perp()) / self.weight
+        self.start + (p - self.origin).dot(self.dir.perp()) / self.weight
     }
 }
 
@@ -70,6 +77,9 @@ pub struct Skeleton {
     pub gables: Vec<(DVec2, f64, DVec2, f64, DVec2)>,
     /// Horizontal tops where the planes never close (all edges around them gables): `(height, polygon)`.
     pub flats: Vec<(f64, Vec<DVec2>)>,
+    /// The eaves of planes that start late (see [`Plane::start`]): the
+    /// pieces of the wavefront each one starts from, at its height.
+    pub late_eaves: Vec<(usize, DVec2, DVec2, f64)>,
 }
 
 impl Skeleton {
@@ -123,8 +133,47 @@ fn velocity(a: &Plane, b: &Plane) -> DVec2 {
 }
 
 impl Sim {
+    /// Plane `i` as it moves now: one that has not started yet stands still.
     fn plane(&self, i: usize) -> Plane {
-        self.planes.get(i).copied().unwrap_or(Plane { origin: DVec2::ZERO, dir: DVec2::X, length: 0.0, weight: 0.0 })
+        let mut p = self.planes.get(i).copied().unwrap_or(Plane {
+            origin: DVec2::ZERO,
+            dir: DVec2::X,
+            length: 0.0,
+            weight: 0.0,
+            start: 0.0,
+        });
+        if !self.started(&p) {
+            p.weight = 0.0;
+        }
+        p
+    }
+
+    /// Whether a plane moves at the current time.
+    fn started(&self, p: &Plane) -> bool {
+        p.start <= self.time + self.tol * 1e-3
+    }
+
+    /// Record where the planes that start now begin: the pieces of the
+    /// wavefront along them.
+    fn record_starts(&mut self, done: &mut [bool]) {
+        for (i, flag) in done.iter_mut().enumerate() {
+            let Some(p) = self.planes.get(i).copied() else { continue };
+            if *flag || p.start <= 0.0 || p.weight <= 0.0 || !self.started(&p) {
+                continue;
+            }
+            *flag = true;
+            for lp in &self.loops {
+                let n = lp.len();
+                for k in 0..n {
+                    if lp[k].out == i {
+                        let (a, b) = (lp[k].pos, lp[(k + 1) % n].pos);
+                        if a.distance(b) > self.tol {
+                            self.out.late_eaves.push((i, a, b, p.start));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn in_plane(&self, l: usize, k: usize) -> usize {
@@ -180,6 +229,16 @@ impl Sim {
                 best = Some(dt);
             }
         };
+        // Start events: a plane still on the wavefront begins to move.
+        for lp in &self.loops {
+            for v in lp {
+                if let Some(p) = self.planes.get(v.out)
+                    && p.weight > 0.0
+                {
+                    consider(p.start - self.time);
+                }
+            }
+        }
         for (l, lp) in self.loops.iter().enumerate() {
             let n = lp.len();
             for k in 0..n {
@@ -498,6 +557,17 @@ impl Sim {
 /// edge), with `weights[l][i]` the inward speed of edge `i` of loop `l`
 /// per unit of height (0 for a gable).
 pub fn skeleton(loops: &[Vec<DVec2>], weights: &[Vec<f64>]) -> Result<Skeleton, SkeletonError> {
+    skeleton_with_starts(loops, weights, &[])
+}
+
+/// [`skeleton`] with edges that start late: `starts[l][i]` is the height
+/// at which edge `i` of loop `l` starts moving in (missing: 0; negative or
+/// not finite: refused), standing still until then.
+pub fn skeleton_with_starts(
+    loops: &[Vec<DVec2>],
+    weights: &[Vec<f64>],
+    starts: &[Vec<f64>],
+) -> Result<Skeleton, SkeletonError> {
     let mut planes = Vec::new();
     let mut wave = Vec::new();
     let mut next_id = 0;
@@ -519,13 +589,14 @@ pub fn skeleton(loops: &[Vec<DVec2>], weights: &[Vec<f64>]) -> Result<Skeleton, 
         for (i, &a) in pts.iter().enumerate() {
             let b = pts[(i + 1) % pts.len()];
             let w = weights.get(l).and_then(|w| w.get(i)).copied().unwrap_or(0.0);
-            if !(a.is_finite() && b.is_finite() && w.is_finite()) {
+            let start = starts.get(l).and_then(|s| s.get(i)).copied().unwrap_or(0.0);
+            if !(a.is_finite() && b.is_finite() && w.is_finite() && start.is_finite() && start >= 0.0) {
                 return Err(SkeletonError::Invalid);
             }
             let Some(dir) = (b - a).try_normalize() else { return Err(SkeletonError::Invalid) };
             lo = lo.min(a);
             hi = hi.max(a);
-            planes.push(Plane { origin: a, dir, length: a.distance(b), weight: w.max(0.0) });
+            planes.push(Plane { origin: a, dir, length: a.distance(b), weight: w.max(0.0), start });
             lp.push(Vertex { id: next_id, pos: a, out: planes.len() - 1 });
             next_id += 1;
         }
@@ -547,13 +618,17 @@ pub fn skeleton(loops: &[Vec<DVec2>], weights: &[Vec<f64>]) -> Result<Skeleton, 
         swept: vec![Vec::new(); n_planes],
         runs: Default::default(),
     };
-    let budget = 8 * n_planes + 64;
+    // Late starts are events too.
+    let mut started = vec![false; n_planes];
+    let late = sim.planes.iter().filter(|p| p.start > 0.0).count();
+    let budget = 8 * n_planes + 2 * late + 64;
     for _ in 0..budget {
         // Topology changes at the current time.
         let mut settle = 4 * n_planes + 16;
         while settle > 0 && (sim.cleanup() | sim.splits()) {
             settle -= 1;
         }
+        sim.record_starts(&mut started);
         if sim.loops.is_empty() {
             let ids: Vec<usize> = sim.runs.keys().copied().collect();
             ids.into_iter().for_each(|id| sim.flush_run(id));

@@ -3312,7 +3312,7 @@ impl<'a> Exporter<'a> {
                 return;
             }
             ElementKind::Roof(r) => {
-                let fp = polygon::ccw(&polygon::offset(&r.footprint, r.overhang));
+                let fp = cc_geom::roofs::outline(r).points;
                 match r.shape {
                     RoofShape::Flat => (
                         Frame::at(DVec3::new(0.0, 0.0, r.base_offset)),
@@ -3329,7 +3329,7 @@ impl<'a> Exporter<'a> {
                         let a = direction_deg.to_radians();
                         let d = DVec2::new(a.cos(), a.sin());
                         let across = d.perp();
-                        let min = fp.iter().map(|p| p.dot(d)).fold(f64::INFINITY, f64::min);
+                        let min = cc_geom::roofs::shed_low(r, d);
                         let stretch = (1.0 + slope * slope).sqrt();
                         let c = 1.0 / stretch;
                         let frame = Frame {
