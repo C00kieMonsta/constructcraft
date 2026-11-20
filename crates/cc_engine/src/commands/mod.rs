@@ -54,6 +54,7 @@ pub mod ramp;
 pub mod rebar;
 pub mod region;
 pub mod render;
+pub mod roof_join;
 pub mod roofing;
 pub mod schedule;
 pub mod shaft;

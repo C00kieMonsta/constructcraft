@@ -957,7 +957,9 @@ impl ModelGeometry {
     /// centerline the top follows the plane of the target's underside above
     /// it (the lowest where several meet, as along a ridge), and keeps its
     /// own height where the target is not above. A wall straddling the
-    /// target's edge counts as under it. Arc walls keep their own top.
+    /// target's edge counts as under it. A roof joined with others counts
+    /// with them (see [`crate::roof_join::joined_group`]). Arc walls keep
+    /// their own top.
     fn attach_wall_tops(&mut self, project: &Project) {
         let attached: Vec<(ElementId, ElementId)> = project
             .walls()
@@ -973,10 +975,13 @@ impl ModelGeometry {
             // Curtain walls keep their grid under a flat top.
             let Some(g) = self.walls.get(&wall).filter(|g| g.curtain.is_none()) else { continue };
             // The target's undersides (faces turned down) as plan outlines,
-            // reaching half the wall further, with their planes.
+            // reaching half the wall further, with their planes; a roof's,
+            // and those of the roofs joined with it.
             let reach = g.half + 0.01;
-            let planes: Vec<(Vec<DVec2>, DVec3, DVec3)> = self
-                .body_of(target)
+            let targets = crate::roof_join::joined_group(&self.roof_joins, target);
+            let planes: Vec<(Vec<DVec2>, DVec3, DVec3)> = targets
+                .iter()
+                .flat_map(|t| self.body_of(*t))
                 .flat_map(|s| s.faces.iter())
                 .filter(|f| f.normal.z < -1e-6 && f.verts.len() >= 3)
                 .map(|f| {

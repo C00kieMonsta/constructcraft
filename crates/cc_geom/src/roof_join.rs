@@ -157,6 +157,23 @@ pub struct Resolved {
     pub joins: BTreeMap<ElementId, RoofJoinGeom>,
 }
 
+/// Roof `id` and the roofs joined with it by joins that are built,
+/// directly or through others, either way.
+pub fn joined_group(joins: &BTreeMap<ElementId, RoofJoinGeom>, id: ElementId) -> BTreeSet<ElementId> {
+    let mut group = BTreeSet::from([id]);
+    let mut todo = vec![id];
+    while let Some(at) = todo.pop() {
+        let Some(j) = joins.get(&at) else { continue };
+        let to = j.to.filter(|_| j.state == Some(JoinState::Joined));
+        for next in to.into_iter().chain(j.cut_by.iter().copied()) {
+            if group.insert(next) {
+                todo.push(next);
+            }
+        }
+    }
+    group
+}
+
 /// The roof joins of `project`.
 pub fn resolve(project: &Project) -> Resolved {
     resolve_with(project, &|id| project.roof_join_target(id), None)
@@ -1121,6 +1138,11 @@ mod tests {
         let ridge = ridges.iter().find(|(a, b)| close(a.x, 5.0) && close(b.x, 5.0)).expect("a ridge along x = 5");
         let (lo, hi) = (ridge.0.y.min(ridge.1.y), ridge.0.y.max(ridge.1.y));
         assert!(close(lo, -6.0) && close(hi, 2.0), "{ridges:?}");
+        let underside = g
+            .body_of(wing)
+            .flat_map(|s| s.faces.iter().filter(|f| f.normal.z < -0.1).flat_map(|f| f.verts.iter().map(|v| v.z)))
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(close(underside, 4.0), "{underside}");
         check_areas(&m, &g, &[(wing, 28.0), (main, 76.0)]);
         assert_eq!(join(&g, main).cut_by, vec![wing]);
         assert!(close(join(&g, main).area, 76.0) && close(j.area, 28.0));

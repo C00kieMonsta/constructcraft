@@ -132,19 +132,28 @@ pub(crate) fn plan_drawing(
                 }
             }
             ElementKind::Roof(r) => {
-                let outline = cc_geom::roofs::outline(r).points;
-                d.polyline(&outline, true, LineStyle::Projection, id);
+                let joined = geom.roof_joins.get(&e.id).filter(|j| j.active());
+                // Joined to another roof, or cut by one: its outline as the joins left it
+                // (the valleys are drawn with the ridges).
+                for &(a, b) in joined.iter().flat_map(|j| &j.outline_edges) {
+                    d.line(a, b, LineStyle::Projection, id);
+                }
+                if joined.is_none() {
+                    d.polyline(&cc_geom::roofs::outline(r).points, true, LineStyle::Projection, id);
+                }
                 if r.overhang > 0.0 || r.edge_overhangs.iter().flatten().any(|o| *o > 0.0) {
                     d.polyline(&r.footprint, true, LineStyle::Hidden, id);
                 }
                 // Courtyards: the eaves reach over them by the overhang.
                 for hole in &r.holes {
-                    d.polyline(&polygon::offset(hole, -r.overhang), true, LineStyle::Projection, id);
+                    if joined.is_none() {
+                        d.polyline(&polygon::offset(hole, -r.overhang), true, LineStyle::Projection, id);
+                    }
                     if r.overhang > 0.0 {
                         d.polyline(hole, true, LineStyle::Hidden, id);
                     }
                 }
-                for cut in &r.cuts {
+                for cut in r.cuts.iter().filter(|_| joined.is_none()) {
                     d.polyline(cut, true, LineStyle::Projection, id);
                 }
                 for &(a, b) in geom.roof_ridges.get(&e.id).into_iter().flatten() {
