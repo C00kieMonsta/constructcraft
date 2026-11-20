@@ -866,7 +866,7 @@ fn modify_tab(ui: &mut Ui, state: &mut AppState) {
     });
     group(ui, t!("group-measure"), |ui| command_button(ui, state, Measure));
     group(ui, t!("group-geometry"), |ui| {
-        command_buttons(ui, state, &[JoinGeometry, UnjoinGeometry, AttachTop, DetachTop, Paint, RemovePaint])
+        command_buttons(ui, state, &[JoinGeometry, UnjoinGeometry, AttachTop, DetachTop, FlipWalls, Paint, RemovePaint])
     });
     group(ui, t!("group-sketch"), |ui| {
         command_buttons(ui, state, &[EditBoundary, EditProfile, EditWallProfile, ResetWallProfile])

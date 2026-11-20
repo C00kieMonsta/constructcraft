@@ -3259,6 +3259,33 @@ fn title_block_editor_snapshot() {
     harness.snapshot("title_block_editor");
 }
 
+/// Space with walls selected flips them (one undo step), and the Flip
+/// Walls command does the same.
+#[test]
+fn space_flips_the_selected_walls() {
+    use crate::commands::UiCommand;
+    let mut state = sample_state();
+    let wall = state.project().walls().map(|(e, _)| e.id).next().unwrap();
+    let ends = |state: &AppState| state.project().element(wall).and_then(|e| e.as_wall()).map(|w| (w.start, w.end));
+    let (start, end) = ends(&state).unwrap();
+    assert_eq!(UiCommand::FlipWalls.unavailable(&state), Some(t!("why-select-walls")));
+    state.selection = [wall].into_iter().collect();
+    assert_eq!(UiCommand::FlipWalls.unavailable(&state), None);
+    let mut harness = themed_harness(state, egui::vec2(300.0, 200.0), egui::Theme::Light, |ui, state| {
+        crate::app::shortcuts(ui.ctx(), state);
+    });
+    harness.run();
+    let depth = harness.state().session.doc.undo_depth();
+    harness.key_press(egui::Key::Space);
+    harness.run();
+    assert_eq!(ends(harness.state()), Some((end, start)), "flipped");
+    assert_eq!(harness.state().session.doc.undo_depth(), depth + 1);
+    assert_eq!(harness.state().message, t!("msg-walls-flipped"));
+    // The command flips it back.
+    crate::commands::run(harness.state_mut(), &egui::Context::default(), UiCommand::FlipWalls);
+    assert_eq!(ends(harness.state()), Some((start, end)), "flipped back");
+}
+
 /// A section's mark in a plan is picked by a click on its head, flipped
 /// with Space and moved by dragging its line.
 #[test]

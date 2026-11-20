@@ -73,5 +73,6 @@ pub use stair::{
 };
 pub use strip::StripArc;
 pub use wall::{Band, Column, LayerGap, Lin, Opening, RECESS_MIN_BACK, Recess, WallGeom};
+pub use wall_rebar::flipped_vertical_offset;
 
 pub use glam::{DVec2, DVec3};

@@ -338,6 +338,7 @@ registry![
         modify::ElementsMirror,
         modify::ElementsPin,
         modify::ElementFlip,
+        modify::WallFlip,
         modify::ElementsTurn,
         modify::ElementsExport,
         modify::ElementsPaste,

@@ -60,7 +60,7 @@ The detailed notes (types, functions, invariants, commands and app entry points 
 
 - [`docs/architecture/core.md`](docs/architecture/core.md) — cc_core, Components, cc_engine, Measurement systems, Visual programming graphs, cc_plugins, cc_cli.
 - [`docs/architecture/geometry.md`](docs/architecture/geometry.md) — cc_geom, cc_render, Joined pieces.
-- [`docs/architecture/walls.md`](docs/architecture/walls.md) — Curtain walls, Wall profiles, Spline walls, Niches.
+- [`docs/architecture/walls.md`](docs/architecture/walls.md) — Curtain walls, Wall profiles, Spline walls, Niches, Wall flip. 
 - [`docs/architecture/elements.md`](docs/architecture/elements.md) — Sketches, Roof coverings and framing, Conceptual masses, Terrain, Building pads, Shafts, Swept profiles.
 - [`docs/architecture/structure.md`](docs/architecture/structure.md) — Piles and pile caps, Structural profiles, Structure by material, Steel buildings, Member hosts and trusses, Bracing, Wall framing, Connections.
 - [`docs/architecture/reinforcement.md`](docs/architecture/reinforcement.md) — Bar marks and bending schedule, Wall reinforcement, Slab reinforcement, Strip footings with a beam and curved rafts, Pile caps and piles.
