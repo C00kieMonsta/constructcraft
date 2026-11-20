@@ -328,8 +328,16 @@ pub fn add_skeleton_roof(solid: &mut Solid, sk: &crate::skeleton::Skeleton, base
             solid.faces.push(Face::new(under, un));
         }
     };
-    for (plane, pts) in &sk.faces {
-        surface(pts, &|p| sk.face_height(*plane, p));
+    for (i, (plane, pts)) in sk.faces.iter().enumerate() {
+        let holes: Vec<Vec<DVec2>> = sk.face_holes.iter().filter(|(f, _)| *f == i).map(|(_, h)| h.clone()).collect();
+        if holes.is_empty() {
+            surface(pts, &|p| sk.face_height(*plane, p));
+        } else {
+            // A plane all the way round an opening, in triangles (a face has one outline).
+            for t in polygon::triangulate_with_holes(pts, &holes) {
+                surface(&t, &|p| sk.face_height(*plane, p));
+            }
+        }
     }
     for (height, pts) in &sk.flats {
         surface(pts, &|_| *height);
@@ -434,6 +442,30 @@ mod tests {
             crate::skeleton::skeleton(&[rect(10.0, 6.0)], &eave_weights(&[rect(10.0, 6.0)], 0.75, None, &[])).unwrap();
         let true_area: f64 = sk.faces.iter().map(|(_, f)| polygon::area(f) * (1.0f64 + 0.75 * 0.75).sqrt()).sum();
         assert!((true_area - 60.0 * 1.25).abs() < 1e-9);
+    }
+
+    /// Issue #380: the slab of a gable roof with a notch cut into its north
+    /// eave right up to a corner tops out at the ridge, and one whose north
+    /// plane runs round an opening leaves the opening out: the volumes are
+    /// the plan area times the (vertical) thickness.
+    #[test]
+    fn notched_and_holed_gable_roofs_are_closed_slabs() {
+        let pts = |c: &[(f64, f64)]| c.iter().map(|&(x, y)| DVec2::new(x, y)).collect::<Vec<_>>();
+        let notched = pts(&[(0.0, 0.0), (13.716, 0.0), (13.716, 7.01), (11.125, 4.419), (8.534, 7.01), (0.0, 7.01)]);
+        let own = [None, Some(0.0), Some(0.0), Some(0.0), None, Some(0.0)];
+        let weights = eave_weights(std::slice::from_ref(&notched), 0.42, Some(DVec2::X), &own);
+        let sk = crate::skeleton::skeleton(std::slice::from_ref(&notched), &weights).unwrap();
+        let mut s = Solid::new(ElementId(1), Category::Roof, [0; 3]);
+        add_skeleton_roof(&mut s, &sk, 3.0, 0.2);
+        assert!((s.volume() - polygon::area(&notched) * 0.2).abs() < 1e-6, "{}", s.volume());
+        let (_, hi) = s.bounds().unwrap();
+        assert!((hi.z - (3.0 + 3.505 * 0.42 + 0.2)).abs() < 1e-9, "the ridge is the top: {}", hi.z);
+        // An opening with gable sides (steeper than 45° to the ridge) and a sloped top.
+        let outer = rect(13.716, 7.01);
+        let hole = pts(&[(9.5, 6.5), (12.5, 6.5), (11.0, 4.4)]);
+        let s = skeleton_solid(&[outer.clone(), hole.clone()], 0.42, Some(DVec2::X), 0.2);
+        let area = polygon::area(&outer) - polygon::area(&hole);
+        assert!((s.volume() - area * 0.2).abs() < 1e-6, "{} vs {}", s.volume(), area * 0.2);
     }
 
     #[test]
