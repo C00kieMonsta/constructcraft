@@ -347,7 +347,7 @@ pub fn run_pending(state: &mut AppState, action: PendingAction) {
 
 /// Close the project and return to the home screen.
 fn close_project(state: &mut AppState) {
-    state.replace_document(Document::new(new_project()));
+    state.close_document(Document::new(new_project()));
     state.project_open = false;
     state.show_home = true;
     state.message = t!("msg-project-closed");

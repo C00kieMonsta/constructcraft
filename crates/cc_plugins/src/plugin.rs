@@ -87,8 +87,9 @@
 //! truncated, other }`. Handlers run in plugin load order, then
 //! registration order, each with a smaller budget ([`EVENT_INSTRUCTIONS`],
 //! [`EVENT_TIME`]), inside [`Session::with_event_scope`]: queries and
-//! `ccad.data.set` for the plugin's own data (one undo step per plugin and
-//! event), no files. A handler's error never fails the command that fired
+//! `ccad.data.set` for the plugin's own data (part of the command's undo
+//! step after `model_changed`, one undo step of its own per plugin after the
+//! other events), no files. A handler's error never fails the command that fired
 //! it: it becomes a message (`[id] …`), the handler's own edits are dropped,
 //! and after [`MAX_FAILURES`] failures in a row the handler is turned off for
 //! the session.

@@ -2665,6 +2665,40 @@ fn plugins_folder(name: &str) -> std::path::PathBuf {
     root
 }
 
+/// Plugins hear `project_opened` for a new or opened project, not for the
+/// blank document behind the home screen after Close.
+#[test]
+fn closing_a_project_opens_none_for_plugins() {
+    let root = std::env::temp_dir().join(format!("ccad-plugins-ui-{}-events", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let dir = root.join("watch");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("plugin.toml"),
+        "id = \"watch\"
+name = \"Watch\"
+version = \"1.0\"
+api = 2
+",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("main.lua"),
+        "ccad.on('project_opened', function(e) print('opened ' .. tostring(e.new)) end)",
+    )
+    .unwrap();
+    let mut state = sample_state();
+    state.prefs.plugin_folder = Some(root.clone());
+    crate::plugins_ui::load(&mut state);
+    assert_eq!(state.session.take_extension_messages(), vec!["[watch] opened true"], "heard when loaded");
+    crate::actions::run_pending(&mut state, crate::state::PendingAction::Close);
+    assert!(state.session.take_extension_messages().is_empty(), "nothing opened on Close");
+    assert!(state.session.extension().is_some(), "the plugins stay");
+    crate::actions::run_pending(&mut state, crate::state::PendingAction::New(cc_core::MeasurementSystem::Metric));
+    assert_eq!(state.session.take_extension_messages(), vec!["[watch] opened true"]);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// The Plugins window lists the folder's plugins; turning one off takes its
 /// commands out of the session, and the loaded plugins stay with a new document.
 #[test]

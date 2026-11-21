@@ -106,7 +106,7 @@ pub use design_option::{DesignOption, OptionSet};
 pub use detail::{DetailLine, DetailStyle, LineStyleDef, LineStyleRef};
 pub use detail_component::DetailComponent;
 pub use dim_refs::{DimRef, Projection, RefAnchor, RefHeight, RefTarget};
-pub use document::{Document, EditCtx, ElementChanges, Transaction};
+pub use document::{Document, EditCtx, ElementChanges, HistoryMark, Transaction};
 pub use element::{
     AnchorHook, Anchorage, BarEnd, BarFace, Beam, BeamLateral, BeamVertical, Ceiling, Column, Component, Dimension,
     DimensionKind, Element, ElementKind, FaceBars, Floor, Foundation, FoundationShape, Grid, Hosted, Leader,

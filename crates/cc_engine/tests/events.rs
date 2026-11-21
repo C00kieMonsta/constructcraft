@@ -189,7 +189,7 @@ fn long_id_lists_are_cut() {
 }
 
 #[test]
-fn handlers_store_their_own_data_in_one_step_and_nothing_else() {
+fn handlers_store_their_own_data_in_the_command_step_and_nothing_else() {
     let react: Reaction = Box::new(|s, e| match e {
         Event::ModelChanged(c) => {
             // Its own data goes through (and fires nothing: no loop) ...
@@ -209,22 +209,20 @@ fn handlers_store_their_own_data_in_one_step_and_nothing_else() {
     wall(&mut session, 0.0);
     assert_eq!(changed(&log).len(), 1);
     assert_eq!(results.borrow_mut().pop().unwrap().unwrap(), json!([true, true, "rejected", "rejected", "rejected"]));
-    // The wall, then the handler's edits as one step named after the plugin.
-    assert_eq!(session.doc.undo_depth(), depth + 2);
-    assert!(session.doc.undo_name().unwrap().contains("Plugin P"), "{:?}", session.doc.undo_name());
+    // The handler's edits joined the wall's undo step.
+    assert_eq!(session.doc.undo_depth(), depth + 1);
+    assert!(!session.doc.undo_name().unwrap().contains("Plugin P"), "{:?}", session.doc.undo_name());
     assert_eq!(session.execute("plugin_data_get", json!({"plugin": "p"})).unwrap(), json!(["wall_create"]));
     // Only the wall is recorded in the macro.
     let steps = session.stop_recording();
     assert_eq!(steps.iter().map(|s| s.command.as_str()).collect::<Vec<_>>(), vec!["wall_create"]);
-    // After undo and redo, handlers only query: storing would clear the
-    // redo history and come back on every undo.
+    // One undo takes back both. After undo and redo, handlers only query:
+    // storing would clear the redo history.
     session.execute("undo", json!({})).unwrap();
     assert_eq!(results.borrow_mut().pop().unwrap().unwrap()[0], json!(false));
+    assert!(ids(&mut session).is_empty());
     assert_eq!(session.execute("plugin_data_get", json!({"plugin": "p"})).unwrap(), Value::Null);
     assert!(session.doc.can_redo());
-    session.execute("undo", json!({})).unwrap();
-    assert!(ids(&mut session).is_empty());
-    session.execute("redo", json!({})).unwrap();
     session.execute("redo", json!({})).unwrap();
     assert_eq!(session.execute("plugin_data_get", json!({"plugin": "p"})).unwrap(), json!(["wall_create"]));
     assert_eq!(ids(&mut session).len(), 1);
@@ -237,19 +235,70 @@ fn code(r: cc_engine::Result<Value>) -> String {
     }
 }
 
+/// Stores how many `model_changed` it heard.
+fn counting() -> Reaction {
+    let mut n = 0;
+    Box::new(move |s, e| match e {
+        Event::ModelChanged(_) => {
+            n += 1;
+            Some(s.execute("plugin_data_set", json!({"plugin": "p", "data": n})))
+        }
+        Event::ProjectSaving { .. } => Some(s.execute("plugin_data_set", json!({"plugin": "p", "data": "saving"}))),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_dragged_value_stays_one_step_with_the_handler_data() {
+    let Setup { mut session, .. } = setup(Some(counting()));
+    let id = wall(&mut session, 0.0);
+    let depth = session.doc.undo_depth();
+    for mark in ["a", "b", "c"] {
+        let set = cc_engine::commands::edit::ElementSet {
+            id: id.0,
+            level: None,
+            type_ref: None,
+            mark: Some(mark.into()),
+            comments: None,
+            params: None,
+        };
+        session.run_merged(42, set).unwrap();
+        assert_eq!(session.doc.undo_depth(), depth + 1, "still one merged step after {mark}");
+    }
+    assert_eq!(session.execute("plugin_data_get", json!({"plugin": "p"})).unwrap(), json!(4));
+    // One undo takes back the whole drag and what the handler stored meanwhile.
+    session.execute("undo", json!({})).unwrap();
+    assert_eq!(session.execute("element_get", json!({"id": id.0})).unwrap()["mark"], json!(""));
+    assert_eq!(session.execute("plugin_data_get", json!({"plugin": "p"})).unwrap(), json!(1));
+    assert_eq!(session.doc.undo_depth(), depth);
+}
+
+#[test]
+fn saving_handlers_get_a_step_of_their_own() {
+    let Setup { mut session, .. } = setup(Some(counting()));
+    wall(&mut session, 0.0);
+    let depth = session.doc.undo_depth();
+    let dir = scratch("own-step");
+    session.execute("project_save", json!({"path": dir.join("s.ccad")})).unwrap();
+    assert_eq!(session.doc.undo_depth(), depth + 1);
+    assert!(session.doc.undo_name().unwrap().contains("Plugin P"), "{:?}", session.doc.undo_name());
+    // Stored before the file was written: saved with it, nothing unsaved.
+    assert!(!session.doc.is_dirty());
+    session.execute("undo", json!({})).unwrap();
+    assert_eq!(session.execute("plugin_data_get", json!({"plugin": "p"})).unwrap(), json!(1));
+    assert_eq!(ids(&mut session).len(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_macro_step_steps_back_with_its_handler_edits() {
-    let react: Reaction = Box::new(|s, e| match e {
-        Event::ModelChanged(c) => Some(s.execute("plugin_data_set", json!({"plugin": "p", "data": c.command}))),
-        _ => None,
-    });
-    let Setup { mut session, .. } = setup(Some(react));
+    let Setup { mut session, .. } = setup(Some(counting()));
     let steps =
         cc_engine::script::parse(r#"[{"command": "wall_create", "args": {"start": [0, 0], "end": [3, 0]}}]"#).unwrap();
     let mut stepper = cc_engine::script::Stepper::new(steps);
     let depth = session.doc.undo_depth();
     stepper.next(&mut session).unwrap();
-    assert_eq!(session.doc.undo_depth(), depth + 2);
+    assert_eq!(session.doc.undo_depth(), depth + 1);
     stepper.back(&mut session).unwrap();
     assert_eq!(session.doc.undo_depth(), depth);
     assert!(ids(&mut session).is_empty());

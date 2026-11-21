@@ -26,8 +26,10 @@
 //! `ccad script`, `ccad lua` or the macro editor is a top-level command: it
 //! is its own undo step, and fires its own events. Handlers run in
 //! [`Session::with_event_scope`]: queries, plus `plugin_data_set` for their
-//! own plugin (none after `undo`/`redo`), no files; their edits for one event
-//! are one undo step of their own, never recorded in a macro.
+//! own plugin (none after `undo`/`redo`), no files. Their edits after
+//! `model_changed` join the undo step of the command that fired it (a
+//! dragged value stays one merged step); after the other events they are one
+//! undo step of their own. They are never recorded in a macro.
 
 use crate::error::Result;
 use crate::registry::CommandInfo;

@@ -46,6 +46,10 @@ pub struct Session {
     /// Whether the document was replaced during the top-level command
     /// running ([`Session::replace`]).
     replaced: bool,
+    /// Whether the event being handled follows an edit command that left its
+    /// own undo step on top, which handlers' edits join (see
+    /// [`Session::with_event_scope`]).
+    fold_events: bool,
 }
 
 /// What a view's own geometry depends on: its phase (an index, when it
@@ -100,6 +104,7 @@ impl Session {
             scopes: Vec::new(),
             firing: false,
             replaced: false,
+            fold_events: false,
         }
     }
 
@@ -529,8 +534,11 @@ impl Session {
     /// user) for `event`, in its scope: queries, plus `plugin_data_set` for
     /// its own id (only queries after `undo` and `redo`, whose edits would
     /// clear the redo history and come back on every undo), and no files.
-    /// What they change becomes one undo step of its own, named after the
-    /// plugin (`tx-plugin-event`); nothing when they change nothing.
+    /// What they change after an edit command (`model_changed`) joins that
+    /// command's undo step, so one undo takes back both and a dragged value
+    /// stays one merged step; after other events (or a command that left no
+    /// step of its own) it becomes one undo step of its own, named after the
+    /// plugin (`tx-plugin-event`). Nothing when they change nothing.
     pub fn with_event_scope<R>(
         &mut self,
         event: &crate::Event,
@@ -543,10 +551,23 @@ impl Session {
             _ => crate::ScopeEdits::OwnData,
         };
         let scope = crate::PluginScope { plugin: plugin.to_string(), edits, files: crate::FileAccess::None };
-        let depth = self.doc.undo_depth();
+        let mark = self.doc.history_mark();
         let out = self.with_plugin_scope(scope, f);
-        self.doc.squash_since(depth, t!("tx-plugin-event", "plugin" => name));
+        let fold = self.fold_events && matches!(event, crate::Event::ModelChanged(_));
+        if !(fold && self.doc.fold_since(mark)) {
+            self.doc.squash_since(mark.depth(), t!("tx-plugin-event", "plugin" => name));
+        }
         out
+    }
+
+    /// [`Session::set_extension`] without `project_opened`: moving the loaded
+    /// plugins to a session whose project the user did not open (the app's
+    /// blank document after closing a project).
+    pub fn set_extension_quietly(
+        &mut self,
+        extension: Option<Box<dyn crate::Extension>>,
+    ) -> Option<Box<dyn crate::Extension>> {
+        std::mem::replace(&mut self.extension, extension)
     }
 
     pub fn extension(&self) -> Option<&dyn crate::Extension> {
@@ -755,6 +776,7 @@ impl Session {
             self.replaced = false;
         }
         let depth = self.doc.undo_depth();
+        let history = (depth, self.doc.undo_top_id());
         let merge_key = self.merge_key;
         // Commands run by another command are part of it, not steps of a macro.
         let recorded_args = (self.recording.is_some() && self.nesting == 0).then(|| args.clone());
@@ -779,7 +801,7 @@ impl Session {
         if top {
             let changes = if journal { self.doc.take_journal() } else { None };
             if result.is_ok() {
-                self.fire_after(name, changes);
+                self.fire_after(name, changes, history);
             }
         }
         result
@@ -787,8 +809,8 @@ impl Session {
 
     /// The events of the top-level command `name` that succeeded, with what
     /// its document's journal noted (`None` when it was off or the document
-    /// was replaced).
-    fn fire_after(&mut self, name: &str, changes: Option<cc_core::ElementChanges>) {
+    /// was replaced) and the undo history's depth and top step before it.
+    fn fire_after(&mut self, name: &str, changes: Option<cc_core::ElementChanges>, history: (usize, Option<u64>)) {
         if std::mem::take(&mut self.replaced) {
             let path = self.doc.path.clone();
             self.fire(crate::Event::ProjectOpened { new: path.is_none(), path });
@@ -797,7 +819,13 @@ impl Session {
                 self.fire(crate::Event::ProjectSaved { path });
             }
         } else if let Some(changes) = changes.filter(|c| !c.is_empty()) {
-            self.fire(crate::Event::ModelChanged(crate::ModelChange::new(name, changes)));
+            let change = crate::ModelChange::new(name, changes);
+            // The command left a step of its own on top (a new one, or one it
+            // merged into), unless it moved in the history.
+            let now = (self.doc.undo_depth(), self.doc.undo_top_id());
+            self.fold_events = !change.is_history() && now != history && now.0 >= history.0;
+            self.fire(crate::Event::ModelChanged(change));
+            self.fold_events = false;
         }
     }
 

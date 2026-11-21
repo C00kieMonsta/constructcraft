@@ -69,10 +69,10 @@ fn handlers_get_each_event_with_its_payload() {
     let depth = s.doc.undo_depth();
     create_wall(&mut s);
     let id = walls(&mut s)[0];
-    // The handler may not edit the model, but keeps its own data, in an
-    // undo step of its own; its own edit fires nothing more.
+    // The handler may not edit the model, but keeps its own data, in the
+    // command's undo step; its own edit fires nothing more.
     assert_eq!(s.take_extension_messages(), vec!["[ev] changed wall_create +1 ~0 -0", "[ev] edit rejected"]);
-    assert_eq!(s.doc.undo_depth(), depth + 2);
+    assert_eq!(s.doc.undo_depth(), depth + 1);
     assert_eq!(
         s.execute("plugin_data_get", json!({"plugin": "ev"})).unwrap(),
         json!({"last": "wall_create", "added": [id]})
@@ -82,13 +82,12 @@ fn handlers_get_each_event_with_its_payload() {
     assert_eq!(s.take_extension_messages()[0], "[ev] changed element_set +0 ~1 -0");
     s.execute("elements_delete", json!({"ids": [id]})).unwrap();
     assert_eq!(s.take_extension_messages()[0], "[ev] changed elements_delete +0 ~0 -1");
-    // Undo first takes back the handler's step (other data), then the delete.
+    // One undo takes back the delete and the data the handler kept for it.
     s.execute("undo", json!({})).unwrap();
-    assert_eq!(s.take_extension_messages()[0], "[ev] changed undo +0 ~0 -0 other");
-    s.execute("undo", json!({})).unwrap();
-    assert_eq!(s.take_extension_messages()[0], "[ev] changed undo +1 ~0 -0");
+    assert_eq!(s.take_extension_messages()[0], "[ev] changed undo +1 ~0 -0 other");
+    assert_eq!(s.execute("plugin_data_get", json!({"plugin": "ev"})).unwrap()["last"], json!("element_set"));
     s.execute("redo", json!({})).unwrap();
-    assert_eq!(s.take_extension_messages()[0], "[ev] changed redo +0 ~0 -1");
+    assert_eq!(s.take_extension_messages()[0], "[ev] changed redo +0 ~0 -1 other");
     // A plugin command fires once, under its full name.
     s.execute("ev__walls", json!({})).unwrap();
     assert_eq!(s.take_extension_messages()[0], "[ev] changed ev__walls +2 ~0 -0");
@@ -114,10 +113,12 @@ fn handlers_get_each_event_with_its_payload() {
 fn handler_edits_stay_out_of_macros() {
     let mut s = session_with(vec![load("macro", "ev", TRACKER, Limits::default()).unwrap()]);
     s.start_recording();
+    let depth = s.doc.undo_depth();
     create_wall(&mut s);
     let steps = s.stop_recording();
     assert_eq!(steps.iter().map(|st| st.command.as_str()).collect::<Vec<_>>(), vec!["wall_create"]);
-    assert!(s.doc.undo_name().unwrap().contains("ev name"), "{:?}", s.doc.undo_name());
+    assert_eq!(s.doc.undo_depth(), depth + 1);
+    assert!(s.execute("plugin_data_get", json!({"plugin": "ev"})).unwrap().is_object());
 }
 
 #[test]

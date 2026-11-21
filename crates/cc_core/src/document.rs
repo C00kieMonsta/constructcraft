@@ -1240,6 +1240,20 @@ impl ElementChanges {
     }
 }
 
+/// A point of a [`Document`]'s undo history ([`Document::history_mark`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HistoryMark {
+    depth: usize,
+    merge_key: Option<u64>,
+}
+
+impl HistoryMark {
+    /// The undo depth then.
+    pub fn depth(&self) -> usize {
+        self.depth
+    }
+}
+
 /// An open project plus its undo history and file state. Cloned to run a
 /// long command (an import) on another thread while the app keeps drawing.
 #[derive(Clone)]
@@ -1313,6 +1327,45 @@ impl Document {
         if let Some(j) = &mut self.journal {
             j.note(tx, forward);
         }
+    }
+
+    /// Where the undo history stands: its depth and the merge key of its
+    /// last step (see [`Document::fold_since`]).
+    pub fn history_mark(&self) -> HistoryMark {
+        HistoryMark { depth: self.undo.len(), merge_key: self.last_merge_key }
+    }
+
+    /// Fold the undo steps recorded since `mark` into the step that was on
+    /// top of the history then, which keeps its name (follow-up edits that
+    /// belong to it, like a plugin's event handlers keeping their data in
+    /// step with the edit). Its merge key stays too, so the next edit merged
+    /// with that key (a value still being dragged) still merges into it. The
+    /// folded step gets a new identity ([`Document::undo_top_id`]). Returns
+    /// whether anything was folded: nothing is when no step was recorded
+    /// since, or when there was no step to fold into.
+    pub fn fold_since(&mut self, mark: HistoryMark) -> bool {
+        if mark.depth == 0 || mark.depth > self.undo.len() {
+            return false;
+        }
+        if mark.depth == self.undo.len() {
+            // Nothing recorded since (or what was is discarded): the merge
+            // goes on as it was.
+            self.last_merge_key = mark.merge_key;
+            return false;
+        }
+        let newer = self.undo.split_off(mark.depth);
+        let serial = self.next_serial();
+        let Some(top) = self.undo.last_mut() else { return false };
+        for tx in newer {
+            top.merge(tx);
+        }
+        top.prune();
+        top.serial = serial;
+        if top.is_empty() {
+            self.undo.pop();
+        }
+        self.last_merge_key = mark.merge_key;
+        true
     }
 
     /// Undo the steps recorded since undo depth `depth` and drop them: they
@@ -1637,6 +1690,36 @@ mod tests {
                 plugin_data: Default::default(),
             })
         })
+    }
+
+    #[test]
+    fn folded_edits_join_the_top_step_and_keep_its_merge() {
+        let mut doc = Document::new(Project::from_template());
+        let before = doc.project.clone();
+        // Nothing to fold into.
+        let mark = doc.history_mark();
+        doc.edit("a", |e| e.info_mut().name = "a".into());
+        assert!(!doc.fold_since(mark) && doc.undo_depth() == 1);
+        // A dragged value: each tick merges, follow-up edits fold into it.
+        let depth = doc.undo_depth();
+        for i in 0..3 {
+            doc.edit_merged("drag", 7, |e| e.info_mut().number = i.to_string());
+            let mark = doc.history_mark();
+            doc.edit("follow", |e| e.info_mut().client = format!("c{i}"));
+            assert!(doc.fold_since(mark));
+            assert_eq!((doc.undo_depth(), doc.undo_name()), (depth + 1, Some("drag")));
+        }
+        // Nothing recorded since: the merge goes on.
+        let mark = doc.history_mark();
+        assert!(!doc.fold_since(mark));
+        doc.edit_merged("drag", 7, |e| e.info_mut().number = "9".into());
+        assert_eq!(doc.undo_depth(), depth + 1);
+        // One undo takes back the drag and what followed it.
+        assert!(doc.undo());
+        assert_eq!((&doc.project.info.number, &doc.project.info.client), (&before.info.number, &before.info.client));
+        assert_eq!(doc.project.info.name, "a");
+        assert!(doc.undo());
+        assert_eq!(doc.project, before);
     }
 
     #[test]

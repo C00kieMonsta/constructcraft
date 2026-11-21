@@ -404,8 +404,20 @@ impl AppState {
         }
     }
 
-    /// Replace the document (new/open), resetting view state.
+    /// Replace the document (new/open), resetting view state. The plugins
+    /// hear `project_opened` for it.
     pub fn replace_document(&mut self, doc: Document) {
+        self.replace_document_with(doc, true);
+    }
+
+    /// Replace the document by the blank one behind the home screen after
+    /// closing a project: like [`AppState::replace_document`], but the
+    /// plugins hear no `project_opened` (no project was opened).
+    pub fn close_document(&mut self, doc: Document) {
+        self.replace_document_with(doc, false);
+    }
+
+    fn replace_document_with(&mut self, doc: Document, opened: bool) {
         let message = std::mem::take(&mut self.message);
         // Kept, as the tools' other sizes are reset to the metric defaults
         // (`follow_system` then sets them for the new project).
@@ -436,7 +448,11 @@ impl AppState {
         self.recent = recent;
         self.updates = updates;
         self.plugins = plugins;
-        self.session.set_extension(extension);
+        if opened {
+            self.session.set_extension(extension);
+        } else {
+            self.session.set_extension_quietly(extension);
+        }
         self.prefs = prefs;
         self.ribbon_collapsed = ribbon_collapsed;
         self.thumbnail_jobs = jobs;
