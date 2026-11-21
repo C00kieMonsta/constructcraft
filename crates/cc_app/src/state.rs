@@ -128,6 +128,8 @@ pub struct Dialogs {
     pub obj_options: crate::obj_ui::ObjOptions,
     /// The Preferences window.
     pub preferences: Option<crate::preferences::PreferencesDialog>,
+    /// The form of a plugin command (see [`crate::plugin_form`]).
+    pub plugin_form: Option<crate::plugin_form::PluginForm>,
 }
 
 /// A status bar text that lasts while something sets it every frame, such

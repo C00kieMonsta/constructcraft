@@ -68,6 +68,8 @@ pub struct Footer {
     extras: Vec<(String, bool)>,
     /// Actions shown greyed out (see [`Footer::disable`]).
     disabled: Vec<usize>,
+    /// Hover texts of buttons (see [`Footer::tip`]).
+    tips: Vec<(usize, String)>,
 }
 
 impl Footer {
@@ -89,6 +91,21 @@ impl Footer {
     /// does not press it.
     pub fn disable(&mut self, index: usize) {
         self.disabled.push(index);
+    }
+
+    /// Show `text` when the button `index` is hovered, also while disabled
+    /// (why it cannot be pressed).
+    pub fn tip(&mut self, index: usize, text: impl Into<String>) {
+        self.tips.push((index, text.into()));
+    }
+
+    /// The button's hover text, shown on `r`.
+    fn tip_on(&self, index: usize, r: egui::Response) -> egui::Response {
+        match self.tips.iter().find(|(i, _)| *i == index) {
+            Some((_, text)) if r.enabled() => r.on_hover_text(text.as_str()),
+            Some((_, text)) => r.on_disabled_hover_text(text.as_str()),
+            None => r,
+        }
     }
 
     /// An auxiliary button on the left side. Its index follows the actions'.
@@ -223,13 +240,20 @@ pub struct DialogResponse {
 pub struct Dialog {
     id: egui::Id,
     title: String,
+    subtitle: Option<String>,
     width: f32,
     kind: Option<Kind>,
 }
 
 impl Dialog {
     pub fn new(id: impl std::hash::Hash + std::fmt::Debug, title: impl Into<String>) -> Self {
-        Self { id: egui::Id::new(("dialog", id)), title: title.into(), width: 420.0, kind: None }
+        Self { id: egui::Id::new(("dialog", id)), title: title.into(), subtitle: None, width: 420.0, kind: None }
+    }
+
+    /// A muted text after the title (what the dialog belongs to), cut to fit the header.
+    pub fn subtitle(mut self, subtitle: impl Into<String>) -> Self {
+        self.subtitle = Some(subtitle.into()).filter(|s| !s.is_empty());
+        self
     }
 
     /// Width of the body content.
@@ -291,6 +315,13 @@ impl Dialog {
                                 egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::t!("action-close"))
                             });
                             close_clicked = r.on_hover_text(crate::t!("action-close")).clicked();
+                            // Between the title and the close button.
+                            if let Some(subtitle) = &self.subtitle {
+                                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                    let text = RichText::new(subtitle).size(12.5).color(PALETTE.text_muted);
+                                    ui.add(egui::Label::new(text).selectable(false).truncate());
+                                });
+                            }
                         });
                     });
                 });
@@ -349,14 +380,15 @@ impl Dialog {
                                     }
                                 })
                                 .inner;
-                            if r.clicked() {
+                            if buttons.tip_on(1000 + i, r).clicked() {
                                 clicked = Some(1000 + i);
                             }
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             for (i, (label, style)) in buttons.actions.iter().enumerate().rev() {
                                 let enabled = !buttons.disabled.contains(&i);
-                                if ui.add_enabled_ui(enabled, |ui| styled_button(ui, label, *style)).inner.clicked() {
+                                let r = ui.add_enabled_ui(enabled, |ui| styled_button(ui, label, *style)).inner;
+                                if buttons.tip_on(i, r).clicked() {
                                     clicked = Some(i);
                                 }
                             }

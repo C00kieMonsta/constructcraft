@@ -82,7 +82,7 @@ Escolher um comando do motor abre um formulário com sua descrição e seus argu
 }
 ```
 
-**Executar** (ou Ctrl+Enter) roda o comando no projeto aberto e mostra o resultado ou a mensagem de erro. Uma alteração é um passo de desfazer e é gravada enquanto uma macro está gravando, como qualquer outra. **Voltar** (ou Esc) retorna à busca. Os argumentos são os mesmos dos scripts e da [referência de comandos](commands.md). Comprimentos estão em metros, ângulos em graus, pontos são `[x, y]`, e níveis, tipos, vistas e materiais podem ser indicados pelo id ou pelo nome.
+**Executar** (ou Ctrl+Enter) roda o comando no projeto aberto e mostra o resultado ou a mensagem de erro. Uma alteração é um passo de desfazer e é gravada enquanto uma macro está gravando, como qualquer outra. **Voltar** (ou Esc) retorna à busca. Os argumentos são os mesmos dos scripts e da [referência de comandos](commands.md). Comprimentos estão em metros, ângulos em graus, pontos são `[x, y]`, e níveis, tipos, vistas e materiais podem ser indicados pelo id ou pelo nome. O comando de um plugin abre o formulário próprio dele (veja [Plugins](#plugins)), exceto pelo *Inserir comando…* do editor de macros.
 
 Os comandos de arquivo do motor (`project_open`, `project_save`, `ifc_import`, `ifc_export`, `sheet_export`, `view_export`…) não aparecem aqui. Os comandos da interface correspondentes, nas abas *Arquivo* e *Inserir* e na paleta, cuidam dos arquivos pelos diálogos de sempre.
 
@@ -566,7 +566,9 @@ O carimbo desenha a folha inteira: borda, margens, o próprio carimbo, logotipos
 
 ## Plugins
 
-Plugins acrescentam comandos ao ConstructCraft (veja [Plugins](automacao.md#plugins) no guia de automação). *Gerenciar → Plugins* tem dois botões: *Plugins…* abre a janela Plugins, e *Comandos de plugins* é um menu dos comandos dos plugins instalados, por plugin; escolher um abre o formulário dele na [paleta de comandos](#executar-comandos-do-motor), onde **Executar** o roda como um passo de desfazer e mostra o que o plugin imprimiu. A paleta também encontra os comandos de plugins pelo nome.
+Plugins acrescentam comandos ao ConstructCraft (veja [Plugins](automacao.md#plugins) no guia de automação). *Gerenciar → Plugins* tem dois botões: *Plugins…* abre a janela Plugins, e *Comandos de plugins* é um menu dos comandos dos plugins instalados, por plugin. A [paleta de comandos](#executar-comandos-do-motor) também os encontra pelo nome.
+
+Escolher um comando de plugin abre o formulário dele, com o título do comando e o nome do plugin. Os parâmetros são campos: os obrigatórios em *Parâmetros*, os outros em *Mais opções*, que só são enviados quando você os define (deixados como estão, ou esvaziados, vale o padrão do próprio comando). Comprimentos são digitados nas unidades do projeto. Um campo de elemento tem **Indicar** (o formulário se esconde; clique o elemento na vista ativa, 2D ou 3D; Esc ou outra ferramenta traz o formulário de volta sem mudanças) e **Seleção** (o único elemento selecionado); uma lista de elementos começa pela seleção e tem **Seleção** e **Limpar**; um ponto é indicado numa planta, atraído como nas ferramentas de desenho. Níveis, vistas, tipos e materiais são escolhidos em listas. **Executar** fica desativado até todos os campos obrigatórios estarem preenchidos e todos os valores serem válidos; a dica dele diz o que falta. Ele roda o comando como um passo de desfazer: um erro fica no formulário; um resultado, ou o que o plugin imprimiu, é mostrado (**Executar de novo** volta ao formulário com os valores); sem nada a mostrar, o formulário fecha e a barra de status diz que concluiu. **JSON** mostra os argumentos em JSON, como os scripts os escrevem, e volta. Um comando sem parâmetros roda assim que é escolhido.
 
 A janela Plugins tem duas abas:
 

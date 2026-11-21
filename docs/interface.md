@@ -82,7 +82,7 @@ Choosing an engine command opens a form with its description and its arguments i
 }
 ```
 
-**Run** (or Ctrl+Enter) executes the command in the open project and shows its result or error message. An edit is one undo step and is recorded while a macro is recording, like any other change. **Back** (or Esc) returns to the search. The arguments are the same as in scripts and in the [command reference](commands.md). Lengths are in meters, angles in degrees, points are `[x, y]`, and levels, types, views and materials can be named by id or by name.
+**Run** (or Ctrl+Enter) executes the command in the open project and shows its result or error message. An edit is one undo step and is recorded while a macro is recording, like any other change. **Back** (or Esc) returns to the search. The arguments are the same as in scripts and in the [command reference](commands.md). Lengths are in meters, angles in degrees, points are `[x, y]`, and levels, types, views and materials can be named by id or by name. A plugin's command opens its own form instead (see [Plugins](#plugins)), except from the macro editor's *Insert Command…*.
 
 The engine's file commands (`project_open`, `project_save`, `ifc_import`, `ifc_export`, `sheet_export`, `view_export`…) are not offered here. Their interface commands in the *File* and *Insert* tabs and the palette handle files through the usual dialogs.
 
@@ -566,7 +566,9 @@ A title block draws the whole sheet: border, margins, the block itself, logos. I
 
 ## Plugins
 
-Plugins add commands to ConstructCraft (see [Plugins](automation.md#plugins) in the automation guide). *Manage → Plugins* holds two buttons: *Plugins…* opens the Plugins window, and *Plugin Commands* is a menu of the installed plugins' commands, by plugin; choosing one opens its form in the [command palette](#running-engine-commands), where **Run** executes it as one undo step and shows what the plugin printed. The palette also finds plugin commands by name.
+Plugins add commands to ConstructCraft (see [Plugins](automation.md#plugins) in the automation guide). *Manage → Plugins* holds two buttons: *Plugins…* opens the Plugins window, and *Plugin Commands* is a menu of the installed plugins' commands, by plugin. The [command palette](#running-engine-commands) also finds them by name.
+
+Choosing a plugin command opens its form, titled with the command and the plugin's name. Its parameters are fields: the required ones under *Parameters*, the others under *More options*, which are sent only when you set them (left alone, or emptied, the command's own default applies). Lengths are typed in the project's units. An element field has **Pick** (the form hides; click the element in the active view, 2D or 3D; Esc or another tool brings the form back unchanged) and **Selection** (the one selected element); a list of elements starts from the selection and has **Selection** and **Clear**; a point is picked in a plan, snapping as the drawing tools do. Levels, views, types and materials are chosen from lists. **Run** stays disabled until every required field is filled and every value is valid; its tooltip says what is missing. It runs the command as one undo step: an error stays in the form; a result, or what the plugin printed, is shown (**Run Again** goes back to the form with its values); with nothing to show the form closes and the status bar says it is done. **JSON** shows the arguments as JSON, as scripts write them, and back. A command without parameters runs as soon as it is chosen.
 
 The Plugins window has two tabs:
 

@@ -248,8 +248,10 @@ fn skeleton(schema: &serde_json::Value) -> String {
     serde_json::to_string_pretty(&Value::Object(args)).unwrap_or_else(|_| "{}".to_string())
 }
 
-/// Open the palette on the form of the engine command `name` (a plugin's
-/// command from the ribbon); nothing happens for an unknown name.
+/// Open the palette on the JSON form of the engine command `name` (tests:
+/// plugin commands open their own form, see [`crate::plugin_form`]);
+/// nothing happens for an unknown name.
+#[cfg(test)]
 pub fn open_command(state: &mut AppState, name: &str) {
     let mut palette = Palette::new(&state.session);
     let Some(command) = palette.catalog.iter().find(|c| c.name == name) else { return };
@@ -399,6 +401,16 @@ fn search(ui: &mut egui::Ui, state: &mut AppState, palette: &mut Palette, keep: 
             *keep = false;
             state.open_view(view);
         }
+        // A plugin's command opens its own form (in the macro editor's insert mode, the JSON one).
+        Action::Engine(i)
+            if !palette.insert
+                && palette.catalog.get(i).is_some_and(|c| cc_engine::extension::is_extension_name(&c.name)) =>
+        {
+            *keep = false;
+            if let Some(name) = palette.catalog.get(i).map(|c| c.name.clone()) {
+                crate::plugin_form::open(state, &name);
+            }
+        }
         Action::Engine(i) => {
             if let Some(command) = palette.catalog.get(i) {
                 palette.form = Some(Form {
@@ -457,6 +469,19 @@ fn entry_row(ui: &mut egui::Ui, entry: &Entry, selected: bool, height: f32) -> e
     response
 }
 
+/// Run the engine command `name` with `args` through the session (one undo
+/// step; a plugin command's edits squashed into one, and undone when it
+/// fails): its result or error message, and what a plugin printed meanwhile.
+pub(crate) fn execute(
+    state: &mut AppState,
+    name: &str,
+    args: serde_json::Value,
+) -> (Result<serde_json::Value, String>, Vec<String>) {
+    let result = state.session.execute(name, args).map_err(|e| e.message);
+    let printed = state.session.take_extension_messages();
+    (result, printed)
+}
+
 /// The arguments of an engine command, a Run button and the result. With
 /// `insert` (the macro editor's *Insert Command…*) the button is *Insert*,
 /// which adds the command as a step of the macro and closes the palette.
@@ -504,13 +529,13 @@ fn engine_form(ui: &mut egui::Ui, state: &mut AppState, mut form: Form, insert: 
     } else if run {
         form.result = Some(match serde_json::from_str::<serde_json::Value>(&form.args) {
             Ok(args) => {
-                let result = state.session.execute(&form.name, args);
+                let (result, printed) = execute(state, &form.name, args);
                 // What a plugin command printed, above its result.
-                let printed = state.session.take_extension_messages().join("\n");
+                let printed = printed.join("\n");
                 let with = |s: String| if printed.is_empty() { s } else { format!("{printed}\n\n{s}") };
                 match result {
                     Ok(out) => Ok(with(serde_json::to_string_pretty(&out).unwrap_or_default())),
-                    Err(e) => Err(with(e.message)),
+                    Err(message) => Err(with(message)),
                 }
             }
             Err(e) => Err(t!("palette-bad-json", "error" => e)),
