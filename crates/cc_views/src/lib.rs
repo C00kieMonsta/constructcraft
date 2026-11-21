@@ -24,6 +24,7 @@ pub mod graphics;
 pub mod hatch;
 mod joins;
 mod legend;
+pub mod level_heads;
 pub mod level_marks;
 pub mod linework;
 mod mep;
@@ -46,8 +47,8 @@ pub use annotate::{
 };
 pub use component_view::{ComponentView, ComponentViewKind, ViewConnector, component_view};
 pub use drawing::{
-    Anchor, BubbleHandle, Drawing2D, LineStyle, MAX_HITS, MarkHandle, Pen, Prim, ResolvedPen, SectionHandle, TagHandle,
-    halftone,
+    Anchor, BubbleHandle, Drawing2D, LevelHandle, LevelHeadHandle, LineStyle, MAX_HITS, MarkHandle, Pen, Prim,
+    ResolvedPen, SectionHandle, TagHandle, halftone,
 };
 pub use drawing_index::DrawingIndex;
 pub use legend::legend;
@@ -145,6 +146,7 @@ pub fn generate_temporary(
         ViewKind::Elevation { direction } => {
             let mut d = elevation(project, geom, *direction, look);
             if let Some(frame) = projected::view_frame(view) {
+                level_heads::draw(&mut d, project, view, &frame);
                 annotate::projected_grids(&mut d, project, &frame, view.scale, &view.tags);
             }
             d
@@ -153,6 +155,7 @@ pub fn generate_temporary(
             let mut d = section(project, geom, (*start, *end), *depth, view.scale, look);
             joins::merge(project, &mut d);
             if let Some(frame) = projected::view_frame(view) {
+                level_heads::draw(&mut d, project, view, &frame);
                 annotate::projected_grids(&mut d, project, &frame, view.scale, &view.tags);
             }
             d

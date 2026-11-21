@@ -401,18 +401,23 @@ impl CurtainEdits {
 
     /// The same edits for the wall walked the other way (`length` long).
     pub fn reverse(&mut self, length: f64) {
+        self.remap(|u| length - u);
+    }
+
+    /// Every position along the wall through `f` (heights are left alone).
+    pub fn remap(&mut self, f: impl Fn(f64) -> f64) {
         if let Some(lines) = &mut self.vertical {
-            lines.iter_mut().for_each(|u| *u = length - *u);
+            lines.iter_mut().for_each(|u| *u = f(*u));
             lines.sort_by(f64::total_cmp);
         }
         for s in &mut self.removed {
             match s.axis {
-                GridAxis::Vertical => s.at = length - s.at,
-                GridAxis::Horizontal => s.along = length - s.along,
+                GridAxis::Vertical => s.at = f(s.at),
+                GridAxis::Horizontal => s.along = f(s.along),
             }
         }
         for p in &mut self.panels {
-            p.u = length - p.u;
+            p.u = f(p.u);
         }
     }
 

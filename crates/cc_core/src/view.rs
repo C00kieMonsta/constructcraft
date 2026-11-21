@@ -421,6 +421,10 @@ pub struct View {
     /// where they sit, meters in plan, by elevation view.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub mark_offsets: std::collections::BTreeMap<ViewId, glam::DVec2>,
+    /// Elevations and sections: how the view shows each level (hidden,
+    /// which ends carry a head, elbows), by level (see [`crate::level_head`]).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub level_heads: std::collections::BTreeMap<crate::LevelId, crate::level_head::LevelHead>,
     /// How much of the elements the view draws (see [`DetailLevel`]).
     #[serde(default, skip_serializing_if = "DetailLevel::is_medium")]
     pub detail: DetailLevel,
@@ -835,6 +839,7 @@ impl View {
             tag_types: Default::default(),
             mark_type: None,
             mark_offsets: Default::default(),
+            level_heads: Default::default(),
             detail: DetailLevel::Medium,
             visual_style: None,
             crop: None,

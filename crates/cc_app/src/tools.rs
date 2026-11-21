@@ -397,8 +397,10 @@ impl Tool {
             Category::DetailLine => Tool::DetailLine,
             Category::LevelMark => Tool::LevelMark { type_id },
             Category::DetailComponent => Tool::DetailComponent { type_id },
-            // Imported, not drawn; bar tags are placed by their command.
+            // Imported, not drawn; bar tags are placed by their command;
+            // levels are made in the levels dialog.
             Category::BarTag
+            | Category::Level
             | Category::Tag
             | Category::ViewMark
             | Category::CadImport
@@ -507,6 +509,13 @@ pub enum Drag {
         bubble: cc_views::BubbleHandle,
         start: DVec2,
     },
+    /// A head of a level in an elevation or a section, as drawn when the
+    /// drag started (see [`crate::level_head_ui`]).
+    LevelHead {
+        level: LevelId,
+        head: cc_views::LevelHeadHandle,
+        start: DVec2,
+    },
     /// An elevation's marker in a floor plan, as drawn when the drag started.
     Mark {
         mark: cc_views::MarkHandle,
@@ -613,6 +622,9 @@ pub struct Interaction {
     /// Sketch points.
     pub points: Vec<DVec2>,
     pub flip_hand: bool,
+    /// The wall tool draws walls with their sides swapped: the exterior on
+    /// the right of the line drawn (Space while drawing).
+    pub wall_flip: bool,
     pub drag: Option<Drag>,
     /// Elements a transform tool acts on (the selection when it started).
     pub targets: Vec<ElementId>,
@@ -638,6 +650,8 @@ pub struct Interaction {
     pub chain_redo: Vec<ChainStep>,
     /// The tag (or grid bubbles) a context menu was opened on: the view and the element.
     pub tag_menu: Option<(ViewId, ElementId)>,
+    /// The level a context menu was opened on in an elevation or a section: the view and the level.
+    pub level_menu: Option<(ViewId, LevelId)>,
     /// Tab cycling the Select tool's pre-selection (issue #406).
     pub tab: crate::preselect::TabCycle,
 }
@@ -3526,6 +3540,11 @@ fn wall_tool(
     type_id: ElementTypeId,
     xf: &Xf,
 ) {
+    // Space swaps the sides of the walls drawn next (the body goes to the other side of the line).
+    if resp.hovered() && ui.input(|i| i.key_pressed(Key::Space)) {
+        state.interaction.wall_flip = !state.interaction.wall_flip;
+        state.message = t!("msg-wall-side-flipped");
+    }
     if state.wall_mode == WallMode::Spline {
         spline_wall_tool(ui, resp, painter, state, level, type_id, xf);
         return;
@@ -3540,8 +3559,10 @@ fn wall_tool(
 
     let ty = state.project().element_type(type_id);
     let half = ty.map_or(0.075, |t| t.thickness() * 0.5);
-    // The body's centerline, across from the drawn location line (to its left).
+    // The body's centerline, across from the drawn location line (to its
+    // left; to its right for a flipped wall, which runs the other way).
     let center = -ty.map_or(0.0, |t| t.location_offset(state.wall_location_line));
+    let center = if state.interaction.wall_flip { -center } else { center };
     // Arc mode: after the start and the end, the third point is on the arc,
     // or a typed radius gives the arc on the cursor's side.
     let arc_end = state.interaction.points.first().copied().filter(|_| arc_mode);
@@ -3679,7 +3700,7 @@ fn spline_wall_tool(
         painter.circle_stroke(xf.to_screen(*q), 3.0, Stroke::new(1.2, PREVIEW));
     }
     let Some(raw) = resp.hover_pos().map(|p| xf.to_world(p)) else {
-        spline_wall_preview(painter, xf, state.project(), type_id, line, &picks);
+        spline_wall_preview(painter, xf, state.project(), type_id, line, &spline_fit(state, picks.clone()));
         return;
     };
     let shift = ui.input(|i| i.modifiers.shift);
@@ -3699,7 +3720,7 @@ fn spline_wall_tool(
     if !on_last {
         fit.push(p);
     }
-    match spline_wall_preview(painter, xf, state.project(), type_id, line, &fit) {
+    match spline_wall_preview(painter, xf, state.project(), type_id, line, &spline_fit(state, fit.clone())) {
         Some(Ok(length)) => label(painter, xf.to_screen(p), format::length(length)),
         Some(Err(e)) => label(painter, xf.to_screen(p), crate::i18n::tr(e.key())),
         None => {}
@@ -3808,7 +3829,7 @@ pub fn spline_wall_escape(state: &mut AppState) -> bool {
 /// points stay, to be changed).
 fn finish_spline_wall(state: &mut AppState, level: LevelId, type_id: ElementTypeId) {
     use cc_core::wall_spline::{SplineError, WallSpline};
-    let fit = state.interaction.points.clone();
+    let fit = spline_fit(state, state.interaction.points.clone());
     let (Some(&a), Some(&b)) = (fit.first(), fit.last()) else { return };
     if fit.len() < 2 {
         state.message = t!("msg-wall-spline-two-points");
@@ -3831,11 +3852,23 @@ fn finish_spline_wall(state: &mut AppState, level: LevelId, type_id: ElementType
     }
 }
 
-/// Create a wall from `a` to `b` (an arc when `bulge` is not 0) with the tool options.
+/// Create a wall from `a` to `b` (an arc when `bulge` is not 0) with the
+/// tool options; a flipped one (Space) runs from `b` to `a`, the same line
+/// walked the other way.
 fn create_wall(state: &mut AppState, level: LevelId, type_id: ElementTypeId, a: DVec2, b: DVec2, bulge: f64) {
+    let (a, b, bulge) = if state.interaction.wall_flip { (b, a, -bulge) } else { (a, b, bulge) };
     let command =
         create::WallCreate { bulge: (bulge != 0.0).then_some(bulge), ..wall_command(state, level, type_id, a, b) };
     run_create(state, command);
+}
+
+/// The points a spline wall passes through, from its start: those clicked,
+/// backwards for a flipped wall (Space).
+fn spline_fit(state: &AppState, mut fit: Vec<DVec2>) -> Vec<DVec2> {
+    if state.interaction.wall_flip {
+        fit.reverse();
+    }
+    fit
 }
 
 /// The command for a straight wall from `a` to `b` with the tool options.
@@ -4245,6 +4278,7 @@ fn annotation_handles(
     let floor_plan = matches!(view.kind, ViewKind::FloorPlan { .. });
     let projected = cc_core::view_mark::MarkKind::of_view(&view.kind).is_some();
     let (tags_ok, bubbles_ok, marks_ok) = (movable, movable || projected, movable && floor_plan);
+    let levels_ok = cc_core::level_head::shows_levels(&view.kind);
     let shift = ui.input(|i| i.modifiers.shift);
     let raw = resp.hover_pos().map(|p| xf.to_world(p));
     let tag_set = |id: cc_core::ElementId| TagSet { view: Ref::Id(view_id.0), ids: vec![id.0], ..Default::default() };
@@ -4307,6 +4341,11 @@ fn annotation_handles(
             }
             return true;
         }
+        Some(Drag::LevelHead { level, head, start }) => {
+            let held = (view_id, level, head);
+            crate::level_head_ui::drag(painter, xf, state, held, start, raw, end, stopped);
+            return true;
+        }
         Some(Drag::Mark { mark, start }) => {
             if let Some(raw) = raw {
                 let c = mark.center + (raw - start);
@@ -4353,6 +4392,9 @@ fn annotation_handles(
         if bubbles_ok && let Some(bubble) = drawing.bubble_at(w) {
             return Some(Drag::Bubble { bubble, start: w });
         }
+        if levels_ok && let Some((level, head)) = crate::level_head_ui::head_at(drawing, w) {
+            return Some(Drag::LevelHead { level, head, start: w });
+        }
         if marks_ok && let Some(mark) = drawing.mark_at(w) {
             return Some(Drag::Mark { mark, start: w });
         }
@@ -4381,7 +4423,12 @@ fn annotation_handles(
             tag.or_else(|| drawing.bubble_at(w).filter(|_| bubbles_ok).map(|b| b.element))
         });
         state.interaction.tag_menu = picked.map(|id| (view_id, id));
+        // Else a level's head or line.
+        let level = raw.filter(|_| levels_ok && picked.is_none());
+        state.interaction.level_menu =
+            level.and_then(|w| crate::level_head_ui::picked(drawing, w, xf)).map(|l| (view_id, l));
     }
+    crate::level_head_ui::menu(resp, state);
     if let Some((view, id)) = state.interaction.tag_menu {
         let mut hide = None;
         let open = resp.context_menu(|ui| {
@@ -4766,6 +4813,7 @@ fn select(
                 | Drag::Tag { .. }
                 | Drag::TagRotate { .. }
                 | Drag::Bubble { .. }
+                | Drag::LevelHead { .. }
                 | Drag::Mark { .. },
             ) => {}
             Some(Drag::Box { start }) => {
@@ -4885,15 +4933,28 @@ pub fn mirror_elements(state: &mut AppState, ids: &[ElementId], a: DVec2, b: DVe
 }
 
 /// Space on a selection: components and columns turn 90° about their
-/// insertion point, doors and windows flip to the other side of the wall.
-/// Returns whether anything changed (one undo step).
+/// insertion point, doors and windows flip to the other side of the wall,
+/// walls swap their exterior and interior sides (their doors and windows
+/// going with them). Returns whether anything changed (one undo step), and
+/// says so in the status bar; walls that cannot be flipped say why there.
 pub fn rotate_selection(state: &mut AppState) -> bool {
     let ids: Vec<ElementId> = state.selection.iter().copied().collect();
     if ids.is_empty() {
         return false;
     }
-    let out = state.session.run(modify_cmd::ElementsTurn { ids: raw_ids(&ids) });
-    out.is_ok_and(|o| !ids_of(&o["changed"]).is_empty())
+    let Ok(out) = state.session.run(modify_cmd::ElementsTurn { ids: raw_ids(&ids) }) else { return false };
+    let changed = ids_of(&out["changed"]);
+    let not_flipped = ids_of(&out["not_flipped"]);
+    if changed.is_empty() {
+        if !not_flipped.is_empty() {
+            // The engine's reason for the first wall that cannot be flipped.
+            crate::actions::run_command(state, modify_cmd::WallFlip { walls: raw_ids(&not_flipped) });
+        }
+        return false;
+    }
+    let walls_only = changed.iter().all(|id| state.project().element(*id).is_some_and(|e| e.as_wall().is_some()));
+    state.message = if walls_only { t!("msg-walls-flipped") } else { t!("msg-rotated") };
+    true
 }
 
 #[cfg(test)]
@@ -5295,12 +5356,19 @@ mod tests {
         };
         let comp = pick(&state, |k| matches!(k, ElementKind::Component(_)));
         let door = pick(&state, |k| matches!(k, ElementKind::Door(_)));
-        let wall = pick(&state, |k| matches!(k, ElementKind::Wall(_)));
+        let host = state.project().element(door).and_then(|e| e.as_hosted()).map(|h| h.host).unwrap();
+        // A wall other than the door's: the door turns by itself.
+        let wall = state.project().walls().map(|(e, _)| e.id).find(|id| *id != host).unwrap();
+        let wall_before = state.project().element(wall).and_then(|e| e.as_wall()).cloned().unwrap();
         let before = state.project().element(comp).cloned().unwrap();
         state.selection = [comp, door, wall].into_iter().collect();
         let depth = state.session.doc.undo_depth();
         assert!(rotate_selection(&mut state));
         assert_eq!(state.session.doc.undo_depth(), depth + 1);
+        assert_eq!(state.message, t!("msg-rotated"));
+        // The wall flipped: the same line walked the other way.
+        let wall_after = state.project().element(wall).and_then(|e| e.as_wall()).cloned().unwrap();
+        assert_eq!((wall_after.start, wall_after.end), (wall_before.end, wall_before.start));
         let (ElementKind::Component(a), Some(ElementKind::Component(b))) =
             (&before.kind, state.project().element(comp).map(|e| &e.kind))
         else {
@@ -5309,9 +5377,37 @@ mod tests {
         assert_eq!(b.rotation_deg, (a.rotation_deg + 90.0).rem_euclid(360.0));
         assert_eq!(a.position, b.position);
         assert!(matches!(state.project().element(door).map(|e| &e.kind), Some(ElementKind::Door(h)) if h.flip_facing));
+        // Walls alone flip, their doors going with them (facing the same way).
+        let facing = |state: &AppState| state.project().element(door).and_then(|e| e.as_hosted()).unwrap().flip_facing;
+        let was = facing(&state);
+        state.selection = [host, door].into_iter().collect();
+        assert!(rotate_selection(&mut state));
+        assert_eq!(state.message, t!("msg-walls-flipped"));
+        assert_eq!(facing(&state), !was, "the door went with its wall, not turned again");
         // Nothing turnable selected: no undo step.
-        state.selection = [wall].into_iter().collect();
+        let floor = pick(&state, |k| matches!(k, ElementKind::Floor(_)));
+        state.selection = [floor].into_iter().collect();
+        let depth = state.session.doc.undo_depth();
         assert!(!rotate_selection(&mut state));
+        assert_eq!(state.session.doc.undo_depth(), depth);
+    }
+
+    /// Space while drawing a wall swaps its sides: the wall runs from the
+    /// second point to the first, so its exterior is on the other side.
+    #[test]
+    fn a_flipped_wall_tool_draws_walls_the_other_way() {
+        let mut state = AppState::new(cc_core::Document::new(crate::actions::new_project()));
+        let level = state.project().levels[0].id;
+        let type_id = state.project().default_type(Category::Wall).unwrap();
+        let (a, b) = (DVec2::ZERO, DVec2::new(4.0, 0.0));
+        state.interaction.wall_flip = true;
+        create_wall(&mut state, level, type_id, a, b, 0.0);
+        let (_, w) = state.project().walls().last().unwrap();
+        assert_eq!((w.start, w.end), (b, a));
+        // An arc keeps its side of the line: its bulge changes sign with the direction.
+        create_wall(&mut state, level, type_id, a, b, 0.5);
+        let (_, w) = state.project().walls().find(|(_, w)| w.bulge != 0.0).unwrap();
+        assert_eq!((w.start, w.end, w.bulge), (b, a, -0.5));
     }
 
     #[test]

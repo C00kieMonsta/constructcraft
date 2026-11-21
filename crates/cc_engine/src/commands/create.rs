@@ -594,9 +594,23 @@ impl Command for RoofCreate {
     }
 }
 
-/// Set the slope of one edge of a gable or hip roof's outline (edge `i` runs
-/// from outline point `i` to the next): `0` makes it a gable end, a positive
-/// slope an eave rising at that slope, `null` returns it to the shape's own.
+/// A roof's own edge slopes and overhangs are numbers, none negative.
+pub(crate) fn check_roof_edges(roof: &Roof) -> Result<()> {
+    for (name, values) in [("edge slopes", &roof.edge_slopes), ("edge overhangs", &roof.edge_overhangs)] {
+        if values.iter().flatten().any(|v| !(v.is_finite() && *v >= 0.0)) {
+            return Err(EngineError::invalid(format!("the {name} cannot be negative")));
+        }
+    }
+    Ok(())
+}
+
+/// Set the slope or the overhang of one edge of a roof's outline (edge `i`
+/// runs from outline point `i` to the next). Slope (gable and hip roofs):
+/// `0` makes the edge a gable end, a positive slope an eave rising at that
+/// slope, `null` returns it to the shape's own. Overhang: how far the roof
+/// reaches past the edge, `null` for the roof's own; the roof planes stay
+/// where the roof's overhang puts them, so the eave moves along its plane
+/// (lower when it reaches further out). What is left out stays as it is.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RoofEdgeSet {
@@ -605,8 +619,12 @@ pub struct RoofEdgeSet {
     /// Edge index, from 0.
     pub edge: usize,
     /// Slope as rise over run (0.5 = 50 %), `0` for a gable end, or `null` for the roof's slope.
-    #[serde(default)]
-    pub slope: Option<f64>,
+    #[serde(default, deserialize_with = "refs::nullable", skip_serializing_if = "Option::is_none")]
+    pub slope: Option<Option<f64>>,
+    /// Overhang past the edge, meters (0 where the roof meets a wall or
+    /// another roof), or `null` for the roof's overhang.
+    #[serde(default, deserialize_with = "refs::nullable", skip_serializing_if = "Option::is_none")]
+    pub overhang: Option<Option<f64>>,
 }
 
 impl Command for RoofEdgeSet {
@@ -614,26 +632,32 @@ impl Command for RoofEdgeSet {
     const KIND: CommandKind = CommandKind::Edit;
     fn run(self, s: &mut Session) -> Result<Value> {
         let id = refs::element(s.project(), self.id)?;
-        let slope = self.slope.map(|v| finite(v, "slope")).transpose()?;
-        if slope.is_some_and(|v| v < 0.0) {
+        if self.slope.is_none() && self.overhang.is_none() {
+            return Err(EngineError::invalid("give a slope or an overhang"));
+        }
+        let slope = self.slope.map(|v| v.map(|v| finite(v, "slope")).transpose()).transpose()?;
+        if slope.flatten().is_some_and(|v| v < 0.0) {
             return Err(EngineError::invalid("the slope cannot be negative"));
+        }
+        let overhang = self.overhang.map(|v| v.map(|v| finite(v, "overhang")).transpose()).transpose()?;
+        if overhang.flatten().is_some_and(|v| v < 0.0) {
+            return Err(EngineError::invalid("the overhang cannot be negative"));
         }
         edit(s, t!("tx-modify"), |e| {
             let Some(ElementKind::Roof(r)) = e.element_mut(id).map(|x| &mut x.kind) else {
                 return Err(EngineError::invalid("not a roof"));
             };
-            if !matches!(r.shape, RoofShape::Gable { .. } | RoofShape::Hip { .. }) {
+            if slope.is_some() && !matches!(r.shape, RoofShape::Gable { .. } | RoofShape::Hip { .. }) {
                 return Err(EngineError::invalid("only gable and hip roofs have edge slopes"));
             }
             if self.edge >= r.footprint.len() {
                 return Err(EngineError::invalid(format!("the roof has {} edges", r.footprint.len())));
             }
-            if r.edge_slopes.len() <= self.edge {
-                r.edge_slopes.resize(self.edge + 1, None);
+            if let Some(slope) = slope {
+                r.set_edge_slope(self.edge, slope);
             }
-            r.edge_slopes[self.edge] = slope;
-            while r.edge_slopes.last().is_some_and(Option::is_none) {
-                r.edge_slopes.pop();
+            if let Some(overhang) = overhang {
+                r.set_edge_overhang(self.edge, overhang);
             }
             Ok(())
         })?;

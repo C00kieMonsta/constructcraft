@@ -272,6 +272,111 @@ impl Command for ElementFlip {
     }
 }
 
+/// Flip walls: swap their exterior and interior sides, their location line
+/// staying where it is (the Space key on selected walls). The wall is
+/// walked the other way: its layers mirror about the location line (a wall
+/// located by a finish face keeps that face on the line, its body goes to
+/// the other side); arcs keep their circle and splines their curve; its
+/// doors, windows and niches stay in place facing the same way; its
+/// profile and curtain grid stay in place along it (a curtain grid its type
+/// lays out from one end becomes the wall's own lines); its reinforcement
+/// stays on the faces looking the same way, its vertical bars at the same
+/// stations; dimensions keep their points. One
+/// undo step; pinned walls are left alone. A wall that cannot be flipped
+/// (an arc or spline too tight for its body on the other side) fails the
+/// command and nothing changes.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WallFlip {
+    /// Ids of the walls.
+    pub walls: Vec<u64>,
+}
+
+/// A wall that cannot be flipped, as a command error.
+fn flip_error(id: ElementId, e: cc_core::wall_flip::FlipError) -> EngineError {
+    match e {
+        cc_core::wall_flip::FlipError::NotWall => EngineError::invalid(format!("element {} is not a wall", id.0)),
+        e => EngineError::rejected(format!("wall {} cannot be flipped: {e}", id.0)),
+    }
+}
+
+/// What a flip keeps in place that only the walls' derived geometry knows
+/// (see `cc_core::wall_flip`): the offsets that keep vertical bar sets at
+/// their stations, and the own grid lines that keep a curtain wall's type
+/// grid where it is when its layout is not the same counted from the other
+/// end (a fixed distance justified at the start or the end).
+#[derive(Default)]
+struct FlipKeep {
+    offsets: Vec<(ElementId, f64)>,
+    lines: Vec<(ElementId, Vec<f64>)>,
+}
+
+/// What flipping `walls` must keep in place, from the geometry before the flip.
+fn flip_keep(s: &mut Session, walls: &[ElementId]) -> FlipKeep {
+    let (p, geom) = s.project_and_geometry();
+    let mut keep = FlipKeep::default();
+    for id in walls {
+        let (Some(e), Some(g)) = (p.element(*id), geom.walls.get(id)) else { continue };
+        let Some(w) = e.as_wall() else { continue };
+        for (bar, r) in p.rebar_of(*id) {
+            if let Some(offset) = cc_geom::flipped_vertical_offset(g, r) {
+                keep.offsets.push((bar.id, offset));
+            }
+        }
+        // A curtain wall laid out by its type's vertical grid.
+        let system = p.element_type(e.type_id).and_then(|t| t.curtain());
+        let (Some(system), Some(curtain), None) = (system, g.curtain.as_ref(), &w.curtain.vertical) else { continue };
+        let (Some(&lo), Some(&hi)) = (curtain.layout.u.first(), curtain.layout.u.last()) else { continue };
+        let along = p.flipped_along(e, w);
+        let mut kept: Vec<f64> =
+            curtain.layout.interior(cc_core::curtain::GridAxis::Vertical).iter().map(|u| along(*u)).collect();
+        kept.sort_by(f64::total_cmp);
+        let laid = system.vertical.lines(along(hi), along(lo));
+        let same = laid.len() == kept.len() && laid.iter().zip(&kept).all(|(a, b)| (a - b).abs() < 1e-9);
+        if !same {
+            keep.lines.push((*id, kept));
+        }
+    }
+    keep
+}
+
+/// Flip `walls` in this edit, keeping in place what `keep` says.
+fn flip_walls(e: &mut cc_core::EditCtx, walls: &[ElementId], keep: &FlipKeep) -> Result<Vec<ElementId>> {
+    let changed = e.flip_walls(walls).map_err(|(id, err)| flip_error(id, err))?;
+    for (id, value) in &keep.offsets {
+        if let Some(ElementKind::Rebar(r)) = e.element_mut(*id).map(|x| &mut x.kind)
+            && let cc_core::RebarLayout::WallVertical { offset, .. } = &mut r.layout
+        {
+            *offset = *value;
+        }
+    }
+    for (id, lines) in &keep.lines {
+        if let Some(ElementKind::Wall(w)) = e.element_mut(*id).map(|x| &mut x.kind) {
+            w.curtain.vertical = Some(lines.clone());
+        }
+    }
+    Ok(changed)
+}
+
+impl Command for WallFlip {
+    const NAME: &'static str = "wall_flip";
+    const KIND: CommandKind = CommandKind::Edit;
+    fn run(self, s: &mut Session) -> Result<Value> {
+        let ids = refs::elements(s.project(), &self.walls)?;
+        for id in &ids {
+            s.project().check_wall_flip(*id).map_err(|e| flip_error(*id, e))?;
+        }
+        let (free, pinned) = unpinned(s.project(), ids);
+        let changed = if free.is_empty() {
+            Vec::new()
+        } else {
+            let keep = flip_keep(s, &free);
+            edit(s, t!("tx-wall-flip"), |e| flip_walls(e, &free, &keep))?
+        };
+        Ok(json!({ "changed": ids_json(&changed), "walls": ids_json(&free), "pinned_skipped": ids_json(&pinned) }))
+    }
+}
+
 /// Allow or disallow joining at one end of a wall or beam. A wall end joins
 /// other walls; a beam end stops at the face of a structural column it lies
 /// in, or meets other beams at the same depth (mitered corners, butt joints).
@@ -832,8 +937,11 @@ impl Command for GridsAlignEnds {
 }
 
 /// Turn elements a quarter: components and columns rotate 90° about their
-/// insertion point; doors and windows flip to the other side of their wall
-/// (the Space key on a selection). Others and pinned elements are left alone.
+/// insertion point; doors and windows flip to the other side of their wall;
+/// walls swap their exterior and interior sides as `wall_flip` does, their
+/// doors, windows and niches going with them, selected or not (the Space
+/// key on a selection), in the same undo step. Others, pinned elements and
+/// walls that cannot be flipped (`not_flipped`) are left alone.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ElementsTurn {
@@ -847,6 +955,14 @@ impl Command for ElementsTurn {
     fn run(self, s: &mut Session) -> Result<Value> {
         let ids = refs::elements(s.project(), &self.ids)?;
         let (free, pinned) = unpinned(s.project(), ids);
+        let (walls, free): (Vec<ElementId>, Vec<ElementId>) =
+            free.into_iter().partition(|id| s.project().element(*id).is_some_and(|e| e.as_wall().is_some()));
+        let (walls, not_flipped): (Vec<ElementId>, Vec<ElementId>) =
+            walls.into_iter().partition(|id| s.project().check_wall_flip(*id).is_ok());
+        // Doors, windows and niches of a flipped wall go with it.
+        let with_wall = |id: &ElementId| {
+            s.project().element(*id).and_then(|e| e.as_hosted()).is_some_and(|h| walls.contains(&h.host))
+        };
         let turnable: Vec<ElementId> = free
             .into_iter()
             .filter(|id| {
@@ -859,10 +975,18 @@ impl Command for ElementsTurn {
                             | ElementKind::Window(_)
                             | ElementKind::Niche(_)
                     )
-                )
+                ) && !with_wall(id)
             })
             .collect();
-        edit(s, t!("tx-rotate"), |e| {
+        if turnable.is_empty() && walls.is_empty() {
+            return Ok(
+                json!({ "changed": [], "pinned_skipped": ids_json(&pinned), "not_flipped": ids_json(&not_flipped) }),
+            );
+        }
+        let name = if turnable.is_empty() { t!("tx-wall-flip") } else { t!("tx-rotate") };
+        let keep = flip_keep(s, &walls);
+        edit(s, name, |e| {
+            flip_walls(e, &walls, &keep)?;
             for id in &turnable {
                 let Some(el) = e.element_mut(*id) else { continue };
                 match &mut el.kind {
@@ -876,7 +1000,12 @@ impl Command for ElementsTurn {
             }
             Ok(())
         })?;
-        Ok(json!({ "changed": ids_json(&turnable), "pinned_skipped": ids_json(&pinned) }))
+        let changed: Vec<ElementId> = walls.into_iter().chain(turnable).collect();
+        Ok(json!({
+            "changed": ids_json(&changed),
+            "pinned_skipped": ids_json(&pinned),
+            "not_flipped": ids_json(&not_flipped),
+        }))
     }
 }
 

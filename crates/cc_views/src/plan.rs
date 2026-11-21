@@ -132,9 +132,9 @@ pub(crate) fn plan_drawing(
                 }
             }
             ElementKind::Roof(r) => {
-                let outline = polygon::offset(&r.footprint, r.overhang);
+                let outline = cc_geom::roofs::outline(r).points;
                 d.polyline(&outline, true, LineStyle::Projection, id);
-                if r.overhang > 0.0 {
+                if r.overhang > 0.0 || r.edge_overhangs.iter().flatten().any(|o| *o > 0.0) {
                     d.polyline(&r.footprint, true, LineStyle::Hidden, id);
                 }
                 // Courtyards: the eaves reach over them by the overhang.

@@ -570,6 +570,7 @@ impl<'a> EditCtx<'a> {
             }
         }
         let elevations = self.project.elevation_ids();
+        let level_ids: std::collections::BTreeSet<crate::LevelId> = self.project.levels.iter().map(|l| l.id).collect();
         let p = &*self.project;
         let changed: Vec<(ViewId, View)> = p
             .views
@@ -582,6 +583,7 @@ impl<'a> EditCtx<'a> {
                     || !v.tag_types.is_empty()
                     || v.mark_type.is_some()
                     || !v.mark_offsets.is_empty()
+                    || !v.level_heads.is_empty()
             })
             .filter_map(|v| {
                 let mut new = v.clone();
@@ -595,6 +597,8 @@ impl<'a> EditCtx<'a> {
                 crate::tag::repair_view_tags(&mut new, &p.elements, &p.types);
                 // Mark types and moved markers of deleted types and views go.
                 crate::view_mark::repair_view_marks(&mut new, &elevations, &p.types);
+                // Heads of deleted levels go.
+                crate::level_head::repair_view_level_heads(&mut new, &level_ids);
                 (new != *v).then_some((v.id, new))
             })
             .collect();

@@ -767,16 +767,23 @@ pub struct Roof {
     /// footprint; pitched roofs slope down to their eaves too.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub holes: Vec<Vec<DVec2>>,
-    /// Slope of each footprint edge (edge `i` from point `i` to `i + 1`) that
-    /// differs from the shape's, for gable and hip roofs: `Some(0.0)` makes
-    /// the edge a gable end, `Some(s)` an eave rising at `s`; missing or
-    /// `None` entries follow the shape.
     /// Openings cut by shafts, kept in step with them by every edit (see
     /// [`crate::shaft`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cuts: Vec<Vec<DVec2>>,
+    /// Slope of each footprint edge (edge `i` from point `i` to `i + 1`) that
+    /// differs from the shape's, for gable and hip roofs: `Some(0.0)` makes
+    /// the edge a gable end, `Some(s)` an eave rising at `s`; missing or
+    /// `None` entries follow the shape.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub edge_slopes: Vec<Option<f64>>,
+    /// Overhang of each footprint edge (meters, as `edge_slopes`) that
+    /// differs from `overhang`; missing or `None` entries take `overhang`.
+    /// The roof planes stay where `overhang` puts them (see
+    /// `cc_geom::roofs`): an edge's own overhang moves its eave along its
+    /// plane, lower when it reaches further out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edge_overhangs: Vec<Option<f64>>,
     /// The curves the outline was drawn with (see [`crate::sketch`]); dropped
     /// when the outline is edited without them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -794,6 +801,7 @@ impl Roof {
             holes: Vec::new(),
             cuts: Vec::new(),
             edge_slopes: Vec::new(),
+            edge_overhangs: Vec::new(),
             sketch: None,
         }
     }
@@ -803,10 +811,51 @@ impl Roof {
         self.edge_slopes.get(i).copied().flatten()
     }
 
+    /// The overhang set on footprint edge `i`, if any.
+    pub fn edge_overhang(&self, i: usize) -> Option<f64> {
+        self.edge_overhangs.get(i).copied().flatten()
+    }
+
+    /// The overhang of footprint edge `i`: its own, else the roof's.
+    pub fn overhang_of(&self, i: usize) -> f64 {
+        self.edge_overhang(i).unwrap_or(self.overhang)
+    }
+
+    /// Whether any edge has an overhang of its own.
+    pub fn has_edge_overhangs(&self) -> bool {
+        self.edge_overhangs.iter().any(Option::is_some)
+    }
+
+    /// Set (or, with `None`, clear) the overhang of edge `i`, keeping no
+    /// trailing empty entries.
+    pub fn set_edge_overhang(&mut self, i: usize, overhang: Option<f64>) {
+        set_edge_value(&mut self.edge_overhangs, i, overhang);
+    }
+
+    /// Set (or, with `None`, clear) the slope of edge `i`, keeping no
+    /// trailing empty entries.
+    pub fn set_edge_slope(&mut self, i: usize, slope: Option<f64>) {
+        set_edge_value(&mut self.edge_slopes, i, slope);
+    }
+
     /// Plan area: the footprint less its openings.
     pub fn area(&self) -> f64 {
         (polygon_area(&self.footprint) - self.holes.iter().chain(&self.cuts).map(|h| polygon_area(h)).sum::<f64>())
             .max(0.0)
+    }
+}
+
+/// Set entry `i` of a per-edge list, growing it with `None`s, then drop the
+/// trailing `None`s.
+fn set_edge_value(values: &mut Vec<Option<f64>>, i: usize, value: Option<f64>) {
+    if values.len() <= i {
+        values.resize(i + 1, None);
+    }
+    if let Some(v) = values.get_mut(i) {
+        *v = value;
+    }
+    while values.last().is_some_and(Option::is_none) {
+        values.pop();
     }
 }
 

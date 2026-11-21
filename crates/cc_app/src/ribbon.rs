@@ -31,6 +31,7 @@ pub fn category_icon(category: Category) -> Icon {
         Category::Roof => Icon::Roof,
         Category::Room => Icon::Room,
         Category::Grid => Icon::Grid,
+        Category::Level => Icon::Levels,
         Category::Foundation | Category::Pile => Icon::Footing,
         Category::Rebar => Icon::Rebar,
         Category::Pipe => Icon::Pipe,
@@ -914,7 +915,7 @@ fn modify_tab(ui: &mut Ui, state: &mut AppState) {
     });
     group(ui, t!("group-measure"), |ui| command_button(ui, state, Measure));
     group(ui, t!("group-geometry"), |ui| {
-        command_buttons(ui, state, &[JoinGeometry, UnjoinGeometry, AttachTop, DetachTop, Paint, RemovePaint])
+        command_buttons(ui, state, &[JoinGeometry, UnjoinGeometry, AttachTop, DetachTop, FlipWalls, Paint, RemovePaint])
     });
     group(ui, t!("group-sketch"), |ui| {
         command_buttons(ui, state, &[EditBoundary, EditProfile, EditWallProfile, ResetWallProfile])

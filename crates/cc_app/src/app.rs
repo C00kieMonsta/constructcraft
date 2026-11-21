@@ -300,8 +300,9 @@ pub(crate) fn shortcuts(ctx: &egui::Context, state: &mut AppState) {
     // Space turns or flips the selection (tools use it for their own preview).
     if space && state.tool == Tool::Select && state.selection.is_empty() && crate::section_mark::flip(state) {
         // The selected section mark was flipped.
-    } else if space && state.tool == Tool::Select && crate::tools::rotate_selection(state) {
-        state.message = t!("msg-rotated");
+    } else if space && state.tool == Tool::Select {
+        // Turns components and columns, flips doors, windows and walls (the status bar says which).
+        crate::tools::rotate_selection(state);
     }
     // An open sketch has its own picks and selection.
     if state.sketch.is_some() {

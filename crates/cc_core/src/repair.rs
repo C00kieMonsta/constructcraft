@@ -656,20 +656,22 @@ impl Project {
             let before = r.holes.len();
             r.holes.retain(|h| h.len() >= 3 && finite_points(h));
             repairs += before - r.holes.len();
-            // Edge slopes: one per footprint edge, finite and not negative.
+            // Edge slopes and overhangs: one per footprint edge, finite and not negative.
             let n = r.footprint.len();
-            if r.edge_slopes.len() > n {
-                r.edge_slopes.truncate(n);
-                repairs += 1;
-            }
-            for s in &mut r.edge_slopes {
-                if s.is_some_and(|v| !(v.is_finite() && v >= 0.0)) {
-                    *s = None;
+            for values in [&mut r.edge_slopes, &mut r.edge_overhangs] {
+                if values.len() > n {
+                    values.truncate(n);
                     repairs += 1;
                 }
-            }
-            while r.edge_slopes.last().is_some_and(Option::is_none) {
-                r.edge_slopes.pop();
+                for s in values.iter_mut() {
+                    if s.is_some_and(|v| !(v.is_finite() && v >= 0.0)) {
+                        *s = None;
+                        repairs += 1;
+                    }
+                }
+                while values.last().is_some_and(Option::is_none) {
+                    values.pop();
+                }
             }
         }
         // Arc walls, arc beams and arc strip footings: a bulge that is not a number makes
@@ -941,12 +943,14 @@ impl Project {
         }
         repairs += crate::tag::repair_tag_types(&mut self.types);
         let elevations = self.elevation_ids();
+        let level_ids: std::collections::BTreeSet<_> = self.levels.iter().map(|l| l.id).collect();
         let elements = &self.elements;
         let exists = |id: crate::ElementId| elements.contains_key(&id);
         for view in self.views.values_mut() {
             repairs += view.graphics.repair(&self.filters, Some(&exists));
             repairs += crate::tag::repair_view_tags(view, elements, &self.types);
             repairs += crate::view_mark::repair_view_marks(view, &elevations, &self.types);
+            repairs += crate::level_head::repair_view_level_heads(view, &level_ids);
             match view.template.map(|t| self.templates.get(&t)) {
                 Some(None) => {
                     view.template = None;
@@ -1543,7 +1547,8 @@ mod tests {
         assert_eq!(p.repair(), 0);
     }
 
-    /// Crafted roof edge slopes: more than edges, a NaN and a negative one.
+    /// Crafted roof edge slopes and overhangs: more than edges, a NaN (or
+    /// infinity) and a negative one.
     #[test]
     fn roof_edge_slopes_are_repaired() {
         let mut p = Project::from_template();
@@ -1552,6 +1557,7 @@ mod tests {
         let square = vec![DVec2::ZERO, DVec2::X, DVec2::ONE, DVec2::Y];
         let mut roof = crate::Roof::new(square, 3.0, 0.0, crate::RoofShape::Hip { slope: 0.5 });
         roof.edge_slopes = vec![Some(f64::NAN), Some(0.8), Some(-1.0), None, Some(0.3)];
+        roof.edge_overhangs = vec![Some(0.3), Some(f64::INFINITY), Some(0.0), Some(-0.2), None, Some(1.0)];
         let id = ElementId(p.alloc_id());
         let e = Element {
             id,
@@ -1568,9 +1574,10 @@ mod tests {
             plugin_data: Default::default(),
         };
         p.elements.insert(id, e);
-        assert_eq!(p.repair(), 3, "one too many, a NaN, a negative slope");
+        assert_eq!(p.repair(), 6, "slopes: one too many, a NaN, a negative; overhangs: too many, inf, negative");
         let Some(ElementKind::Roof(r)) = p.element(id).map(|e| &e.kind) else { panic!("the roof stays") };
         assert_eq!(r.edge_slopes, vec![None, Some(0.8)]);
+        assert_eq!(r.edge_overhangs, vec![Some(0.3), None, Some(0.0)]);
         assert_eq!(p.repair(), 0);
     }
 

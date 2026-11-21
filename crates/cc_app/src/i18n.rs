@@ -51,7 +51,8 @@ mod tests {
             .into_iter()
             .chain(cc_core::ViewCategory::ALL.map(|c| c.key()))
             .chain(cc_core::FoundationKind::ALL.map(|k| k.key()))
-            .chain(cc_core::pile::PileKind::ALL.map(|k| k.key()));
+            .chain(cc_core::pile::PileKind::ALL.map(|k| k.key()))
+            .chain(cc_core::level_head::LevelHeads::ALL.map(|h| h.key()));
         missing.extend(runtime.filter(|k| !messages.contains_key(*k)).map(String::from));
         let project = cc_core::Project::from_template();
         let geom = cc_geom::ModelGeometry::build(&project);

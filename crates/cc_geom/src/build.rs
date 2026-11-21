@@ -1415,7 +1415,9 @@ impl ModelGeometry {
                     }
                 }
                 ElementKind::Roof(r) => {
-                    let fp = polygon::ccw(&polygon::offset(&r.footprint, r.overhang));
+                    // The footprint grown by each edge's overhang.
+                    let outline = crate::roofs::outline(r);
+                    let fp = outline.points.clone();
                     // Openings shrink by the overhang (the eaves reach over them), clockwise.
                     let holes: Vec<Vec<DVec2>> = r
                         .holes
@@ -1439,7 +1441,8 @@ impl ModelGeometry {
                         RoofShape::Shed { slope, direction_deg } => {
                             let a = direction_deg.to_radians();
                             let d = DVec2::new(a.cos(), a.sin());
-                            let min = fp.iter().map(|p| p.dot(d)).fold(f64::INFINITY, f64::min);
+                            // The plane starts at the low eave of the roof's own overhang.
+                            let min = crate::roofs::shed_low(r, d);
                             let vertical_thk = thk * (1.0 + slope * slope).sqrt();
                             let bottom = move |p: DVec2| base + slope * (p.dot(d) - min);
                             s.add_prism_with_holes(&fp, &holes, bottom, move |p| bottom(p) + vertical_thk);
@@ -1452,18 +1455,27 @@ impl ModelGeometry {
                             let vertical_thk = thk * (1.0 + slope * slope).sqrt();
                             let mut loops = vec![fp.clone()];
                             loops.extend(holes.iter().cloned());
-                            let own = crate::roofs::ccw_edge_slopes(r);
-                            let weights = crate::roofs::eave_weights(&loops, slope, ridge, &own);
+                            let own = &outline.own;
+                            let weights = crate::roofs::eave_weights(&loops, slope, ridge, own);
                             let sloped = weights.iter().flatten().any(|w| *w > 0.0);
-                            match crate::skeleton::skeleton(&loops, &weights) {
+                            // Eaves with an overhang of their own lie higher or lower on
+                            // their planes: they start late, from the lowest eave.
+                            let slopes = crate::roofs::edge_slopes(&fp, slope, ridge, own);
+                            let (starts, low) =
+                                crate::roofs::eave_starts(&slopes, &outline.overhangs, r.overhang, loops.len() > 1);
+                            let base = base + low;
+                            // Openings keep their eaves at the roof's base.
+                            let mut all_starts = vec![starts.clone()];
+                            all_starts.extend(holes.iter().map(|h| vec![-low; h.len()]));
+                            match crate::skeleton::skeleton_with_starts(&loops, &weights, &all_starts) {
                                 Ok(sk) if sloped => {
                                     crate::roofs::add_skeleton_roof(&mut s, &sk, base, vertical_thk);
                                     self.roof_ridges.insert(e.id, sk.lines);
                                 }
                                 // Should the skeleton fail, the lowest planes of the outline.
                                 Err(_) if sloped && holes.is_empty() => {
-                                    let slopes = crate::roofs::edge_slopes(&fp, slope, ridge, &own);
-                                    let eaves = crate::roofs::sloped_eaves(&fp, &slopes);
+                                    let mut eaves = crate::roofs::sloped_eaves(&fp, &slopes);
+                                    crate::roofs::raise_eaves(&mut eaves, &fp, &slopes, &starts);
                                     crate::roofs::add_pitched_roof(&mut s, &fp, &eaves, base, vertical_thk);
                                     let regions = crate::roofs::roof_regions(&fp, &eaves);
                                     self.roof_ridges.insert(e.id, crate::roofs::ridge_lines(&fp, &regions));

@@ -36,6 +36,7 @@ mod home;
 mod i18n;
 mod icons;
 mod jobs;
+mod level_head_ui;
 mod level_mark_ui;
 mod library;
 mod line_styles_dialog;

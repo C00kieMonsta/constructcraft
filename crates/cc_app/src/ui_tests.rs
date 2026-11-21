@@ -3895,6 +3895,33 @@ fn title_block_editor_snapshot() {
     harness.snapshot("title_block_editor");
 }
 
+/// Space with walls selected flips them (one undo step), and the Flip
+/// Walls command does the same.
+#[test]
+fn space_flips_the_selected_walls() {
+    use crate::commands::UiCommand;
+    let mut state = sample_state();
+    let wall = state.project().walls().map(|(e, _)| e.id).next().unwrap();
+    let ends = |state: &AppState| state.project().element(wall).and_then(|e| e.as_wall()).map(|w| (w.start, w.end));
+    let (start, end) = ends(&state).unwrap();
+    assert_eq!(UiCommand::FlipWalls.unavailable(&state), Some(t!("why-select-walls")));
+    state.selection = [wall].into_iter().collect();
+    assert_eq!(UiCommand::FlipWalls.unavailable(&state), None);
+    let mut harness = themed_harness(state, egui::vec2(300.0, 200.0), egui::Theme::Light, |ui, state| {
+        crate::app::shortcuts(ui.ctx(), state);
+    });
+    harness.run();
+    let depth = harness.state().session.doc.undo_depth();
+    harness.key_press(egui::Key::Space);
+    harness.run();
+    assert_eq!(ends(harness.state()), Some((end, start)), "flipped");
+    assert_eq!(harness.state().session.doc.undo_depth(), depth + 1);
+    assert_eq!(harness.state().message, t!("msg-walls-flipped"));
+    // The command flips it back.
+    crate::commands::run(harness.state_mut(), &egui::Context::default(), UiCommand::FlipWalls);
+    assert_eq!(ends(harness.state()), Some((start, end)), "flipped back");
+}
+
 /// A section's mark in a plan is picked by a click on its head, flipped
 /// with Space and moved by dragging its line.
 #[test]
@@ -7698,4 +7725,74 @@ fn developer_mode_loads_the_development_folder_and_reloads_on_change() {
     assert_eq!(harness.state().message, t!("plug-dev-reloaded"));
     let _ = std::fs::remove_dir_all(&installed);
     let _ = std::fs::remove_dir_all(&dev_root);
+}
+
+/// In an elevation a level's head is dragged up off its line with an elbow
+/// (dropped near the line it goes back onto it), and the level's context
+/// menu hides it in the view (issue #453).
+#[test]
+fn level_heads_are_dragged_and_hidden_in_elevations() {
+    use glam::DVec2;
+    let mut state = sample_state();
+    let p = state.project();
+    let view = p.views.values().find(|v| matches!(v.kind, cc_core::ViewKind::Elevation { .. })).unwrap().id;
+    let level = p.levels[0].id;
+    state.active_view = Some(view);
+    state.set_tool(crate::tools::Tool::Select);
+    let head = move |state: &mut AppState| {
+        let d = state.drawing(view).unwrap();
+        d.levels.iter().find(|l| l.level == level).and_then(|l| l.heads.first().copied()).unwrap()
+    };
+    /// The view drawn around the end of the first level's line, 20 points a meter.
+    fn xf_of(state: &mut AppState, rect: egui::Rect) -> crate::paint::Xf {
+        let view = state.active_view.unwrap();
+        let d = state.drawing(view).unwrap();
+        let level = state.project().levels[0].id;
+        let origin = d.levels.iter().find(|l| l.level == level).map(|l| l.b).unwrap_or_default();
+        crate::paint::Xf { screen: rect.center(), origin, scale: 20.0 }
+    }
+    let mut harness = themed_harness(state, egui::vec2(600.0, 400.0), egui::Theme::Light, |ui, state| {
+        let (resp, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
+        let xf = xf_of(state, resp.rect);
+        let Some(view) = state.active_view.and_then(|v| state.project().view(v).cloned()) else { return };
+        let Some(drawing) = state.drawing(view.id) else { return };
+        crate::tools::handle(ui, &resp, &painter, state, &view, &xf, &drawing);
+    });
+    harness.run();
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 400.0));
+    let xf = xf_of(harness.state_mut(), rect);
+    let screen = |p: DVec2| xf.to_screen(p);
+    let press = |h: &mut Harness<'static, AppState>, pos: egui::Pos2, button: egui::PointerButton, pressed: bool| {
+        h.input_mut().events.push(egui::Event::PointerMoved(pos));
+        h.input_mut().events.push(egui::Event::PointerButton { pos, button, pressed, modifiers: Default::default() });
+        h.run();
+    };
+    let drag = |h: &mut Harness<'static, AppState>, from: egui::Pos2, by: egui::Vec2| {
+        press(h, from, egui::PointerButton::Primary, true);
+        for k in 1..=4 {
+            h.input_mut().events.push(egui::Event::PointerMoved(from + by * (k as f32 / 4.0)));
+            h.run();
+        }
+        press(h, from + by, egui::PointerButton::Primary, false);
+    };
+    let setting = |h: &Harness<'static, AppState>| {
+        h.state().project().view(view).unwrap().level_heads.get(&level).copied().unwrap_or_default()
+    };
+
+    // Dragged 20 points (1 m) up: the end head's elbow.
+    let h = head(harness.state_mut());
+    drag(&mut harness, screen(h.center), egui::vec2(0.0, -20.0));
+    assert!((setting(&harness).elbow - 1.0).abs() < 1e-6, "{:?}", setting(&harness));
+    // Dropped a few points off the line, it goes back onto it.
+    let h = head(harness.state_mut());
+    drag(&mut harness, screen(h.center), egui::vec2(0.0, 18.0));
+    assert_eq!(setting(&harness).elbow, 0.0);
+    // Its context menu hides it in this view.
+    let at = screen(head(harness.state_mut()).center);
+    press(&mut harness, at, egui::PointerButton::Secondary, true);
+    press(&mut harness, at, egui::PointerButton::Secondary, false);
+    harness.get_by_label(&t!("menu-hide-level")).click();
+    harness.run();
+    assert!(setting(&harness).hidden);
+    assert!(harness.state_mut().drawing(view).unwrap().levels.iter().all(|l| l.level != level));
 }
