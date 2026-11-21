@@ -53,6 +53,7 @@ pub fn show(ctx: &Context, state: &mut AppState) {
     crate::macro_ui::dialog(ctx, state);
     crate::plugins_ui::drain_messages(state);
     crate::plugins_ui::show(ctx, state);
+    crate::plugin_form::show(ctx, state);
     // After the library window, which opens it over itself.
     crate::preferences::show(ctx, state);
     // Before the unsaved changes question its Create may ask.

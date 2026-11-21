@@ -165,6 +165,11 @@ pub enum Tool {
     Paint {
         remove: bool,
     },
+    /// Pick an element (or, with `point`, a point in a plan) for a field of
+    /// a plugin command's form, hidden meanwhile (see [`crate::plugin_form`]).
+    Pick {
+        point: bool,
+    },
 }
 
 impl Tool {
@@ -243,6 +248,8 @@ impl Tool {
             Tool::CurtainGrid => "tool-curtain-grid",
             Tool::Paint { remove: false } => "tool-paint",
             Tool::Paint { remove: true } => "tool-remove-paint",
+            Tool::Pick { point: false } => "tool-pick-element",
+            Tool::Pick { point: true } => "tool-pick-point",
             Tool::Text { .. } => "tool-text",
             Tool::DetailLine => "tool-detail-line",
             Tool::LevelMark { .. } => "tool-level-mark",
@@ -1680,6 +1687,8 @@ pub fn handle(
                 select(ui, resp, painter, state, false, xf, drawing, None);
             }
         }
+        // A plugin form's element is picked in any 2D view, its point in plans.
+        (Tool::Pick { point }, _) => crate::plugin_form::pick_tool(ui, resp, painter, state, view, *point, xf, drawing),
         // Faces are painted in 3D views.
         (Tool::Paint { .. }, _) => {
             if resp.clicked() {

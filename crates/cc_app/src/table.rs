@@ -25,8 +25,17 @@ fn row_height() -> f32 {
 
 /// Collapsible section header; `add` draws the rows while it is open.
 pub fn section(ui: &mut Ui, id: &str, title: String, add: impl FnOnce(&mut Ui)) {
+    section_open(ui, id, title, true, add);
+}
+
+/// A [`section`] closed until the user opens it (then it stays as they left it).
+pub fn section_closed(ui: &mut Ui, id: &str, title: String, add: impl FnOnce(&mut Ui)) {
+    section_open(ui, id, title, false, add);
+}
+
+fn section_open(ui: &mut Ui, id: &str, title: String, default_open: bool, add: impl FnOnce(&mut Ui)) {
     let state_id = ui.make_persistent_id(("prop-section", id));
-    let mut open = ui.data_mut(|d| *d.get_persisted_mut_or(state_id, true));
+    let mut open = ui.data_mut(|d| *d.get_persisted_mut_or(state_id, default_open));
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), row_height()), Sense::click());
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::CollapsingHeader, true, open, &title));
     let painter = ui.painter();

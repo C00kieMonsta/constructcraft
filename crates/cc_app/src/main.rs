@@ -55,6 +55,7 @@ mod paint_cache;
 mod paint_ui;
 mod palette;
 mod phases_dialog;
+mod plugin_form;
 mod plugins_ui;
 mod preferences;
 mod preselect;

@@ -985,7 +985,7 @@ fn manage_tab(ui: &mut Ui, state: &mut AppState) {
 }
 
 /// Plugin Commands: a menu of the loaded plugins' commands, by plugin;
-/// each opens its form in the command palette.
+/// each opens its form (see [`crate::plugin_form`]).
 fn plugin_menu(ui: &mut Ui, state: &mut AppState) {
     let r = command_menu(ui, state, UiCommand::PluginCommands);
     egui::Popup::menu(&r).show(|ui| {
@@ -1005,7 +1005,7 @@ fn plugin_menu(ui: &mut Ui, state: &mut AppState) {
                     }
                     if r.clicked() {
                         state.ribbon_peek = false;
-                        crate::palette::open_command(state, &name);
+                        crate::plugin_form::open(state, &name);
                     }
                 }
             }
@@ -1466,6 +1466,9 @@ pub fn options_bar(ui: &mut Ui, state: &mut AppState) {
             }
             Tool::CurtainGrid => crate::curtain_ui::options_bar(ui, state),
             Tool::Paint { remove } => crate::paint_ui::options_bar(ui, state, remove),
+            Tool::Pick { .. } => {
+                ui.label(theme::muted(crate::plugin_form::prompt(state)));
+            }
             Tool::Mirror { draw } => {
                 ui.checkbox(&mut state.modify.mirror_copy, t!("opt-copy"));
                 ui.label(theme::muted(if draw { t!("hint-mirror-draw") } else { t!("hint-mirror-pick") }));

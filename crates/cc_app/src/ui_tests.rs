@@ -2713,6 +2713,402 @@ fn plugin_commands_run_from_the_palette() {
     assert!(harness.query_by_label_contains("made a wall").is_some(), "what it printed is shown");
 }
 
+/// The plugin `form_tools`, whose commands take every kind of field.
+const FORM_TOOLS: &str = r#"
+ccad.command {
+  name = "mark_wall",
+  title = "Mark wall",
+  params = {
+    properties = {
+      wall = { type = "integer", ui = "element", category = "wall", description = "The wall to mark." },
+      note = { type = "string", default = "marked" },
+      walls = { type = "array", ui = "elements", category = "wall" },
+      at = { type = "array", ui = "point" },
+      flag = { type = "boolean" },
+      count = { type = "integer", minimum = 1, maximum = 9 },
+    },
+    required = { "wall" },
+  },
+  run = function(args)
+    ccad.run("element_set", { id = args.wall, comments = args.note or "marked" })
+  end,
+}
+
+ccad.command {
+  name = "wall_at",
+  title = "Wall at a point",
+  params = {
+    properties = {
+      at = { type = "array", ui = "point", description = "Where the wall starts." },
+      length = { type = "number", ui = "length", default = 2, minimum = 0.1 },
+    },
+    required = { "at", "length" },
+  },
+  run = function(args)
+    local id = ccad.run("wall_create", { start = args.at, ["end"] = { args.at[1] + args.length, args.at[2] } }).id
+    print("wall " .. id)
+    return { id = id }
+  end,
+}
+
+ccad.command {
+  name = "layout",
+  title = "Every field",
+  description = "A form with one field of each kind, all of them required, to see how it is laid out.",
+  params = {
+    properties = {
+      a_length = { type = "number", ui = "length", default = 2.5, minimum = 0.1 },
+      b_count = { type = "integer", default = 3 },
+      c_flag = { type = "boolean", default = true },
+      d_side = { type = "string", enum = { "left", "right" }, enum_labels = { "Left side", "Right side" } },
+      e_name = { type = "string", default = "A rather long default name to see how it is cut in its cell" },
+      f_wall = { type = "integer", ui = "element", category = "wall" },
+      g_walls = { type = "array", ui = "elements" },
+      h_at = { type = "array", ui = "point", default = { 1.5, 2.25 } },
+      i_level = { type = "integer", ui = "level" },
+      j_view = { type = "integer", ui = "view" },
+      k_type = { type = "integer", ui = "type", category = "wall" },
+      l_material = { type = "string", ui = "material" },
+      m_extra = { type = "object", default = { a = 1 } },
+    },
+    required = { "a_length", "b_count", "c_flag", "d_side", "e_name", "f_wall", "g_walls", "h_at", "i_level",
+      "j_view", "k_type", "l_material", "m_extra" },
+  },
+  run = function() end,
+}
+
+ccad.command { name = "noop", title = "Do nothing", run = function() end }
+
+ccad.command {
+  name = "count_walls",
+  title = "Count walls",
+  kind = "query",
+  run = function() return { walls = #ccad.run("elements_list", { category = "wall" }) } end,
+}
+
+ccad.command {
+  name = "report",
+  title = "Report",
+  kind = "query",
+  run = function()
+    print(string.rep("a long printed line ", 30))
+    return { text = string.rep("wide ", 60), list = { 1, 2, 3 } }
+  end,
+}
+
+ccad.command {
+  name = "fail",
+  title = "Always fails",
+  params = {
+    properties = { why = { type = "string", default = "no luck: " .. string.rep("the reason goes on ", 8) } },
+    required = { "why" },
+  },
+  run = function(args) print("trying") error(args.why, 0) end,
+}
+"#;
+
+/// A plugins folder with the plugin `form_tools` ([`FORM_TOOLS`]).
+fn form_plugins_folder(name: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("ccad-plugin-form-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let dir = root.join("form_tools");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("plugin.toml"), "id = \"form_tools\"\nname = \"Form tools\"\nversion = \"1.0.0\"\n")
+        .unwrap();
+    std::fs::write(dir.join("main.lua"), FORM_TOOLS).unwrap();
+    root
+}
+
+/// The sample house with the plugins of `folder` loaded.
+fn state_with_plugins(folder: std::path::PathBuf) -> AppState {
+    let mut state = sample_state();
+    state.prefs.plugin_folder = Some(folder);
+    crate::plugins_ui::load(&mut state);
+    state
+}
+
+fn form_field(state: &AppState, name: &str) -> crate::plugin_form::Field {
+    let form = state.dialogs.plugin_form.as_ref().expect("the form is open");
+    form.fields().iter().find(|f| f.name == name).cloned().expect("the field")
+}
+
+/// *Plugin Commands* opens the example plugin's command in its form: the
+/// lengths typed, Run creates the room as one undo step and shows what it
+/// returned; Run Again goes back to the form with the values kept.
+#[test]
+fn plugin_commands_open_their_form_from_the_ribbon() {
+    let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plugins");
+    let mut state = state_with_plugins(examples);
+    state.ribbon_tab = RibbonTab::Manage;
+    let walls =
+        |s: &AppState| s.project().elements.values().filter(|e| e.category() == cc_core::Category::Wall).count();
+    let before = (walls(&state), state.session.doc.undo_depth());
+    // Wide enough for the whole Manage tab.
+    let mut harness = themed_harness(state, egui::vec2(1800.0, 800.0), egui::Theme::Light, |ui, state| {
+        crate::app::shortcuts(ui.ctx(), state);
+        crate::ribbon::ribbon(ui, state);
+        crate::dialogs::show(ui.ctx(), state);
+    });
+    harness.get_by_role_and_label(Role::Button, &t!("action-plugin-commands")).click();
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "rectangle_room").click();
+    harness.run();
+    assert!(harness.state().dialogs.plugin_form.is_some(), "the menu opens the form");
+    assert!(harness.query_by_label("Rectangle room").is_some(), "titled by the command");
+    assert!(harness.query_by_label("Quick rooms").is_some(), "the plugin's name by the title");
+    let run_disabled = |h: &Harness<'static, AppState>| {
+        h.get_by_role_and_label(Role::Button, &t!("palette-run")).accesskit_node().is_disabled()
+    };
+    assert!(run_disabled(&harness), "the width and depth are required");
+    for (label, value) in [("Width", "4"), ("Depth", "3")] {
+        harness.get_by_label(label).focus();
+        harness.run();
+        harness.get_by_label(label).type_text(value);
+        harness.run();
+    }
+    assert!(!run_disabled(&harness));
+    harness.get_by_role_and_label(Role::Button, &t!("palette-run")).click();
+    harness.run();
+    assert_eq!(walls(harness.state()), before.0 + 4);
+    assert_eq!(harness.state().session.doc.undo_depth(), before.1 + 1, "one undo step");
+    assert!(harness.state().dialogs.plugin_form.as_ref().unwrap().shows_result());
+    assert!(harness.query_by_label_contains("\"floor\"").is_some(), "what it returned is shown");
+    harness.get_by_role_and_label(Role::Button, &t!("pform-run-again")).click();
+    harness.run();
+    assert_eq!(harness.get_by_label("Width").value().as_deref(), Some("4"), "the values are kept");
+    harness.get_by_role_and_label(Role::Button, &t!("action-cancel")).click();
+    harness.run();
+    assert!(harness.state().dialogs.plugin_form.is_none());
+}
+
+/// Elements come from the selection: a list starts with the selected walls
+/// (not the door), and Selection fills a single wall when exactly one is selected.
+#[test]
+fn plugin_form_takes_the_selection() {
+    use std::collections::BTreeSet;
+    let mut state = state_with_plugins(form_plugins_folder("selection"));
+    let walls: Vec<cc_core::ElementId> = state.project().walls().map(|(e, _)| e.id).take(2).collect();
+    let door = state.project().elements.values().find(|e| e.category() == cc_core::Category::Door).unwrap().id;
+    state.selection = BTreeSet::from([walls[0], walls[1], door]);
+    crate::plugin_form::open(&mut state, "form_tools__mark_wall");
+    let ids = serde_json::json!(walls.iter().map(|w| w.0).collect::<Vec<_>>());
+    assert_eq!(form_field(&state, "walls").effective(), Some(&ids), "the selected walls, without the door");
+    let mut harness = app_harness(state);
+    let selection = |h: &Harness<'static, AppState>| {
+        h.get_by_role_and_label(Role::Button, &t!("pform-selection")).accesskit_node().is_disabled()
+    };
+    assert!(selection(&harness), "two walls are selected");
+    harness.state_mut().selection = BTreeSet::from([walls[0], door]);
+    harness.run();
+    assert!(!selection(&harness));
+    harness.get_by_role_and_label(Role::Button, &t!("pform-selection")).click();
+    harness.run();
+    assert_eq!(form_field(harness.state(), "wall").effective(), Some(&serde_json::json!(walls[0].0)));
+    assert!(harness.query_by_label_contains(&format!("#{} ", walls[0].0)).is_some(), "the wall is named");
+    harness.get_by_role_and_label(Role::Button, &t!("palette-run")).click();
+    harness.run();
+    assert_eq!(harness.state().project().element(walls[0]).unwrap().comments, "marked");
+    assert!(harness.state().dialogs.plugin_form.is_none(), "nothing to show: the form closes");
+    assert_eq!(harness.state().message, t!("pform-done", "title" => "Mark wall"));
+}
+
+/// Where the pick harness centers the plan, and its scale (points a meter).
+const PICK_ORIGIN: glam::DVec2 = glam::DVec2::new(36.0, 2.0);
+const PICK_SCALE: f64 = 20.0;
+const PICK_SIZE: egui::Vec2 = egui::vec2(900.0, 640.0);
+
+/// The active plan over the whole window with its tools, the dialogs over
+/// it and the keyboard shortcuts, as the app runs them.
+fn pick_harness(state: AppState) -> Harness<'static, AppState> {
+    themed_harness(state, PICK_SIZE, egui::Theme::Light, |ui, state| {
+        state.sync();
+        state.hint.begin_frame();
+        crate::app::shortcuts(ui.ctx(), state);
+        let (resp, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
+        let xf = crate::paint::Xf { screen: resp.rect.center(), origin: PICK_ORIGIN, scale: PICK_SCALE };
+        if let Some(view) = state.active_view.and_then(|v| state.project().view(v).cloned())
+            && let Some(drawing) = state.drawing(view.id)
+        {
+            crate::tools::handle(ui, &resp, &painter, state, &view, &xf, &drawing);
+        }
+        crate::dialogs::show(ui.ctx(), state);
+        state.hint.end_frame();
+    })
+}
+
+/// A click at the plan point `p` of the pick harness.
+fn click_plan(harness: &mut Harness<'static, AppState>, p: [f64; 2]) {
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, PICK_SIZE);
+    let xf = crate::paint::Xf { screen: rect.center(), origin: PICK_ORIGIN, scale: PICK_SCALE };
+    let pos = xf.to_screen(glam::DVec2::from(p));
+    harness.input_mut().events.push(egui::Event::PointerMoved(pos));
+    harness.run();
+    for pressed in [true, false] {
+        let button = egui::PointerButton::Primary;
+        harness.input_mut().events.push(egui::Event::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers: Default::default(),
+        });
+        harness.run();
+    }
+}
+
+/// The sample house with the form plugin, a wall and a column away from
+/// the house, and their plan active: (state, wall, column).
+fn pick_state(name: &str) -> (AppState, u64, u64) {
+    let mut state = state_with_plugins(form_plugins_folder(name));
+    let run = |s: &mut AppState, command: &str, args: serde_json::Value| {
+        s.session.execute(command, args).unwrap()["id"].as_u64().unwrap()
+    };
+    let wall = run(&mut state, "wall_create", serde_json::json!({"start": [30.0, 0.0], "end": [34.0, 0.0]}));
+    let column = run(&mut state, "column_create", serde_json::json!({"position": [40.0, 0.0]}));
+    let level = state.project().element(cc_core::ElementId(wall)).unwrap().level;
+    let plan = state.project().views.values().find(|v| v.is_plan() && v.level() == Some(level)).unwrap().id;
+    state.active_view = Some(plan);
+    (state, wall, column)
+}
+
+/// Pick hides the form and picks in the view: Esc brings the form back
+/// unchanged, an element of another category is refused with a notice, and
+/// a wall fills the field; Run then edits it.
+#[test]
+fn plugin_form_picks_an_element_in_the_view() {
+    use crate::tools::Tool;
+    let (mut state, wall, column) = pick_state("pick-element");
+    crate::plugin_form::open(&mut state, "form_tools__mark_wall");
+    let mut harness = pick_harness(state);
+    let shown = |h: &Harness<'static, AppState>| h.query_by_label(&t!("palette-run")).is_some();
+    assert!(shown(&harness));
+    harness.get_by_role_and_label(Role::Button, &t!("pform-pick")).click();
+    harness.run();
+    assert_eq!(harness.state().tool, Tool::Pick { point: false });
+    assert!(!shown(&harness), "the form is hidden while picking");
+    let prompt = t!("pform-pick-element-of", "category" => crate::actions::t_category(cc_core::Category::Wall));
+    assert_eq!(harness.state().hint.shown(), Some(prompt.as_str()), "the status bar prompts");
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert_eq!(harness.state().tool, Tool::Select);
+    assert!(shown(&harness), "Esc brings the form back");
+    assert_eq!(form_field(harness.state(), "wall").effective(), None, "unchanged");
+
+    harness.get_by_role_and_label(Role::Button, &t!("pform-pick")).click();
+    harness.run();
+    click_plan(&mut harness, [40.0, 0.0]);
+    assert_eq!(harness.state().tool, Tool::Pick { point: false }, "a column is not a wall: still picking");
+    assert!(harness.state().hint.shown().is_some_and(|h| h.contains(&prompt) && h.len() > prompt.len()));
+    assert_eq!(harness.state().dialogs.plugin_form.as_ref().unwrap().picking(), Some(0));
+    assert!(harness.state().project().element(cc_core::ElementId(column)).is_some());
+    click_plan(&mut harness, [32.0, 0.0]);
+    assert_eq!(harness.state().tool, Tool::Select);
+    assert!(shown(&harness), "the form comes back");
+    assert_eq!(form_field(harness.state(), "wall").effective(), Some(&serde_json::json!(wall)));
+    harness.get_by_role_and_label(Role::Button, &t!("palette-run")).click();
+    harness.run();
+    assert_eq!(harness.state().project().element(cc_core::ElementId(wall)).unwrap().comments, "marked");
+}
+
+/// A point field picks a point in the plan; the command's result and what
+/// it printed show after Run.
+#[test]
+fn plugin_form_picks_a_point_in_the_plan() {
+    let (mut state, _, _) = pick_state("pick-point");
+    let walls =
+        |s: &AppState| s.project().elements.values().filter(|e| e.category() == cc_core::Category::Wall).count();
+    let before = walls(&state);
+    crate::plugin_form::open(&mut state, "form_tools__wall_at");
+    let mut harness = pick_harness(state);
+    harness.get_by_role_and_label(Role::Button, &t!("pform-pick")).click();
+    harness.run();
+    assert_eq!(harness.state().tool, crate::tools::Tool::Pick { point: true });
+    click_plan(&mut harness, [38.0, 6.0]);
+    let at = form_field(harness.state(), "at").effective().cloned().unwrap();
+    let (x, y) = (at[0].as_f64().unwrap(), at[1].as_f64().unwrap());
+    assert!((x - 38.0).abs() < 0.05 && (y - 6.0).abs() < 0.05, "{at}");
+    harness.get_by_role_and_label(Role::Button, &t!("palette-run")).click();
+    harness.run();
+    assert_eq!(walls(harness.state()), before + 1);
+    assert!(harness.state().dialogs.plugin_form.as_ref().unwrap().shows_result());
+    assert!(harness.query_by_label_contains("[form_tools] wall").is_some(), "what it printed");
+    harness.get_all_by_label(&t!("action-close")).last().unwrap().click();
+    harness.run();
+    assert!(harness.state().dialogs.plugin_form.is_none());
+}
+
+/// The JSON button shows the arguments as JSON and reads them back; JSON
+/// the form cannot hold stays JSON, with the reason.
+#[test]
+fn plugin_form_goes_to_json_and_back() {
+    let mut state = state_with_plugins(form_plugins_folder("json"));
+    let wall = state.project().walls().map(|(e, _)| e.id).next().unwrap();
+    crate::plugin_form::open(&mut state, "form_tools__mark_wall");
+    let mut harness = app_harness(state);
+    let type_json = |h: &mut Harness<'static, AppState>, text: &str| {
+        h.get_by_role_and_label(Role::MultilineTextInput, &t!("palette-arguments")).focus();
+        h.run();
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.get_by_role_and_label(Role::MultilineTextInput, &t!("palette-arguments")).type_text(text);
+        h.run();
+    };
+    let form = |h: &Harness<'static, AppState>| h.state().dialogs.plugin_form.as_ref().unwrap().shows_json();
+    harness.get_by_role_and_label(Role::Button, &t!("pform-json")).click();
+    harness.run();
+    assert!(form(&harness));
+    type_json(&mut harness, r#"{"nope": 1}"#);
+    harness.get_by_role_and_label(Role::Button, &t!("pform-json")).click();
+    harness.run();
+    assert!(form(&harness), "an unknown property stays in JSON");
+    assert!(harness.query_by_label(&t!("pform-json-unknown", "name" => "nope")).is_some(), "with the reason");
+    type_json(&mut harness, &format!(r#"{{"wall": {}, "note": "via json"}}"#, wall.0));
+    harness.get_by_role_and_label(Role::Button, &t!("pform-json")).click();
+    harness.run();
+    assert!(!form(&harness), "back in the form");
+    assert_eq!(form_field(harness.state(), "note").effective(), Some(&serde_json::json!("via json")));
+    harness.get_by_role_and_label(Role::Button, &t!("palette-run")).click();
+    harness.run();
+    assert_eq!(harness.state().project().element(wall).unwrap().comments, "via json");
+}
+
+/// A command that fails leaves the form open with its message and what it
+/// printed; one without parameters runs at once, closing or showing its result.
+#[test]
+fn plugin_form_errors_and_commands_without_parameters() {
+    let mut state = state_with_plugins(form_plugins_folder("run"));
+    crate::plugin_form::open(&mut state, "form_tools__noop");
+    assert!(state.dialogs.plugin_form.is_none(), "nothing to ask nor to show");
+    assert_eq!(state.message, t!("pform-done", "title" => "Do nothing"));
+    crate::plugin_form::open(&mut state, "form_tools__fail");
+    let mut harness = app_harness(state);
+    harness.get_by_role_and_label(Role::Button, &t!("palette-run")).click();
+    harness.run();
+    let error = harness.state().dialogs.plugin_form.as_ref().unwrap().error().unwrap_or_default().to_string();
+    assert!(error.contains("[form_tools] trying") && error.contains("no luck"), "{error}");
+    assert!(harness.query_by_label_contains("no luck").is_some(), "shown in the form");
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(harness.state().dialogs.plugin_form.is_none());
+    let count = harness.state().project().walls().count();
+    crate::plugin_form::open(harness.state_mut(), "form_tools__count_walls");
+    harness.run();
+    assert!(harness.state().dialogs.plugin_form.as_ref().unwrap().shows_result());
+    assert!(harness.query_by_label_contains(&format!("\"walls\": {count}")).is_some());
+}
+
+/// The palette opens a plugin's command in its form.
+#[test]
+fn the_palette_opens_plugin_commands_in_their_form() {
+    let mut state = state_with_plugins(form_plugins_folder("palette"));
+    crate::palette::toggle(&mut state);
+    let mut harness = palette_harness(state);
+    harness.get_by_role(Role::TextInput).type_text("form_tools__mark_wall");
+    harness.run();
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    assert!(harness.state().palette.is_none());
+    assert!(harness.state().dialogs.plugin_form.is_some());
+}
+
 /// Installing from a local archive and removing a plugin, as the window does.
 #[test]
 fn removing_a_plugin_from_the_window() {
@@ -3845,6 +4241,34 @@ fn every_dialog_keeps_its_body_inside() {
     ];
     for section in [Section::General, Section::Interface, Section::FileLocations, Section::Saving, Section::Shortcuts] {
         opens.push((format!("preferences {section:?}"), Box::new(move |s| crate::preferences::open(s, section))));
+    }
+    // A plugin command's form with every kind of field (a wall selected), as
+    // JSON, a result with long lines, and an error.
+    let plugins = form_plugins_folder("layout");
+    type Then = fn(&mut AppState);
+    let forms: [(&str, &'static str, Then); 4] = [
+        ("plugin form", "form_tools__layout", |_| {}),
+        ("plugin form json", "form_tools__layout", |s| {
+            if let Some(form) = s.dialogs.plugin_form.as_mut() {
+                form.toggle_json(&crate::plugin_form::Fmt::current());
+            }
+        }),
+        ("plugin form result", "form_tools__report", |_| {}),
+        ("plugin form error", "form_tools__fail", crate::plugin_form::run_open),
+    ];
+    for (name, command, then) in forms {
+        let plugins = plugins.clone();
+        opens.push((
+            name.into(),
+            Box::new(move |s| {
+                s.prefs.plugin_folder = Some(plugins.clone());
+                crate::plugins_ui::load(s);
+                let wall = s.project().walls().map(|(e, _)| e.id).next();
+                s.selection.extend(wall);
+                crate::plugin_form::open(s, command);
+                then(s);
+            }),
+        ));
     }
     // Sun Settings in each kind of sun, and in a 3D view.
     for (mode, three_d) in
