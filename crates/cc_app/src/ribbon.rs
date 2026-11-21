@@ -29,6 +29,7 @@ pub fn category_icon(category: Category) -> Icon {
         Category::Roof => Icon::Roof,
         Category::Room => Icon::Room,
         Category::Grid => Icon::Grid,
+        Category::Level => Icon::Levels,
         Category::Foundation | Category::Pile => Icon::Footing,
         Category::Rebar => Icon::Rebar,
         Category::Pipe => Icon::Pipe,

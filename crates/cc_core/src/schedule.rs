@@ -308,6 +308,7 @@ impl ScheduleField {
                 ];
             }
             Category::Grid
+            | Category::Level
             | Category::Dimension
             | Category::Text
             | Category::DetailLine
@@ -379,6 +380,7 @@ impl ScheduleField {
             Category::Topography => vec![F::Mark, F::Type, F::Level, F::Area, F::Volume],
             Category::Pad => vec![F::Mark, F::Type, F::Level, F::Elevation, F::Area, F::CutVolume, F::FillVolume],
             Category::Grid
+            | Category::Level
             | Category::Dimension
             | Category::Text
             | Category::DetailLine

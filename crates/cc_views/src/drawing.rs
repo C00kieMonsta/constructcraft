@@ -232,6 +232,9 @@ pub struct Drawing2D {
     pub marks: Vec<MarkHandle>,
     /// The bubbles of grids: picked and moved in the view.
     pub bubbles: Vec<BubbleHandle>,
+    /// The levels of an elevation or a section: picked, and their heads
+    /// moved, in the view.
+    pub levels: Vec<LevelHandle>,
     /// Lookups over `prims`, built the first time they are needed (see
     /// [`DrawingIndex`]); a copy of the drawing starts without them.
     pub index: DrawingIndex,
@@ -326,6 +329,46 @@ pub struct BubbleHandle {
     pub offset: DVec2,
 }
 
+/// A level's line in an elevation or a section, as drawn (meters in the view).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LevelHandle {
+    pub level: cc_core::LevelId,
+    /// The line's ends: the start on the left.
+    pub a: DVec2,
+    pub b: DVec2,
+    /// The heads drawn at its ends.
+    pub heads: Vec<LevelHeadHandle>,
+}
+
+/// One head of a level's line, as drawn.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LevelHeadHandle {
+    /// At the line's start (else its end).
+    pub start: bool,
+    /// The end of the line the head belongs to.
+    pub tip: DVec2,
+    /// Where the head's symbol points: `tip`, or past its elbow.
+    pub point: DVec2,
+    /// The box the symbol and the texts take.
+    pub center: DVec2,
+    pub half: DVec2,
+    /// How far the head is moved up from the line, meters in the view.
+    pub elbow: f64,
+}
+
+impl LevelHeadHandle {
+    pub fn contains(&self, p: DVec2) -> bool {
+        (p - self.center).abs().cmple(self.half).all()
+    }
+}
+
+impl LevelHandle {
+    /// Whether `p` lies within `tol` of the line.
+    pub fn on_line(&self, p: DVec2, tol: f64) -> bool {
+        cc_geom::polygon::closest_on_segment(self.a, self.b, p).0.distance(p) <= tol
+    }
+}
+
 impl Drawing2D {
     /// The primitives of the view itself, without its underlay and its overlay.
     pub fn own_prims(&self) -> &[Prim] {
@@ -374,6 +417,16 @@ impl Drawing2D {
     /// The elevation marker at `p` (the last drawn on top), if any.
     pub fn mark_at(&self, p: DVec2) -> Option<MarkHandle> {
         self.marks.iter().rev().find(|m| (p - m.center).abs().cmple(m.half).all()).copied()
+    }
+
+    /// The level whose head is at `p` (with which head: `true` at the
+    /// start), else whose line passes within `tol` of it.
+    pub fn level_at(&self, p: DVec2, tol: f64) -> Option<(cc_core::LevelId, Option<bool>)> {
+        let head = self.levels.iter().rev().find_map(|l| {
+            let h = l.heads.iter().find(|h| h.contains(p))?;
+            Some((l.level, Some(h.start)))
+        });
+        head.or_else(|| self.levels.iter().rev().find(|l| l.on_line(p, tol)).map(|l| (l.level, None)))
     }
 
     /// The grid bubble at `p` (the last drawn on top), if any.

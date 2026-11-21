@@ -31,6 +31,7 @@ pub mod graph;
 pub mod graphics;
 pub mod grid_frame;
 pub mod io;
+pub mod level_heads;
 pub mod level_mark;
 pub mod levels;
 pub mod lightning;

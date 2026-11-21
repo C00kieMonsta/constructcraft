@@ -390,8 +390,10 @@ impl Tool {
             Category::DetailLine => Tool::DetailLine,
             Category::LevelMark => Tool::LevelMark { type_id },
             Category::DetailComponent => Tool::DetailComponent { type_id },
-            // Imported, not drawn; bar tags are placed by their command.
+            // Imported, not drawn; bar tags are placed by their command;
+            // levels are made in the levels dialog.
             Category::BarTag
+            | Category::Level
             | Category::Tag
             | Category::ViewMark
             | Category::CadImport
@@ -498,6 +500,13 @@ pub enum Drag {
     /// A grid's bubble, as drawn when the drag started.
     Bubble {
         bubble: cc_views::BubbleHandle,
+        start: DVec2,
+    },
+    /// A head of a level in an elevation or a section, as drawn when the
+    /// drag started (see [`crate::level_head_ui`]).
+    LevelHead {
+        level: LevelId,
+        head: cc_views::LevelHeadHandle,
         start: DVec2,
     },
     /// An elevation's marker in a floor plan, as drawn when the drag started.
@@ -634,6 +643,8 @@ pub struct Interaction {
     pub chain_redo: Vec<ChainStep>,
     /// The tag (or grid bubbles) a context menu was opened on: the view and the element.
     pub tag_menu: Option<(ViewId, ElementId)>,
+    /// The level a context menu was opened on in an elevation or a section: the view and the level.
+    pub level_menu: Option<(ViewId, LevelId)>,
     /// Tab cycling the Select tool's pre-selection (issue #406).
     pub tab: crate::preselect::TabCycle,
 }
@@ -4258,6 +4269,7 @@ fn annotation_handles(
     let floor_plan = matches!(view.kind, ViewKind::FloorPlan { .. });
     let projected = cc_core::view_mark::MarkKind::of_view(&view.kind).is_some();
     let (tags_ok, bubbles_ok, marks_ok) = (movable, movable || projected, movable && floor_plan);
+    let levels_ok = cc_core::level_head::shows_levels(&view.kind);
     let shift = ui.input(|i| i.modifiers.shift);
     let raw = resp.hover_pos().map(|p| xf.to_world(p));
     let tag_set = |id: cc_core::ElementId| TagSet { view: Ref::Id(view_id.0), ids: vec![id.0], ..Default::default() };
@@ -4320,6 +4332,11 @@ fn annotation_handles(
             }
             return true;
         }
+        Some(Drag::LevelHead { level, head, start }) => {
+            let held = (view_id, level, head);
+            crate::level_head_ui::drag(painter, xf, state, held, start, raw, end, stopped);
+            return true;
+        }
         Some(Drag::Mark { mark, start }) => {
             if let Some(raw) = raw {
                 let c = mark.center + (raw - start);
@@ -4366,6 +4383,9 @@ fn annotation_handles(
         if bubbles_ok && let Some(bubble) = drawing.bubble_at(w) {
             return Some(Drag::Bubble { bubble, start: w });
         }
+        if levels_ok && let Some((level, head)) = crate::level_head_ui::head_at(drawing, w) {
+            return Some(Drag::LevelHead { level, head, start: w });
+        }
         if marks_ok && let Some(mark) = drawing.mark_at(w) {
             return Some(Drag::Mark { mark, start: w });
         }
@@ -4394,7 +4414,12 @@ fn annotation_handles(
             tag.or_else(|| drawing.bubble_at(w).filter(|_| bubbles_ok).map(|b| b.element))
         });
         state.interaction.tag_menu = picked.map(|id| (view_id, id));
+        // Else a level's head or line.
+        let level = raw.filter(|_| levels_ok && picked.is_none());
+        state.interaction.level_menu =
+            level.and_then(|w| crate::level_head_ui::picked(drawing, w, xf)).map(|l| (view_id, l));
     }
+    crate::level_head_ui::menu(resp, state);
     if let Some((view, id)) = state.interaction.tag_menu {
         let mut hide = None;
         let open = resp.context_menu(|ui| {
@@ -4779,6 +4804,7 @@ fn select(
                 | Drag::Tag { .. }
                 | Drag::TagRotate { .. }
                 | Drag::Bubble { .. }
+                | Drag::LevelHead { .. }
                 | Drag::Mark { .. },
             ) => {}
             Some(Drag::Box { start }) => {

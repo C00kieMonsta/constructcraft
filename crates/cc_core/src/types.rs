@@ -12,6 +12,9 @@ pub enum Category {
     Roof,
     Room,
     Grid,
+    /// Levels as drawn in elevations and sections: a line across the view
+    /// with a head (name and elevation) at its ends (see [`crate::level_head`]).
+    Level,
     Dimension,
     Text,
     Column,
@@ -81,7 +84,7 @@ pub enum Category {
 }
 
 impl Category {
-    pub const ALL: [Category; 42] = [
+    pub const ALL: [Category; 43] = [
         Category::Wall,
         Category::Door,
         Category::Window,
@@ -107,6 +110,7 @@ impl Category {
         Category::Component,
         Category::Room,
         Category::Grid,
+        Category::Level,
         Category::Dimension,
         Category::Text,
         Category::DetailLine,
@@ -217,6 +221,7 @@ impl Category {
             Category::Roof => "category-roof",
             Category::Room => "category-room",
             Category::Grid => "category-grid",
+            Category::Level => "category-level",
             Category::Dimension => "category-dimension",
             Category::Text => "category-text",
             Category::LevelMark => "category-level-mark",
