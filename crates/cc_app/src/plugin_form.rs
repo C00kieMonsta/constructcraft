@@ -1,8 +1,11 @@
 //! The form of a plugin command: a dialog built from the JSON Schema of its
 //! parameters (`input_schema`), in place of the palette's JSON arguments.
 //! *Plugin Commands* and the palette's plugin entries open it ([`open`]);
-//! Run goes through the palette's path ([`crate::palette::execute`]), so
-//! errors, undo and what the plugin prints behave the same.
+//! Run goes through the session like the palette's commands, so errors, undo
+//! and what the plugin prints behave the same. A command that waits for an
+//! external program is left pending: the form keeps its state, hidden behind
+//! the progress dialog of [`crate::plugin_job`], and shows the result when
+//! the command ends ([`job_ended`]).
 //!
 //! What the form reads of each property of `input_schema.properties`:
 //! `type` (`number`, `integer`, `boolean`, `string`, `array`, `object`; any
@@ -661,9 +664,16 @@ pub struct PluginForm {
     picking: Option<Picking>,
     /// The document revision the choices were read at.
     revision: Option<u64>,
+    /// The command waits for an external program: what it printed so far.
+    waiting: Option<Vec<String>>,
 }
 
 impl PluginForm {
+    /// Whether its command waits for an external program.
+    pub fn is_waiting(&self) -> bool {
+        self.waiting.is_some()
+    }
+
     fn prompt(&self) -> String {
         let Some(pick) = &self.picking else { return String::new() };
         let base = if pick.point {
@@ -834,6 +844,7 @@ pub fn open_prefilled(state: &mut AppState, command: &str, prefill: Map<String, 
         error: None,
         picking: None,
         revision: None,
+        waiting: None,
     };
     let others = info.input_schema.get("properties").and_then(Value::as_object).is_some_and(|props| {
         props.keys().any(|name| !form.fields.iter().any(|f| f.name == *name && f.touched && prefill.contains_key(name)))
@@ -857,9 +868,44 @@ fn is_empty(v: &Value) -> bool {
 }
 
 /// Run the command with `args`; false when the form closes (it ran and
-/// had nothing to show: the status bar says it is done).
+/// had nothing to show: the status bar says it is done). A command that
+/// waits for a program keeps the form, waiting.
 fn run(state: &mut AppState, form: &mut PluginForm, args: Value) -> bool {
-    let (result, printed) = crate::palette::execute(state, &form.command, args);
+    let result = state.session.execute(&form.command, args);
+    let printed = state.session.take_extension_messages();
+    match result {
+        Err(e) if e.code == cc_engine::ErrorCode::Pending => {
+            form.waiting = Some(printed);
+            form.error = None;
+            true
+        }
+        result => show_result(state, form, result.map_err(|e| e.message), printed),
+    }
+}
+
+/// The command waiting for a program ended with `result` (it printed
+/// `printed` since it started waiting): the open form shows it as a run
+/// that ended at once would.
+pub(crate) fn job_ended(state: &mut AppState, result: cc_engine::Result<Value>, printed: Vec<String>) {
+    let Some(mut form) = state.dialogs.plugin_form.take() else { return };
+    let mut lines = form.waiting.take().unwrap_or_default();
+    lines.extend(printed);
+    let result = result.map_err(|e| match e.code {
+        cc_engine::ErrorCode::Cancelled => t!("job-plugin-cancelled"),
+        _ => e.message,
+    });
+    if show_result(state, &mut form, result, lines) {
+        state.dialogs.plugin_form = Some(form);
+    }
+}
+
+/// Show what a run returned and printed; false when the form closes.
+fn show_result(
+    state: &mut AppState,
+    form: &mut PluginForm,
+    result: Result<Value, String>,
+    printed: Vec<String>,
+) -> bool {
     match result {
         Ok(out) if is_empty(&out) && printed.is_empty() => {
             state.message = t!("pform-done", "title" => form.title);
@@ -904,6 +950,15 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
         }
         return;
     };
+    // Behind the progress dialog until its command ends (a command the
+    // session dropped, its plugins loaded again, gives the form back).
+    if form.waiting.is_some() {
+        if state.session.has_job() {
+            state.dialogs.plugin_form = Some(form);
+            return;
+        }
+        form.waiting = None;
+    }
     if form.picking.is_some() {
         if matches!(state.tool, Tool::Pick { .. }) {
             state.hint.set(form.prompt());

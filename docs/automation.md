@@ -139,6 +139,8 @@ ccad -p house.ccad --save run cad_explode id=120
 | `io` | reading or writing a file failed |
 | `internal` | a bug; the project is kept as it was |
 | `script` | a Lua script or plugin failed: a syntax or run-time error, or a limit reached |
+| `pending` | a plugin command goes on in the background, waiting for an external program (only in a session that does not block, see [External programs](#external-programs)) |
+| `cancelled` | a plugin command waiting for an external program was cancelled; what it did was undone |
 
 ## Command line: `ccad`
 
@@ -644,7 +646,7 @@ authors = ["…"]
 license = "GPL-3.0-or-later"
 homepage = "https://…"
 main = "main.lua"           # the default
-permissions = []            # or ["files"], see below
+permissions = []            # or ["files"], ["tools"] (api 2), see below
 ```
 
 `main.lua` runs once when the plugin loads and registers commands with `ccad.command`:
@@ -674,7 +676,7 @@ ccad.command {
 - **What a command may run:** a `query` command only queries; an `edit` command queries and edits; commands that read or write files (import, export, save) need the `files` permission (without it, edit commands that read a file a parameter names, such as `cad_import` or `fill_pattern_import` with a `path`, refuse the path; their inline forms, such as `fill_pattern_import` with `text`, still work), and a command of kind `file` can only be declared with it. Without `files`, a command still works with the files its arguments name in `save_path` and `open_path` parameters ([API 2](#files-without-the-files-permission)). Opening or creating a project, `undo`, `redo` and `language_set` cannot run inside a plugin command, nor can another plugin's command.
 - **These rules hold for everything a command runs:** the engine checks every command run while a plugin command runs (its scope), also the nodes of a graph it runs with `graph_run`; a graph's `plugin_data_set` node for another plugin's id is refused like a direct `ccad.run`. Lua scripts the user runs (`ccad lua`) are not restricted.
 - **The sandbox** is that of [Lua scripts](#lua-scripts), with the budget counted per command; each plugin has its own Lua state, which keeps its variables between commands. `require("a.b")` loads `a/b.lua` from the plugin's folder (once; files outside the folder are refused), and `ccad.plugin` holds its `id`, `name` and `version`. `ccad.run` works only while a command runs, not while the plugin loads.
-- **Permissions** are granted by whoever loads the plugin: `ccad --plugins` grants what the manifest asks for, since you named the folder.
+- **Permissions** are granted by whoever loads the plugin: `ccad --plugins` grants what the manifest asks for, since you named the folder. `files` lets its commands work with any file; `tools` (API 2) lets them run the external programs the user chooses for its tools ([External programs](#external-programs)).
 
 ### Plugin API 2: buttons, settings, translations and data
 
@@ -806,6 +808,69 @@ label = "%import.epw%"
 The file types come from the parameter's `extensions`. An entry whose command `main.lua` does not register, or whose command has no such parameter or more than one, is a load error; both need `api = 2`. In the app, clicking the entry opens the save (exporter) or open (importer) dialog for those extensions, then the command's form with the chosen path (or runs the command at once when the path is its only parameter). `ccad plugins` lists them (`exporters`, `importers`: command, label, parameter and extensions).
 
 Plugins are shared through the community index, [constructcraft-plugins](https://github.com/francisreboucas/constructcraft-plugins): one entry per plugin, with where to download each version and its checksum, submitted by pull request. In the app, *Manage → Plugins* installs, updates, turns off and removes plugins ([Plugins](interface.md#plugins)); without it, `ccad plugins install <file.zip> <folder>` installs a downloaded archive (checked the same way: safe paths, sizes, and a plugin that loads) and `ccad plugins remove <id> <folder>` removes one.
+
+#### External programs
+
+A plugin can run a program installed on the computer, such as the EnergyPlus simulator, when the user allows it and chooses which program file it is. The program runs outside the sandbox, with the user's permissions, so nothing runs that the user did not approve, and the app keeps working while it runs.
+
+```toml
+permissions = ["tools"]                          # needs api = 2
+
+[[tools]]                                        # at most 8
+id = "energyplus"                                # like a plugin id; ccad.process.run names it
+name = "EnergyPlus"                              # may be "%key%"
+executables = ["energyplus.exe", "energyplus"]   # the program's accepted file names
+homepage = "https://energyplus.net"              # optional: where to get it
+version_args = ["--version"]                     # optional: what "Test" runs
+```
+
+`[[tools]]` without the `tools` permission, or under `api = 1`, is a load error; so are batch files (`.bat`, `.cmd`) and names with folders in `executables`.
+
+**Approval.** Two things are the user's choice, never the plugin's:
+
+- **The permission:** in the app, *Allow it to run external programs* in the Plugins window (kept per plugin, like the `files` permission); `ccad --plugins` grants what the manifest asks for, since you named the folder.
+- **The program:** the path of each tool, chosen in the Plugins window (*External programs*: *Browse…*, or *Use …* for a program of that name found on `PATH`, never taken by itself) and kept in `<plugins folder>/.tools/<plugin id>.json` (`{ "<tool id>": "<absolute path>" }`; removed with the plugin). A path is valid only when it is an existing file whose name is one of `executables` (in any case on Windows). From the command line:
+
+```sh
+ccad plugins tools ~/plugins energy                         # the tools: path chosen, why it cannot run, a suggestion from PATH
+ccad plugins tools ~/plugins energy energyplus=/opt/EnergyPlus/energyplus --test   # choose it, and run version_args
+ccad plugins tools ~/plugins energy energyplus=             # forget it
+ccad --plugins ~/plugins/energy --tool energy.energyplus=/opt/EnergyPlus/energyplus run energy__simulate
+```
+
+`--tool <plugin>.<tool>=<path>` (repeatable) gives a program for one run, also to a plugin loaded from its own folder, which reads no stored paths; a path that does not fit is reported on standard error and left out. `ccad plugins` lists each plugin's `tools` (`id`, `name`, `executables`, `homepage`, `path`, `problem`).
+
+**Running it.** In a command's `run` function:
+
+```lua
+local r = ccad.process.run("energyplus", {
+  args = { "-w", "in.epw", "-r", "in.idf" },     -- passed as they are, without a shell
+  files = { ["in.idf"] = idf_text },              -- written into the run folder first
+  copy = { ["in.epw"] = args.weather },           -- a file given to this command to read (open_path), copied there
+  outputs = { "eplusout.csv", "eplustbl.htm", "*.err" },  -- read back; * matches any characters within a name
+  timeout = 600,                                  -- seconds: default 300, at most 7200
+})
+-- r = { code = 0, stdout = "…", stderr = "…", truncated = false, timed_out = false,
+--       files = { ["eplusout.csv"] = "…", ["eplusout.err"] = "…" } }
+```
+
+- **The run folder:** each run gets a new folder of its own in the system's temporary folder (`constructcraft-<plugin>-<random>`), which is the program's working folder; the `files` are written and the `copy` files copied into it, the `outputs` found there are read back (outputs not found are simply missing from `files`; links are not followed), and the folder is deleted afterwards, also when the run fails, times out or is cancelled.
+- **Names** in `files`, `copy` and `outputs` are relative to the run folder, plain names joined by `/` (`sub/in.idf`): `..`, absolute paths, drives, `\`, `:` and Windows device names (`CON`, `NUL`, `COM1`…) are refused.
+- **No shell:** the program is started directly, and each argument reaches it as written: `&`, `;`, `|`, quotes and `$(…)` mean nothing.
+- **Environment:** the program gets only `PATH`, `SystemRoot`, `TEMP`, `TMP`, `HOME`, `USERPROFILE`, `LANG` and `LC_*` from the app's environment; nothing else is passed on. Standard input is empty.
+- **Limits:** the inputs (`files` and `copy`) at most 256 MiB in all; each output at most 64 MiB and all outputs at most 256 MiB (beyond, the call raises an error); standard output and error kept up to 1 MiB each (`truncated = true` when either was cut). On timeout the program is killed and `timed_out = true` (no `code`). A non-zero exit code is returned, not raised: the plugin decides what it means.
+- **Stopping:** on timeout or cancel the program is killed. Programs it started itself may keep running: no job objects or process groups are used.
+- **What approval means:** the plugin decides the arguments and input files, so choosing a general-purpose program for a tool (a shell, a script interpreter) gives the plugin everything that program can do; choose the program the tool is meant for.
+- **Errors** raise at the call, like `ccad.run`, and name what to do: no `tools` permission, a tool the manifest does not declare, no program chosen (it names the Plugins window, `ccad plugins tools` and `--tool`), a program that is missing or of another name, a bad name, a limit, a program that could not start. `pcall` catches them.
+- **Where it works:** only in a command's own `run` function (also inside `pcall`), not while `main.lua` loads, not in event handlers, not in a coroutine the plugin starts, a module being required or a function a library function calls (such as `table.sort`'s comparator). Lua scripts the user runs (`ccad lua`) have no `ccad.process`.
+
+**The command waits without holding the app.** A command's `run` function runs in a coroutine: `ccad.process.run` hands the program to a background thread and the command waits there. With `ccad`, scripts, macros and MCP the command simply takes as long as the program; in the app it is left pending: a dialog shows the plugin, the program, the time elapsed and the last line it wrote, with *Cancel* ([Plugins](interface.md#plugins)). While it waits:
+
+- it is still one command: its edits before and after the wait are one undo step, a failure (or *Cancel*) undoes all of them, the files it writes with `ccad.file.write` are written only when it ends without error, and `model_changed` fires once, when it ends;
+- the session runs only queries: any command that edits, saves, opens or exports, `undo` and `redo`, and other plugin commands are refused (`a plugin command is running`), and no event fires;
+- the time spent waiting does not count against the command's 60 seconds: that limit is for Lua; its instruction budget goes on across the wait.
+
+A command may run several programs one after the other; *Cancel* stops the one running and undoes the command (`cancelled`). In the engine, `Session::set_blocking(false)` leaves such commands pending (`execute` returns the code `pending`), `Session::poll_job` goes on with them and returns their result when they end, `Session::job` describes the one waiting, and `Session::cancel_job` stops it; sessions block by default, and commands run by other commands (graphs, scripts) and macro steps are always waited for.
 
 #### Events
 

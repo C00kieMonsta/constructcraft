@@ -4,9 +4,10 @@
 //! Plugins tab, see [`unavailable`] for their `when`, and their exporters
 //! and importers join the ribbon's Export and Import groups, see
 //! [`run_file_entry`]) and the Plugins window,
-//! which turns them on and off, grants the `files` permission, edits their
-//! settings, removes them, and installs and updates them from the community
-//! index.
+//! which turns them on and off, grants the `files` and `tools` permissions,
+//! chooses the external programs their tools run ([`tools_section`]), edits
+//! their settings, removes them, and installs and updates them from the
+//! community index.
 //!
 //! Plugins run sandboxed in `cc_plugins`; installing is `cc_plugins::store` (checked
 //! archives), and the only network use is here: the index and the archives
@@ -23,7 +24,7 @@ use cc_core::ViewCategory;
 use cc_engine::Extension;
 use cc_plugins::contributions::current_values;
 use cc_plugins::store::{self, Index, IndexPlugin, IndexVersion};
-use cc_plugins::{Limits, Permissions, PluginHost, Setting, SettingKind, When};
+use cc_plugins::{Limits, Permissions, PluginHost, Setting, SettingKind, Tool, When};
 use egui::{Context, RichText, Stroke, Ui};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
@@ -64,6 +65,13 @@ pub struct Listed {
     pub license: String,
     pub homepage: String,
     pub asks_files: bool,
+    /// It asks for the `tools` permission.
+    pub asks_tools: bool,
+    /// Its external programs, with the paths chosen for them.
+    pub tools: Vec<Tool>,
+    /// For each tool, a program of its name found on `PATH` (offered, never
+    /// chosen by itself).
+    pub suggestions: Vec<Option<PathBuf>>,
     /// Its commands, when loaded: `(full name, description)`.
     pub commands: Vec<(String, String)>,
     /// It declares settings (shown in the window, also when turned off).
@@ -107,7 +115,15 @@ struct Job {
     name: String,
     id: String,
     files: bool,
+    tools: bool,
     result: Receiver<Result<PathBuf, String>>,
+}
+
+/// A program's *Test*: running in a background thread, or what it said.
+#[derive(Debug)]
+enum ToolTest {
+    Running(Receiver<Result<String, String>>),
+    Done(Result<String, String>),
 }
 
 /// Plugins state of the app (kept when the document changes).
@@ -127,6 +143,10 @@ pub struct Plugins {
     job: Option<Job>,
     /// Installs that may work with files (the user ticked the box).
     allow_files: std::collections::BTreeSet<String>,
+    /// Installs that may run external programs (the user ticked the box).
+    allow_tools: std::collections::BTreeSet<String>,
+    /// The *Test* of each program, by plugin and tool id.
+    tests: HashMap<(String, String), ToolTest>,
     /// The last install or removal, for the window.
     pub notice: Option<Result<String, String>>,
     /// The folder the plugins were loaded from (loaded again when the
@@ -170,8 +190,9 @@ pub fn load(state: &mut AppState) {
     if let Some(folder) = state.prefs.plugins_dir() {
         let off = state.prefs.plugins_off.clone();
         let files = state.prefs.plugins_files.clone();
+        let tools = state.prefs.plugins_tools.clone();
         let errors = host.load_folder(&folder, Limits::default(), |m| {
-            (!off.contains(&m.id)).then(|| Permissions { files: files.contains(&m.id) })
+            (!off.contains(&m.id)).then(|| Permissions { files: files.contains(&m.id), tools: tools.contains(&m.id) })
         });
         for found in store::installed(&folder) {
             let error = errors.iter().find(|e| e.dir == found.dir).map(|e| e.message.clone());
@@ -191,8 +212,15 @@ pub fn load(state: &mut AppState) {
                         },
                         None => (m.name.clone(), m.description.clone()),
                     };
+                    // Read from the manifest, so a plugin turned off has them too.
+                    let tools =
+                        cc_plugins::plugin::tools_schema(&found.dir, &folder).map(|(_, t)| t).unwrap_or_default();
+                    let suggestions = tools.iter().map(|t| cc_plugins::tools::find_on_path(&t.executables)).collect();
                     Listed {
                         asks_files: m.requested().files,
+                        asks_tools: m.requested().tools,
+                        tools,
+                        suggestions,
                         has_settings: !m.settings.is_empty(),
                         id: m.id,
                         name,
@@ -215,6 +243,9 @@ pub fn load(state: &mut AppState) {
                     license: String::new(),
                     homepage: String::new(),
                     asks_files: false,
+                    asks_tools: false,
+                    tools: Vec::new(),
+                    suggestions: Vec::new(),
                     has_settings: false,
                     commands: Vec::new(),
                     error: Some(message),
@@ -428,6 +459,15 @@ fn app_version() -> (u64, u64, u64) {
 /// Check the background work: the index read, an install finished.
 fn poll(state: &mut AppState) {
     let p = &mut state.plugins;
+    for test in p.tests.values_mut() {
+        if let ToolTest::Running(rx) = test {
+            match rx.try_recv() {
+                Ok(result) => *test = ToolTest::Done(result),
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => *test = ToolTest::Done(Err(String::new())),
+            }
+        }
+    }
     if let IndexState::Reading(rx) = &p.index {
         p.index = match rx.try_recv() {
             Ok(Ok(index)) => IndexState::Read(index),
@@ -442,11 +482,14 @@ fn poll(state: &mut AppState) {
         Err(TryRecvError::Empty) => return,
         Err(TryRecvError::Disconnected) => Err(String::new()),
     };
-    let Some(Job { name, id, files, .. }) = p.job.take() else { return };
+    let Some(Job { name, id, files, tools, .. }) = p.job.take() else { return };
     match result {
         Ok(_) => {
             if files {
-                state.prefs.plugins_files.insert(id);
+                state.prefs.plugins_files.insert(id.clone());
+            }
+            if tools {
+                state.prefs.plugins_tools.insert(id);
             }
             load(state);
             let version = state.plugins.listed.iter().find(|l| l.name == name).map(|l| l.version.clone());
@@ -520,7 +563,7 @@ fn body(ui: &mut Ui, ctx: &Context, state: &mut AppState) {
     }
     ui.add_space(6.0);
     match state.plugins.tab {
-        Tab::Installed => installed_tab(ui, state),
+        Tab::Installed => installed_tab(ui, ctx, state),
         Tab::Available => available_tab(ui, ctx, state),
     }
     ui.add_space(6.0);
@@ -554,7 +597,7 @@ fn name_list(ui: &mut Ui, rows: &[(String, String, bool)], selected: &mut Option
     });
 }
 
-fn installed_tab(ui: &mut Ui, state: &mut AppState) {
+fn installed_tab(ui: &mut Ui, ctx: &Context, state: &mut AppState) {
     let rows: Vec<(String, String, bool)> = state
         .plugins
         .listed
@@ -569,6 +612,7 @@ fn installed_tab(ui: &mut Ui, state: &mut AppState) {
     let mut changed = false;
     let mut remove = None;
     let mut settings_action = None;
+    let mut tool_action = None;
     crate::dialog::two_columns(ui, [300.0, 540.0], |ui, column| {
         if column == 0 {
             name_list(ui, &rows, &mut selected, &t!("plug-none-installed"));
@@ -605,6 +649,18 @@ fn installed_tab(ui: &mut Ui, state: &mut AppState) {
             }
             ui.label(theme::muted(t!("plug-files-hint")).size(11.5));
         }
+        if item.asks_tools {
+            let mut tools = state.prefs.plugins_tools.contains(&item.id);
+            if ui.checkbox(&mut tools, t!("plug-tools")).changed() {
+                if tools {
+                    state.prefs.plugins_tools.insert(item.id.clone());
+                } else {
+                    state.prefs.plugins_tools.remove(&item.id);
+                }
+                changed = true;
+            }
+            ui.label(RichText::new(t!("plug-tools-hint")).size(11.5).color(PALETTE.warning));
+        }
         ui.add_space(6.0);
         ui.label(RichText::new(t!("plug-commands")).strong());
         if item.commands.is_empty() {
@@ -618,6 +674,7 @@ fn installed_tab(ui: &mut Ui, state: &mut AppState) {
                 }
             }
         });
+        tool_action = tools_section(ui, ctx, state, &item);
         settings_action = settings_section(ui, state, &item);
         ui.add_space(6.0);
         if crate::dialog::styled_button(ui, &t!("plug-remove"), crate::dialog::Style::Danger).clicked() {
@@ -633,12 +690,16 @@ fn installed_tab(ui: &mut Ui, state: &mut AppState) {
         Some(SettingsAction::Reset) => write_settings(state, Map::new()),
         None => {}
     }
+    if let Some((id, tool, path)) = tool_action {
+        choose_program(state, &id, &tool, &path);
+    }
     if let Some(item) = remove {
         let folder = item.dir.parent().map(PathBuf::from).unwrap_or_default();
         state.plugins.notice = Some(match store::uninstall(&folder, &item.id) {
             Ok(()) => {
                 state.prefs.plugins_off.remove(&item.id);
                 state.prefs.plugins_files.remove(&item.id);
+                state.prefs.plugins_tools.remove(&item.id);
                 state.plugins.selected = None;
                 Ok(t!("plug-removed", "name" => item.name.clone()))
             }
@@ -646,6 +707,102 @@ fn installed_tab(ui: &mut Ui, state: &mut AppState) {
         });
         load(state);
     }
+}
+
+/// The *External programs* section of the selected plugin: for each tool its
+/// name, the program chosen (and why it cannot run), *Browse…*, the program
+/// of its name found on `PATH` (*Use …*), *Test* (its version check, in a
+/// background thread) with what it answered, and where to get it. Returns
+/// the program chosen: plugin id, tool id, path.
+fn tools_section(ui: &mut Ui, ctx: &Context, state: &mut AppState, item: &Listed) -> Option<(String, String, PathBuf)> {
+    if item.tools.is_empty() {
+        return None;
+    }
+    let mut chosen = None;
+    ui.add_space(6.0);
+    table::section(ui, &format!("plug-tools-{}", item.id), t!("plug-programs"), |ui| {
+        for (i, tool) in item.tools.iter().enumerate() {
+            egui::Frame::new().inner_margin(egui::Margin::symmetric(8, 6)).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new(&tool.name).strong());
+                let shown = match &tool.path {
+                    Some(path) => RichText::new(path.display().to_string()).monospace().size(11.5),
+                    None => theme::muted(t!("plug-program-none")).size(11.5),
+                };
+                ui.add(egui::Label::new(shown).truncate());
+                if let (Some(_), Some(problem)) = (&tool.path, tool.problem()) {
+                    let text = t!("plug-program-problem", "message" => problem);
+                    ui.label(RichText::new(text).size(11.5).color(PALETTE.warning));
+                }
+                let key = (item.id.clone(), tool.id.clone());
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button(t!("pform-browse")).clicked()
+                        && let Some(path) = rfd::FileDialog::new().set_title(tool.name.as_str()).pick_file()
+                    {
+                        chosen = Some((item.id.clone(), tool.id.clone(), path));
+                    }
+                    let suggestion =
+                        item.suggestions.get(i).cloned().flatten().filter(|s| tool.path.as_ref() != Some(s));
+                    if let Some(found) = suggestion {
+                        let label = t!("plug-program-use", "path" => found.display().to_string());
+                        if ui.button(label).clicked() {
+                            chosen = Some((item.id.clone(), tool.id.clone(), found));
+                        }
+                    }
+                    let testing = matches!(state.plugins.tests.get(&key), Some(ToolTest::Running(_)));
+                    let can_test = tool.problem().is_none() && !testing;
+                    if ui.add_enabled(can_test, egui::Button::new(t!("plug-program-test"))).clicked()
+                        && let Some(path) = tool.path.clone()
+                    {
+                        let (plugin, tool) = (item.id.clone(), tool.clone());
+                        let rx = spawn(ctx, "plugin-tool-test", move || cc_plugins::tools::test(&plugin, &tool, &path));
+                        state.plugins.tests.insert(key.clone(), ToolTest::Running(rx));
+                    }
+                    if tool.homepage.starts_with("https://") {
+                        ui.hyperlink_to(t!("plug-program-homepage"), &tool.homepage);
+                    }
+                });
+                match state.plugins.tests.get(&key) {
+                    Some(ToolTest::Running(_)) => {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(theme::muted(t!("plug-program-testing")).size(11.5));
+                        });
+                    }
+                    Some(ToolTest::Done(Ok(answer))) => {
+                        let text = if answer.is_empty() { t!("plug-program-test-ok") } else { answer.clone() };
+                        ui.add(egui::Label::new(RichText::new(text).monospace().size(11.5).color(PALETTE.text_muted)));
+                    }
+                    Some(ToolTest::Done(Err(message))) => {
+                        let text = t!("plug-program-test-failed", "message" => message);
+                        ui.label(RichText::new(text).size(11.5).color(PALETTE.danger));
+                    }
+                    None => {}
+                }
+            });
+        }
+    });
+    chosen
+}
+
+/// Store `path` as the program of the tool `tool` of the plugin `id` (when
+/// it has the tool's name) and load the plugins again, so it runs it.
+fn choose_program(state: &mut AppState, id: &str, tool: &str, path: &std::path::Path) {
+    let Some(folder) = state.prefs.plugins_dir() else { return };
+    let Some(item) = state.plugins.listed.iter().find(|l| l.id == id) else { return };
+    let Some(spec) = item.tools.iter().find(|t| t.id == tool) else { return };
+    let name = spec.name.clone();
+    let checked = cc_plugins::tools::check_path(&spec.executables, path).and_then(|()| {
+        let mut paths = cc_plugins::tools::read_tool_paths(&folder, id);
+        paths.insert(tool.to_string(), path.to_path_buf());
+        cc_plugins::tools::write_tool_paths(&folder, id, &paths)
+    });
+    state.plugins.tests.remove(&(id.to_string(), tool.to_string()));
+    state.plugins.notice = Some(match checked {
+        Ok(()) => Ok(t!("plug-program-saved", "tool" => name, "path" => path.display().to_string())),
+        Err(message) => Err(t!("plug-program-problem", "message" => message)),
+    });
+    load(state);
 }
 
 /// What the buttons under a plugin's settings ask for.
@@ -874,6 +1031,18 @@ fn available_tab(ui: &mut Ui, ctx: &Context, state: &mut AppState) {
             }
             ui.label(theme::muted(t!("plug-files-hint")).size(11.5));
         }
+        let asks_tools = best.permissions.iter().any(|p| p == "tools");
+        if asks_tools {
+            let mut allow = state.plugins.allow_tools.contains(&plugin.id);
+            if ui.checkbox(&mut allow, t!("plug-tools")).changed() {
+                if allow {
+                    state.plugins.allow_tools.insert(plugin.id.clone());
+                } else {
+                    state.plugins.allow_tools.remove(&plugin.id);
+                }
+            }
+            ui.label(RichText::new(t!("plug-tools-hint")).size(11.5).color(PALETTE.warning));
+        }
         let installed = state.plugins.listed.iter().find(|l| l.id == plugin.id);
         let newer = installed.is_none_or(|l| {
             store::parse_version(&l.version)
@@ -895,18 +1064,19 @@ fn available_tab(ui: &mut Ui, ctx: &Context, state: &mut AppState) {
                 t!("plug-install")
             };
             if crate::dialog::styled_button(ui, &label, crate::dialog::Style::Primary).clicked() {
-                install = Some((plugin.clone(), best.clone(), asks_files));
+                install = Some((plugin.clone(), best.clone(), asks_files, asks_tools));
             }
         }
     });
     state.plugins.selected = selected;
-    if let Some((plugin, version, asks_files)) = install {
+    if let Some((plugin, version, asks_files, asks_tools)) = install {
         let Some(folder) = state.prefs.plugins_dir() else { return };
         let files = asks_files && state.plugins.allow_files.contains(&plugin.id);
+        let tools = asks_tools && state.plugins.allow_tools.contains(&plugin.id);
         state.plugins.notice = None;
         let (name, id) = (plugin.name.clone(), plugin.id.clone());
         let result = start_install(ctx, plugin, version, folder);
-        state.plugins.job = Some(Job { name, id, files, result });
+        state.plugins.job = Some(Job { name, id, files, tools, result });
     }
 }
 
@@ -915,6 +1085,32 @@ fn available_tab(ui: &mut Ui, ctx: &Context, state: &mut AppState) {
 pub fn set_index(state: &mut AppState, index: Index) {
     state.plugins.index = IndexState::Read(index);
     state.plugins.tab = Tab::Available;
+}
+
+/// Choose `path` for the tool `tool` of the plugin `id`, as Browse… does
+/// (tests).
+#[cfg(test)]
+pub fn choose_program_for_test(state: &mut AppState, id: &str, tool: &str, path: &std::path::Path) {
+    choose_program(state, id, tool, path);
+}
+
+/// Wait for the *Test* of every program to end (tests).
+#[cfg(test)]
+pub fn finish_tests(state: &mut AppState) {
+    for test in state.plugins.tests.values_mut() {
+        if let ToolTest::Running(rx) = test {
+            *test = ToolTest::Done(rx.recv_timeout(Duration::from_secs(20)).unwrap_or_else(|e| Err(e.to_string())));
+        }
+    }
+}
+
+/// What the *Test* of the tool `tool` of the plugin `id` answered (tests).
+#[cfg(test)]
+pub fn test_answer(state: &AppState, id: &str, tool: &str) -> Option<Result<String, String>> {
+    match state.plugins.tests.get(&(id.to_string(), tool.to_string()))? {
+        ToolTest::Done(result) => Some(result.clone()),
+        ToolTest::Running(_) => None,
+    }
 }
 
 /// Wait for the install running (tests: it fails at once, offline).

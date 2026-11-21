@@ -472,12 +472,21 @@ fn entry_row(ui: &mut egui::Ui, entry: &Entry, selected: bool, height: f32) -> e
 /// Run the engine command `name` with `args` through the session (one undo
 /// step; a plugin command's edits squashed into one, and undone when it
 /// fails): its result or error message, and what a plugin printed meanwhile.
+/// A plugin command that waits for an external program goes on behind
+/// [`crate::plugin_job`]'s dialog.
 pub(crate) fn execute(
     state: &mut AppState,
     name: &str,
     args: serde_json::Value,
 ) -> (Result<serde_json::Value, String>, Vec<String>) {
-    let result = state.session.execute(name, args).map_err(|e| e.message);
+    let result = state.session.execute(name, args).map_err(|e| match e.code {
+        // It goes on behind the progress dialog; its end shows in the status bar.
+        cc_engine::ErrorCode::Pending => {
+            let tool = state.session.job().map(|j| j.info.tool).unwrap_or_default();
+            t!("job-plugin-pending", "tool" => tool)
+        }
+        _ => e.message,
+    });
     let printed = state.session.take_extension_messages();
     (result, printed)
 }

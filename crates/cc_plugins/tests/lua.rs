@@ -308,7 +308,7 @@ fn plugins_without_files_cannot_import_by_path() {
 fn granted_files_permission_needs_the_manifest() {
     let dir = room_tools("grant");
     let mut plugin = Plugin::load(&dir, Limits::default()).unwrap();
-    plugin.grant(Permissions { files: true });
+    plugin.grant(Permissions { files: true, ..Permissions::NONE });
     assert_eq!(plugin.granted(), Permissions::NONE, "the manifest does not ask for files");
 }
 

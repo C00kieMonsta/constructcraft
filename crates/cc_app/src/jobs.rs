@@ -51,9 +51,10 @@ pub struct Job {
     finish: Option<Finish>,
 }
 
-/// A job is running: shortcuts, dropped files and new jobs wait.
+/// A job is running, or a plugin command waits for an external program
+/// (see [`crate::plugin_job`]): shortcuts, dropped files and new jobs wait.
 pub fn busy(state: &AppState) -> bool {
-    state.job.is_some()
+    state.job.is_some() || state.session.has_job()
 }
 
 /// Run `run` on a worker thread over the document `base` names, showing the
@@ -147,7 +148,7 @@ fn size_text(bytes: u64) -> String {
 }
 
 /// Elapsed time as minutes and seconds.
-fn elapsed_text(elapsed: Duration) -> String {
+pub(crate) fn elapsed_text(elapsed: Duration) -> String {
     let secs = elapsed.as_secs();
     format!("{}:{:02}", secs / 60, secs % 60)
 }

@@ -51,9 +51,13 @@ pub fn show(ctx: &Context, state: &mut AppState) {
     crate::library::show(ctx, state);
     crate::obj_ui::show(ctx, state);
     crate::macro_ui::dialog(ctx, state);
+    // Before the messages are drained: what a plugin command waiting printed goes to its form.
+    crate::plugin_job::poll(ctx, state);
     crate::plugins_ui::drain_messages(state);
     crate::plugins_ui::show(ctx, state);
     crate::plugin_form::show(ctx, state);
+    // Over the plugin windows.
+    crate::plugin_job::show(ctx, state);
     // After the library window, which opens it over itself.
     crate::preferences::show(ctx, state);
     // Before the unsaved changes question its Create may ask.

@@ -44,6 +44,31 @@ fn themed_harness(
     harness
 }
 
+/// [`themed_harness`] for a UI that keeps repainting (a spinner): its first
+/// frames run without waiting for it to settle.
+fn spinning_harness(
+    state: AppState,
+    size: egui::Vec2,
+    draw: fn(&mut egui::Ui, &mut AppState),
+) -> Harness<'static, AppState> {
+    let mut themed = false;
+    let mut harness = Harness::builder().with_size(size).build_ui_state(
+        move |ui, state: &mut AppState| {
+            if !themed {
+                crate::theme::apply(ui.ctx());
+                ui.ctx().set_theme(egui::Theme::Light);
+                themed = true;
+                return;
+            }
+            crate::theme::sync(ui.ctx());
+            draw(ui, state)
+        },
+        state,
+    );
+    let _ = harness.try_run();
+    harness
+}
+
 fn ribbon_harness(state: AppState, width: f32) -> Harness<'static, AppState> {
     ribbon_harness_sized(state, egui::vec2(width, 150.0))
 }
@@ -4485,6 +4510,30 @@ fn every_dialog_keeps_its_body_inside() {
             }),
         ));
     }
+    // A plugin command waiting for its program, and the Plugins window
+    // showing a plugin's external programs.
+    let sim = sim_plugins_folder("layout");
+    let sim_job = sim.clone();
+    opens.push((
+        "plugin job".into(),
+        Box::new(move |s| {
+            s.prefs.plugins_tools.insert("sim".into());
+            s.prefs.plugin_folder = Some(sim_job.clone());
+            crate::plugins_ui::load(s);
+            crate::plugin_form::open(s, "sim__simulate");
+            assert!(s.session.has_job(), "{}", s.message);
+        }),
+    ));
+    opens.push((
+        "plugins tools".into(),
+        Box::new(move |s| {
+            s.prefs.plugins_tools.insert("sim".into());
+            s.prefs.plugin_folder = Some(sim.clone());
+            crate::plugins_ui::load(s);
+            crate::plugins_ui::open(s);
+            s.plugins.selected = Some("sim".into());
+        }),
+    ));
     // The Plugins window with a plugin's settings shown.
     let quick_rooms = quick_rooms_folder("layout");
     opens.push((
@@ -4573,7 +4622,8 @@ fn every_dialog_keeps_its_body_inside() {
         open(&mut state);
         let draw: fn(&mut egui::Ui, &mut AppState) = |ui, state| crate::dialogs::show(ui.ctx(), state);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let mut harness = themed_harness(state, egui::vec2(1500.0, 1000.0), egui::Theme::Light, draw);
+            // Some show a spinner (a plugin command waiting for its program).
+            let mut harness = spinning_harness(state, egui::vec2(1500.0, 1000.0), draw);
             for _ in 0..6 {
                 harness.step();
             }
@@ -7434,4 +7484,127 @@ fn plugin_exporters_and_importers_join_the_ribbon() {
     crate::plugins_ui::open_file_entry(harness.state_mut(), &entry, &plain);
     assert!(harness.state().dialogs.plugin_form.is_none(), "it ran and had nothing to show");
     assert_eq!(std::fs::read_to_string(&plain).unwrap(), "plain");
+}
+
+/// A program on every CI system that waits about `secs` seconds, with its
+/// arguments: the stand-in for a simulator.
+fn sleeper(secs: u32) -> (std::path::PathBuf, Vec<String>) {
+    if cfg!(windows) {
+        let root = std::env::var_os("SystemRoot").map_or_else(|| "C:\\Windows".into(), std::path::PathBuf::from);
+        (root.join("System32").join("PING.EXE"), vec!["-n".into(), (secs + 1).to_string(), "127.0.0.1".into()])
+    } else {
+        ("/bin/sleep".into(), vec![secs.to_string()])
+    }
+}
+
+/// A folder with the plugin `sim`: its command `simulate` draws a wall, then
+/// runs its tool `sleeper` ([`sleeper`], chosen in `.tools/sim.json`) for
+/// 30 seconds, then draws another wall.
+fn sim_plugins_folder(name: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("ccad-sim-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let dir = root.join("sim");
+    std::fs::create_dir_all(&dir).unwrap();
+    let (program, args) = sleeper(30);
+    let (_, test_args) = sleeper(0);
+    let list = |a: &[String]| a.iter().map(|x| format!("\"{x}\"")).collect::<Vec<_>>().join(", ");
+    let manifest = format!(
+        "id = \"sim\"\nname = \"Simulator plugin\"\nversion = \"1.0\"\napi = 2\npermissions = [\"tools\"]\n\n\
+         [[tools]]\nid = \"sleeper\"\nname = \"Sleeper\"\nexecutables = [\"ping.exe\", \"sleep\"]\n\
+         homepage = \"https://example.org/sleeper\"\nversion_args = [{}]\n",
+        list(&test_args)
+    );
+    std::fs::write(dir.join("plugin.toml"), manifest).unwrap();
+    let main = format!(
+        "ccad.command {{ name = \"simulate\", title = \"Simulate\", run = function()\n\
+           ccad.run(\"wall_create\", {{ start = {{ 0, 0 }}, [\"end\"] = {{ 5, 0 }} }})\n\
+           local r = ccad.process.run(\"sleeper\", {{ args = {{ {} }}, timeout = 120 }})\n\
+           ccad.run(\"wall_create\", {{ start = {{ 0, 3 }}, [\"end\"] = {{ 5, 3 }} }})\n\
+           return {{ code = r.code }}\n\
+         end }}\n",
+        list(&args)
+    );
+    std::fs::write(dir.join("main.lua"), main).unwrap();
+    let paths = std::collections::BTreeMap::from([("sleeper".to_string(), program)]);
+    cc_plugins::tools::write_tool_paths(&root, "sim", &paths).unwrap();
+    root
+}
+
+/// A plugin command running an external program leaves the app working: a
+/// modal dialog names the plugin and the program, shortcuts wait, and
+/// Cancel stops the program and undoes what the command did.
+#[test]
+fn a_plugin_command_waiting_for_a_program_shows_progress_and_cancels() {
+    let mut state = sample_state();
+    state.prefs.plugins_tools.insert("sim".into());
+    state.prefs.plugin_folder = Some(sim_plugins_folder("cancel"));
+    crate::plugins_ui::load(&mut state);
+    let (walls, depth) = (wall_count(&state), state.session.doc.undo_depth());
+    crate::plugin_form::open(&mut state, "sim__simulate");
+    assert!(state.session.has_job(), "{}", state.message);
+    assert!(state.dialogs.plugin_form.as_ref().unwrap().is_waiting());
+    assert!(crate::jobs::busy(&state), "shortcuts and dropped files wait");
+    assert_eq!(wall_count(&state), walls + 1, "the first wall is drawn meanwhile");
+    let mut harness = spinning_harness(state, egui::vec2(1200.0, 800.0), |ui, state| {
+        crate::app::shortcuts(ui.ctx(), state);
+        crate::dialogs::show(ui.ctx(), state);
+    });
+    assert!(harness.query_by_label("Simulator plugin").is_some(), "the dialog is titled after the plugin");
+    assert!(harness.query_by_label(&t!("job-plugin-running", "tool" => "Sleeper")).is_some());
+    // The command's form waits behind it.
+    assert!(harness.query_by_label(&t!("palette-run")).is_none());
+    // Undo waits too: the command's step is still open.
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    harness.run_steps(2);
+    assert_eq!(wall_count(harness.state()), walls + 1);
+    harness.get_by_label(&t!("action-cancel")).click();
+    harness.run_steps(2);
+    let state = harness.state();
+    assert!(!state.session.has_job());
+    assert!(state.dialogs.plugin_form.is_some(), "the form shows how it ended");
+    assert_eq!(state.dialogs.plugin_form.as_ref().unwrap().error(), Some(t!("job-plugin-cancelled").as_str()));
+    assert_eq!((wall_count(state), state.session.doc.undo_depth()), (walls, depth), "nothing stays");
+    assert!(harness.query_by_label(&t!("job-plugin-running", "tool" => "Sleeper")).is_none());
+}
+
+/// The Plugins window grants the `tools` permission and chooses each tool's
+/// program: a program of another name is refused, a chosen one is stored
+/// and *Test* runs its version check.
+#[test]
+fn the_plugins_window_chooses_and_tests_external_programs() {
+    let folder = sim_plugins_folder("window");
+    let program = cc_plugins::tools::read_tool_paths(&folder, "sim")["sleeper"].clone();
+    cc_plugins::tools::write_tool_paths(&folder, "sim", &Default::default()).unwrap();
+    let mut state = sample_state();
+    state.prefs.plugin_folder = Some(folder.clone());
+    crate::plugins_ui::load(&mut state);
+    crate::plugins_ui::open(&mut state);
+    state.plugins.selected = Some("sim".into());
+    let mut harness = themed_harness(state, egui::vec2(1200.0, 900.0), egui::Theme::Light, |ui, state| {
+        crate::dialogs::show(ui.ctx(), state);
+    });
+    harness.run();
+    assert!(harness.query_by_label(&t!("plug-programs")).is_some());
+    assert!(harness.query_by_label("Sleeper").is_some());
+    assert!(harness.query_by_label(&t!("plug-program-none")).is_some());
+    harness.get_by_label(&t!("plug-tools")).click();
+    harness.run();
+    assert!(harness.state().prefs.plugins_tools.contains("sim"), "the permission is granted");
+    // Browse… picks a file: one of another name is refused.
+    let other = folder.join("other.exe");
+    std::fs::write(&other, "x").unwrap();
+    crate::plugins_ui::choose_program_for_test(harness.state_mut(), "sim", "sleeper", &other);
+    assert!(matches!(harness.state().plugins.notice, Some(Err(_))));
+    assert!(cc_plugins::tools::read_tool_paths(&folder, "sim").is_empty());
+    crate::plugins_ui::choose_program_for_test(harness.state_mut(), "sim", "sleeper", &program);
+    assert!(matches!(harness.state().plugins.notice, Some(Ok(_))), "{:?}", harness.state().plugins.notice);
+    assert_eq!(cc_plugins::tools::read_tool_paths(&folder, "sim")["sleeper"], program);
+    harness.run();
+    assert!(harness.query_by_label(&program.display().to_string()).is_some());
+    harness.get_by_label(&t!("plug-program-test")).click();
+    // A spinner while it runs.
+    harness.run_steps(2);
+    crate::plugins_ui::finish_tests(harness.state_mut());
+    assert!(crate::plugins_ui::test_answer(harness.state(), "sim", "sleeper").is_some_and(|r| r.is_ok()));
+    harness.run();
 }

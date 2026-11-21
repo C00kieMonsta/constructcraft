@@ -406,3 +406,94 @@ fn plugin_exporters_write_the_path_given() {
     assert_eq!(summary[0]["exporters"][0]["extensions"], json!(["idf"]));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `ccad plugins tools` shows and stores the program a plugin's tool runs
+/// (here `ccad` itself), `--tool` gives it for one run, and the plugin runs
+/// it with `ccad.process.run`, waited for.
+#[test]
+fn plugin_tools_are_chosen_and_run() {
+    let dir = std::env::temp_dir().join(format!("ccad-cli-{}-tools", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let plugin = dir.join("runner");
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(
+        plugin.join("plugin.toml"),
+        r#"id = "runner"
+name = "Runner"
+version = "1.0"
+api = 2
+permissions = ["tools"]
+
+[[tools]]
+id = "self"
+name = "ConstructCraft CLI"
+executables = ["ccad.exe", "ccad"]
+version_args = ["--version"]
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        plugin.join("main.lua"),
+        r#"ccad.command { name = "version", kind = "query", run = function()
+  local r = ccad.process.run("self", { args = { "--version" } })
+  return { code = r.code, out = r.stdout }
+end }"#,
+    )
+    .unwrap();
+    let folder = dir.to_string_lossy().into_owned();
+    let exe = env!("CARGO_BIN_EXE_ccad");
+    let (code, out, err) = ccad(&["plugins", "tools", &folder, "runner"], "");
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out["tools"][0]["id"], "self");
+    assert_eq!(out["tools"][0]["path"], Value::Null);
+    assert_eq!(out["tools"][0]["problem"], "no program chosen");
+
+    // Not chosen: the command says what to configure.
+    let (code, _, err) = ccad(&["--plugins", &folder, "run", "runner__version"], "");
+    assert_eq!(code, 1);
+    assert!(err.contains("no program was chosen for ConstructCraft CLI (self)"), "{err}");
+
+    // A program of another name is refused, and nothing is stored.
+    let manifest = plugin.join("plugin.toml").to_string_lossy().into_owned();
+    let (code, _, err) = ccad(&["plugins", "tools", &folder, "runner", &format!("self={manifest}")], "");
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("must be named ccad.exe or ccad"), "{err}");
+    assert_eq!(ccad(&["plugins", "tools", &folder, "runner", "other=x"], "").0, 2);
+    assert!(!dir.join(".tools").join("runner.json").exists());
+
+    let (code, out, err) = ccad(&["plugins", "tools", &folder, "runner", &format!("self={exe}"), "--test"], "");
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out["tools"][0]["problem"], Value::Null);
+    assert_eq!(out["tools"][0]["test"]["ok"], true, "{out}");
+    assert!(out["tools"][0]["test"]["output"].as_str().unwrap().starts_with("ccad "), "{out}");
+    let stored: Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join(".tools").join("runner.json")).unwrap()).unwrap();
+    assert_eq!(std::path::PathBuf::from(stored["self"].as_str().unwrap()), std::path::PathBuf::from(exe));
+
+    // The folder of plugins runs it, waited for.
+    let (code, out, err) = ccad(&["--plugins", &folder, "run", "runner__version"], "");
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out["code"], 0);
+    assert!(out["out"].as_str().unwrap().starts_with("ccad "), "{out}");
+    let (_, summary, _) = ccad(&["--plugins", &folder, "plugins"], "");
+    assert_eq!(summary[0]["granted"]["tools"], true);
+    assert_eq!(summary[0]["tools"][0]["problem"], Value::Null);
+
+    // `self=` forgets it.
+    let (code, out, _) = ccad(&["plugins", "tools", &folder, "runner", "self="], "");
+    assert_eq!((code, out["tools"][0]["path"].clone()), (0, Value::Null));
+    assert!(!dir.join(".tools").join("runner.json").exists());
+
+    // --tool gives it for one run, also to a plugin loaded from its own folder.
+    let single = plugin.to_string_lossy().into_owned();
+    let tool = format!("runner.self={exe}");
+    let (code, out, err) = ccad(&["--plugins", &single, "--tool", &tool, "run", "runner__version"], "");
+    assert_eq!(code, 0, "{err}");
+    assert!(out["out"].as_str().unwrap().starts_with("ccad "), "{out}");
+    let bad = format!("runner.self={manifest}");
+    let (code, _, err) = ccad(&["--plugins", &single, "--tool", &bad, "run", "runner__version"], "");
+    assert_eq!(code, 1);
+    assert!(err.contains("--tool runner.self") && err.contains("must be named"), "{err}");
+    assert_eq!(ccad(&["--tool", "nonsense", "commands"], "").0, 2);
+    let _ = std::fs::remove_dir_all(&dir);
+}

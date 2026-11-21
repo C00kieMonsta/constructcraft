@@ -66,6 +66,8 @@ const PLUGIN_FOLDER_KEY: &str = "plugin_folder";
 const PLUGINS_OFF_KEY: &str = "plugins_off";
 /// eframe storage key of the plugins allowed to work with files (one id per line).
 const PLUGINS_FILES_KEY: &str = "plugins_files";
+/// eframe storage key of the plugins allowed to run external programs (one id per line).
+const PLUGINS_TOOLS_KEY: &str = "plugins_tools";
 /// eframe storage key of where the side panels are docked (`side_panels::PanelLayout::to_text`).
 const PANELS_KEY: &str = "side_panels";
 /// eframe storage key of the Structure tab's material (`StructuralMaterial::code`).
@@ -142,6 +144,9 @@ pub struct Preferences {
     pub plugins_off: BTreeSet<String>,
     /// Plugins the user allowed to work with files (the `files` permission).
     pub plugins_files: BTreeSet<String>,
+    /// Plugins the user allowed to run external programs (the `tools`
+    /// permission).
+    pub plugins_tools: BTreeSet<String>,
     /// Where the Project Browser and Properties are docked.
     pub panels: crate::side_panels::PanelLayout,
     /// The material the Structure tab's column and beam tools place.
@@ -173,6 +178,7 @@ impl Default for Preferences {
             plugin_folder: None,
             plugins_off: BTreeSet::new(),
             plugins_files: BTreeSet::new(),
+            plugins_tools: BTreeSet::new(),
             panels: Default::default(),
             structure_material: Default::default(),
 
@@ -276,6 +282,7 @@ impl Preferences {
             plugin_folder: folder(get(PLUGIN_FOLDER_KEY)),
             plugins_off: get(PLUGINS_OFF_KEY).map(|v| id_lines(&v)).unwrap_or_default(),
             plugins_files: get(PLUGINS_FILES_KEY).map(|v| id_lines(&v)).unwrap_or_default(),
+            plugins_tools: get(PLUGINS_TOOLS_KEY).map(|v| id_lines(&v)).unwrap_or_default(),
             panels: get(PANELS_KEY).and_then(|v| crate::side_panels::PanelLayout::from_text(&v)).unwrap_or_default(),
             structure_material: get(STRUCTURE_MATERIAL_KEY)
                 .and_then(|v| cc_core::StructuralMaterial::from_code(&v))
@@ -311,6 +318,7 @@ impl Preferences {
         let ids = |set: &BTreeSet<String>| set.iter().cloned().collect::<Vec<_>>().join("\n");
         set(PLUGINS_OFF_KEY, ids(&self.plugins_off));
         set(PLUGINS_FILES_KEY, ids(&self.plugins_files));
+        set(PLUGINS_TOOLS_KEY, ids(&self.plugins_tools));
         set(PANELS_KEY, self.panels.to_text());
         set(STRUCTURE_MATERIAL_KEY, self.structure_material.code().to_string());
 
@@ -1138,6 +1146,7 @@ mod tests {
             plugin_folder: Some(PathBuf::from("/plugins")),
             plugins_off: BTreeSet::from(["old_tool".to_string()]),
             plugins_files: BTreeSet::from(["exporter".to_string(), "importer".to_string()]),
+            plugins_tools: BTreeSet::from(["simulator".to_string()]),
             panels: crate::side_panels::PanelLayout {
                 left: vec![],
                 right: vec![vec![crate::side_panels::Pane::Properties], vec![crate::side_panels::Pane::Browser]],

@@ -9,6 +9,7 @@ mod api2;
 mod events;
 mod files;
 mod lua;
+mod process;
 mod scope;
 mod store;
 

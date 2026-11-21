@@ -90,7 +90,7 @@ fn plugin_dir(dir: &Path, extra: &str, main: &str) -> PathBuf {
 fn session(dir: &Path, files: bool) -> Session {
     let extra = if files { "permissions = [\"files\"]\n" } else { "" };
     let mut plugin = Plugin::load(&plugin_dir(dir, extra, MAIN), Limits::default()).unwrap();
-    plugin.grant(Permissions { files });
+    plugin.grant(Permissions { files, ..Permissions::NONE });
     let mut host = PluginHost::new();
     host.add(plugin).unwrap();
     let mut s = Session::default();

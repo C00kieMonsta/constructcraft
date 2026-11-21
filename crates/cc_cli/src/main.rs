@@ -29,6 +29,11 @@ Usage:
   ccad plugins settings <folder> <id> [key=value ...]
                                       show a plugin's settings, or change and
                                       store them (in <folder>/.settings)
+  ccad plugins tools <folder> <id> [tool=path ...] [--test]
+                                      show the external programs a plugin may
+                                      run, or choose them (in <folder>/.tools;
+                                      tool= forgets one); --test runs each
+                                      one's version check
   ccad [options] mcp                  serve the commands over MCP (stdio)
 
 Arguments of `run`: a JSON object, @file.json, - (standard input), or
@@ -57,6 +62,9 @@ Options:
                          subfolders (repeatable); their commands are named
                          <plugin>__<command> and get the permissions their
                          plugin.toml asks for
+  --tool <plugin>.<tool>=<path>
+                         the program a plugin's tool runs, for this run
+                         (repeatable; checked like `plugins tools`)
   --allow-files          let a graph run commands that read or write files
                          (open, save, import, export); a graph file cannot
                          allow them itself
@@ -73,9 +81,23 @@ struct Options {
     save: bool,
     save_as: Option<PathBuf>,
     plugins: Vec<PathBuf>,
+    /// `--tool`: plugin id, tool id, program.
+    tools: Vec<(String, String, PathBuf)>,
     /// `graph` may run file commands (`graph_run`'s `allow_files`).
     allow_files: bool,
     rest: Vec<String>,
+}
+
+/// `<plugin>.<tool>=<path>` of `--tool`.
+fn parse_tool(spec: &str) -> Result<(String, String, PathBuf), String> {
+    let bad = || format!("--tool {spec}: expected <plugin>.<tool>=<path>");
+    let (names, path) = spec.split_once('=').ok_or_else(bad)?;
+    let (plugin, tool) = names.split_once('.').ok_or_else(bad)?;
+    if plugin.is_empty() || tool.is_empty() || path.is_empty() {
+        return Err(bad());
+    }
+    let path = std::path::absolute(path).map_err(|e| format!("--tool {spec}: {e}"))?;
+    Ok((plugin.to_string(), tool.to_string(), path))
 }
 
 fn parse_options(args: Vec<String>) -> Result<Options, String> {
@@ -84,6 +106,7 @@ fn parse_options(args: Vec<String>) -> Result<Options, String> {
         save: false,
         save_as: None,
         plugins: Vec::new(),
+        tools: Vec::new(),
         allow_files: false,
         rest: Vec::new(),
     };
@@ -96,6 +119,7 @@ fn parse_options(args: Vec<String>) -> Result<Options, String> {
             "-V" | "--version" => o.rest.push("--version".into()),
             "--save-as" => o.save_as = Some(it.next().ok_or("--save-as needs a file")?.into()),
             "--plugins" => o.plugins.push(it.next().ok_or("--plugins needs a folder")?.into()),
+            "--tool" => o.tools.push(parse_tool(&it.next().ok_or("--tool needs <plugin>.<tool>=<path>")?)?),
             "--lang" => {
                 let code = it.next().ok_or("--lang needs a language")?;
                 let lang = cc_engine::i18n::Language::from_code(&code).ok_or(format!("unsupported language {code}"))?;
@@ -112,13 +136,19 @@ fn parse_options(args: Vec<String>) -> Result<Options, String> {
 }
 
 /// The plugins of `--plugins`, each granted what its manifest asks for (the
-/// user named the folders); plugins that fail to load are reported on
+/// user named the folders), with the programs of `--tool`; plugins that fail
+/// to load, and programs that do not fit their tool, are reported on
 /// standard error and left out.
 fn plugins(o: &Options) -> cc_plugins::PluginHost {
     let mut host = cc_plugins::PluginHost::new();
     for folder in &o.plugins {
         for e in host.load_folder(folder, cc_plugins::Limits::default(), |m| Some(m.requested())) {
             eprintln!("ccad: plugin not loaded: {e}");
+        }
+    }
+    for (plugin, tool, path) in &o.tools {
+        if let Err(e) = host.set_tool_path(plugin, tool, Some(path.clone())) {
+            eprintln!("ccad: --tool {plugin}.{tool}: {e}");
         }
     }
     host
@@ -244,6 +274,84 @@ fn plugin_settings(folder: &str, id: &str, pairs: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// `ccad plugins tools <folder> <id> [tool=path ...] [--test]`: print the
+/// external programs of the plugin `id` of the plugins folder `folder`, the
+/// path chosen for each (and why it cannot run), a suggestion found on
+/// `PATH`, after checking and storing the given paths (`tool=` forgets
+/// one); `--test` runs each chosen program's version check. The plugin's
+/// code does not run.
+fn plugin_tools(folder: &str, id: &str, rest: &[String]) -> ExitCode {
+    let folder = std::path::Path::new(folder);
+    if !cc_plugins::plugin::valid_id(id) {
+        return usage_error(&format!("\"{id}\" is not a plugin id"));
+    }
+    let (manifest, tools) = match cc_plugins::plugin::tools_schema(&folder.join(id), folder) {
+        Ok(found) => found,
+        Err(e) => return fail(&EngineError::io(e)),
+    };
+    if manifest.id != id {
+        return fail(&EngineError::io(format!("the folder {id} holds the plugin \"{}\"", manifest.id)));
+    }
+    let test = rest.iter().any(|a| a == "--test");
+    let mut stored: std::collections::BTreeMap<String, PathBuf> = cc_plugins::tools::read_tool_paths(folder, id)
+        .into_iter()
+        .filter(|(k, _)| tools.iter().any(|t| &t.id == k))
+        .collect();
+    let pairs: Vec<&String> = rest.iter().filter(|a| *a != "--test").collect();
+    for pair in &pairs {
+        let Some((key, text)) = pair.split_once('=') else {
+            return usage_error(&format!("expected tool=path, got '{pair}'"));
+        };
+        let Some(tool) = tools.iter().find(|t| t.id == key) else {
+            let known: Vec<&str> = tools.iter().map(|t| t.id.as_str()).collect();
+            return usage_error(&format!("the plugin {id} has no tool \"{key}\" (tools: {})", known.join(", ")));
+        };
+        if text.is_empty() {
+            stored.remove(key);
+            continue;
+        }
+        let path = match std::path::absolute(text) {
+            Ok(p) => p,
+            Err(e) => return usage_error(&format!("{text}: {e}")),
+        };
+        if let Err(e) = cc_plugins::tools::check_path(&tool.executables, &path) {
+            return usage_error(&format!("invalid program for {key}: {e}"));
+        }
+        stored.insert(key.to_string(), path);
+    }
+    if !pairs.is_empty()
+        && let Err(e) = cc_plugins::tools::write_tool_paths(folder, id, &stored)
+    {
+        return fail(&EngineError::io(e));
+    }
+    let list: Vec<Value> = tools
+        .into_iter()
+        .map(|t| {
+            let tool = cc_plugins::Tool { path: stored.get(&t.id).cloned(), ..t };
+            let problem = tool.problem();
+            let mut out = json!({
+                "id": tool.id,
+                "name": tool.name,
+                "executables": tool.executables,
+                "homepage": tool.homepage,
+                "version_args": tool.version_args,
+                "path": tool.path,
+                "problem": problem,
+                "suggestion": cc_plugins::tools::find_on_path(&tool.executables),
+            });
+            if let (true, None, Some(path)) = (test, &problem, &tool.path) {
+                out["test"] = match cc_plugins::tools::test(id, &tool, path) {
+                    Ok(text) => json!({ "ok": true, "output": text }),
+                    Err(e) => json!({ "ok": false, "error": e }),
+                };
+            }
+            out
+        })
+        .collect();
+    print(&json!({ "id": id, "tools": list }));
+    ExitCode::SUCCESS
+}
+
 /// Save when asked (after the commands ran), then show what plugins printed
 /// meanwhile (their `project_saving` and `project_saved` handlers).
 fn save(s: &mut Session, o: &Options) -> Result<(), EngineError> {
@@ -336,8 +444,10 @@ fn main() -> ExitCode {
                 }
             }
             [action, folder, id, pairs @ ..] if action == "settings" => plugin_settings(folder, id, pairs),
+            [action, folder, id, rest @ ..] if action == "tools" => plugin_tools(folder, id, rest),
             _ => usage_error(
-                "plugins takes no arguments, `install <file.zip> <folder>`, `remove <id> <folder>` or                  `settings <folder> <id> [key=value ...]`",
+                "plugins takes no arguments, `install <file.zip> <folder>`, `remove <id> <folder>`, `settings \
+                 <folder> <id> [key=value ...]` or `tools <folder> <id> [tool=path ...] [--test]`",
             ),
         },
         "run" => {

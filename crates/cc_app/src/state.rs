@@ -323,6 +323,9 @@ pub struct AppState {
 impl AppState {
     pub fn new(doc: Document) -> Self {
         let mut session = Session::new(doc);
+        // Plugin commands that wait for an external program are driven by
+        // `plugin_job` every frame, behind its progress dialog.
+        session.set_blocking(false);
         session.sync();
         Self {
             session,

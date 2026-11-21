@@ -478,6 +478,8 @@ impl eframe::App for ConstructApp {
 
     /// A clean exit: the changes were saved or discarded, so the copy goes.
     fn on_exit(&mut self) {
+        // A program a plugin command waits for is stopped with the app.
+        self.state.session.cancel_job();
         self.recovery.exit();
         // Update Now left the new version to start, or its installer to run.
         if let Some(next) = self.state.updates.on_exit.take() {

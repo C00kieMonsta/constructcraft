@@ -311,7 +311,7 @@ fn install_unchecked(
 }
 
 /// Remove the installed plugin `id` from `folder` (only a folder whose
-/// manifest has that id), with its stored settings.
+/// manifest has that id), with its stored settings and tool paths.
 pub fn uninstall(folder: &Path, id: &str) -> Result<(), String> {
     let dir = folder.join(id);
     let manifest = std::fs::read_to_string(dir.join(MANIFEST)).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -321,6 +321,7 @@ pub fn uninstall(folder: &Path, id: &str) -> Result<(), String> {
     }
     std::fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let _ = std::fs::remove_file(settings_path(folder, id));
+    let _ = std::fs::remove_file(crate::tools::tools_path(folder, id));
     Ok(())
 }
 

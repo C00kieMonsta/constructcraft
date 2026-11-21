@@ -139,6 +139,8 @@ ccad -p casa.ccad --save run cad_explode id=120
 | `io` | falha ao ler ou gravar um arquivo |
 | `internal` | um defeito; o projeto fica como estava |
 | `script` | um script ou plugin Lua falhou: erro de sintaxe ou de execução, ou um limite atingido |
+| `pending` | um comando de plugin continua em segundo plano, esperando um programa externo (só numa sessão que não bloqueia, veja [Programas externos](#programas-externos)) |
+| `cancelled` | um comando de plugin que esperava um programa externo foi cancelado; o que ele fez foi desfeito |
 
 ## Linha de comando: `ccad`
 
@@ -645,7 +647,7 @@ authors = ["…"]
 license = "GPL-3.0-or-later"
 homepage = "https://…"
 main = "main.lua"           # o padrão
-permissions = []            # ou ["files"], veja abaixo
+permissions = []            # ou ["files"], ["tools"] (api 2), veja abaixo
 ```
 
 `main.lua` roda uma vez quando o plugin carrega e registra comandos com `ccad.command`:
@@ -675,7 +677,7 @@ ccad.command {
 - **O que um comando pode executar:** um comando `query` só consulta; um `edit` consulta e edita; comandos que leem ou gravam arquivos (importar, exportar, salvar) precisam da permissão `files` (sem ela, comandos de edição que leem um arquivo indicado por um parâmetro, como `cad_import` ou `fill_pattern_import` com `path`, recusam o caminho; as formas sem arquivo, como `fill_pattern_import` com `text`, continuam funcionando), e só com ela se declara um comando do tipo `file`. Sem `files`, um comando ainda trabalha com os arquivos que os argumentos dele indicam em parâmetros `save_path` e `open_path` ([API 2](#arquivos-sem-a-permissão-files)). Abrir ou criar um projeto, `undo`, `redo` e `language_set` não rodam dentro de um comando de plugin, nem o comando de outro plugin.
 - **Essas regras valem para tudo o que um comando executa:** o motor confere cada comando executado enquanto um comando de plugin roda (o escopo dele), também os nós de um grafo que ele roda com `graph_run`; um nó `plugin_data_set` com o id de outro plugin é recusado como um `ccad.run` direto. Os scripts Lua que o usuário roda (`ccad lua`) não têm restrição.
 - **O sandbox** é o dos [scripts Lua](#scripts-lua), com o limite contado por comando; cada plugin tem o seu próprio estado Lua, que guarda as variáveis entre um comando e outro. `require("a.b")` carrega `a/b.lua` da pasta do plugin (uma vez; arquivos fora da pasta são recusados), e `ccad.plugin` tem o `id`, o `name` e a `version` dele. `ccad.run` só funciona enquanto um comando roda, não enquanto o plugin carrega.
-- **As permissões** são concedidas por quem carrega o plugin: `ccad --plugins` concede o que o manifesto pede, já que você indicou a pasta.
+- **As permissões** são concedidas por quem carrega o plugin: `ccad --plugins` concede o que o manifesto pede, já que você indicou a pasta. `files` deixa os comandos dele trabalharem com qualquer arquivo; `tools` (API 2) deixa que executem os programas externos que o usuário escolhe para as ferramentas dele ([Programas externos](#programas-externos)).
 
 ### API de plugins 2: botões, configurações, traduções e dados
 
@@ -807,6 +809,69 @@ label = "%import.epw%"
 Os tipos de arquivo vêm das `extensions` do parâmetro. Um item cujo comando o `main.lua` não registra, ou cujo comando não tem um parâmetro desses ou tem mais de um, é um erro de carga; os dois precisam de `api = 2`. No aplicativo, clicar no item abre a janela de salvar (exportador) ou de abrir (importador) para essas extensões e depois o formulário do comando com o caminho escolhido (ou roda o comando na hora, quando o caminho é o único parâmetro). `ccad plugins` os lista (`exporters`, `importers`: comando, rótulo, parâmetro e extensões).
 
 Os plugins são compartilhados pelo índice da comunidade, [constructcraft-plugins](https://github.com/francisreboucas/constructcraft-plugins): uma entrada por plugin, com de onde baixar cada versão e o checksum dela, enviada por pull request. No aplicativo, *Gerenciar → Plugins* instala, atualiza, desativa e remove plugins ([Plugins](interface.pt-BR.md#plugins)); sem ele, `ccad plugins install <arquivo.zip> <pasta>` instala um arquivo baixado (verificado do mesmo jeito: caminhos seguros, tamanhos e um plugin que carrega) e `ccad plugins remove <id> <pasta>` remove um.
+
+#### Programas externos
+
+Um plugin pode executar um programa instalado no computador, como o simulador EnergyPlus, quando o usuário permite e escolhe qual arquivo de programa é. O programa roda fora da sandbox, com as permissões do usuário, então nada roda sem a aprovação do usuário, e o aplicativo continua funcionando enquanto ele roda.
+
+```toml
+permissions = ["tools"]                          # precisa de api = 2
+
+[[tools]]                                        # no máximo 8
+id = "energyplus"                                # como um id de plugin; ccad.process.run usa esse nome
+name = "EnergyPlus"                              # pode ser "%chave%"
+executables = ["energyplus.exe", "energyplus"]   # os nomes de arquivo aceitos do programa
+homepage = "https://energyplus.net"              # opcional: onde obtê-lo
+version_args = ["--version"]                     # opcional: o que o "Testar" executa
+```
+
+`[[tools]]` sem a permissão `tools`, ou com `api = 1`, é um erro de carga; também são arquivos de lote (`.bat`, `.cmd`) e nomes com pastas em `executables`.
+
+**Aprovação.** Duas coisas são escolha do usuário, nunca do plugin:
+
+- **A permissão:** no aplicativo, *Permitir que execute programas externos* na janela Plugins (guardada por plugin, como a permissão `files`); `ccad --plugins` concede o que o manifesto pede, já que você indicou a pasta.
+- **O programa:** o caminho de cada ferramenta, escolhido na janela Plugins (*Programas externos*: *Procurar…*, ou *Usar …* para um programa com esse nome encontrado no `PATH`, que nunca é usado sozinho) e guardado em `<pasta de plugins>/.tools/<id do plugin>.json` (`{ "<id da ferramenta>": "<caminho absoluto>" }`; removido com o plugin). Um caminho só vale quando é um arquivo existente cujo nome é um dos `executables` (sem diferença de maiúsculas no Windows). Pela linha de comando:
+
+```sh
+ccad plugins tools ~/plugins energy                         # as ferramentas: caminho escolhido, por que não pode rodar, uma sugestão do PATH
+ccad plugins tools ~/plugins energy energyplus=/opt/EnergyPlus/energyplus --test   # escolhe e executa version_args
+ccad plugins tools ~/plugins energy energyplus=             # esquece
+ccad --plugins ~/plugins/energy --tool energy.energyplus=/opt/EnergyPlus/energyplus run energy__simulate
+```
+
+`--tool <plugin>.<ferramenta>=<caminho>` (repetível) dá um programa para uma execução, também a um plugin carregado da própria pasta, que não lê caminhos guardados; um caminho que não serve é informado na saída de erro e deixado de fora. `ccad plugins` lista as `tools` de cada plugin (`id`, `name`, `executables`, `homepage`, `path`, `problem`).
+
+**Executando.** Na função `run` de um comando:
+
+```lua
+local r = ccad.process.run("energyplus", {
+  args = { "-w", "in.epw", "-r", "in.idf" },     -- passados como estão, sem shell
+  files = { ["in.idf"] = texto_idf },             -- gravados antes na pasta da execução
+  copy = { ["in.epw"] = args.clima },             -- um arquivo dado ao comando para ler (open_path), copiado para lá
+  outputs = { "eplusout.csv", "eplustbl.htm", "*.err" },  -- lidos de volta; * casa quaisquer caracteres dentro de um nome
+  timeout = 600,                                  -- segundos: padrão 300, no máximo 7200
+})
+-- r = { code = 0, stdout = "…", stderr = "…", truncated = false, timed_out = false,
+--       files = { ["eplusout.csv"] = "…", ["eplusout.err"] = "…" } }
+```
+
+- **A pasta da execução:** cada execução ganha uma pasta nova só sua na pasta temporária do sistema (`constructcraft-<plugin>-<aleatório>`), que é a pasta de trabalho do programa; os `files` são gravados e os arquivos de `copy` copiados para ela, as `outputs` encontradas lá são lidas de volta (as não encontradas simplesmente não aparecem em `files`; links não são seguidos), e a pasta é apagada depois, também quando a execução falha, estoura o tempo ou é cancelada.
+- **Nomes** em `files`, `copy` e `outputs` são relativos à pasta da execução, nomes simples unidos por `/` (`sub/in.idf`): `..`, caminhos absolutos, unidades, `\`, `:` e nomes de dispositivo do Windows (`CON`, `NUL`, `COM1`…) são recusados.
+- **Sem shell:** o programa é iniciado diretamente, e cada argumento chega a ele como escrito: `&`, `;`, `|`, aspas e `$(…)` não significam nada.
+- **Ambiente:** o programa recebe do ambiente do aplicativo só `PATH`, `SystemRoot`, `TEMP`, `TMP`, `HOME`, `USERPROFILE`, `LANG` e `LC_*`; nada mais é repassado. A entrada padrão é vazia.
+- **Limites:** as entradas (`files` e `copy`) no máximo 256 MiB ao todo; cada saída no máximo 64 MiB e todas as saídas no máximo 256 MiB (além disso, a chamada levanta um erro); saída padrão e de erro guardadas até 1 MiB cada (`truncated = true` quando alguma foi cortada). Ao estourar o tempo o programa é encerrado e `timed_out = true` (sem `code`). Um código de saída diferente de zero é devolvido, não levantado: o plugin decide o que ele significa.
+- **Parada:** ao estourar o tempo ou ao cancelar, o programa é encerrado. Programas que ele mesmo iniciou podem continuar rodando: não são usados job objects nem grupos de processos.
+- **O que a aprovação significa:** o plugin decide os argumentos e os arquivos de entrada, então escolher um programa de uso geral para uma ferramenta (um shell, um interpretador de scripts) dá ao plugin tudo o que esse programa pode fazer; escolha o programa a que a ferramenta se destina.
+- **Erros** são levantados na chamada, como em `ccad.run`, e dizem o que fazer: sem a permissão `tools`, uma ferramenta que o manifesto não declara, nenhum programa escolhido (citando a janela Plugins, `ccad plugins tools` e `--tool`), um programa que não existe ou com outro nome, um nome inválido, um limite, um programa que não pôde iniciar. `pcall` os captura.
+- **Onde funciona:** só na própria função `run` de um comando (também dentro de `pcall`), não enquanto o `main.lua` carrega, não em tratadores de eventos, não numa corrotina que o plugin inicia, num módulo sendo carregado por `require` nem numa função chamada por uma função de biblioteca (como o comparador de `table.sort`). Scripts Lua que o usuário roda (`ccad lua`) não têm `ccad.process`.
+
+**O comando espera sem travar o aplicativo.** A função `run` de um comando roda numa corrotina: `ccad.process.run` entrega o programa a uma thread em segundo plano e o comando espera ali. Com o `ccad`, scripts, macros e MCP o comando simplesmente leva o tempo do programa; no aplicativo ele fica pendente: um diálogo mostra o plugin, o programa, o tempo decorrido e a última linha que ele escreveu, com *Cancelar* ([Plugins](interface.pt-BR.md#plugins)). Enquanto espera:
+
+- continua sendo um comando: suas edições antes e depois da espera são um só passo de desfazer, uma falha (ou *Cancelar*) desfaz todas, os arquivos que grava com `ccad.file.write` só são gravados quando termina sem erro, e `model_changed` dispara uma vez, quando termina;
+- a sessão só roda consultas: qualquer comando que edita, salva, abre ou exporta, `undo` e `redo`, e outros comandos de plugin são recusados (`a plugin command is running`), e nenhum evento dispara;
+- o tempo de espera não conta nos 60 segundos do comando: esse limite é do Lua; seu orçamento de instruções continua através da espera.
+
+Um comando pode executar vários programas, um depois do outro; *Cancelar* encerra o que está rodando e desfaz o comando (`cancelled`). No motor, `Session::set_blocking(false)` deixa esses comandos pendentes (`execute` devolve o código `pending`), `Session::poll_job` continua com eles e devolve o resultado quando terminam, `Session::job` descreve o que está esperando e `Session::cancel_job` o encerra; as sessões bloqueiam por padrão, e comandos rodados por outros comandos (grafos, scripts) e passos de macro são sempre esperados.
 
 #### Eventos
 

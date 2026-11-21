@@ -20,19 +20,26 @@
 //!   extension's [`cc_engine::Extension::on_event`].
 //! - [`store`] installs plugins from the community index and keeps the
 //!   values of their settings.
+//! - Plugins with the `tools` permission run external programs the user
+//!   chose ([`tools`]) with `ccad.process.run`, on a background thread
+//!   ([`process`]); the command waits without holding the session
+//!   ([`cc_engine::Outcome::Pending`]).
 
 pub mod api;
 pub mod contributions;
 pub mod locales;
 pub mod plugin;
+pub mod process;
 pub mod script;
 pub mod store;
+pub mod tools;
 
 pub use cc_script::{convert, sandbox};
 
-pub use api::{API_VERSION, FileRun};
+pub use api::{API_VERSION, CommandRun, FileRun, ProcessRun};
 pub use contributions::{Button, ButtonSize, FileAction, Setting, SettingKind, When};
 pub use locales::Locales;
 pub use plugin::{Manifest, Permissions, Plugin, PluginError, PluginHost};
 pub use sandbox::Limits;
 pub use script::{ScriptOptions, ScriptOutput, run_script};
+pub use tools::{Tool, ToolSpec};

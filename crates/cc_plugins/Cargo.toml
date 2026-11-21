@@ -22,6 +22,14 @@ toml.workspace = true
 [lints]
 workspace = true
 
+# A small program the tests of `ccad.process.run` run as an external tool;
+# not part of ConstructCraft.
+[[bin]]
+name = "cc_plugins_test_tool"
+path = "src/bin/test_tool.rs"
+test = false
+doc = false
+
 [[test]]
 name = "main"
 path = "tests/main.rs"

@@ -11,7 +11,8 @@
 //! license = "MIT"
 //! homepage = "https://…"
 //! main = "main.lua"        # the default
-//! permissions = ["files"]  # optional: run commands that read or write files
+//! permissions = ["files"]  # optional: run commands that read or write files;
+//!                          # "tools" (api 2): run the external programs below
 //!
 //! [[buttons]]              # api 2: a ribbon button (at most 64)
 //! command = "walls"        # a command main.lua registers
@@ -37,6 +38,11 @@
 //! [[importers]]            # api 2: an entry of the app's Import list (at most 16)
 //! command = "import_epw"   # a command with exactly one ui = "open_path" parameter
 //! label = "EnergyPlus weather (.epw)"
+//!
+//! [[tools]]                # api 2, with the "tools" permission: an external program
+//! id = "energyplus"        # (at most 8; see crate::tools)
+//! name = "EnergyPlus"
+//! executables = ["energyplus.exe", "energyplus"]
 //! ```
 //!
 //! `main.lua` registers commands with `ccad.command { name, title,
@@ -73,6 +79,14 @@
 //!   command succeeds; a file an engine command (`ifc_export`…) wrote during
 //!   a command that then fails stays.
 //!
+//! A command's `run` function runs in a coroutine, so `ccad.process.run`
+//! (with the `tools` permission and a program the user chose for the tool,
+//! see [`crate::tools`]) can wait for an external program without holding
+//! the session: the command is left pending ([`Outcome::Pending`]) and goes
+//! on, in its scope, when the program ended ([`crate::process`]). The time
+//! spent waiting does not count against the run's time limit; its
+//! instruction budget goes on.
+//!
 //! Every command a plugin command runs, also through `graph_run`, scripts
 //! or macros, is checked by the engine against the command's
 //! [`cc_engine::PluginScope`]: only its own plugin data, no `project_new`,
@@ -99,27 +113,29 @@
 //! a plugin loaded from its own folder (not a folder of plugins) starts
 //! with the defaults.
 
-use crate::api::FileRun;
-use crate::api::{API_VERSION, Api, engine_error};
+use crate::api::{API_VERSION, Api, CommandRun, FileRun, ProcessRun, engine_error, finished_table};
 use crate::contributions::{
     Button, ButtonSize, ButtonSpec, FileAction, FileActionSpec, MAX_BUTTONS, MAX_FILE_ACTIONS, MAX_ICON, MAX_SETTINGS,
     Setting, SettingSpec, When, check_param_hints, current_values, path_params, resolve_schema, settings_json,
 };
 use crate::convert::{from_lua, to_lua};
 use crate::locales::Locales;
+use crate::process::{Finished, Running};
 use crate::sandbox::{Limits, Sandbox};
+use crate::tools::{MAX_TOOLS, Tool, ToolSpec};
 use cc_engine::extension::SEPARATOR;
 use cc_engine::{
-    CommandInfo, CommandKind, EngineError, Event, EventKind, Extension, FileAccess, Grants, PluginScope, ScopeEdits,
-    Session,
+    CommandInfo, CommandKind, EngineError, ErrorCode, Event, EventKind, Extension, FileAccess, Grants, JobInfo,
+    Outcome, PluginScope, ScopeEdits, Session,
 };
-use mlua::{Function, Lua, Table, Value as LuaValue};
+use mlua::{Function, Lua, MultiValue, Table, ThreadStatus, Value as LuaValue};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value, json};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 /// The manifest's file name.
 pub const MANIFEST: &str = "plugin.toml";
@@ -139,6 +155,8 @@ pub const EVENT_INSTRUCTIONS: u64 = 50_000_000;
 pub const EVENT_TIME: std::time::Duration = std::time::Duration::from_secs(5);
 /// Failures in a row after which a handler is turned off for the session.
 pub const MAX_FAILURES: u32 = 3;
+/// How long [`Extension::run`] waits for a program at a time.
+const WAIT_STEP: Duration = Duration::from_millis(100);
 
 /// A plugin's `plugin.toml`.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -178,6 +196,9 @@ pub struct Manifest {
     /// Entries of the app's Import list (api 2).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub importers: Vec<FileActionSpec>,
+    /// External programs it may run (api 2, with the `tools` permission).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<ToolSpec>,
 }
 
 /// The `[settings.*]` tables in the order the manifest writes them.
@@ -206,13 +227,15 @@ fn main_lua() -> String {
 pub struct Permissions {
     /// Run commands that read or write files (import, export, save).
     pub files: bool,
+    /// Run the external programs of its `[[tools]]` (`ccad.process.run`).
+    pub tools: bool,
 }
 
 impl Permissions {
-    pub const NONE: Permissions = Permissions { files: false };
+    pub const NONE: Permissions = Permissions { files: false, tools: false };
 
     fn and(self, other: Permissions) -> Permissions {
-        Permissions { files: self.files && other.files }
+        Permissions { files: self.files && other.files, tools: self.tools && other.tools }
     }
 }
 
@@ -273,8 +296,11 @@ impl Manifest {
             return Err(format!("main \"{}\": a .lua file inside the plugin's folder", self.main));
         }
         for p in &self.permissions {
-            if p != "files" {
-                return Err(format!("unknown permission \"{p}\" (known: files)"));
+            match p.as_str() {
+                "files" => {}
+                "tools" if self.api >= 2 => {}
+                "tools" => return Err("the tools permission needs api = 2".into()),
+                _ => return Err(format!("unknown permission \"{p}\" (known: files, tools)")),
             }
         }
         if self.api < 2 && !self.buttons.is_empty() {
@@ -304,6 +330,23 @@ impl Manifest {
                 a.check().map_err(|e| format!("{key}[{}]: {e}", i + 1))?;
             }
         }
+        if !self.tools.is_empty() {
+            if self.api < 2 {
+                return Err("tools need api = 2".into());
+            }
+            if !self.requested().tools {
+                return Err("tools need the \"tools\" permission (permissions = [\"tools\"])".into());
+            }
+        }
+        if self.tools.len() > MAX_TOOLS {
+            return Err(format!("at most {MAX_TOOLS} tools"));
+        }
+        for (i, t) in self.tools.iter().enumerate() {
+            t.check().map_err(|e| format!("tools[{}]: {e}", i + 1))?;
+            if self.tools.iter().take(i).any(|o| o.id == t.id) {
+                return Err(format!("tools[{}]: the id \"{}\" is used twice", i + 1, t.id));
+            }
+        }
         Ok(())
     }
 
@@ -314,7 +357,10 @@ impl Manifest {
 
     /// The permissions it asks for.
     pub fn requested(&self) -> Permissions {
-        Permissions { files: self.permissions.iter().any(|p| p == "files") }
+        Permissions {
+            files: self.permissions.iter().any(|p| p == "files"),
+            tools: self.permissions.iter().any(|p| p == "tools"),
+        }
     }
 
     /// Its settings, checked, with their text as written (`%key%` not
@@ -337,6 +383,25 @@ pub fn settings_schema(dir: &Path) -> Result<(Manifest, Vec<Setting>), String> {
         settings
     };
     Ok((manifest, settings))
+}
+
+/// The manifest and external programs of the plugin in `dir`, their names
+/// in the current language, with the paths stored for them in the plugins
+/// folder `folder` ([`crate::tools::read_tool_paths`]), without running its
+/// code (to show or change them for a plugin that is not loaded).
+pub fn tools_schema(dir: &Path, folder: &Path) -> Result<(Manifest, Vec<Tool>), String> {
+    let manifest = Manifest::read(dir)?;
+    let locales = if manifest.api >= 2 { Some(Locales::load(dir)?) } else { None };
+    let stored = crate::tools::read_tool_paths(folder, &manifest.id);
+    let tools = manifest
+        .tools
+        .iter()
+        .map(|t| {
+            let resolve = |text: &str| locales.as_ref().map_or_else(|| text.to_string(), |l| l.resolve(text));
+            Tool::of(t, resolve, stored.get(&t.id).cloned())
+        })
+        .collect();
+    Ok((manifest, tools))
 }
 
 /// A relative path made of plain names (letters, digits, `_`, `-`), ending
@@ -426,6 +491,40 @@ struct FileActionDef {
     extensions: Vec<String>,
 }
 
+/// A plugin command running in its coroutine, between two steps.
+struct Coroutine {
+    /// The command's full name.
+    name: String,
+    scope: PluginScope,
+    thread: mlua::Thread,
+    run: CommandRun,
+}
+
+/// A plugin command waiting for an external program.
+struct Suspended {
+    co: Coroutine,
+    running: Running,
+    /// The program's name, for people.
+    tool: String,
+    /// When it started waiting (that time does not count against its limit).
+    since: Instant,
+}
+
+/// What the coroutine of a command is resumed with.
+enum Resume {
+    /// The command's arguments, to start it.
+    Start(Value),
+    /// How the program it waited for ended (an error raises in the command).
+    Finished(Result<Finished, String>),
+}
+
+/// What one step of a command's coroutine ended with.
+enum Stepped {
+    Returned(Value),
+    /// It yielded this value (`ccad.process.run`'s token, or the plugin's own).
+    Yielded(LuaValue),
+}
+
 /// A loaded plugin.
 pub struct Plugin {
     pub manifest: Manifest,
@@ -449,6 +548,10 @@ pub struct Plugin {
     settings_meta: Table,
     /// What it printed while loading, until a host takes it.
     printed: Vec<String>,
+    /// The path the user chose for each of its tools (by tool id).
+    tool_paths: BTreeMap<String, PathBuf>,
+    /// Its command waiting for an external program, if any.
+    suspended: Option<Suspended>,
 }
 
 impl std::fmt::Debug for Plugin {
@@ -537,6 +640,8 @@ impl Plugin {
             values,
             settings_meta,
             printed,
+            tool_paths: BTreeMap::new(),
+            suspended: None,
         })
     }
 
@@ -634,6 +739,41 @@ impl Plugin {
             .collect()
     }
 
+    /// Its external programs, names in the current language, with the paths
+    /// chosen for them.
+    pub fn tools(&self) -> Vec<Tool> {
+        self.manifest
+            .tools
+            .iter()
+            .map(|t| Tool::of(t, |text| self.resolve(text), self.tool_paths.get(&t.id).cloned()))
+            .collect()
+    }
+
+    /// Set the paths chosen for its tools (stored ones, checked when used);
+    /// unknown tool ids are left out.
+    pub fn set_tool_paths(&mut self, paths: BTreeMap<String, PathBuf>) {
+        self.tool_paths = paths.into_iter().filter(|(k, _)| self.manifest.tools.iter().any(|t| &t.id == k)).collect();
+    }
+
+    /// Set the path of its tool `tool` (checked: an existing file named one
+    /// of the tool's executables), or forget it with `None`.
+    pub fn set_tool_path(&mut self, tool: &str, path: Option<PathBuf>) -> Result<(), String> {
+        let spec = self.manifest.tools.iter().find(|t| t.id == tool).ok_or_else(|| {
+            let known: Vec<&str> = self.manifest.tools.iter().map(|t| t.id.as_str()).collect();
+            format!("the plugin {} has no tool \"{tool}\" (tools: {})", self.manifest.id, known.join(", "))
+        })?;
+        match path {
+            Some(path) => {
+                crate::tools::check_path(&spec.executables, &path)?;
+                self.tool_paths.insert(tool.to_string(), path);
+            }
+            None => {
+                self.tool_paths.remove(tool);
+            }
+        }
+        Ok(())
+    }
+
     /// Its settings, text in the current language.
     pub fn settings(&self) -> Vec<Setting> {
         self.settings.iter().map(|s| s.resolved(|t| self.resolve(t))).collect()
@@ -657,29 +797,33 @@ impl Plugin {
         Ok(())
     }
 
-    /// Run its command `short` (the name without the plugin's id).
-    fn call(&mut self, session: &mut Session, short: &str, args: Value) -> Option<Result<Value, EngineError>> {
+    /// Start its command `short` (the name without the plugin's id): its
+    /// `run` function runs in a coroutine until it returns, fails, or waits
+    /// for an external program (`ccad.process.run`: [`Outcome::Pending`],
+    /// see [`Plugin::resume`]).
+    fn start(&mut self, session: &mut Session, short: &str, args: Value) -> Option<Outcome> {
         let command = self.commands.iter().find(|c| c.short == short)?;
         let name = command.info.name.clone();
         let kind = command.info.kind;
+        let fail = |e: EngineError| Some(Outcome::Done(Err(e)));
         if kind == CommandKind::File && !self.granted.files {
             let message = format!(
                 "{name} works with files: the plugin {} was not granted the \"files\" permission",
                 self.manifest.id
             );
-            return Some(Err(EngineError::rejected(message)));
+            return fail(EngineError::rejected(message));
         }
         let args = match args {
             Value::Null => json!({}),
             Value::Object(_) => args,
-            _ => return Some(Err(EngineError::invalid(format!("{name}: the arguments must be an object")))),
+            _ => return fail(EngineError::invalid(format!("{name}: the arguments must be an object"))),
         };
         if let Some(missing) = command.required.iter().find(|k| args.get(k.as_str()).is_none()) {
-            return Some(Err(EngineError::invalid(format!("{name}: missing field `{missing}`"))));
+            return fail(EngineError::invalid(format!("{name}: missing field `{missing}`")));
         }
         let grants = match grants(&name, &command.info.input_schema, &args) {
             Ok(g) => g,
-            Err(e) => return Some(Err(e)),
+            Err(e) => return fail(e),
         };
         let scope = PluginScope {
             plugin: self.manifest.id.clone(),
@@ -687,20 +831,107 @@ impl Plugin {
             files: if self.granted.files { FileAccess::All } else { FileAccess::Granted(grants.clone()) },
         };
         let func = command.func.clone();
+        // A command left waiting by a session that went is stopped.
+        self.cancel();
         if let Err(e) = fill_settings(&self.sandbox.lua, &self.settings_meta, &self.values) {
-            return Some(Err(engine_error(&e)));
+            return fail(engine_error(&e));
         }
+        let thread = match self.sandbox.lua.create_thread(func) {
+            Ok(t) => t,
+            Err(e) => return fail(engine_error(&e)),
+        };
+        let process = ProcessRun {
+            plugin: self.manifest.id.clone(),
+            allowed: self.granted.tools,
+            tools: self.tools(),
+            thread: Some(thread.clone()),
+            request: None,
+        };
+        let run = CommandRun { files: RefCell::new(FileRun::new(grants)), process: RefCell::new(process) };
         self.sandbox.reset_budget();
-        let files = RefCell::new(FileRun::new(grants));
-        let (lua, api) = (&self.sandbox.lua, &self.api);
-        let result = session.with_plugin_scope(scope, |session| {
-            api.with_session(lua, session, Some(&files), |lua| {
-                let out: LuaValue = func.call(to_lua(lua, &args)?)?;
-                from_lua(lua, &out).map_err(|e| mlua::Error::runtime(format!("{name}: the result: {e}")))
+        Some(self.step(session, Coroutine { name, scope, thread, run }, Resume::Start(args)))
+    }
+
+    /// Resume the coroutine of `co` with `input`, in its scope, until it
+    /// returns, fails or waits again.
+    fn step(&mut self, session: &mut Session, co: Coroutine, input: Resume) -> Outcome {
+        let (lua, api, thread, name) = (&self.sandbox.lua, &self.api, &co.thread, &co.name);
+        let stepped = session.with_plugin_scope(co.scope.clone(), |session| {
+            api.with_session(lua, session, Some(&co.run), |lua| {
+                let values: MultiValue = match input {
+                    Resume::Start(args) => thread.resume(to_lua(lua, &args)?)?,
+                    Resume::Finished(Ok(done)) => thread.resume((finished_table(lua, &done)?, LuaValue::Nil))?,
+                    Resume::Finished(Err(message)) => thread.resume((LuaValue::Nil, message))?,
+                };
+                let first = values.into_iter().next().unwrap_or(LuaValue::Nil);
+                if thread.status() == ThreadStatus::Resumable {
+                    return Ok(Stepped::Yielded(first));
+                }
+                let out =
+                    from_lua(lua, &first).map_err(|e| mlua::Error::runtime(format!("{name}: the result: {e}")))?;
+                Ok(Stepped::Returned(out))
             })
         });
-        // What it wrote with ccad.file reaches the disk only when it succeeded.
-        Some(result.map_err(|e| engine_error(&e)).and_then(|out| files.into_inner().commit().map(|()| out)))
+        match stepped {
+            Err(e) => Outcome::Done(Err(engine_error(&e))),
+            // What it wrote with ccad.file reaches the disk only when it succeeded.
+            Ok(Stepped::Returned(out)) => Outcome::Done(co.run.files.into_inner().commit().map(|()| out)),
+            Ok(Stepped::Yielded(value)) => {
+                let request = co.run.process.borrow_mut().request.take();
+                match request {
+                    // Only the token ccad.process.run made waits for its program.
+                    Some((token, tool, request)) if matches!(&value, LuaValue::Table(t) if t.to_pointer() == token.to_pointer()) =>
+                    {
+                        let running = Running::start(request);
+                        self.suspended = Some(Suspended { co, running, tool, since: Instant::now() });
+                        Outcome::Pending
+                    }
+                    _ => Outcome::Done(Err(EngineError::new(
+                        ErrorCode::Script,
+                        format!(
+                            "{}: coroutine.yield outside a coroutine the command started (only ccad.process.run \
+                             waits)",
+                            co.name
+                        ),
+                    ))),
+                }
+            }
+        }
+    }
+
+    /// Go on with its command waiting for a program: wait at most `wait`,
+    /// then, when the program ended, resume the command with its result
+    /// (the time it waited is given back to its time limit).
+    fn resume(&mut self, session: &mut Session, wait: Duration) -> Outcome {
+        let Some(suspended) = self.suspended.take() else {
+            return Outcome::Done(Err(EngineError::new(ErrorCode::Internal, "no plugin command is waiting")));
+        };
+        let Some(finished) = suspended.running.wait(wait) else {
+            self.suspended = Some(suspended);
+            return Outcome::Pending;
+        };
+        self.sandbox.extend_time(suspended.since.elapsed());
+        let finished = finished.map_err(|m| format!("ccad.process.run: {}: {m}", suspended.tool));
+        self.step(session, suspended.co, Resume::Finished(finished))
+    }
+
+    /// Stop its command waiting, and the program it waits for (its writes
+    /// with `ccad.file` are dropped).
+    fn cancel(&mut self) {
+        if let Some(suspended) = self.suspended.take() {
+            suspended.running.cancel();
+        }
+    }
+
+    /// Its command waiting, as the session shows it.
+    fn job(&self) -> Option<JobInfo> {
+        let s = self.suspended.as_ref()?;
+        Some(JobInfo {
+            plugin: self.manifest.id.clone(),
+            plugin_name: self.display_name(),
+            tool: s.tool.clone(),
+            last_line: s.running.last_line(),
+        })
     }
 
     /// Whether it has a handler of `kind` that is on.
@@ -1044,6 +1275,8 @@ fn require_fn(lua: &Lua, dir: &Path, id: &str) -> mlua::Result<Function> {
 pub struct PluginHost {
     plugins: Vec<Plugin>,
     messages: Vec<String>,
+    /// The plugin whose command waits for an external program.
+    pending: Option<String>,
 }
 
 impl PluginHost {
@@ -1074,13 +1307,15 @@ impl PluginHost {
     /// Load the plugins of `folder`: the folder itself when it holds a
     /// manifest, else each of its subfolders that does (in name order),
     /// skipping hidden ones (an install's `.<id>.installing` and `.<id>.old`,
-    /// the `.settings` folder) and refusing one whose name is not its
+    /// the `.settings` and `.tools` folders) and refusing one whose name is not its
     /// plugin's id (installs are named so; permissions are granted by id).
     /// `grant` decides the permissions of each, or `None` to leave it out
     /// (turned off). In a folder of plugins, each starts with the settings
-    /// stored in `.settings/<id>.json` ([`crate::store::read_settings`]); a
-    /// single plugin's folder gives the defaults. Returns the plugins that
-    /// could not be loaded.
+    /// stored in `.settings/<id>.json` ([`crate::store::read_settings`]) and
+    /// the tool paths stored in `.tools/<id>.json`
+    /// ([`crate::tools::read_tool_paths`]); a single plugin's folder gives
+    /// the defaults and no tool paths. Returns the plugins that could not be
+    /// loaded.
     pub fn load_folder(
         &mut self,
         folder: &Path,
@@ -1112,7 +1347,7 @@ impl PluginHost {
         for dir in dirs {
             // Read the manifest first: a plugin left out runs no code.
             let manifest = read_inside(&dir, Path::new(MANIFEST), MAX_MANIFEST).and_then(|t| Manifest::parse(&t));
-            let (permissions, stored) = match &manifest {
+            let (permissions, stored, tool_paths) = match &manifest {
                 // A folder named after another id (a copy, a leftover of an
                 // install) would take that id's place and its permissions.
                 Ok(m) if !single && dir.file_name().is_none_or(|n| n.to_string_lossy() != m.id.as_str()) => {
@@ -1121,8 +1356,10 @@ impl PluginHost {
                     continue;
                 }
                 Ok(m) => match grant(m) {
-                    Some(p) if single => (p, Map::new()),
-                    Some(p) => (p, crate::store::read_settings(folder, &m.id)),
+                    Some(p) if single => (p, Map::new(), BTreeMap::new()),
+                    Some(p) => {
+                        (p, crate::store::read_settings(folder, &m.id), crate::tools::read_tool_paths(folder, &m.id))
+                    }
                     None => continue,
                 },
                 Err(message) => {
@@ -1133,6 +1370,7 @@ impl PluginHost {
             match Plugin::load_with_settings(&dir, limits, &stored) {
                 Ok(mut plugin) => {
                     plugin.grant(permissions);
+                    plugin.set_tool_paths(tool_paths);
                     if let Err(e) = self.add(plugin) {
                         errors.push(e);
                     }
@@ -1159,6 +1397,14 @@ impl PluginHost {
         let plugin =
             self.plugins.iter_mut().find(|p| p.manifest.id == id).ok_or_else(|| format!("no plugin \"{id}\""))?;
         plugin.set_setting(key, &value)
+    }
+
+    /// Set the path of the tool `tool` of the plugin `id` (checked; see
+    /// [`Plugin::set_tool_path`]).
+    pub fn set_tool_path(&mut self, id: &str, tool: &str, path: Option<PathBuf>) -> Result<(), String> {
+        let plugin =
+            self.plugins.iter_mut().find(|p| p.manifest.id == id).ok_or_else(|| format!("no plugin \"{id}\""))?;
+        plugin.set_tool_path(tool, path)
     }
 
     /// The title of the plugin command `full_name` (`<id>__<name>`) in the
@@ -1204,10 +1450,27 @@ impl PluginHost {
                         "settings": settings,
                         "exporters": p.exporters(),
                         "importers": p.importers(),
+                        "tools": p.tools().iter().map(|t| json!({
+                            "id": t.id,
+                            "name": t.name,
+                            "executables": t.executables,
+                            "homepage": t.homepage,
+                            "path": t.path,
+                            "problem": t.problem(),
+                        })).collect::<Vec<_>>(),
                     })
                 })
                 .collect(),
         )
+    }
+}
+
+impl PluginHost {
+    /// Move what the plugin `id` printed to the messages.
+    fn collect_output(&mut self, id: &str) {
+        let Some(plugin) = self.plugins.iter().find(|p| p.manifest.id == id) else { return };
+        let lines = plugin.sandbox.take_output();
+        self.messages.extend(lines.into_iter().map(|line| format!("[{id}] {line}")));
     }
 }
 
@@ -1216,14 +1479,55 @@ impl Extension for PluginHost {
         self.plugins.iter().flat_map(|p| p.commands()).collect()
     }
 
+    /// Run a command to its end, waiting for the programs it runs.
     fn run(&mut self, session: &mut Session, name: &str, args: Value) -> Option<cc_engine::Result<Value>> {
-        let (id, short) = name.split_once(SEPARATOR)?;
-        let plugin = self.plugins.iter_mut().find(|p| p.manifest.id == id)?;
-        let result = plugin.call(session, short, args);
-        for line in plugin.sandbox.take_output() {
-            self.messages.push(format!("[{id}] {line}"));
+        match self.start(session, name, args)? {
+            Outcome::Done(result) => Some(result),
+            Outcome::Pending => loop {
+                if let Outcome::Done(result) = self.resume(session, WAIT_STEP) {
+                    return Some(result);
+                }
+            },
         }
-        result
+    }
+
+    fn start(&mut self, session: &mut Session, name: &str, args: Value) -> Option<Outcome> {
+        let (id, short) = name.split_once(SEPARATOR)?;
+        // A command left waiting by a session that went is stopped.
+        self.cancel(session);
+        let plugin = self.plugins.iter_mut().find(|p| p.manifest.id == id)?;
+        let outcome = plugin.start(session, short, args);
+        self.collect_output(id);
+        if matches!(outcome, Some(Outcome::Pending)) {
+            self.pending = Some(id.to_string());
+        }
+        outcome
+    }
+
+    fn resume(&mut self, session: &mut Session, wait: Duration) -> Outcome {
+        let plugin = self.pending.take().and_then(|id| self.plugins.iter_mut().find(|p| p.manifest.id == id));
+        let Some(plugin) = plugin else {
+            return Outcome::Done(Err(EngineError::new(ErrorCode::Internal, "no plugin command is waiting")));
+        };
+        let id = plugin.manifest.id.clone();
+        let outcome = plugin.resume(session, wait);
+        self.collect_output(&id);
+        if outcome == Outcome::Pending {
+            self.pending = Some(id);
+        }
+        outcome
+    }
+
+    fn cancel(&mut self, _session: &mut Session) {
+        let Some(id) = self.pending.take() else { return };
+        if let Some(plugin) = self.plugins.iter_mut().find(|p| p.manifest.id == id) {
+            plugin.cancel();
+        }
+        self.collect_output(&id);
+    }
+
+    fn job(&self) -> Option<JobInfo> {
+        self.plugin(self.pending.as_deref()?)?.job()
     }
 
     fn take_messages(&mut self) -> Vec<String> {

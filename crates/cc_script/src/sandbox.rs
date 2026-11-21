@@ -100,6 +100,13 @@ impl Meter {
         self.deadline.set(now.checked_add(time).unwrap_or(far));
     }
 
+    /// Move the time limit `by` later (time the run spent waiting, which
+    /// does not count).
+    fn extend(&self, by: Duration) {
+        let deadline = self.deadline.get();
+        self.deadline.set(deadline.checked_add(by).unwrap_or(deadline));
+    }
+
     /// Why the run must stop, if it must.
     pub fn exceeded(&self) -> Option<&'static str> {
         if self.spent.get() > self.limit.get() {
@@ -291,6 +298,13 @@ impl Sandbox {
         self.meter.reset(instructions.min(self.limits.instructions), time.min(self.limits.time));
     }
 
+    /// Give the run `waited` more time: what it spent waiting for something
+    /// outside Lua (an external program) does not count against its time
+    /// limit; the instruction budget goes on as it was.
+    pub fn extend_time(&self, waited: Duration) {
+        self.meter.extend(waited);
+    }
+
     pub fn limits(&self) -> Limits {
         self.limits
     }
@@ -365,5 +379,17 @@ mod tests {
         assert!(start.elapsed() < Duration::from_secs(20));
         // A new run gets its time again.
         assert!(run(&sandbox, "return 1").is_ok());
+    }
+
+    #[test]
+    fn time_spent_waiting_does_not_count() {
+        let short = Limits { time: Duration::from_millis(300), ..Limits::default() };
+        let sandbox = Sandbox::new(short).unwrap();
+        sandbox.reset_budget();
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(sandbox.meter.exceeded().is_some(), "the time is spent");
+        sandbox.extend_time(Duration::from_millis(400));
+        assert_eq!(sandbox.meter.exceeded(), None, "the wait is given back");
+        assert!(sandbox.lua.load("return 1").eval::<i64>().is_ok());
     }
 }
