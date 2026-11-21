@@ -547,7 +547,7 @@ The `ccad` table:
 | `ccad.null` | JSON `null` (Lua's `nil` leaves a field out) |
 | `ccad.array(t)` | marks `t` as a list, so that an empty table is sent as `[]` rather than `{}` |
 | `ccad.json.encode(v)`, `ccad.json.decode(s)` | JSON text to and from Lua values |
-| `ccad.version`, `ccad.api` | the ConstructCraft version and the plugin API version (1) |
+| `ccad.version`, `ccad.api` | the ConstructCraft version and the plugin API version (2) |
 
 Arguments and results are JSON: objects are tables with string keys, arrays are sequences (`{ 0, 0 }` is a point), `end` is a Lua keyword and is written `["end"]`. A whole number computed with `/` (which always gives a float in Lua) is sent as an integer, so `10 / 2` works where an id or count is expected.
 
@@ -623,7 +623,7 @@ A plugin is a folder with a `plugin.toml` manifest and Lua code that adds comman
 
 ```sh
 ccad --plugins examples/plugins commands                # the catalog, with the plugins' commands
-ccad --plugins examples/plugins plugins                 # the plugins, their permissions and commands
+ccad --plugins examples/plugins plugins                 # the plugins: permissions, commands, buttons, settings
 ccad --plugins examples/plugins run quick_rooms__rectangle_room width=4 depth=3 name=Office door=south
 claude mcp add constructcad -- ccad mcp --plugins /path/to/plugins
 ```
@@ -638,7 +638,7 @@ claude mcp add constructcad -- ccad mcp --plugins /path/to/plugins
 id = "quick_rooms"          # lowercase letters, digits and single underscores, up to 32
 name = "Quick rooms"
 version = "0.1.0"
-api = 1                     # the plugin API it is written for
+api = 1                     # the plugin API it is written for (1 or 2, see below)
 description = "Rectangular rooms in one step, and wall totals by type."
 authors = ["…"]
 license = "GPL-3.0-or-later"
@@ -674,6 +674,105 @@ ccad.command {
 - **What a command may run:** a `query` command only queries; an `edit` command queries and edits; commands that read or write files (import, export, save) need the `files` permission (without it, edit commands that read a file a parameter names, such as `cad_import` or `fill_pattern_import` with a `path`, refuse the path; their inline forms, such as `fill_pattern_import` with `text`, still work), and a command of kind `file` can only be declared with it. Opening or creating a project, `undo`, `redo` and `language_set` cannot run inside a plugin command, nor can another plugin's command.
 - **The sandbox** is that of [Lua scripts](#lua-scripts), with the budget counted per command; each plugin has its own Lua state, which keeps its variables between commands. `require("a.b")` loads `a/b.lua` from the plugin's folder (once; files outside the folder are refused), and `ccad.plugin` holds its `id`, `name` and `version`. `ccad.run` works only while a command runs, not while the plugin loads.
 - **Permissions** are granted by whoever loads the plugin: `ccad --plugins` grants what the manifest asks for, since you named the folder.
+
+### Plugin API 2: buttons, settings, translations and data
+
+A plugin written for `api = 2` (`ccad.api` is 2 in this version) can also declare ribbon buttons and settings in its manifest, translate its text and give its parameters hints for the interface. Manifests with `api = 1` load as before; buttons and settings are refused under `api = 1` (`buttons need api = 2`), so the index never offers such a plugin to a build that only knows API 1.
+
+```toml
+id = "quick_rooms"
+name = "%name%"                  # looked up in locales/<language>.toml
+version = "0.2.0"
+api = 2
+
+[[buttons]]                      # at most 64
+command = "rectangle_room"       # a command main.lua registers (its short name)
+label = "%button.room%"          # at most 64 characters
+icon = "icons/room.svg"          # optional: an SVG in the plugin's folder, at most 64 KiB
+panel = "Rooms"                  # optional: the ribbon panel (default: the plugin's name)
+size = "large"                   # "large" (the default) or "small"
+when = "view:floor_plan"         # optional: when the button is available
+
+[settings.default_height]        # at most 64; keys like command names
+type = "number"                  # boolean, number, integer or string
+default = 2.8                    # required, and must fit the setting
+title = "%settings.height%"      # optional (default: the key made readable, "Default height")
+description = "Height of the walls it draws"
+ui = "length"                    # optional, numbers only: shown in the project's units
+minimum = 0.5                    # numbers and integers; also maximum
+
+[settings.door_side]
+type = "string"
+default = "south"
+enum = ["north", "south"]        # strings only: the allowed values
+enum_labels = ["North", "South"] # optional, one per value
+```
+
+A button whose command `main.lua` does not register is a load error naming the command. **`when`** is a comma-separated list of terms that must all hold:
+
+| Term | Holds when |
+|---|---|
+| `selection` | at least one element is selected |
+| `selection:one` | exactly one element is selected |
+| `selection:<category>` | at least one element is selected and all are of the category (`wall`, `door`…; the names of `categories_list`) |
+| `view:<kind>` | the active view is a `floor_plan`, `ceiling_plan`, `three_d`, `elevation`, `section`, `legend`, `drafting`, `schedule`, `diagram` or `sheet` |
+
+An unknown term, category or view kind is a load error.
+
+**Settings.** `ccad.settings` holds the current value of each setting (the stored value, or the default): it is read-only (assigning to it raises an error), is there while `main.lua` runs, and is refreshed before each command runs. Settings are listed in the manifest's order. The values are kept per plugin in `<plugins folder>/.settings/<id>.json`; stored values that no longer fit the manifest (an unknown key, a wrong type, a value out of `enum`, `minimum` or `maximum`) are dropped when the plugin loads, and a plugin loaded from its own folder (not a folder of plugins) starts with the defaults. Removing a plugin removes its settings. From the command line:
+
+```sh
+ccad plugins settings ~/plugins quick_rooms                         # the settings and their values, as JSON
+ccad plugins settings ~/plugins quick_rooms default_height=3 door_side=north
+```
+
+Values are written like `run`'s `key=value` arguments (JSON or plain text; a string setting takes the text as it is), checked against the manifest and stored; a value that does not fit is refused and nothing is written. This reads the manifest and the translations only: the plugin's code does not run.
+
+**Translations.** `locales/<code>.toml` files in the plugin's folder, `<code>` one of ConstructCraft's languages (`en`, `pt-BR`, `es`, `fr`, `de`, `it`, `lo`, `pl`, `uk-UA`, `zh-TW`, `zh-CN`, `ja`; other files are ignored), hold `key = "text"` lines or tables whose keys join with `.` (each file at most 256 KiB; a file that is not TOML of texts is a load error):
+
+```toml
+# locales/pt-BR.toml
+name = "Salas rápidas"
+[button]
+room = "Sala"                 # the key button.room
+[settings]
+height = "Altura padrão"
+```
+
+A text that is exactly `%key%` is looked up when it is shown, in the current language: that language's file, then one of the same base language (`pt` for `pt-BR`), then `en`; a key found nowhere shows as the key. This applies to the manifest's `name` and `description`, buttons' `label` and `panel`, settings' `title`, `description` and `enum_labels`, commands' `title` and `description`, and the `title`, `description` and `enum_labels` of each parameter. Changing the language changes the text at once, without reloading plugins. Under `api = 1` texts are shown as written.
+
+**Parameter hints.** A parameter of `params` may say how the interface asks for it; with `api = 2` the hints are checked when the command registers (a wrong one is a load error), and they are passed on to MCP clients unchanged:
+
+| `ui` | Type of the parameter | Asks for |
+|---|---|---|
+| `length` | `number` | a length, in the project's units |
+| `element` | `integer` | an element id (`category` narrows it) |
+| `elements` | `array` | element ids (`category` narrows them) |
+| `point` | `array` | a point `[x, y]` |
+| `level` | `integer` | a level id |
+| `view` | `integer` | a view id |
+| `type` | `integer` | a type id (`category` narrows it) |
+| `material` | `string` | a material name |
+
+`category` (a category name) goes only with `element`, `elements` and `type`; `enum_labels` gives a label to each value of `enum` (as many strings); `title` is a short name for the parameter.
+
+```lua
+params = { properties = {
+  width = { type = "number", ui = "length", title = "%param.width%" },
+  wall = { type = "integer", ui = "element", category = "wall" },
+  side = { type = "string", enum = { "north", "south" }, enum_labels = { "%north%", "%south%" } },
+} }
+```
+
+**Plugin data.** A plugin keeps its own data in the project, on elements or on the project itself, saved in the `.ccad` file (the commands `plugin_data_get`, `plugin_data_set` and `plugin_data_list` of the [command reference](commands.md)):
+
+| | |
+|---|---|
+| `ccad.data.get(element)` | what the plugin keeps on the element (`nil`: on the project), or `ccad.null` |
+| `ccad.data.set(element, value)` | keep `value` (any JSON, up to 256 KiB) there, replacing what was there; `nil` removes it |
+| `ccad.data.list()` | `{ project = true/false, elements = { ids… } }` |
+
+`ccad.data.set` is an edit, so a `query` command cannot call it, and it is part of the command's one undo step. A plugin command reaches only its own data: running a `plugin_data_*` command through `ccad.run` or `ccad.try` with another plugin's id is refused (`a plugin reads and writes only its own data`). Lua scripts the user runs (`ccad lua`) reach any plugin's data.
 
 Plugins are shared through the community index, [constructcraft-plugins](https://github.com/francisreboucas/constructcraft-plugins): one entry per plugin, with where to download each version and its checksum, submitted by pull request. In the app, *Manage → Plugins* installs, updates, turns off and removes plugins ([Plugins](interface.md#plugins)); without it, `ccad plugins install <file.zip> <folder>` installs a downloaded archive (checked the same way: safe paths, sizes, and a plugin that loads) and `ccad plugins remove <id> <folder>` removes one.
 

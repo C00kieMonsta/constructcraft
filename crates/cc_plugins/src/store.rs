@@ -8,12 +8,18 @@
 //! read in memory with bounded sizes, entries with unsafe paths or links are
 //! refused, and the plugin must load (in the sandbox) before it replaces an
 //! installed one.
+//!
+//! The values of plugin settings are kept here too, one JSON object per
+//! plugin in `<plugins folder>/.settings/<id>.json` ([`read_settings`],
+//! [`write_settings`]); the loader skips the hidden folder.
 
 use crate::api::API_VERSION;
 use crate::plugin::{MANIFEST, Manifest, Plugin};
 use crate::sandbox::Limits;
 use serde::Deserialize;
+use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Where the app reads the index.
@@ -26,6 +32,10 @@ pub const MAX_ARCHIVE: usize = 20 * 1024 * 1024;
 const MAX_UNPACKED: u64 = 50 * 1024 * 1024;
 const MAX_FILES: usize = 2000;
 const MAX_PLUGINS: usize = 10_000;
+/// The folder of stored settings, inside a plugins folder.
+pub const SETTINGS_DIR: &str = ".settings";
+/// Largest settings file, in bytes.
+pub const MAX_SETTINGS_FILE: u64 = 64 * 1024;
 
 /// The plugin index.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -301,7 +311,7 @@ fn install_unchecked(
 }
 
 /// Remove the installed plugin `id` from `folder` (only a folder whose
-/// manifest has that id).
+/// manifest has that id), with its stored settings.
 pub fn uninstall(folder: &Path, id: &str) -> Result<(), String> {
     let dir = folder.join(id);
     let manifest = std::fs::read_to_string(dir.join(MANIFEST)).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -309,5 +319,56 @@ pub fn uninstall(folder: &Path, id: &str) -> Result<(), String> {
     if found.id != id {
         return Err(format!("{} holds the plugin \"{}\"", dir.display(), found.id));
     }
-    std::fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))
+    std::fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let _ = std::fs::remove_file(settings_path(folder, id));
+    Ok(())
+}
+
+/// Where the settings of the plugin `id` of the plugins folder `folder` are
+/// kept: `<folder>/.settings/<id>.json`.
+pub fn settings_path(folder: &Path, id: &str) -> PathBuf {
+    folder.join(SETTINGS_DIR).join(format!("{id}.json"))
+}
+
+/// The stored settings of the plugin `id` (a JSON object), checked only for
+/// being one: a missing, unreadable, too large or invalid file (or a bad
+/// id) gives an empty map. Values are checked against the plugin's schema
+/// when it loads.
+pub fn read_settings(folder: &Path, id: &str) -> Map<String, Value> {
+    if !crate::plugin::valid_id(id) {
+        return Map::new();
+    }
+    let Ok(file) = std::fs::File::open(settings_path(folder, id)) else { return Map::new() };
+    let mut bytes = Vec::new();
+    if file.take(MAX_SETTINGS_FILE + 1).read_to_end(&mut bytes).is_err() || bytes.len() as u64 > MAX_SETTINGS_FILE {
+        return Map::new();
+    }
+    match serde_json::from_slice(&bytes) {
+        Ok(Value::Object(map)) => map,
+        _ => Map::new(),
+    }
+}
+
+/// Store the settings of the plugin `id` (creating `.settings`), replacing
+/// the file at once (a temporary file renamed over it).
+pub fn write_settings(folder: &Path, id: &str, values: &Map<String, Value>) -> Result<(), String> {
+    if !crate::plugin::valid_id(id) {
+        return Err(format!("plugin id \"{id}\": not a valid id"));
+    }
+    let text = serde_json::to_string_pretty(values).map_err(|e| e.to_string())?;
+    if text.len() as u64 > MAX_SETTINGS_FILE {
+        return Err(format!("the settings of {id} take more than {MAX_SETTINGS_FILE} bytes"));
+    }
+    let dir = folder.join(SETTINGS_DIR);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let path = settings_path(folder, id);
+    let temp = dir.join(format!(".{id}.json.tmp"));
+    if let Err(e) = std::fs::write(&temp, text) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(format!("{}: {e}", temp.display()));
+    }
+    std::fs::rename(&temp, &path).map_err(|e| {
+        let _ = std::fs::remove_file(&temp);
+        format!("{}: {e}", path.display())
+    })
 }

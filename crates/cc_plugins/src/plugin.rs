@@ -3,15 +3,32 @@
 //!
 //! ```toml
 //! id = "room_tools"        # lowercase letters, digits and _, no "__"
-//! name = "Room tools"
+//! name = "Room tools"      # may be "%key%" (api 2, see the locales)
 //! version = "0.1.0"
-//! api = 1                  # the plugin API it was written for
+//! api = 2                  # the plugin API it was written for (1 or 2)
 //! description = "…"
 //! authors = ["…"]
 //! license = "MIT"
 //! homepage = "https://…"
 //! main = "main.lua"        # the default
 //! permissions = ["files"]  # optional: run commands that read or write files
+//!
+//! [[buttons]]              # api 2: a ribbon button (at most 64)
+//! command = "walls"        # a command main.lua registers
+//! label = "Walls"          # at most 64 characters, may be "%key%"
+//! icon = "icons/walls.svg" # optional, an SVG inside the folder, at most 64 KiB
+//! panel = "Rooms"          # optional (default: the plugin's name), may be "%key%"
+//! size = "large"           # or "small"
+//! when = "selection:wall"  # optional: selection, selection:one,
+//!                          # selection:<category>, view:<kind>; comma-separated, all hold
+//!
+//! [settings.height]        # api 2: a setting (at most 64), key like a command name
+//! type = "number"          # boolean, number, integer or string
+//! default = 2.8
+//! title = "%settings.height%"
+//! ui = "length"            # numbers only
+//! minimum = 0.5            # numbers and integers; also maximum
+//! # enum = ["a", "b"] and enum_labels = […] for strings
 //! ```
 //!
 //! `main.lua` registers commands with `ccad.command { name, title,
@@ -19,17 +36,46 @@
 //! `a/b.lua` from the plugin's folder. A command `walls` of the plugin
 //! `room_tools` is `room_tools__walls` in the catalog. Each plugin has its
 //! own sandboxed Lua state.
+//!
+//! Every plugin gets `ccad.settings`, the current values of its settings
+//! (stored over defaults; read-only, present while `main.lua` runs and
+//! refreshed before each command), and `ccad.data.get(element)`,
+//! `ccad.data.set(element, value)` and `ccad.data.list()`, its own data in
+//! the project (`element` nil: the project's) through
+//! `plugin_data_get`/`set`/`list`; a plugin command cannot run those
+//! commands for another plugin's id. With api 2 a plugin also has:
+//! - buttons and settings in its manifest (refused under api 1, so the index
+//!   never offers such a plugin to an older build);
+//! - translations in `locales/<code>.toml` ([`crate::locales`]) of its name,
+//!   description, buttons, settings and commands (`title`, `description`,
+//!   and the parameters' `title`, `description` and `enum_labels`), looked
+//!   up in the current language each time they are listed;
+//! - UI hints on command parameters, checked when a command registers: `ui`
+//!   (`length` on a number, `element`/`level`/`view`/`type` on an integer,
+//!   `elements`/`point` on an array, `material` on a string), `category`
+//!   (with `element`, `elements` or `type`), `enum_labels` (one per `enum`
+//!   value) and `title`.
+//!
+//! Settings are kept per plugin in `<plugins folder>/.settings/<id>.json`
+//! ([`crate::store::read_settings`]), read by [`PluginHost::load_folder`];
+//! a plugin loaded from its own folder (not a folder of plugins) starts
+//! with the defaults.
 
 use crate::api::{API_VERSION, Access, Api, engine_error};
+use crate::contributions::{
+    Button, ButtonSize, ButtonSpec, MAX_BUTTONS, MAX_ICON, MAX_SETTINGS, Setting, SettingSpec, When, check_param_hints,
+    current_values, resolve_schema, settings_json,
+};
 use crate::convert::{from_lua, to_lua};
+use crate::locales::Locales;
 use crate::sandbox::{Limits, Sandbox};
 use cc_engine::extension::SEPARATOR;
 use cc_engine::{CommandInfo, CommandKind, EngineError, Extension, Session};
 use mlua::{Function, Lua, Table, Value as LuaValue};
-use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde_json::{Map, Value, json};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -64,6 +110,31 @@ pub struct Manifest {
     pub main: String,
     #[serde(default)]
     pub permissions: Vec<String>,
+    /// Ribbon buttons (api 2).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub buttons: Vec<ButtonSpec>,
+    /// Settings (api 2): the `[settings.<key>]` tables, in the manifest's
+    /// order.
+    #[serde(
+        default,
+        deserialize_with = "settings_in_order",
+        serialize_with = "settings_as_table",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub settings: Vec<(String, SettingSpec)>,
+}
+
+/// The `[settings.*]` tables in the order the manifest writes them.
+fn settings_in_order<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<(String, SettingSpec)>, D::Error> {
+    let map: BTreeMap<String, toml::Spanned<SettingSpec>> = Deserialize::deserialize(d)?;
+    let mut list: Vec<(usize, String, SettingSpec)> =
+        map.into_iter().map(|(k, v)| (v.span().start, k, v.into_inner())).collect();
+    list.sort_by_key(|(start, ..)| *start);
+    Ok(list.into_iter().map(|(_, k, v)| (k, v)).collect())
+}
+
+fn settings_as_table<S: Serializer>(settings: &[(String, SettingSpec)], s: S) -> Result<S::Ok, S::Error> {
+    s.collect_map(settings.iter().map(|(k, v)| (k, v)))
 }
 
 fn api_one() -> u32 {
@@ -105,10 +176,10 @@ impl std::fmt::Display for PluginError {
 
 impl std::error::Error for PluginError {}
 
-/// Whether `s` is a valid id or command name: a lowercase letter, then
-/// lowercase letters, digits and single underscores, not ending in one
-/// (the rule of [`cc_core::plugin_data::valid_plugin_name`]).
-fn valid_name(s: &str) -> bool {
+/// Whether `s` is a valid command name: a lowercase letter, then lowercase
+/// letters, digits and single underscores, not ending in one (the rule of
+/// [`cc_core::plugin_data::valid_plugin_name`]).
+pub(crate) fn valid_command_name(s: &str) -> bool {
     cc_core::plugin_data::valid_plugin_name(s) && !s.contains(SEPARATOR)
 }
 
@@ -150,19 +221,67 @@ impl Manifest {
                 return Err(format!("unknown permission \"{p}\" (known: files)"));
             }
         }
+        if self.api < 2 && !self.buttons.is_empty() {
+            return Err("buttons need api = 2".into());
+        }
+        if self.api < 2 && !self.settings.is_empty() {
+            return Err("settings need api = 2".into());
+        }
+        if self.buttons.len() > MAX_BUTTONS {
+            return Err(format!("at most {MAX_BUTTONS} buttons"));
+        }
+        for (i, b) in self.buttons.iter().enumerate() {
+            b.check().map_err(|e| format!("buttons[{}]: {e}", i + 1))?;
+        }
+        if self.settings.len() > MAX_SETTINGS {
+            return Err(format!("at most {MAX_SETTINGS} settings"));
+        }
+        self.setting_list()?;
         Ok(())
+    }
+
+    /// Read and check the manifest of the plugin in `dir`.
+    pub fn read(dir: &Path) -> Result<Manifest, String> {
+        Manifest::parse(&read_inside(dir, Path::new(MANIFEST), MAX_MANIFEST)?)
     }
 
     /// The permissions it asks for.
     pub fn requested(&self) -> Permissions {
         Permissions { files: self.permissions.iter().any(|p| p == "files") }
     }
+
+    /// Its settings, checked, with their text as written (`%key%` not
+    /// looked up).
+    pub fn setting_list(&self) -> Result<Vec<Setting>, String> {
+        self.settings.iter().map(|(key, spec)| spec.setting(key)).collect()
+    }
+}
+
+/// The manifest and settings of the plugin in `dir`, the settings' text in
+/// the current language, without running its code (to show or change
+/// settings of a plugin that is not loaded).
+pub fn settings_schema(dir: &Path) -> Result<(Manifest, Vec<Setting>), String> {
+    let manifest = Manifest::read(dir)?;
+    let settings = manifest.setting_list()?;
+    let settings = if manifest.api >= 2 {
+        let locales = Locales::load(dir)?;
+        settings.iter().map(|s| s.resolved(|t| locales.resolve(t))).collect()
+    } else {
+        settings
+    };
+    Ok((manifest, settings))
 }
 
 /// A relative path made of plain names (letters, digits, `_`, `-`), ending
 /// in `.lua`: no `..`, no absolute paths, no drive letters.
 fn module_path(rel: &str) -> Option<PathBuf> {
-    let stem = rel.strip_suffix(".lua")?;
+    plain_path(rel, "lua")
+}
+
+/// A relative path made of plain names (letters, digits, `_`, `-`) joined
+/// by `/`, ending in `.<ext>`.
+pub(crate) fn plain_path(rel: &str, ext: &str) -> Option<PathBuf> {
+    let stem = rel.strip_suffix(ext)?.strip_suffix('.')?;
     let mut path = PathBuf::new();
     for part in stem.split('/') {
         if part.is_empty() || !part.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
@@ -170,33 +289,55 @@ fn module_path(rel: &str) -> Option<PathBuf> {
         }
         path.push(part);
     }
-    path.set_extension("lua");
+    path.set_extension(ext);
     Some(path)
+}
+
+/// The canonical path of a file of the plugin, refusing ones that are
+/// outside its folder (through links), not files, or larger than `max`.
+fn file_inside(dir: &Path, rel: &Path, max: u64) -> Result<PathBuf, String> {
+    let shown = rel.display();
+    let root = dir.canonicalize().map_err(|e| format!("{}: {e}", dir.display()))?;
+    let real = dir.join(rel).canonicalize().map_err(|e| format!("{shown}: {e}"))?;
+    if !real.starts_with(&root) {
+        return Err(format!("{shown} is outside the plugin's folder"));
+    }
+    let meta = std::fs::metadata(&real).map_err(|e| format!("{shown}: {e}"))?;
+    if !meta.is_file() {
+        return Err(format!("{shown} is not a file"));
+    }
+    if meta.len() > max {
+        return Err(format!("{shown} is larger than {max} bytes"));
+    }
+    Ok(real)
 }
 
 /// Read a file of the plugin, refusing large ones and ones outside its folder
 /// (through links).
-fn read_inside(dir: &Path, rel: &Path, max: u64) -> Result<String, String> {
-    let path = dir.join(rel);
-    let shown = rel.display();
-    let root = dir.canonicalize().map_err(|e| format!("{}: {e}", dir.display()))?;
-    let real = path.canonicalize().map_err(|e| format!("{shown}: {e}"))?;
-    if !real.starts_with(&root) {
-        return Err(format!("{shown} is outside the plugin's folder"));
-    }
-    let len = std::fs::metadata(&real).map_err(|e| format!("{shown}: {e}"))?.len();
-    if len > max {
-        return Err(format!("{shown} is larger than {max} bytes"));
-    }
-    std::fs::read_to_string(&real).map_err(|e| format!("{shown}: {e}"))
+pub(crate) fn read_inside(dir: &Path, rel: &Path, max: u64) -> Result<String, String> {
+    let real = file_inside(dir, rel, max)?;
+    std::fs::read_to_string(&real).map_err(|e| format!("{}: {e}", rel.display()))
 }
 
-/// A command a plugin registered.
+/// A command a plugin registered, its text as written.
 struct PluginCommand {
     short: String,
+    title: Option<String>,
+    /// The catalog entry; `description` and the schema's text as written.
     info: CommandInfo,
     required: Vec<String>,
     func: Function,
+}
+
+/// A button of the manifest, checked.
+#[derive(Debug, Clone)]
+struct ButtonDef {
+    command: String,
+    label: String,
+    panel: Option<String>,
+    icon: Option<PathBuf>,
+    size: ButtonSize,
+    when: Vec<When>,
 }
 
 /// A loaded plugin.
@@ -207,6 +348,15 @@ pub struct Plugin {
     sandbox: Sandbox,
     api: Api,
     commands: Vec<PluginCommand>,
+    /// Its translations (`None` under api 1: text is shown as written).
+    locales: Option<Locales>,
+    buttons: Vec<ButtonDef>,
+    /// Its settings, text as written.
+    settings: Vec<Setting>,
+    /// The current value of each setting.
+    values: Map<String, Value>,
+    /// The metatable of `ccad.settings`, whose `__index` holds the values.
+    settings_meta: Table,
     /// What it printed while loading, until a host takes it.
     printed: Vec<String>,
 }
@@ -217,19 +367,82 @@ impl std::fmt::Debug for Plugin {
     }
 }
 
+/// Makes `ccad.settings` read-only: the values live in the metatable's
+/// `__index`, which the host replaces before each command.
+const SETTINGS_PRELUDE: &str = r#"
+local mt = ...
+local next, error = next, error
+mt.__index = {}
+mt.__newindex = function() error("ccad.settings is read-only", 2) end
+mt.__pairs = function() return next, mt.__index, nil end
+mt.__metatable = "ccad.settings"
+"#;
+
+/// `ccad.data`: the plugin's own data in the project.
+const DATA_PRELUDE: &str = r#"
+local ccad, id = ...
+local run, null = ccad.run, ccad.null
+local data = {}
+function data.get(element) return run("plugin_data_get", { plugin = id, element = element }) end
+function data.set(element, value)
+  if value == nil then value = null end
+  return run("plugin_data_set", { plugin = id, element = element, data = value })
+end
+function data.list() return run("plugin_data_list", { plugin = id }) end
+ccad.data = data
+"#;
+
+/// Put `values` in `ccad.settings` (through its metatable).
+fn fill_settings(lua: &Lua, meta: &Table, values: &Map<String, Value>) -> mlua::Result<()> {
+    let inner = lua.create_table()?;
+    for (k, v) in values {
+        inner.raw_set(k.as_str(), to_lua(lua, v)?)?;
+    }
+    meta.raw_set("__index", inner)
+}
+
 impl Plugin {
     /// Load the plugin in `dir`: read its manifest, run its main file and
-    /// keep the commands it registers. It is granted no permission yet.
+    /// keep the commands it registers. It is granted no permission yet, and
+    /// its settings have their defaults.
     pub fn load(dir: &Path, limits: Limits) -> Result<Plugin, PluginError> {
+        Plugin::load_with_settings(dir, limits, &Map::new())
+    }
+
+    /// [`Plugin::load`] with stored setting values (see
+    /// [`crate::store::read_settings`]): those that fit their setting are
+    /// kept, the others (and unknown keys) dropped.
+    pub fn load_with_settings(dir: &Path, limits: Limits, stored: &Map<String, Value>) -> Result<Plugin, PluginError> {
         let fail = |message: String| PluginError { dir: dir.to_path_buf(), message };
         let manifest =
             Manifest::parse(&read_inside(dir, Path::new(MANIFEST), MAX_MANIFEST).map_err(fail)?).map_err(fail)?;
         let main = module_path(&manifest.main).ok_or_else(|| fail("bad main".into()))?;
         let source = read_inside(dir, &main, MAX_SOURCE).map_err(fail)?;
+        let locales = if manifest.api >= 2 { Some(Locales::load(dir).map_err(fail)?) } else { None };
+        let buttons = buttons(dir, &manifest).map_err(fail)?;
+        let settings = manifest.setting_list().map_err(fail)?;
+        let values = current_values(&settings, stored);
         let sandbox = Sandbox::new(limits).map_err(|e| fail(engine_error(&e).message))?;
-        let (api, commands) = setup(&sandbox, dir, &manifest, &source).map_err(|e| fail(engine_error(&e).message))?;
+        let (api, commands, settings_meta) =
+            setup(&sandbox, dir, &manifest, &source, &values).map_err(|e| fail(engine_error(&e).message))?;
+        if let Some(b) = buttons.iter().find(|b| !commands.iter().any(|c| c.short == b.command)) {
+            return Err(fail(format!("a button runs the command \"{}\", which main.lua does not register", b.command)));
+        }
         let printed = sandbox.take_output();
-        Ok(Plugin { manifest, dir: dir.to_path_buf(), granted: Permissions::NONE, sandbox, api, commands, printed })
+        Ok(Plugin {
+            manifest,
+            dir: dir.to_path_buf(),
+            granted: Permissions::NONE,
+            sandbox,
+            api,
+            commands,
+            locales,
+            buttons,
+            settings,
+            values,
+            settings_meta,
+            printed,
+        })
     }
 
     /// Grant permissions (only those the manifest asks for are kept).
@@ -241,9 +454,91 @@ impl Plugin {
         self.granted
     }
 
-    /// Its commands' catalog entries (full names).
-    pub fn commands(&self) -> impl Iterator<Item = &CommandInfo> {
-        self.commands.iter().map(|c| &c.info)
+    /// `text` in the current language when it is a `%key%` of its locales
+    /// (api 2); as written otherwise.
+    pub fn resolve(&self, text: &str) -> String {
+        match &self.locales {
+            Some(l) => l.resolve(text),
+            None => text.to_string(),
+        }
+    }
+
+    /// Its name, in the current language.
+    pub fn display_name(&self) -> String {
+        self.resolve(&self.manifest.name)
+    }
+
+    /// Its description, in the current language.
+    pub fn display_description(&self) -> String {
+        self.resolve(&self.manifest.description)
+    }
+
+    /// Its commands' catalog entries (full names), text in the current
+    /// language.
+    pub fn commands(&self) -> impl Iterator<Item = CommandInfo> + '_ {
+        self.commands.iter().map(|c| self.info(c))
+    }
+
+    fn info(&self, c: &PluginCommand) -> CommandInfo {
+        let mut description = self.resolve(&c.info.description);
+        if description.is_empty()
+            && let Some(title) = c.title.as_deref().filter(|t| !t.trim().is_empty())
+        {
+            description = self.resolve(title);
+        }
+        CommandInfo {
+            description,
+            input_schema: resolve_schema(&c.info.input_schema, |t| self.resolve(t)),
+            ..c.info.clone()
+        }
+    }
+
+    /// The title of its command `short` (without the plugin's id), in the
+    /// current language; `None` when it has no such command or no title.
+    pub fn command_title(&self, short: &str) -> Option<String> {
+        let c = self.commands.iter().find(|c| c.short == short)?;
+        c.title.as_deref().filter(|t| !t.trim().is_empty()).map(|t| self.resolve(t))
+    }
+
+    /// Its buttons, text in the current language.
+    pub fn buttons(&self) -> Vec<Button> {
+        self.buttons
+            .iter()
+            .map(|b| Button {
+                command: format!("{}{SEPARATOR}{}", self.manifest.id, b.command),
+                label: self.resolve(&b.label),
+                panel: match &b.panel {
+                    Some(p) => self.resolve(p),
+                    None => self.display_name(),
+                },
+                icon: b.icon.clone(),
+                size: b.size,
+                when: b.when.clone(),
+            })
+            .collect()
+    }
+
+    /// Its settings, text in the current language.
+    pub fn settings(&self) -> Vec<Setting> {
+        self.settings.iter().map(|s| s.resolved(|t| self.resolve(t))).collect()
+    }
+
+    /// The current value of each of its settings (defaults included).
+    pub fn setting_values(&self) -> Map<String, Value> {
+        self.values.clone()
+    }
+
+    /// Change the current value of its setting `key` (not stored; see
+    /// [`crate::store::write_settings`]).
+    pub fn set_setting(&mut self, key: &str, value: &Value) -> Result<(), String> {
+        let setting = self
+            .settings
+            .iter()
+            .find(|s| s.key == key)
+            .ok_or_else(|| format!("the plugin {} has no setting \"{key}\"", self.manifest.id))?;
+        let value = setting.validate(value)?;
+        self.values.insert(key.to_string(), value);
+        Ok(())
     }
 
     /// Run its command `short` (the name without the plugin's id).
@@ -269,6 +564,9 @@ impl Plugin {
         let access =
             Access { edits: kind != CommandKind::Query, files: self.granted.files, history: false, language: false };
         let func = command.func.clone();
+        if let Err(e) = fill_settings(&self.sandbox.lua, &self.settings_meta, &self.values) {
+            return Some(Err(engine_error(&e)));
+        }
         self.sandbox.reset_budget();
         let result = self.api.with_session(&self.sandbox.lua, session, access, |lua| {
             let out: LuaValue = func.call(to_lua(lua, &args)?)?;
@@ -278,13 +576,49 @@ impl Plugin {
     }
 }
 
+/// The manifest's buttons, checked against the plugin's folder (icons).
+fn buttons(dir: &Path, manifest: &Manifest) -> Result<Vec<ButtonDef>, String> {
+    manifest
+        .buttons
+        .iter()
+        .enumerate()
+        .map(|(i, b)| {
+            let err = |e: String| format!("buttons[{}]: {e}", i + 1);
+            let (size, when) = b.check().map_err(err)?;
+            let icon = match &b.icon {
+                Some(rel) => {
+                    let path = plain_path(rel, "svg").ok_or_else(|| err(format!("icon \"{rel}\": an .svg file")))?;
+                    Some(file_inside(dir, &path, MAX_ICON).map_err(|e| err(format!("icon: {e}")))?)
+                }
+                None => None,
+            };
+            Ok(ButtonDef {
+                command: b.command.clone(),
+                label: b.label.clone(),
+                panel: b.panel.clone(),
+                icon,
+                size,
+                when,
+            })
+        })
+        .collect()
+}
+
 /// What `ccad.command` collected while the plugin loaded.
 type Registered = Rc<RefCell<Vec<PluginCommand>>>;
 
-/// Install the API, `require` and `ccad.command`, and run the main file.
-fn setup(sandbox: &Sandbox, dir: &Path, manifest: &Manifest, source: &str) -> mlua::Result<(Api, Vec<PluginCommand>)> {
+/// Install the API, `require`, `ccad.settings`, `ccad.data` and
+/// `ccad.command`, and run the main file. Returns the API, the commands and
+/// the metatable of `ccad.settings`.
+fn setup(
+    sandbox: &Sandbox,
+    dir: &Path,
+    manifest: &Manifest,
+    source: &str,
+    values: &Map<String, Value>,
+) -> mlua::Result<(Api, Vec<PluginCommand>, Table)> {
     let lua = &sandbox.lua;
-    let api = Api::install(lua)?;
+    let api = Api::install_for_plugin(lua, &manifest.id)?;
     let plugin = lua.create_table()?;
     plugin.raw_set("id", manifest.id.as_str())?;
     plugin.raw_set("name", manifest.name.as_str())?;
@@ -292,12 +626,21 @@ fn setup(sandbox: &Sandbox, dir: &Path, manifest: &Manifest, source: &str) -> ml
     api.ccad.raw_set("plugin", plugin)?;
     lua.globals().raw_set("require", require_fn(lua, dir, &manifest.id)?)?;
 
+    let meta = lua.create_table()?;
+    lua.load(SETTINGS_PRELUDE).set_name("=ccad.settings").call::<()>(meta.clone())?;
+    let settings = lua.create_table()?;
+    settings.set_metatable(Some(meta.clone()))?;
+    fill_settings(lua, &meta, values)?;
+    api.ccad.raw_set("settings", settings)?;
+    lua.load(DATA_PRELUDE).set_name("=ccad.data").call::<()>((api.ccad.clone(), manifest.id.as_str()))?;
+
     let registered: Registered = Rc::new(RefCell::new(Vec::new()));
     let sink = registered.clone();
     let id = manifest.id.clone();
     let requested = manifest.requested();
+    let version = manifest.api;
     let command = lua.create_function(move |lua, spec: Table| {
-        let c = register(lua, &id, requested, &spec)?;
+        let c = register(lua, &id, version, requested, &spec)?;
         let mut list = sink.borrow_mut();
         if list.len() >= MAX_COMMANDS {
             return Err(mlua::Error::runtime(format!("a plugin registers at most {MAX_COMMANDS} commands")));
@@ -320,15 +663,16 @@ fn setup(sandbox: &Sandbox, dir: &Path, manifest: &Manifest, source: &str) -> ml
     })?;
     api.ccad.raw_set("command", late)?;
     let commands = std::mem::take(&mut *registered.borrow_mut());
-    Ok((api, commands))
+    Ok((api, commands, meta))
 }
 
-/// Read one `ccad.command { … }` table.
-fn register(lua: &Lua, id: &str, requested: Permissions, spec: &Table) -> mlua::Result<PluginCommand> {
+/// Read one `ccad.command { … }` table of a plugin written for `version` of
+/// the plugin API.
+fn register(lua: &Lua, id: &str, version: u32, requested: Permissions, spec: &Table) -> mlua::Result<PluginCommand> {
     let err = |m: String| mlua::Error::runtime(format!("ccad.command: {m}"));
     let short: String = spec.get::<Option<String>>("name")?.ok_or_else(|| err("needs a name".into()))?;
     let full = format!("{id}{SEPARATOR}{short}");
-    if !valid_name(&short) || full.len() > MAX_NAME {
+    if !valid_command_name(&short) || full.len() > MAX_NAME {
         return Err(err(format!(
             "name \"{short}\": lowercase letters, digits and single underscores, starting with a letter \
              ({MAX_NAME} characters at most with the plugin's id)"
@@ -361,10 +705,9 @@ fn register(lua: &Lua, id: &str, requested: Permissions, spec: &Table) -> mlua::
         .and_then(Value::as_array)
         .map(|r| r.iter().filter_map(Value::as_str).map(str::to_string).collect())
         .unwrap_or_default();
-    let description = match title {
-        Some(t) if !t.trim().is_empty() && description.is_empty() => t,
-        _ => description,
-    };
+    if version >= 2 {
+        check_param_hints(&schema).map_err(|e| err(format!("{short}: {e}")))?;
+    }
     let info = CommandInfo {
         name: full,
         kind,
@@ -373,7 +716,7 @@ fn register(lua: &Lua, id: &str, requested: Permissions, spec: &Table) -> mlua::
         input_schema: schema,
         reads_files: false,
     };
-    Ok(PluginCommand { short, info, required, func })
+    Ok(PluginCommand { short, title, info, required, func })
 }
 
 /// `require(name)`: the module `a.b` is `a/b.lua` in the plugin's folder,
@@ -450,10 +793,13 @@ impl PluginHost {
 
     /// Load the plugins of `folder`: the folder itself when it holds a
     /// manifest, else each of its subfolders that does (in name order),
-    /// skipping hidden ones (an install's `.<id>.installing` and `.<id>.old`)
-    /// and refusing one whose name is not its plugin's id (installs are named
-    /// so; permissions are granted by id). `grant` decides the permissions of
-    /// each, or `None` to leave it out (turned off). Returns the plugins that
+    /// skipping hidden ones (an install's `.<id>.installing` and `.<id>.old`,
+    /// the `.settings` folder) and refusing one whose name is not its
+    /// plugin's id (installs are named so; permissions are granted by id).
+    /// `grant` decides the permissions of each, or `None` to leave it out
+    /// (turned off). In a folder of plugins, each starts with the settings
+    /// stored in `.settings/<id>.json` ([`crate::store::read_settings`]); a
+    /// single plugin's folder gives the defaults. Returns the plugins that
     /// could not be loaded.
     pub fn load_folder(
         &mut self,
@@ -486,7 +832,7 @@ impl PluginHost {
         for dir in dirs {
             // Read the manifest first: a plugin left out runs no code.
             let manifest = read_inside(&dir, Path::new(MANIFEST), MAX_MANIFEST).and_then(|t| Manifest::parse(&t));
-            let permissions = match &manifest {
+            let (permissions, stored) = match &manifest {
                 // A folder named after another id (a copy, a leftover of an
                 // install) would take that id's place and its permissions.
                 Ok(m) if !single && dir.file_name().is_none_or(|n| n.to_string_lossy() != m.id.as_str()) => {
@@ -495,7 +841,8 @@ impl PluginHost {
                     continue;
                 }
                 Ok(m) => match grant(m) {
-                    Some(p) => p,
+                    Some(p) if single => (p, Map::new()),
+                    Some(p) => (p, crate::store::read_settings(folder, &m.id)),
                     None => continue,
                 },
                 Err(message) => {
@@ -503,7 +850,7 @@ impl PluginHost {
                     continue;
                 }
             };
-            match Plugin::load(&dir, limits) {
+            match Plugin::load_with_settings(&dir, limits, &stored) {
                 Ok(mut plugin) => {
                     plugin.grant(permissions);
                     if let Err(e) = self.add(plugin) {
@@ -520,21 +867,61 @@ impl PluginHost {
         &self.plugins
     }
 
-    /// A summary of the plugins for listings (`ccad plugins`).
+    /// The plugin `id`, if loaded.
+    pub fn plugin(&self, id: &str) -> Option<&Plugin> {
+        self.plugins.iter().find(|p| p.manifest.id == id)
+    }
+
+    /// Change the current value of the setting `key` of the plugin `id`
+    /// (checked against its schema; not stored, see
+    /// [`crate::store::write_settings`]).
+    pub fn set_setting(&mut self, id: &str, key: &str, value: Value) -> Result<(), String> {
+        let plugin =
+            self.plugins.iter_mut().find(|p| p.manifest.id == id).ok_or_else(|| format!("no plugin \"{id}\""))?;
+        plugin.set_setting(key, &value)
+    }
+
+    /// The title of the plugin command `full_name` (`<id>__<name>`) in the
+    /// current language; `None` when there is no such command or it has no
+    /// title.
+    pub fn command_title(&self, full_name: &str) -> Option<String> {
+        let (id, short) = full_name.split_once(SEPARATOR)?;
+        self.plugin(id)?.command_title(short)
+    }
+
+    /// A summary of the plugins for listings (`ccad plugins`), text in the
+    /// current language.
     pub fn summary(&self) -> Value {
         Value::Array(
             self.plugins
                 .iter()
                 .map(|p| {
+                    let commands: Vec<Value> = p
+                        .commands
+                        .iter()
+                        .map(|c| {
+                            let info = p.info(c);
+                            json!({
+                                "name": info.name,
+                                "kind": info.kind,
+                                "title": p.command_title(&c.short),
+                                "description": info.description,
+                            })
+                        })
+                        .collect();
+                    let settings = settings_json(&p.settings(), &p.values);
                     json!({
                         "id": p.manifest.id,
-                        "name": p.manifest.name,
+                        "name": p.display_name(),
                         "version": p.manifest.version,
-                        "description": p.manifest.description,
+                        "api": p.manifest.api,
+                        "description": p.display_description(),
                         "dir": p.dir,
                         "requested": p.manifest.requested(),
                         "granted": p.granted,
-                        "commands": p.commands().map(|c| json!({"name": c.name, "kind": c.kind, "description": c.description})).collect::<Vec<_>>(),
+                        "commands": commands,
+                        "buttons": p.buttons(),
+                        "settings": settings,
                     })
                 })
                 .collect(),
@@ -544,7 +931,7 @@ impl PluginHost {
 
 impl Extension for PluginHost {
     fn commands(&self) -> Vec<CommandInfo> {
-        self.plugins.iter().flat_map(|p| p.commands().cloned()).collect()
+        self.plugins.iter().flat_map(|p| p.commands()).collect()
     }
 
     fn run(&mut self, session: &mut Session, name: &str, args: Value) -> Option<cc_engine::Result<Value>> {

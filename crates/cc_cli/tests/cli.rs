@@ -260,3 +260,80 @@ fn plugins_install_and_remove() {
     assert_eq!(ccad(&["plugins", "remove", "tools", &folder], "").0, 1);
     assert_eq!(ccad(&["plugins", "frobnicate"], "").0, 2);
 }
+
+#[test]
+fn plugins_settings_are_shown_and_stored() {
+    let dir = std::env::temp_dir().join(format!("ccad-cli-{}-settings", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let plugin = dir.join("tools");
+    std::fs::create_dir_all(plugin.join("locales")).unwrap();
+    std::fs::write(
+        plugin.join("plugin.toml"),
+        r#"id = "tools"
+name = "Tools"
+version = "2.0"
+api = 2
+
+[settings.height]
+type = "number"
+default = 2.8
+title = "%height%"
+minimum = 1
+
+[settings.mode]
+type = "string"
+default = "fast"
+enum = ["fast", "exact"]
+
+[settings.label]
+type = "string"
+default = "A"
+
+[settings.count]
+type = "integer"
+default = 1
+"#,
+    )
+    .unwrap();
+    std::fs::write(plugin.join("locales").join("en.toml"), "height = \"Wall height\"\n").unwrap();
+    // The code does not run to show or change settings.
+    std::fs::write(plugin.join("main.lua"), "error('ran')").unwrap();
+    let folder = dir.to_string_lossy().into_owned();
+    let (code, out, err) = ccad(&["plugins", "settings", &folder, "tools"], "");
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out["id"], "tools");
+    let settings = out["settings"].as_array().unwrap();
+    assert_eq!(settings.len(), 4);
+    assert_eq!(settings[0]["key"], "height");
+    assert_eq!(settings[0]["title"], "Wall height");
+    assert_eq!(settings[0]["value"], 2.8);
+    assert_eq!(settings[1]["enum"], json!(["fast", "exact"]));
+
+    let (code, out, err) =
+        ccad(&["plugins", "settings", &folder, "tools", "height=3.5", "mode=exact", "label=42", "count=3"], "");
+    assert_eq!(code, 0, "{err}");
+    let values: Vec<&Value> = out["settings"].as_array().unwrap().iter().map(|s| &s["value"]).collect();
+    assert_eq!(values, [&json!(3.5), &json!("exact"), &json!("42"), &json!(3)]);
+    let stored: Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join(".settings").join("tools.json")).unwrap()).unwrap();
+    assert_eq!(stored, json!({"height": 3.5, "mode": "exact", "label": "42", "count": 3}));
+    let (_, out, _) = ccad(&["plugins", "settings", &folder, "tools"], "");
+    assert_eq!(out["settings"][0]["value"], 3.5);
+
+    // Values that do not fit are refused and nothing is written.
+    for bad in ["height=0.5", "mode=slow", "count=1.5", "height=tall", "nope=1", "height"] {
+        let (code, _, err) = ccad(&["plugins", "settings", &folder, "tools", bad, "count=5"], "");
+        assert_eq!(code, 2, "{bad}: {err}");
+    }
+    let (_, out, _) = ccad(&["plugins", "settings", &folder, "tools"], "");
+    assert_eq!(out["settings"][3]["value"], 3);
+    // An unknown plugin or a bad id.
+    assert_eq!(ccad(&["plugins", "settings", &folder, "other"], "").0, 1);
+    assert_eq!(ccad(&["plugins", "settings", &folder, "Bad Id"], "").0, 2);
+    // The plugins of the folder start with the stored values.
+    std::fs::write(plugin.join("main.lua"), "").unwrap();
+    let (code, summary, err) = ccad(&["--plugins", &folder, "plugins"], "");
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(summary[0]["settings"][0]["value"], 3.5);
+    assert_eq!(summary[0]["api"], 2);
+}

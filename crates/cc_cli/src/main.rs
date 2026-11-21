@@ -26,6 +26,9 @@ Usage:
   ccad [options] plugins              list the plugins loaded with --plugins
   ccad plugins install <zip> <folder> install a plugin archive into a plugins folder
   ccad plugins remove <id> <folder>   remove an installed plugin
+  ccad plugins settings <folder> <id> [key=value ...]
+                                      show a plugin's settings, or change and
+                                      store them (in <folder>/.settings)
   ccad [options] mcp                  serve the commands over MCP (stdio)
 
 Arguments of `run`: a JSON object, @file.json, - (standard input), or
@@ -189,6 +192,58 @@ fn usage_error(message: &str) -> ExitCode {
     ExitCode::from(2)
 }
 
+/// `ccad plugins settings <folder> <id> [key=value ...]`: print the
+/// settings of the plugin `id` of the plugins folder `folder` with their
+/// current values, after checking and storing the given ones. The plugin's
+/// code does not run.
+fn plugin_settings(folder: &str, id: &str, pairs: &[String]) -> ExitCode {
+    let folder = std::path::Path::new(folder);
+    if !cc_plugins::plugin::valid_id(id) {
+        return usage_error(&format!("\"{id}\" is not a plugin id"));
+    }
+    let (manifest, settings) = match cc_plugins::plugin::settings_schema(&folder.join(id)) {
+        Ok(found) => found,
+        Err(e) => return fail(&EngineError::io(e)),
+    };
+    if manifest.id != id {
+        return fail(&EngineError::io(format!("the folder {id} holds the plugin \"{}\"", manifest.id)));
+    }
+    // The stored values that still fit, then the new ones.
+    let mut stored: serde_json::Map<String, Value> = cc_plugins::store::read_settings(folder, id)
+        .into_iter()
+        .filter(|(k, v)| settings.iter().any(|s| &s.key == k && s.validate(v).is_ok()))
+        .collect();
+    for pair in pairs {
+        let Some((key, text)) = pair.split_once('=') else {
+            return usage_error(&format!("expected key=value, got '{pair}'"));
+        };
+        let Some(setting) = settings.iter().find(|s| s.key == key) else {
+            let known: Vec<&str> = settings.iter().map(|s| s.key.as_str()).collect();
+            return usage_error(&format!("the plugin {id} has no setting \"{key}\" (settings: {})", known.join(", ")));
+        };
+        // Like `run`'s arguments: JSON or plain text; a string setting takes
+        // the text as it is.
+        let value = match setting.kind {
+            cc_plugins::SettingKind::String => Value::String(text.to_string()),
+            _ => serde_json::from_str(text).unwrap_or_else(|_| Value::String(text.to_string())),
+        };
+        match setting.validate(&value) {
+            Ok(v) => {
+                stored.insert(key.to_string(), v);
+            }
+            Err(e) => return usage_error(&format!("invalid setting: {e}")),
+        }
+    }
+    if !pairs.is_empty()
+        && let Err(e) = cc_plugins::store::write_settings(folder, id, &stored)
+    {
+        return fail(&EngineError::io(e));
+    }
+    let values = cc_plugins::contributions::current_values(&settings, &stored);
+    print(&json!({ "id": id, "settings": cc_plugins::contributions::settings_json(&settings, &values) }));
+    ExitCode::SUCCESS
+}
+
 /// Save when asked (after the commands ran).
 fn save(s: &mut Session, o: &Options) -> Result<(), EngineError> {
     if let Some(path) = &o.save_as {
@@ -276,7 +331,10 @@ fn main() -> ExitCode {
                     Err(e) => fail(&EngineError::io(e)),
                 }
             }
-            _ => usage_error("plugins takes no arguments, `install <file.zip> <folder>` or `remove <id> <folder>`"),
+            [action, folder, id, pairs @ ..] if action == "settings" => plugin_settings(folder, id, pairs),
+            _ => usage_error(
+                "plugins takes no arguments, `install <file.zip> <folder>`, `remove <id> <folder>` or                  `settings <folder> <id> [key=value ...]`",
+            ),
         },
         "run" => {
             let Some((name, args)) = rest.split_first() else { return usage_error("run needs a command") };

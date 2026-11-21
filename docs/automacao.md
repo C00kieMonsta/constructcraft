@@ -547,7 +547,7 @@ A tabela `ccad`:
 | `ccad.null` | o `null` do JSON (o `nil` do Lua omite o campo) |
 | `ccad.array(t)` | marca `t` como lista, para que uma tabela vazia vá como `[]` e não `{}` |
 | `ccad.json.encode(v)`, `ccad.json.decode(s)` | texto JSON de e para valores Lua |
-| `ccad.version`, `ccad.api` | a versão do ConstructCraft e a da API de plugins (1) |
+| `ccad.version`, `ccad.api` | a versão do ConstructCraft e a da API de plugins (2) |
 
 Argumentos e resultados são JSON: objetos são tabelas com chaves de texto, listas são sequências (`{ 0, 0 }` é um ponto), e `end`, palavra reservada do Lua, se escreve `["end"]`. Um número inteiro calculado com `/` (que em Lua sempre dá um número real) vai como inteiro, então `10 / 2` funciona onde se espera um id ou uma contagem.
 
@@ -624,7 +624,7 @@ Um plugin é uma pasta com um manifesto `plugin.toml` e código Lua que acrescen
 
 ```sh
 ccad --plugins examples/plugins commands                # o catálogo, com os comandos dos plugins
-ccad --plugins examples/plugins plugins                 # os plugins, as permissões e os comandos deles
+ccad --plugins examples/plugins plugins                 # os plugins: permissões, comandos, botões, configurações
 ccad --plugins examples/plugins run quick_rooms__rectangle_room width=4 depth=3 name=Escritório door=south
 claude mcp add constructcad -- ccad mcp --plugins /caminho/para/plugins
 ```
@@ -639,7 +639,7 @@ claude mcp add constructcad -- ccad mcp --plugins /caminho/para/plugins
 id = "quick_rooms"          # letras minúsculas, dígitos e sublinhados simples, até 32
 name = "Quick rooms"
 version = "0.1.0"
-api = 1                     # a API de plugins para a qual ele foi escrito
+api = 1                     # a API de plugins para a qual ele foi escrito (1 ou 2, veja abaixo)
 description = "Rectangular rooms in one step, and wall totals by type."
 authors = ["…"]
 license = "GPL-3.0-or-later"
@@ -675,6 +675,105 @@ ccad.command {
 - **O que um comando pode executar:** um comando `query` só consulta; um `edit` consulta e edita; comandos que leem ou gravam arquivos (importar, exportar, salvar) precisam da permissão `files` (sem ela, comandos de edição que leem um arquivo indicado por um parâmetro, como `cad_import` ou `fill_pattern_import` com `path`, recusam o caminho; as formas sem arquivo, como `fill_pattern_import` com `text`, continuam funcionando), e só com ela se declara um comando do tipo `file`. Abrir ou criar um projeto, `undo`, `redo` e `language_set` não rodam dentro de um comando de plugin, nem o comando de outro plugin.
 - **O sandbox** é o dos [scripts Lua](#scripts-lua), com o limite contado por comando; cada plugin tem o seu próprio estado Lua, que guarda as variáveis entre um comando e outro. `require("a.b")` carrega `a/b.lua` da pasta do plugin (uma vez; arquivos fora da pasta são recusados), e `ccad.plugin` tem o `id`, o `name` e a `version` dele. `ccad.run` só funciona enquanto um comando roda, não enquanto o plugin carrega.
 - **As permissões** são concedidas por quem carrega o plugin: `ccad --plugins` concede o que o manifesto pede, já que você indicou a pasta.
+
+### API de plugins 2: botões, configurações, traduções e dados
+
+Um plugin escrito para `api = 2` (`ccad.api` vale 2 nesta versão) também pode declarar botões da faixa de opções e configurações no manifesto, traduzir os seus textos e dar aos parâmetros dicas para a interface. Manifestos com `api = 1` carregam como antes; botões e configurações são recusados com `api = 1` (`buttons need api = 2`), de modo que o índice nunca oferece um plugin assim a uma versão que só conhece a API 1.
+
+```toml
+id = "quick_rooms"
+name = "%name%"                  # procurado em locales/<idioma>.toml
+version = "0.2.0"
+api = 2
+
+[[buttons]]                      # no máximo 64
+command = "rectangle_room"       # um comando que o main.lua registra (o nome curto)
+label = "%button.room%"          # no máximo 64 caracteres
+icon = "icons/room.svg"          # opcional: um SVG na pasta do plugin, no máximo 64 KiB
+panel = "Rooms"                  # opcional: o painel da faixa (padrão: o nome do plugin)
+size = "large"                   # "large" (o padrão) ou "small"
+when = "view:floor_plan"         # opcional: quando o botão fica disponível
+
+[settings.default_height]        # no máximo 64; chaves como nomes de comando
+type = "number"                  # boolean, number, integer ou string
+default = 2.8                    # obrigatório, e tem de caber na configuração
+title = "%settings.height%"      # opcional (padrão: a chave legível, "Default height")
+description = "Altura das paredes que ele desenha"
+ui = "length"                    # opcional, só para números: mostrado nas unidades do projeto
+minimum = 0.5                    # números e inteiros; também maximum
+
+[settings.door_side]
+type = "string"
+default = "south"
+enum = ["north", "south"]        # só para textos: os valores permitidos
+enum_labels = ["Norte", "Sul"]   # opcional, um por valor
+```
+
+Um botão cujo comando o `main.lua` não registra é um erro de carregamento que cita o comando. **`when`** é uma lista de termos separados por vírgula que precisam valer todos:
+
+| Termo | Vale quando |
+|---|---|
+| `selection` | há pelo menos um elemento selecionado |
+| `selection:one` | há exatamente um elemento selecionado |
+| `selection:<categoria>` | há pelo menos um elemento selecionado e todos são da categoria (`wall`, `door`…; os nomes de `categories_list`) |
+| `view:<tipo>` | a vista ativa é `floor_plan`, `ceiling_plan`, `three_d`, `elevation`, `section`, `legend`, `drafting`, `schedule`, `diagram` ou `sheet` |
+
+Um termo, categoria ou tipo de vista desconhecido é um erro de carregamento.
+
+**Configurações.** `ccad.settings` tem o valor atual de cada configuração (o valor guardado, ou o padrão): é somente leitura (atribuir a ela gera um erro), existe enquanto o `main.lua` roda e é atualizada antes de cada comando. As configurações são listadas na ordem do manifesto. Os valores são guardados por plugin em `<pasta de plugins>/.settings/<id>.json`; valores guardados que não cabem mais no manifesto (uma chave desconhecida, um tipo errado, um valor fora de `enum`, `minimum` ou `maximum`) são descartados quando o plugin carrega, e um plugin carregado da própria pasta (não de uma pasta de plugins) começa com os padrões. Remover um plugin remove as configurações dele. Pela linha de comando:
+
+```sh
+ccad plugins settings ~/plugins quick_rooms                         # as configurações e os valores, em JSON
+ccad plugins settings ~/plugins quick_rooms default_height=3 door_side=north
+```
+
+Os valores se escrevem como os argumentos `key=value` do `run` (JSON ou texto simples; uma configuração de texto recebe o texto como está), são conferidos com o manifesto e guardados; um valor que não cabe é recusado e nada é gravado. Isso lê só o manifesto e as traduções: o código do plugin não roda.
+
+**Traduções.** Arquivos `locales/<código>.toml` na pasta do plugin, `<código>` um dos idiomas do ConstructCraft (`en`, `pt-BR`, `es`, `fr`, `de`, `it`, `lo`, `pl`, `uk-UA`, `zh-TW`, `zh-CN`, `ja`; outros arquivos são ignorados), têm linhas `chave = "texto"` ou tabelas cujas chaves se juntam com `.` (cada arquivo com no máximo 256 KiB; um arquivo que não é TOML de textos é um erro de carregamento):
+
+```toml
+# locales/pt-BR.toml
+name = "Salas rápidas"
+[button]
+room = "Sala"                 # a chave button.room
+[settings]
+height = "Altura padrão"
+```
+
+Um texto que é exatamente `%chave%` é procurado quando é mostrado, no idioma atual: o arquivo desse idioma, depois um do mesmo idioma base (`pt` para `pt-BR`), depois `en`; uma chave que não está em nenhum aparece como a própria chave. Isso vale para `name` e `description` do manifesto, `label` e `panel` dos botões, `title`, `description` e `enum_labels` das configurações, `title` e `description` dos comandos, e `title`, `description` e `enum_labels` de cada parâmetro. Trocar o idioma troca os textos na hora, sem recarregar os plugins. Com `api = 1` os textos aparecem como estão escritos.
+
+**Dicas dos parâmetros.** Um parâmetro de `params` pode dizer como a interface o pede; com `api = 2` as dicas são conferidas quando o comando é registrado (uma errada é um erro de carregamento), e passam inalteradas para os clientes MCP:
+
+| `ui` | Tipo do parâmetro | Pede |
+|---|---|---|
+| `length` | `number` | um comprimento, nas unidades do projeto |
+| `element` | `integer` | o id de um elemento (`category` restringe) |
+| `elements` | `array` | ids de elementos (`category` restringe) |
+| `point` | `array` | um ponto `[x, y]` |
+| `level` | `integer` | o id de um nível |
+| `view` | `integer` | o id de uma vista |
+| `type` | `integer` | o id de um tipo (`category` restringe) |
+| `material` | `string` | o nome de um material |
+
+`category` (o nome de uma categoria) só acompanha `element`, `elements` e `type`; `enum_labels` dá um rótulo a cada valor de `enum` (o mesmo número de textos); `title` é um nome curto para o parâmetro.
+
+```lua
+params = { properties = {
+  width = { type = "number", ui = "length", title = "%param.width%" },
+  wall = { type = "integer", ui = "element", category = "wall" },
+  side = { type = "string", enum = { "north", "south" }, enum_labels = { "%north%", "%south%" } },
+} }
+```
+
+**Dados do plugin.** Um plugin guarda os seus próprios dados no projeto, em elementos ou no próprio projeto, salvos no arquivo `.ccad` (os comandos `plugin_data_get`, `plugin_data_set` e `plugin_data_list` da [referência de comandos](commands.md)):
+
+| | |
+|---|---|
+| `ccad.data.get(elemento)` | o que o plugin guarda no elemento (`nil`: no projeto), ou `ccad.null` |
+| `ccad.data.set(elemento, valor)` | guarda `valor` (qualquer JSON, até 256 KiB) ali, no lugar do que havia; `nil` remove |
+| `ccad.data.list()` | `{ project = true/false, elements = { ids… } }` |
+
+`ccad.data.set` é uma edição, então um comando `query` não pode chamá-lo, e faz parte do passo único de desfazer do comando. Um comando de plugin alcança só os próprios dados: executar um comando `plugin_data_*` por `ccad.run` ou `ccad.try` com o id de outro plugin é recusado (`a plugin reads and writes only its own data`). Scripts Lua que o usuário roda (`ccad lua`) alcançam os dados de qualquer plugin.
 
 Os plugins são compartilhados pelo índice da comunidade, [constructcraft-plugins](https://github.com/francisreboucas/constructcraft-plugins): uma entrada por plugin, com de onde baixar cada versão e o checksum dela, enviada por pull request. No aplicativo, *Gerenciar → Plugins* instala, atualiza, desativa e remove plugins ([Plugins](interface.pt-BR.md#plugins)); sem ele, `ccad plugins install <arquivo.zip> <pasta>` instala um arquivo baixado (verificado do mesmo jeito: caminhos seguros, tamanhos e um plugin que carrega) e `ccad plugins remove <id> <pasta>` remove um.
 

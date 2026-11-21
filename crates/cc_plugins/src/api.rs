@@ -9,6 +9,9 @@
 //! - `ccad.null` (JSON null), `ccad.array(t)` (marks `t`, even empty, as a
 //!   list), `ccad.json.encode(v)` / `ccad.json.decode(s)`, `ccad.version`,
 //!   `ccad.api` (the plugin API version).
+//! - In plugins only (see [`crate::plugin`]): `ccad.plugin`, `ccad.command`,
+//!   `ccad.settings` and `ccad.data`. A plugin's runs may call the
+//!   `plugin_data_*` commands only with its own id as `plugin`.
 //!
 //! The functions that reach the session exist only while a script or a
 //! plugin command runs: the Lua wrappers stay (a plugin may keep them in
@@ -22,7 +25,7 @@ use serde_json::Value;
 use std::cell::RefCell;
 
 /// The plugin API version this build provides (`api` in `plugin.toml`).
-pub const API_VERSION: u32 = 1;
+pub const API_VERSION: u32 = 2;
 
 /// Makes the wrappers over the private table of the run's functions.
 const PRELUDE: &str = r#"
@@ -81,9 +84,20 @@ impl Access {
 pub struct Api {
     pub ccad: Table,
     imp: Table,
+    /// The plugin whose state this is: its runs reach only its own plugin
+    /// data. `None` for scripts.
+    owner: Option<String>,
 }
 
 impl Api {
+    /// Make the `ccad` global in `lua` for the plugin `id`, whose runs may
+    /// read and write only its own plugin data.
+    pub fn install_for_plugin(lua: &Lua, id: &str) -> mlua::Result<Api> {
+        let mut api = Api::install(lua)?;
+        api.owner = Some(id.to_string());
+        Ok(api)
+    }
+
     /// Make the `ccad` global in `lua`.
     pub fn install(lua: &Lua) -> mlua::Result<Api> {
         let ccad = lua.create_table()?;
@@ -120,7 +134,7 @@ impl Api {
         ccad.raw_set("json", json)?;
         lua.load(PRELUDE).set_name("=ccad").call::<()>((ccad.clone(), imp.clone()))?;
         lua.globals().raw_set("ccad", ccad.clone())?;
-        Ok(Api { ccad, imp })
+        Ok(Api { ccad, imp, owner: None })
     }
 
     /// Run `f` with the session's functions available to the Lua code.
@@ -133,17 +147,18 @@ impl Api {
     ) -> mlua::Result<R> {
         let cell = RefCell::new(session);
         let cell = &cell;
+        let owner = self.owner.as_deref();
         let result = lua.scope(|scope| {
             let run = scope.create_function(move |lua, (name, args): (String, LuaValue)| {
                 let mut session = cell.try_borrow_mut().map_err(mlua::Error::runtime)?;
-                match execute(lua, &mut session, access, &name, &args)? {
+                match execute(lua, &mut session, access, owner, &name, &args)? {
                     Ok(v) => to_lua(lua, &v),
                     Err(e) => Err(mlua::Error::external(e)),
                 }
             })?;
             let try_run = scope.create_function(move |lua, (name, args): (String, LuaValue)| {
                 let mut session = cell.try_borrow_mut().map_err(mlua::Error::runtime)?;
-                match execute(lua, &mut session, access, &name, &args)? {
+                match execute(lua, &mut session, access, owner, &name, &args)? {
                     Ok(v) => Ok((to_lua(lua, &v)?, LuaValue::Nil)),
                     Err(e) => {
                         let err = lua.create_table()?;
@@ -192,11 +207,13 @@ impl Api {
 }
 
 /// Run one command for the Lua code: `Err` for errors of the Lua side (bad
-/// arguments), `Ok(Err)` for the command's own failure.
+/// arguments), `Ok(Err)` for the command's own failure. A plugin (`owner`)
+/// reaches only its own plugin data.
 fn execute(
     lua: &Lua,
     session: &mut Session,
     access: Access,
+    owner: Option<&str>,
     name: &str,
     args: &LuaValue,
 ) -> mlua::Result<Result<Value, EngineError>> {
@@ -204,6 +221,14 @@ fn execute(
         LuaValue::Nil => Value::Object(Default::default()),
         other => from_lua(lua, other).map_err(|e| mlua::Error::runtime(format!("{name}: arguments: {e}")))?,
     };
+    if let Some(own) = owner
+        && name.starts_with("plugin_data_")
+        && args.get("plugin").and_then(Value::as_str) != Some(own)
+    {
+        return Ok(Err(EngineError::rejected(format!(
+            "{name}: a plugin reads and writes only its own data (plugin = \"{own}\")"
+        ))));
+    }
     if let Some(reason) = access.refuses(name, session.kind_of(name)) {
         return Ok(Err(EngineError::rejected(reason)));
     }
