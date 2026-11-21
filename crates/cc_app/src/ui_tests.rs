@@ -2851,16 +2851,21 @@ fn plugin_commands_open_their_form_from_the_ribbon() {
     });
     harness.get_by_role_and_label(Role::Button, &t!("action-plugin-commands")).click();
     harness.run();
-    harness.get_by_role_and_label(Role::Button, "rectangle_room").click();
+    // The menu and the form show the command's title in the language (the
+    // tests run in pt-BR, the reference language); its lengths are typed in
+    // the project's units, or with a unit.
+    harness.get_by_role_and_label(Role::Button, "Sala retangular").click();
     harness.run();
     assert!(harness.state().dialogs.plugin_form.is_some(), "the menu opens the form");
-    assert!(harness.query_by_label("Rectangle room").is_some(), "titled by the command");
-    assert!(harness.query_by_label("Quick rooms").is_some(), "the plugin's name by the title");
+    assert!(harness.query_by_label("Sala retangular").is_some(), "titled by the command's title");
+    assert!(harness.query_by_label("Salas rápidas").is_some(), "the plugin's name by the title");
     let run_disabled = |h: &Harness<'static, AppState>| {
         h.get_by_role_and_label(Role::Button, &t!("palette-run")).accesskit_node().is_disabled()
     };
     assert!(run_disabled(&harness), "the width and depth are required");
-    for (label, value) in [("Width", "4"), ("Depth", "3")] {
+    let hint = harness.get_by_label("Largura").accesskit_node().placeholder().map(str::to_string);
+    assert_eq!(hint, Some(t!("pform-required-hint")), "an empty required field says so");
+    for (label, value) in [("Largura", "4 m"), ("Profundidade", "3 m")] {
         harness.get_by_label(label).focus();
         harness.run();
         harness.get_by_label(label).type_text(value);
@@ -2875,10 +2880,186 @@ fn plugin_commands_open_their_form_from_the_ribbon() {
     assert!(harness.query_by_label_contains("\"floor\"").is_some(), "what it returned is shown");
     harness.get_by_role_and_label(Role::Button, &t!("pform-run-again")).click();
     harness.run();
-    assert_eq!(harness.get_by_label("Width").value().as_deref(), Some("4"), "the values are kept");
+    assert_eq!(harness.get_by_label("Largura").value().as_deref(), Some("4 m"), "the values are kept");
     harness.get_by_role_and_label(Role::Button, &t!("action-cancel")).click();
     harness.run();
     assert!(harness.state().dialogs.plugin_form.is_none());
+}
+
+/// A copy of `from` (a folder) at `to`.
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let path = entry.unwrap().path();
+        let target = to.join(path.file_name().unwrap());
+        if path.is_dir() {
+            copy_dir(&path, &target);
+        } else {
+            std::fs::copy(&path, &target).unwrap();
+        }
+    }
+}
+
+/// A plugins folder with a copy of the example plugin, so its settings are
+/// written outside the sources.
+fn quick_rooms_folder(name: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("ccad-quick-rooms-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plugins/quick_rooms");
+    copy_dir(&example, &root.join("quick_rooms"));
+    root
+}
+
+/// The ribbon, the shortcuts and the dialogs, wide enough for every tab.
+fn wide_ribbon_harness(state: AppState) -> Harness<'static, AppState> {
+    themed_harness(state, egui::vec2(1800.0, 800.0), egui::Theme::Light, |ui, state| {
+        crate::app::shortcuts(ui.ctx(), state);
+        crate::ribbon::ribbon(ui, state);
+        crate::dialogs::show(ui.ctx(), state);
+    })
+}
+
+/// The Plugins tab is there only while a loaded plugin has buttons (a tab
+/// left picked falls back to Manage); its buttons carry the plugin's text
+/// in the language, follow a change of language, and open their form.
+#[test]
+fn the_plugins_tab_shows_the_plugins_buttons() {
+    let plugins_label = t!("ribbon-plugins");
+    let count = |h: &Harness<'static, AppState>| h.query_all_by_label(&plugins_label).count();
+    let mut state = sample_state();
+    state.ribbon_tab = RibbonTab::Plugins;
+    let mut harness = wide_ribbon_harness(state);
+    harness.run();
+    assert_eq!(harness.state().ribbon_tab, RibbonTab::Manage, "no plugin buttons: back to Manage");
+    let without = count(&harness);
+    let mut state = state_with_plugins(quick_rooms_folder("tab"));
+    state.ribbon_tab = RibbonTab::Manage;
+    let mut harness = wide_ribbon_harness(state);
+    harness.run();
+    assert_eq!(count(&harness), without + 1, "the Plugins tab is shown");
+    harness.state_mut().ribbon_tab = RibbonTab::Plugins;
+    harness.run();
+    assert!(harness.query_by_label("Salas rápidas").is_some(), "the panel, named in the language");
+    assert!(harness.query_by_role_and_label(Role::Button, "Totais de paredes").is_some());
+    harness.get_by_role_and_label(Role::Button, "Sala retangular").click();
+    harness.run();
+    let title = harness.state().plugins.command_title("quick_rooms__rectangle_room").map(str::to_string);
+    assert_eq!(title.as_deref(), Some("Sala retangular"));
+    assert!(harness.state().dialogs.plugin_form.is_some(), "the button opens the form");
+    assert!(harness.query_all_by_label("Sala retangular").count() >= 2, "the form is titled by the command's title");
+    // Another language: the plugins load again, their text in it.
+    crate::actions::set_language(harness.state_mut(), crate::i18n::Language::En);
+    let labels: Vec<String> = harness.state().plugins.buttons.iter().map(|b| b.button.label.clone()).collect();
+    assert_eq!(labels, ["Rectangular room", "Wall totals"]);
+    assert_eq!(harness.state().plugins.command_title("quick_rooms__wall_totals"), Some("Wall totals"));
+    crate::actions::set_language(harness.state_mut(), crate::i18n::Language::PtBr);
+}
+
+/// A plugins folder with `sel_tools`, whose small button needs walls selected.
+fn selection_plugins_folder(name: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("ccad-plugin-when-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let dir = root.join("sel_tools");
+    std::fs::create_dir_all(&dir).unwrap();
+    let manifest = "id = \"sel_tools\"\nname = \"Selection tools\"\nversion = \"1.0.0\"\napi = 2\n\n\
+                    [[buttons]]\ncommand = \"mark\"\nlabel = \"Mark walls\"\nsize = \"small\"\nwhen = \"selection:wall\"\n";
+    std::fs::write(dir.join("plugin.toml"), manifest).unwrap();
+    std::fs::write(dir.join("main.lua"), "ccad.command { name = 'mark', title = 'Mark walls', run = function() end }")
+        .unwrap();
+    root
+}
+
+/// A button with `when = "selection:wall"` is available only while walls,
+/// and nothing else, are selected; its tooltip tells why it is not.
+#[test]
+fn plugin_buttons_follow_their_when() {
+    use std::collections::BTreeSet;
+    let mut state = state_with_plugins(selection_plugins_folder("ribbon"));
+    state.ribbon_tab = RibbonTab::Plugins;
+    let wall = state.project().walls().map(|(e, _)| e.id).next().unwrap();
+    let door = state.project().elements.values().find(|e| e.category() == cc_core::Category::Door).unwrap().id;
+    let mut harness = wide_ribbon_harness(state);
+    harness.run();
+    let disabled = |h: &Harness<'static, AppState>| {
+        h.get_by_role_and_label(Role::Button, "Mark walls").accesskit_node().is_disabled()
+    };
+    assert!(disabled(&harness), "nothing selected");
+    harness.get_by_role_and_label(Role::Button, "Mark walls").hover();
+    harness.run();
+    let why = t!("plug-when-category", "category" => crate::actions::t_category(cc_core::Category::Wall));
+    assert!(harness.query_by_label_contains(&why).is_some(), "the tooltip says why");
+    harness.state_mut().selection = BTreeSet::from([wall]);
+    harness.run();
+    assert!(!disabled(&harness), "a wall selected");
+    harness.state_mut().selection = BTreeSet::from([wall, door]);
+    harness.run();
+    assert!(disabled(&harness), "a door too");
+    harness.state_mut().selection = BTreeSet::from([wall]);
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "Mark walls").click();
+    harness.run();
+    assert_eq!(harness.state().message, t!("pform-done", "title" => "Mark walls"), "no parameters: it ran");
+}
+
+/// The Settings section of the Plugins window stores the values that
+/// differ from the defaults, keeps the stored one when a value typed does
+/// not fit, and the plugin loaded again runs with them; Reset to defaults
+/// empties them.
+#[test]
+fn plugin_settings_are_saved_and_used() {
+    let folder = quick_rooms_folder("settings");
+    let mut state = state_with_plugins(folder.clone());
+    crate::plugins_ui::open(&mut state);
+    state.plugins.selected = Some("quick_rooms".into());
+    let mut harness = app_harness(state);
+    harness.run();
+    assert!(harness.query_by_label(&t!("plug-settings")).is_some(), "the section");
+    let height = "Altura padrão das paredes";
+    let retype = |h: &mut Harness<'static, AppState>, text: &str| {
+        h.get_by_label(height).focus();
+        h.run();
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.get_by_label(height).type_text(text);
+        h.run();
+    };
+    retype(&mut harness, "3,5 m");
+    // The dialog's Save, after the quick access toolbar's.
+    harness.get_all_by_label(&t!("plug-settings-save")).last().unwrap().click();
+    harness.run();
+    let stored = |folder: &std::path::Path| cc_plugins::store::read_settings(folder, "quick_rooms");
+    assert_eq!(serde_json::Value::Object(stored(&folder)), serde_json::json!({"default_height": 3.5}));
+    // Below the minimum: shown as invalid, and the stored value stays.
+    retype(&mut harness, "1 m");
+    // The dialog's Save, after the quick access toolbar's.
+    harness.get_all_by_label(&t!("plug-settings-save")).last().unwrap().click();
+    harness.run();
+    assert_eq!(serde_json::Value::Object(stored(&folder)), serde_json::json!({"default_height": 3.5}));
+    // The plugin was loaded again with the setting: a room without a height uses it.
+    let out = harness
+        .state_mut()
+        .session
+        .execute("quick_rooms__rectangle_room", serde_json::json!({"width": 4, "depth": 3}))
+        .unwrap();
+    let south = cc_core::ElementId(out["walls"]["south"].as_u64().unwrap());
+    let wall_height = harness.state().project().walls().find(|(e, _)| e.id == south).map(|(_, w)| w.height);
+    assert_eq!(wall_height, Some(3.5));
+    let room = out["room"].as_u64().unwrap();
+    let data = harness
+        .state_mut()
+        .session
+        .execute("plugin_data_get", serde_json::json!({"plugin": "quick_rooms", "element": room}))
+        .unwrap();
+    assert_eq!(data, serde_json::json!({"width": 4, "depth": 3}), "the size kept on the room");
+    harness.get_by_role_and_label(Role::Button, &t!("plug-settings-reset")).click();
+    harness.run();
+    assert!(stored(&folder).is_empty(), "back to the defaults");
+    assert_eq!(harness.get_by_label(height).value().as_deref().map(|v| v.starts_with("2")), Some(true));
+    // Turned off, it can still be set, and the window says when it applies.
+    harness.get_by_label(&t!("plug-enabled")).click();
+    harness.run();
+    assert!(harness.query_by_label(height).is_some());
+    assert!(harness.query_by_label(&t!("plug-settings-off")).is_some());
+    let _ = std::fs::remove_dir_all(&folder);
 }
 
 /// Elements come from the selection: a list starts with the selected walls
@@ -4270,6 +4451,17 @@ fn every_dialog_keeps_its_body_inside() {
             }),
         ));
     }
+    // The Plugins window with a plugin's settings shown.
+    let quick_rooms = quick_rooms_folder("layout");
+    opens.push((
+        "plugins settings".into(),
+        Box::new(move |s| {
+            s.prefs.plugin_folder = Some(quick_rooms.clone());
+            crate::plugins_ui::load(s);
+            crate::plugins_ui::open(s);
+            s.plugins.selected = Some("quick_rooms".into());
+        }),
+    ));
     // Sun Settings in each kind of sun, and in a 3D view.
     for (mode, three_d) in
         [("still", false), ("single_day", false), ("multi_day", false), ("lighting", false), ("multi_day", true)]

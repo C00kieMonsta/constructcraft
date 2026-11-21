@@ -638,8 +638,8 @@ claude mcp add constructcad -- ccad mcp --plugins /caminho/para/plugins
 ```toml
 id = "quick_rooms"          # letras minúsculas, dígitos e sublinhados simples, até 32
 name = "Quick rooms"
-version = "0.1.0"
-api = 1                     # a API de plugins para a qual ele foi escrito (1 ou 2, veja abaixo)
+version = "0.2.0"
+api = 2                     # a API de plugins para a qual ele foi escrito (1 ou 2, veja abaixo)
 description = "Rectangular rooms in one step, and wall totals by type."
 authors = ["…"]
 license = "GPL-3.0-or-later"
@@ -690,7 +690,7 @@ api = 2
 command = "rectangle_room"       # um comando que o main.lua registra (o nome curto)
 label = "%button.room%"          # no máximo 64 caracteres
 icon = "icons/room.svg"          # opcional: um SVG na pasta do plugin, no máximo 64 KiB
-panel = "Rooms"                  # opcional: o painel da faixa (padrão: o nome do plugin)
+panel = "%panel%"                # opcional: o painel da faixa (padrão: o nome do plugin)
 size = "large"                   # "large" (o padrão) ou "small"
 when = "view:floor_plan"         # opcional: quando o botão fica disponível
 
@@ -700,13 +700,13 @@ default = 2.8                    # obrigatório, e tem de caber na configuraçã
 title = "%settings.height%"      # opcional (padrão: a chave legível, "Default height")
 description = "Altura das paredes que ele desenha"
 ui = "length"                    # opcional, só para números: mostrado nas unidades do projeto
-minimum = 0.5                    # números e inteiros; também maximum
+minimum = 2.0                    # números e inteiros; também maximum
 
-[settings.door_side]
+[settings.default_door]
 type = "string"
-default = "south"
-enum = ["north", "south"]        # só para textos: os valores permitidos
-enum_labels = ["Norte", "Sul"]   # opcional, um por valor
+default = "none"
+enum = ["none", "south", "east", "north", "west"]   # só para textos: os valores permitidos
+enum_labels = ["%side.none%", "%side.south%", "%side.east%", "%side.north%", "%side.west%"]   # opcional, um por valor
 ```
 
 Um botão cujo comando o `main.lua` não registra é um erro de carregamento que cita o comando. **`when`** é uma lista de termos separados por vírgula que precisam valer todos:
@@ -724,7 +724,7 @@ Um termo, categoria ou tipo de vista desconhecido é um erro de carregamento.
 
 ```sh
 ccad plugins settings ~/plugins quick_rooms                         # as configurações e os valores, em JSON
-ccad plugins settings ~/plugins quick_rooms default_height=3 door_side=north
+ccad plugins settings ~/plugins quick_rooms default_height=3 default_door=north
 ```
 
 Os valores se escrevem como os argumentos `key=value` do `run` (JSON ou texto simples; uma configuração de texto recebe o texto como está), são conferidos com o manifesto e guardados; um valor que não cabe é recusado e nada é gravado. Isso lê só o manifesto e as traduções: o código do plugin não roda.

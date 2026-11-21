@@ -297,6 +297,8 @@ pub fn set_language(state: &mut AppState, lang: crate::i18n::Language) {
     }
     crate::i18n::set_language(lang);
     state.invalidate_drawings();
+    // The plugins' names, buttons and titles are read in the language at load.
+    crate::plugins_ui::load(state);
     state.message = t!("msg-language-changed");
 }
 

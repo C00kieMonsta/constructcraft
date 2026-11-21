@@ -1,9 +1,38 @@
 # An example plugin (see docs/automation.md, "Plugins").
 id = "quick_rooms"
-name = "Quick rooms"
-version = "0.1.0"
-api = 1
-description = "Rectangular rooms in one step, and wall totals by type."
+name = "%name%"
+version = "0.2.0"
+api = 2
+description = "%description%"
 authors = ["ConstructCraft contributors"]
 license = "GPL-3.0-or-later"
 homepage = "https://github.com/francisreboucas/constructcraft"
+
+[[buttons]]
+command = "rectangle_room"
+label = "%button.room%"
+icon = "icons/room.svg"
+panel = "%panel%"
+
+[[buttons]]
+command = "wall_totals"
+label = "%button.totals%"
+icon = "icons/totals.svg"
+panel = "%panel%"
+
+[settings.default_height]
+type = "number"
+ui = "length"
+default = 2.8
+minimum = 2.0
+maximum = 10.0
+title = "%settings.height.title%"
+description = "%settings.height.description%"
+
+[settings.default_door]
+type = "string"
+default = "none"
+enum = ["none", "south", "east", "north", "west"]
+enum_labels = ["%side.none%", "%side.south%", "%side.east%", "%side.north%", "%side.west%"]
+title = "%settings.door.title%"
+description = "%settings.door.description%"

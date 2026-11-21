@@ -1,0 +1,62 @@
+name = "Salas rápidas"
+description = "Salas retangulares num só passo, e totais de paredes por tipo."
+panel = "Salas rápidas"
+
+[button]
+room = "Sala retangular"
+totals = "Totais de paredes"
+
+[room]
+title = "Sala retangular"
+description = "Quatro paredes em volta de um retângulo, o piso e o ambiente, com uma porta opcional centrada num dos lados. Devolve os ids que criou."
+
+[totals]
+title = "Totais de paredes"
+description = "Quantidade e comprimento total das paredes de cada tipo (metros)."
+
+[param.x]
+title = "Lado oeste"
+description = "Onde fica o lado oeste (padrão 0)."
+
+[param.y]
+title = "Lado sul"
+description = "Onde fica o lado sul (padrão 0)."
+
+[param.width]
+title = "Largura"
+description = "Tamanho ao longo de x."
+
+[param.depth]
+title = "Profundidade"
+description = "Tamanho ao longo de y."
+
+[param.height]
+title = "Altura das paredes"
+description = "Altura das paredes (padrão: a configuração do plugin)."
+
+[param.level]
+title = "Nível"
+description = "O nível da sala (padrão: o nível mais baixo)."
+
+[param.name]
+title = "Nome da sala"
+description = "O nome do ambiente."
+
+[param.door]
+title = "Porta"
+description = "O lado com uma porta (padrão: a configuração do plugin)."
+
+[side]
+none = "Sem porta"
+south = "Sul"
+east = "Leste"
+north = "Norte"
+west = "Oeste"
+
+[settings.height]
+title = "Altura padrão das paredes"
+description = "Altura das paredes quando o comando não recebe uma."
+
+[settings.door]
+title = "Porta padrão"
+description = "O lado com uma porta quando o comando não recebe um."

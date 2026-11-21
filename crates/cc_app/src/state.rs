@@ -25,6 +25,8 @@ pub enum RibbonTab {
     Annotate,
     View,
     Manage,
+    /// The buttons of the loaded plugins (shown only when there are some).
+    Plugins,
 }
 
 /// An action that discards unsaved changes, waiting for confirmation.

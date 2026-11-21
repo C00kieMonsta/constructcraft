@@ -3,11 +3,13 @@
 use crate::actions;
 use crate::commands::{self, UiCommand};
 use crate::icons::{self, Badge, Icon, Tones};
+use crate::plugins_ui::RibbonButton;
 use crate::state::{AppState, RibbonTab};
 use crate::t;
 use crate::theme::{self, PALETTE};
 use crate::tools::{DimensionMode, Run, Tool};
 use cc_core::{Category, ViewCategory};
+use cc_plugins::ButtonSize;
 use cc_views::format;
 use egui::{Align, Button, DragValue, Layout, Response, RichText, Sense, Stroke, StrokeKind, Ui, vec2};
 
@@ -151,15 +153,36 @@ fn label_lines(ui: &Ui, label: &str, font: &egui::FontId) -> Vec<String> {
     }
 }
 
+/// What a ribbon button shows as its icon: a built-in one with its badge, or
+/// a plugin's SVG file (the plugin icon when it cannot be drawn).
+#[derive(Debug, Clone, Copy)]
+enum Glyph<'a> {
+    Icon(Icon, Option<Badge>),
+    File(Option<&'a std::path::Path>),
+}
+
+impl Glyph<'_> {
+    fn badge(self) -> Option<Badge> {
+        match self {
+            Glyph::Icon(_, badge) => badge,
+            Glyph::File(_) => None,
+        }
+    }
+
+    fn paint(self, painter: &egui::Painter, rect: egui::Rect, tones: Tones) {
+        match self {
+            Glyph::Icon(icon, badge) => icons::paint_toned(painter, rect, icon, tones, badge),
+            Glyph::File(path) => {
+                if !path.is_some_and(|p| icons::paint_file_toned(painter, rect, p, tones)) {
+                    icons::paint_toned(painter, rect, Icon::Plugin, tones, None);
+                }
+            }
+        }
+    }
+}
+
 /// A large ribbon button: icon above a label of up to two lines. `dropdown` adds a chevron.
-fn big_button(
-    ui: &mut Ui,
-    (icon, badge): (Icon, Option<Badge>),
-    label: &str,
-    selected: bool,
-    enabled: bool,
-    dropdown: bool,
-) -> Response {
+fn big_button(ui: &mut Ui, glyph: Glyph<'_>, label: &str, selected: bool, enabled: bool, dropdown: bool) -> Response {
     let text_color = if enabled { PALETTE.text } else { PALETTE.text_faint };
     let font = egui::FontId::proportional(12.0);
     let galleys: Vec<_> = label_lines(ui, label, &font)
@@ -188,9 +211,9 @@ fn big_button(
             (true, false) => PALETTE.text,
         };
         let icon_center = egui::pos2(rect.center().x, rect.top() + 6.0 + ICON_SIZE / 2.0);
-        let tones = Tones::of(theme::palette(ui.ctx()), badge, enabled, selected);
+        let tones = Tones::of(theme::palette(ui.ctx()), glyph.badge(), enabled, selected);
         let icon_rect = egui::Rect::from_center_size(icon_center, vec2(ICON_SIZE, ICON_SIZE));
-        icons::paint_toned(painter, icon_rect, icon, tones, badge);
+        glyph.paint(painter, icon_rect, tones);
         // Lines start right under the icon, each centered; the chevron follows the last one.
         let text_color = if selected { PALETTE.accent_text } else { text_color };
         let mut y = rect.top() + 6.0 + ICON_SIZE + 3.0;
@@ -224,51 +247,61 @@ fn stack_rows(n: usize) -> usize {
 /// the large buttons' height. Returns the clicked command.
 fn stacked(ui: &mut Ui, state: &AppState, family: &[UiCommand]) -> Option<UiCommand> {
     let mut clicked = None;
-    let rows = stack_rows(family.len());
-    let size = vec2(28.0, (BUTTON_HEIGHT - 4.0) / 3.0);
-    let column_h = rows as f32 * size.y + (rows as f32 - 1.0) * 2.0;
-    for chunk in family.chunks(rows) {
+    stack_columns(ui, family, |ui, command| {
+        let why = command.unavailable(state);
+        let enabled = why.is_none();
+        let glyph = Glyph::Icon(command.icon(), command.badge());
+        let r = small_button(ui, glyph, &command.label(state), enabled, command.selected(state));
+        if command_tooltip(r, state, *command, why).clicked() && enabled {
+            clicked = Some(*command);
+        }
+    });
+    clicked
+}
+
+/// `items` in columns of two or three (see [`stack_rows`]), two-row
+/// columns centered on the large buttons' height.
+fn stack_columns<T>(ui: &mut Ui, items: &[T], mut each: impl FnMut(&mut Ui, &T)) {
+    let rows = stack_rows(items.len());
+    let column_h = rows as f32 * STACK_BUTTON.y + (rows as f32 - 1.0) * 2.0;
+    for chunk in items.chunks(rows) {
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
             ui.add_space(((BUTTON_HEIGHT - column_h) / 2.0).max(0.0));
-            for command in chunk {
-                let why = command.unavailable(state);
-                let (enabled, selected) = (why.is_none(), command.selected(state));
-                let sense = if enabled { Sense::click() } else { Sense::hover() };
-                let (rect, r) = ui.allocate_exact_size(size, sense);
-                let painter = ui.painter();
-                let radius = theme::RADIUS as f32;
-                if selected {
-                    painter.rect_filled(rect, radius, PALETTE.accent_soft);
-                    painter.rect_stroke(
-                        rect,
-                        radius,
-                        Stroke::new(1.0, PALETTE.accent.gamma_multiply(0.55)),
-                        StrokeKind::Inside,
-                    );
-                } else if enabled && r.hovered() {
-                    let fill = if r.is_pointer_button_down_on() { PALETTE.pressed } else { PALETTE.hover };
-                    painter.rect_filled(rect, radius, fill);
-                }
-                let color = match (enabled, selected) {
-                    (false, _) => PALETTE.text_faint,
-                    (true, true) => PALETTE.accent_text,
-                    (true, false) => PALETTE.text,
-                };
-                let icon_rect = egui::Rect::from_center_size(rect.center(), vec2(STACK_ICON_SIZE, STACK_ICON_SIZE));
-                let tones =
-                    Tones { ink: color, ..Tones::of(theme::palette(ui.ctx()), command.badge(), enabled, selected) };
-                icons::paint_toned(painter, icon_rect, command.icon(), tones, command.badge());
-                let label = command.label(state);
-                r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, selected, &label));
-                let r = if enabled { r.on_hover_cursor(egui::CursorIcon::PointingHand) } else { r };
-                if command_tooltip(r, state, *command, why).clicked() && enabled {
-                    clicked = Some(*command);
-                }
+            for item in chunk {
+                each(ui, item);
             }
         });
     }
-    clicked
+}
+
+/// Size of a small stacked ribbon button.
+const STACK_BUTTON: egui::Vec2 = vec2(28.0, (BUTTON_HEIGHT - 4.0) / 3.0);
+
+/// A small stacked ribbon button: an icon, its label told to screen readers
+/// (and tests) and in the tooltip.
+fn small_button(ui: &mut Ui, glyph: Glyph<'_>, label: &str, enabled: bool, selected: bool) -> Response {
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, r) = ui.allocate_exact_size(STACK_BUTTON, sense);
+    let painter = ui.painter();
+    let radius = theme::RADIUS as f32;
+    if selected {
+        painter.rect_filled(rect, radius, PALETTE.accent_soft);
+        painter.rect_stroke(rect, radius, Stroke::new(1.0, PALETTE.accent.gamma_multiply(0.55)), StrokeKind::Inside);
+    } else if enabled && r.hovered() {
+        let fill = if r.is_pointer_button_down_on() { PALETTE.pressed } else { PALETTE.hover };
+        painter.rect_filled(rect, radius, fill);
+    }
+    let color = match (enabled, selected) {
+        (false, _) => PALETTE.text_faint,
+        (true, true) => PALETTE.accent_text,
+        (true, false) => PALETTE.text,
+    };
+    let icon_rect = egui::Rect::from_center_size(rect.center(), vec2(STACK_ICON_SIZE, STACK_ICON_SIZE));
+    let tones = Tones { ink: color, ..Tones::of(theme::palette(ui.ctx()), glyph.badge(), enabled, selected) };
+    glyph.paint(painter, icon_rect, tones);
+    r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, selected, label));
+    if enabled { r.on_hover_cursor(egui::CursorIcon::PointingHand) } else { r }
 }
 
 /// Small square icon button (quick access toolbar).
@@ -365,7 +398,8 @@ fn command_menu(ui: &mut Ui, state: &AppState, command: UiCommand) -> Response {
 fn command_big(ui: &mut Ui, state: &AppState, command: UiCommand, dropdown: bool) -> Response {
     let why = command.unavailable(state);
     let label = command.label(state);
-    let r = big_button(ui, (command.icon(), command.badge()), &label, command.selected(state), why.is_none(), dropdown);
+    let glyph = Glyph::Icon(command.icon(), command.badge());
+    let r = big_button(ui, glyph, &label, command.selected(state), why.is_none(), dropdown);
     command_tooltip(r, state, command, why)
 }
 
@@ -458,7 +492,7 @@ pub fn ribbon(ui: &mut Ui, state: &mut AppState) {
     });
     // Ribbon tab titles, each as wide as its own text (measured bold, as when
     // active, so a tab keeps its width when picked) plus some room around it.
-    let tabs = [
+    let mut tabs = vec![
         (RibbonTab::File, t!("ribbon-file")),
         (RibbonTab::Architecture, t!("ribbon-architecture")),
         (RibbonTab::Structure, t!("ribbon-structure")),
@@ -470,6 +504,14 @@ pub fn ribbon(ui: &mut Ui, state: &mut AppState) {
         (RibbonTab::View, t!("ribbon-view")),
         (RibbonTab::Manage, t!("ribbon-manage")),
     ];
+    // The Plugins tab, while a loaded plugin has buttons.
+    if state.plugins.buttons.is_empty() {
+        if state.ribbon_tab == RibbonTab::Plugins {
+            state.ribbon_tab = RibbonTab::Manage;
+        }
+    } else {
+        tabs.push((RibbonTab::Plugins, t!("ribbon-plugins")));
+    }
     let text_widths: Vec<f32> = tabs
         .iter()
         .map(|(_, label)| ui.painter().layout_no_wrap(label.clone(), tab_font(true), PALETTE.text).size().x)
@@ -597,6 +639,7 @@ fn tab_row(ui: &mut Ui, state: &mut AppState, available: f32) {
                     RibbonTab::Annotate => annotate_tab(ui, state),
                     RibbonTab::View => view_tab(ui, state),
                     RibbonTab::Manage => manage_tab(ui, state),
+                    RibbonTab::Plugins => plugins_tab(ui, state),
                 }
             });
         });
@@ -998,8 +1041,11 @@ fn plugin_menu(ui: &mut Ui, state: &mut AppState) {
             for (plugin, commands) in groups {
                 ui.label(theme::muted(plugin).size(11.5));
                 for (name, description) in commands {
-                    let short = name.split_once("__").map_or(name.as_str(), |(_, c)| c).to_string();
-                    let mut r = ui.button(short);
+                    let title = match state.plugins.command_title(&name) {
+                        Some(title) => title.to_string(),
+                        None => name.split_once("__").map_or(name.as_str(), |(_, c)| c).to_string(),
+                    };
+                    let mut r = ui.button(title);
                     if !description.is_empty() {
                         r = r.on_hover_text(description);
                     }
@@ -1016,6 +1062,79 @@ fn plugin_menu(ui: &mut Ui, state: &mut AppState) {
             crate::plugins_ui::open(state);
         }
     });
+}
+
+/// The Plugins tab: the loaded plugins' buttons, one group per plugin and
+/// panel (in load order, then the manifest's), drawn as the built-in ones;
+/// each opens its command's form.
+fn plugins_tab(ui: &mut Ui, state: &mut AppState) {
+    let buttons = state.plugins.buttons.clone();
+    let mut groups: Vec<(&str, &str, Vec<&RibbonButton>)> = Vec::new();
+    for b in &buttons {
+        match groups.iter_mut().find(|(id, panel, _)| *id == b.plugin_id && *panel == b.button.panel) {
+            Some((_, _, list)) => list.push(b),
+            None => groups.push((&b.plugin_id, &b.button.panel, vec![b])),
+        }
+    }
+    for (_, panel, list) in groups {
+        group(ui, panel.to_string(), |ui| {
+            // Consecutive small buttons stack in columns, as built-in families do.
+            let mut i = 0;
+            while let Some(b) = list.get(i) {
+                if b.button.size == ButtonSize::Large {
+                    plugin_big(ui, state, b);
+                    i += 1;
+                    continue;
+                }
+                let rest = list.get(i..).unwrap_or_default();
+                let run = rest.iter().take_while(|b| b.button.size == ButtonSize::Small).count();
+                stack_columns(ui, rest.get(..run).unwrap_or_default(), |ui, b| plugin_small(ui, state, b));
+                i += run;
+            }
+        });
+    }
+}
+
+fn plugin_big(ui: &mut Ui, state: &mut AppState, b: &RibbonButton) {
+    let why = crate::plugins_ui::unavailable(state, &b.button.when);
+    let glyph = Glyph::File(b.button.icon.as_deref());
+    let r = big_button(ui, glyph, &b.button.label, false, why.is_none(), false);
+    if plugin_tooltip(r, state, b, why).clicked() {
+        run_plugin_button(state, b);
+    }
+}
+
+fn plugin_small(ui: &mut Ui, state: &mut AppState, b: &RibbonButton) {
+    let why = crate::plugins_ui::unavailable(state, &b.button.when);
+    let enabled = why.is_none();
+    let r = small_button(ui, Glyph::File(b.button.icon.as_deref()), &b.button.label, enabled, false);
+    if plugin_tooltip(r, state, b, why).clicked() && enabled {
+        run_plugin_button(state, b);
+    }
+}
+
+fn run_plugin_button(state: &mut AppState, b: &RibbonButton) {
+    state.ribbon_peek = false;
+    crate::plugin_form::open(state, &b.button.command);
+}
+
+/// A plugin button's tooltip, as a built-in command's: its label, what it
+/// does, the plugin it comes from, and why it is unavailable.
+fn plugin_tooltip(response: Response, state: &AppState, b: &RibbonButton, why: Option<String>) -> Response {
+    let detailed = state.prefs.detailed_tooltips;
+    response.on_hover_ui(|ui| {
+        ui.set_max_width(300.0);
+        ui.spacing_mut().item_spacing.y = 4.0;
+        ui.label(RichText::new(&b.button.label).family(theme::semibold()).color(PALETTE.text));
+        // A command without a description is described by its title, often the label.
+        if detailed && !b.description.is_empty() && b.description != b.button.label {
+            ui.label(theme::muted(&b.description));
+        }
+        ui.label(theme::muted(t!("tip-plugin", "name" => b.plugin.clone())).size(11.0));
+        if let Some(why) = &why {
+            ui.label(RichText::new(t!("tip-unavailable", "reason" => why)).color(PALETTE.warning));
+        }
+    })
 }
 
 /// Run Macro: a menu of the macros in the macros folder (see Preferences)

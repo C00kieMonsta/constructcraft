@@ -788,7 +788,10 @@ pub fn open(state: &mut AppState, command: &str) {
             }
         }
     }
-    let title = title_of(&info.description, command);
+    let title = match state.plugins.command_title(command) {
+        Some(title) => title.to_string(),
+        None => title_of(&info.description, command),
+    };
     let description = info.description.trim();
     let description = if description == title { String::new() } else { description.to_string() };
     let mut form = PluginForm {
@@ -1061,18 +1064,28 @@ fn field_row(ui: &mut Ui, state: &AppState, field: &mut Field, fmt: &Fmt) -> boo
     pick
 }
 
-fn value_cell(ui: &mut Ui, state: &AppState, field: &mut Field, fmt: &Fmt) -> bool {
+/// The editor of a number, text, boolean or choice field (a plugin's
+/// settings use these); other kinds show nothing.
+pub(crate) fn plain_cell(ui: &mut Ui, field: &mut Field, fmt: &Fmt) {
     match field.kind.clone() {
         Kind::Number { .. } | Kind::Text => {
-            let hint = (!field.required).then(|| t!("pform-default"));
+            // Empty, a required field says so; an optional one takes the command's default.
+            let hint = if field.required { t!("pform-required-hint") } else { t!("pform-default") };
             let name = field.label.clone();
-            text_field(ui, field, 0, None, &name, hint, fmt);
+            text_field(ui, field, 0, None, &name, Some(hint), fmt);
         }
         Kind::Boolean => bool_field(ui, field, fmt),
         Kind::Choice { values, labels } => {
             let options: Vec<(Value, String)> = values.into_iter().map(|v| json!(v)).zip(labels).collect();
             combo(ui, field, &options, fmt);
         }
+        _ => {}
+    }
+}
+
+fn value_cell(ui: &mut Ui, state: &AppState, field: &mut Field, fmt: &Fmt) -> bool {
+    match field.kind.clone() {
+        Kind::Number { .. } | Kind::Text | Kind::Boolean | Kind::Choice { .. } => plain_cell(ui, field, fmt),
         Kind::Level | Kind::View | Kind::Type { .. } | Kind::Material => {
             let options = field.options.clone();
             combo(ui, field, &options, fmt);

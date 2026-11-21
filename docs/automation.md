@@ -637,8 +637,8 @@ claude mcp add constructcad -- ccad mcp --plugins /path/to/plugins
 ```toml
 id = "quick_rooms"          # lowercase letters, digits and single underscores, up to 32
 name = "Quick rooms"
-version = "0.1.0"
-api = 1                     # the plugin API it is written for (1 or 2, see below)
+version = "0.2.0"
+api = 2                     # the plugin API it is written for (1 or 2, see below)
 description = "Rectangular rooms in one step, and wall totals by type."
 authors = ["…"]
 license = "GPL-3.0-or-later"
@@ -689,7 +689,7 @@ api = 2
 command = "rectangle_room"       # a command main.lua registers (its short name)
 label = "%button.room%"          # at most 64 characters
 icon = "icons/room.svg"          # optional: an SVG in the plugin's folder, at most 64 KiB
-panel = "Rooms"                  # optional: the ribbon panel (default: the plugin's name)
+panel = "%panel%"                # optional: the ribbon panel (default: the plugin's name)
 size = "large"                   # "large" (the default) or "small"
 when = "view:floor_plan"         # optional: when the button is available
 
@@ -699,13 +699,13 @@ default = 2.8                    # required, and must fit the setting
 title = "%settings.height%"      # optional (default: the key made readable, "Default height")
 description = "Height of the walls it draws"
 ui = "length"                    # optional, numbers only: shown in the project's units
-minimum = 0.5                    # numbers and integers; also maximum
+minimum = 2.0                    # numbers and integers; also maximum
 
-[settings.door_side]
+[settings.default_door]
 type = "string"
-default = "south"
-enum = ["north", "south"]        # strings only: the allowed values
-enum_labels = ["North", "South"] # optional, one per value
+default = "none"
+enum = ["none", "south", "east", "north", "west"]   # strings only: the allowed values
+enum_labels = ["%side.none%", "%side.south%", "%side.east%", "%side.north%", "%side.west%"]   # optional, one per value
 ```
 
 A button whose command `main.lua` does not register is a load error naming the command. **`when`** is a comma-separated list of terms that must all hold:
@@ -723,7 +723,7 @@ An unknown term, category or view kind is a load error.
 
 ```sh
 ccad plugins settings ~/plugins quick_rooms                         # the settings and their values, as JSON
-ccad plugins settings ~/plugins quick_rooms default_height=3 door_side=north
+ccad plugins settings ~/plugins quick_rooms default_height=3 default_door=north
 ```
 
 Values are written like `run`'s `key=value` arguments (JSON or plain text; a string setting takes the text as it is), checked against the manifest and stored; a value that does not fit is refused and nothing is written. This reads the manifest and the translations only: the plugin's code does not run.
