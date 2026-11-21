@@ -497,3 +497,102 @@ end }"#,
     assert_eq!(ccad(&["--tool", "nonsense", "commands"], "").0, 2);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The output of `ccad` as text, its exit code and standard error.
+fn ccad_text(args: &[&str]) -> (i32, String, String) {
+    let out = Command::new(env!("CARGO_BIN_EXE_ccad")).args(args).env("CCAD_LANG", "en").output().unwrap();
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn the_example_plugin_passes_its_tests() {
+    let folder = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/plugins/quick_rooms");
+    let (code, out, err) = ccad_text(&["plugins", "test", folder]);
+    assert_eq!(code, 0, "{out}\n{err}");
+    assert!(out.contains("PASS quick_rooms_test.lua::test_a_room_has_four_walls_a_floor_and_a_room"), "{out}");
+    assert!(out.contains("PASS quick_rooms_test.lua::test_walls_take_the_default_height_setting"), "{out}");
+    assert!(out.trim_end().ends_with("5 passed, 0 failed"), "{out}");
+    let (code, out, _) = ccad_text(&["plugins", "test", folder, "--filter", "door"]);
+    assert_eq!(code, 0);
+    assert_eq!(out.lines().count(), 2, "one test and the summary: {out}");
+}
+
+#[test]
+fn plugin_tests_report_failures_with_exit_codes() {
+    let dir = std::env::temp_dir().join(format!("ccad-cli-{}-plugin-tests", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("tests")).unwrap();
+    std::fs::write(dir.join("plugin.toml"), "id = \"t\"\nname = \"T\"\nversion = \"1\"\napi = 2\n").unwrap();
+    std::fs::write(dir.join("main.lua"), "ccad.command { name = 'n', run = function() print('ran n') return 1 end }")
+        .unwrap();
+    std::fs::write(
+        dir.join("tests/n_test.lua"),
+        "function test_good() ccad.test.eq(ccad.run('t__n'), 1) end\n\
+         function test_bad() ccad.run('t__n') ccad.test.eq(ccad.run('t__n'), 2, 'the answer') end",
+    )
+    .unwrap();
+    let folder = dir.to_string_lossy().into_owned();
+    let (code, out, _) = ccad_text(&["plugins", "test", &folder]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("PASS n_test.lua::test_good"), "{out}");
+    assert!(out.contains("FAIL n_test.lua::test_bad: ") && out.contains("the answer: expected 2, got 1"), "{out}");
+    assert!(out.contains("    [t] ran n"), "what the failed test printed: {out}");
+    assert!(out.contains("1 passed, 1 failed"), "{out}");
+    let (code, out, _) = ccad_text(&["plugins", "test", &folder, "--filter", "good"]);
+    assert_eq!((code, out.contains("1 passed, 0 failed")), (0, true), "{out}");
+    let (code, _, err) = ccad_text(&["plugins", "test", &folder, "--filter", "nothing"]);
+    assert_eq!(code, 1, "no test matches: {err}");
+    // Usage errors.
+    assert_eq!(ccad_text(&["plugins", "test"]).0, 2);
+    assert_eq!(ccad_text(&["plugins", "test", &folder, "--frobnicate"]).0, 2);
+    let empty = dir.join("tests").to_string_lossy().into_owned();
+    assert_eq!(ccad_text(&["plugins", "test", &empty]).0, 2, "not a plugin");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_new_plugin_loads_and_passes_its_test() {
+    let dir = std::env::temp_dir().join(format!("ccad-cli-{}-new-plugin", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let folder = dir.to_string_lossy().into_owned();
+    let (code, out, err) = ccad(&["plugins", "new", &folder, "my_walls", "name=My \"walls\""], "");
+    assert_eq!(code, 0, "{err}");
+    let plugin = dir.join("my_walls");
+    assert_eq!(out["created"].as_str().map(std::path::PathBuf::from), Some(plugin.clone()));
+    for file in [
+        "plugin.toml",
+        "main.lua",
+        "locales/en.toml",
+        "locales/pt-BR.toml",
+        "icons/my_walls.svg",
+        "tests/basic_test.lua",
+        "README.md",
+        ".luarc.json",
+        "types/ccad.d.lua",
+    ] {
+        assert!(plugin.join(file).is_file(), "{file}");
+    }
+    let luarc: Value = serde_json::from_str(&std::fs::read_to_string(plugin.join(".luarc.json")).unwrap()).unwrap();
+    assert_eq!(luarc["workspace.library"], json!(["types"]));
+    // It loads, with its name, button and setting.
+    let path = plugin.to_string_lossy().into_owned();
+    let (code, summary, err) = ccad(&["--plugins", &path, "plugins"], "");
+    assert_eq!(code, 0, "{err}");
+    assert!(!err.contains("not loaded"), "{err}");
+    assert_eq!(summary[0]["name"], "My \"walls\"");
+    assert_eq!(summary[0]["buttons"][0]["command"], "my_walls__wall_line");
+    assert_eq!(summary[0]["settings"][0]["key"], "wall_height");
+    // Its tests pass.
+    let (code, out, err) = ccad_text(&["plugins", "test", &path]);
+    assert_eq!(code, 0, "{out}\n{err}");
+    assert!(out.contains("2 passed, 0 failed"), "{out}");
+    // An existing folder or a bad id is refused.
+    assert_eq!(ccad(&["plugins", "new", &folder, "my_walls"], "").0, 2);
+    assert_eq!(ccad(&["plugins", "new", &folder, "Bad-Id"], "").0, 2);
+    assert!(!dir.join("Bad-Id").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}

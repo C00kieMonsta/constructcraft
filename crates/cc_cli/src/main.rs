@@ -4,6 +4,7 @@
 //! loaded with `--plugins`.
 
 mod mcp;
+mod scaffold;
 
 use cc_engine::{EngineError, Session};
 use serde_json::{Value, json};
@@ -34,6 +35,11 @@ Usage:
                                       run, or choose them (in <folder>/.tools;
                                       tool= forgets one); --test runs each
                                       one's version check
+  ccad plugins new <folder> <id> [name=<name>]
+                                      make a new plugin in <folder>/<id>
+  ccad [--tool ...] plugins test <plugin folder> [--filter <text>] [--tool ...]
+                                      run the plugin's tests/*_test.lua, each
+                                      over a new project with the plugin loaded
   ccad [options] mcp                  serve the commands over MCP (stdio)
 
 Arguments of `run`: a JSON object, @file.json, - (standard input), or
@@ -352,6 +358,75 @@ fn plugin_tools(folder: &str, id: &str, rest: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// `ccad plugins new <folder> <id> [name=<name>]`: make a new plugin from
+/// the template ([`scaffold`]).
+fn plugin_new(folder: &str, id: &str, rest: &[String]) -> ExitCode {
+    let name = match rest {
+        [] => None,
+        [one] => match one.strip_prefix("name=") {
+            Some(name) => Some(name),
+            None => return usage_error(&format!("expected name=<name>, got '{one}'")),
+        },
+        _ => return usage_error("plugins new takes a folder, an id and at most name=<name>"),
+    };
+    match scaffold::create(std::path::Path::new(folder), id, name) {
+        Ok(dir) => {
+            print(&json!({ "created": dir }));
+            ExitCode::SUCCESS
+        }
+        Err(e) => usage_error(&e),
+    }
+}
+
+/// `ccad plugins test <plugin folder> [--filter <text>] [--tool …]`: run the
+/// plugin's tests ([`cc_plugins::testing`]); one line per test (`PASS
+/// name`, or `FAIL name: message` and what it printed), then a summary.
+/// Exit code 1 when a test failed (or none matched the filter), 2 on usage
+/// errors.
+fn plugin_test(o: &Options, rest: &[String]) -> ExitCode {
+    let mut folder = None;
+    let mut options = cc_plugins::testing::TestOptions { tools: o.tools.clone(), ..Default::default() };
+    let mut it = rest.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--filter" => match it.next() {
+                Some(f) => options.filter = Some(f.clone()),
+                None => return usage_error("--filter needs a text"),
+            },
+            "--tool" => match it.next().map(|t| parse_tool(t)) {
+                Some(Ok(tool)) => options.tools.push(tool),
+                Some(Err(e)) => return usage_error(&e),
+                None => return usage_error("--tool needs <plugin>.<tool>=<path>"),
+            },
+            _ if a.starts_with("--") => return usage_error(&format!("unknown option {a}")),
+            _ if folder.is_none() => folder = Some(a.clone()),
+            _ => return usage_error("plugins test takes one plugin folder"),
+        }
+    }
+    let Some(folder) = folder else { return usage_error("plugins test needs a plugin's folder") };
+    let results = match cc_plugins::testing::run_tests(std::path::Path::new(&folder), &options) {
+        Ok(r) => r,
+        Err(e) => return usage_error(&e),
+    };
+    let failed = results.iter().filter(|r| r.result.is_err()).count();
+    for r in &results {
+        match &r.result {
+            Ok(()) => println!("PASS {}", r.name),
+            Err(message) => {
+                println!("FAIL {}: {message}", r.name);
+                for line in &r.output {
+                    println!("    {line}");
+                }
+            }
+        }
+    }
+    println!("{} passed, {failed} failed", results.len() - failed);
+    if results.is_empty() {
+        eprintln!("ccad: no test matches");
+    }
+    if failed > 0 || results.is_empty() { ExitCode::from(1) } else { ExitCode::SUCCESS }
+}
+
 /// Save when asked (after the commands ran), then show what plugins printed
 /// meanwhile (their `project_saving` and `project_saved` handlers).
 fn save(s: &mut Session, o: &Options) -> Result<(), EngineError> {
@@ -445,9 +520,12 @@ fn main() -> ExitCode {
             }
             [action, folder, id, pairs @ ..] if action == "settings" => plugin_settings(folder, id, pairs),
             [action, folder, id, rest @ ..] if action == "tools" => plugin_tools(folder, id, rest),
+            [action, folder, id, rest @ ..] if action == "new" => plugin_new(folder, id, rest),
+            [action, rest @ ..] if action == "test" => plugin_test(&o, rest),
             _ => usage_error(
                 "plugins takes no arguments, `install <file.zip> <folder>`, `remove <id> <folder>`, `settings \
-                 <folder> <id> [key=value ...]` or `tools <folder> <id> [tool=path ...] [--test]`",
+                 <folder> <id> [key=value ...]`, `tools <folder> <id> [tool=path ...] [--test]`, `new <folder> \
+                 <id> [name=<name>]` or `test <plugin folder> [--filter <text>] [--tool <plugin>.<tool>=<path>]`",
             ),
         },
         "run" => {

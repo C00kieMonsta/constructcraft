@@ -24,6 +24,8 @@
 //!   chose ([`tools`]) with `ccad.process.run`, on a background thread
 //!   ([`process`]); the command waits without holding the session
 //!   ([`cc_engine::Outcome::Pending`]).
+//! - [`testing`] runs a plugin's own tests (`tests/*_test.lua`, `ccad
+//!   plugins test`), each over a fresh session with the plugin loaded.
 
 pub mod api;
 pub mod contributions;
@@ -32,6 +34,7 @@ pub mod plugin;
 pub mod process;
 pub mod script;
 pub mod store;
+pub mod testing;
 pub mod tools;
 
 pub use cc_script::{convert, sandbox};

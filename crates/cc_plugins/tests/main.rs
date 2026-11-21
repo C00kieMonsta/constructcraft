@@ -12,6 +12,7 @@ mod lua;
 mod process;
 mod scope;
 mod store;
+mod testing;
 
 /// Every `.rs` file of `tests/` is declared above, so none is skipped.
 #[test]
