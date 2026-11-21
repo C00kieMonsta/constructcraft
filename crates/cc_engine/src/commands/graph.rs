@@ -19,7 +19,7 @@ fn load(session: &Session, path: Option<&str>, graph: Option<&Value>, allow_file
     let (mut g, repairs) = match (path, graph) {
         (_, Some(v)) => Graph::from_value(v.clone()).map_err(EngineError::invalid)?,
         (Some(p), None) => {
-            session.require_files("path")?;
+            session.require_read("path", std::path::Path::new(p))?;
             let size = std::fs::metadata(p).map_err(|e| EngineError::invalid(format!("{p}: {e}")))?.len();
             if usize::try_from(size).map_or(true, |s| s > MAX_FILE) {
                 return Err(EngineError::invalid(format!("{p}: the graph file is too large")));

@@ -1,6 +1,7 @@
 //! What a plugin declares in its `plugin.toml` besides commands (plugin API
 //! 2): ribbon buttons with their availability conditions ([`When`]), settings
-//! ([`Setting`]), and the UI hints of command parameters.
+//! ([`Setting`]), exporters and importers ([`FileAction`]), and the UI hints
+//! of command parameters.
 //!
 //! The manifest's own text may be a `%key%` looked up in the plugin's
 //! locales (see [`crate::locales`]) when it is shown; the types here keep the
@@ -39,8 +40,14 @@ pub const VIEW_KINDS: [&str; 10] = [
     "sheet",
 ];
 
+/// Most exporters, and most importers, of one plugin.
+pub const MAX_FILE_ACTIONS: usize = 16;
+/// Most `extensions` of a path parameter, and longest one.
+pub const MAX_EXTENSIONS: usize = 16;
+const MAX_EXTENSION: usize = 16;
+
 /// The `ui` hints of command parameters and the JSON type each needs.
-pub const PARAM_UI: [(&str, &str); 8] = [
+pub const PARAM_UI: [(&str, &str); 10] = [
     ("length", "number"),
     ("element", "integer"),
     ("elements", "array"),
@@ -49,7 +56,13 @@ pub const PARAM_UI: [(&str, &str); 8] = [
     ("view", "integer"),
     ("type", "integer"),
     ("material", "string"),
+    ("save_path", "string"),
+    ("open_path", "string"),
 ];
+
+/// The `ui` hints of a file the command writes (`save_path`) or reads
+/// (`open_path`): granted to the command when it runs.
+pub const PATH_UI: [&str; 2] = ["save_path", "open_path"];
 
 /// The `ui` hints that may carry a `category`.
 const UI_WITH_CATEGORY: [&str; 3] = ["element", "elements", "type"];
@@ -494,8 +507,94 @@ pub(crate) fn check_param_hints(schema: &Value) -> Result<(), String> {
         if prop.get("title").is_some_and(|t| !t.is_string()) {
             return Err(err("title must be a string".into()));
         }
+        match prop.get("extensions") {
+            None => {}
+            Some(_) if !ui.is_some_and(|u| PATH_UI.contains(&u)) => {
+                return Err(err("extensions needs ui \"save_path\" or \"open_path\"".into()));
+            }
+            Some(list) => {
+                check_extensions(list).map_err(err)?;
+            }
+        }
     }
     Ok(())
+}
+
+/// A path parameter's `extensions`: 1 to [`MAX_EXTENSIONS`] lowercase
+/// letters and digits each (1 to 16), without the dot, none twice.
+fn check_extensions(list: &Value) -> Result<Vec<String>, String> {
+    let bad = || {
+        format!(
+            "extensions: 1 to {MAX_EXTENSIONS} different extensions, each 1 to {MAX_EXTENSION} lowercase letters              or digits, without the dot"
+        )
+    };
+    let items = list.as_array().ok_or_else(bad)?;
+    if items.is_empty() || items.len() > MAX_EXTENSIONS {
+        return Err(bad());
+    }
+    let mut out: Vec<String> = Vec::new();
+    for item in items {
+        let ext = item.as_str().ok_or_else(bad)?;
+        let plain = !ext.is_empty()
+            && ext.len() <= MAX_EXTENSION
+            && ext.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+        if !plain || out.iter().any(|o| o == ext) {
+            return Err(bad());
+        }
+        out.push(ext.to_string());
+    }
+    Ok(out)
+}
+
+/// The path parameters of a command's schema: `(name, ui, extensions)` of
+/// each property with `ui = "save_path"` or `"open_path"`, in name order.
+pub fn path_params(schema: &Value) -> Vec<(String, String, Vec<String>)> {
+    let Some(properties) = schema.get("properties").and_then(Value::as_object) else { return Vec::new() };
+    properties
+        .iter()
+        .filter_map(|(name, prop)| {
+            let ui = prop.get("ui").and_then(Value::as_str).filter(|u| PATH_UI.contains(u))?;
+            let extensions = prop.get("extensions").and_then(|l| check_extensions(l).ok()).unwrap_or_default();
+            Some((name.clone(), ui.to_string(), extensions))
+        })
+        .collect()
+}
+
+/// An `[[exporters]]` or `[[importers]]` entry of the manifest, as written.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileActionSpec {
+    /// A command the plugin registers (its short name), with exactly one
+    /// `save_path` parameter (an exporter) or `open_path` one (an importer).
+    pub command: String,
+    /// What the app's Export or Import entry says; may be `%key%`.
+    pub label: String,
+}
+
+impl FileActionSpec {
+    /// Check what does not need the plugin's commands.
+    pub(crate) fn check(&self) -> Result<(), String> {
+        if !crate::plugin::valid_command_name(&self.command) {
+            return Err(format!("command \"{}\": a command name the plugin registers", self.command));
+        }
+        if self.label.trim().is_empty() || chars(&self.label) > MAX_LABEL {
+            return Err(format!("label: 1 to {MAX_LABEL} characters"));
+        }
+        Ok(())
+    }
+}
+
+/// A plugin's exporter or importer, ready to show (label in the current
+/// language).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FileAction {
+    /// The command it runs, full name (`<id>__<command>`).
+    pub command: String,
+    pub label: String,
+    /// The command's parameter that takes the path.
+    pub param: String,
+    /// The extensions the file may have (empty: any), lowercase without the dot.
+    pub extensions: Vec<String>,
 }
 
 /// The schema with each property's `title`, `description` and

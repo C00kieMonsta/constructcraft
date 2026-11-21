@@ -273,7 +273,7 @@ impl Command for SiteContextImport {
             (Some(_), Some(_)) => return Err(EngineError::invalid("give data or path, not both")),
             (Some(d), None) => d,
             (None, Some(path)) => {
-                s.require_files("path")?;
+                s.require_read("path", path)?;
                 let meta =
                     std::fs::metadata(path).map_err(|e| EngineError::invalid(format!("{}: {e}", path.display())))?;
                 if meta.len() > osm::MAX_JSON as u64 {

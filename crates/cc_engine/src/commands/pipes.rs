@@ -381,7 +381,7 @@ impl Command for PipeSeriesImport {
             (Some(code), None, None) => built_in_copy(code)
                 .ok_or_else(|| EngineError::not_found(format!("no built-in pipe series '{code}'")))?,
             (None, Some(path), None) => {
-                s.require_files("path")?;
+                s.require_read("path", path)?;
                 let len = std::fs::metadata(path)?.len();
                 if len > MAX_FILE_BYTES as u64 {
                     return Err(EngineError::invalid(format!("the file is larger than {} MB", MAX_FILE_BYTES >> 20)));
@@ -492,7 +492,11 @@ pub struct PipeSeriesExport {
 impl Command for PipeSeriesExport {
     const NAME: &'static str = "pipe_series_export";
     const KIND: CommandKind = CommandKind::File;
+    const CHECKS_PATHS: bool = true;
     fn run(self, s: &mut Session) -> Result<Value> {
+        if let Some(path) = &self.path {
+            s.require_write("path", path)?;
+        }
         let p = s.project();
         let id = refs::pipe_series(p, &self.series)?;
         let series = p.pipe_series_by_id(id).ok_or_else(|| EngineError::not_found("pipe series"))?;

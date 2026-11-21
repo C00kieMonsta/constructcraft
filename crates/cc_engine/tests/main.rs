@@ -52,6 +52,7 @@ mod pile_rebar;
 mod piles;
 mod pipes;
 mod plugin_data;
+mod plugin_scope;
 mod profiles;
 mod project_templates;
 mod rebar_copy;

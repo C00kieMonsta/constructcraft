@@ -39,7 +39,7 @@ impl Command for MacroCheck {
         let text = match (self.text, self.path) {
             (Some(text), _) => text,
             (None, Some(path)) => {
-                s.require_files("path")?;
+                s.require_read("path", std::path::Path::new(&path))?;
                 cc_core::read_to_string_limited(std::path::Path::new(&path), MAX_MACRO_BYTES)
                     .map_err(|e| EngineError::invalid(format!("{path}: {e}")))?
             }

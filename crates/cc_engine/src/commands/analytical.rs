@@ -155,7 +155,9 @@ pub struct AnalyticalExport {
 impl Command for AnalyticalExport {
     const NAME: &'static str = "analytical_export";
     const KIND: CommandKind = CommandKind::File;
+    const CHECKS_PATHS: bool = true;
     fn run(self, s: &mut Session) -> Result<Value> {
+        s.require_write("path", &self.path)?;
         let model = model_json(s, self.arc_segments)?;
         let text = serde_json::to_string_pretty(&model).map_err(|e| EngineError::invalid(e.to_string()))?;
         std::fs::write(&self.path, text).map_err(|e| EngineError::io(e.to_string()))?;

@@ -193,10 +193,8 @@ fn the_sandbox_has_no_files_or_code_loading() {
 #[test]
 fn runaway_scripts_stop() {
     let mut s = Session::default();
-    let small = ScriptOptions {
-        limits: Limits { instructions: 2_000_000, memory: 16 * 1024 * 1024, ..Limits::default() },
-        ..Default::default()
-    };
+    let small =
+        ScriptOptions { limits: Limits { instructions: 2_000_000, memory: 16 * 1024 * 1024, ..Limits::default() } };
     let run = |s: &mut Session, src: &str| run_script(s, src, "t.lua", json!({}), small).result.unwrap_err();
     for src in [
         "while true do end",

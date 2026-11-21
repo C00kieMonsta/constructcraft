@@ -469,8 +469,8 @@ impl SheetPieceArg {
                 width: width.text()?,
                 height: height.text()?,
                 image: {
-                    if image_path.is_some() {
-                        s.require_files("image_path")?;
+                    if let Some(path) = image_path {
+                        s.require_read("image_path", path)?;
                     }
                     read_picture(image_path.as_deref(), image.as_deref())?
                 },
@@ -693,8 +693,8 @@ impl Command for ComponentSheetPieceSet {
         let picture = match (&self.image_path, &self.image) {
             (None, None) => None,
             (path, text) => {
-                if path.is_some() {
-                    s.require_files("image_path")?;
+                if let Some(path) = path {
+                    s.require_read("image_path", path)?;
                 }
                 Some(read_picture(path.as_deref(), text.as_deref())?)
             }

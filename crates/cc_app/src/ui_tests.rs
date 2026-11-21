@@ -7331,3 +7331,73 @@ fn closing_the_other_views_keeps_a_later_tab_shown() {
     // The view is drawn: its zoom button is there.
     assert!(harness.query_by_label(&t!("canvas-zoom-menu")).is_some());
 }
+
+/// The plugin `idf_tools`: an exporter with an option, one with only its
+/// path, and an importer.
+const IDF_TOOLS: &str = r#"
+ccad.command { name = "export_idf", kind = "query", title = "Export IDF",
+  params = { required = { "path" }, properties = {
+    path = { type = "string", ui = "save_path", extensions = { "idf" }, title = "File" },
+    comment = { type = "string" } } },
+  run = function(a) ccad.file.write(a.path, "Version,24.1; ! " .. (a.comment or "")) end }
+ccad.command { name = "export_plain", kind = "query",
+  params = { properties = { path = { type = "string", ui = "save_path", extensions = { "txt" } } } },
+  run = function(a) ccad.file.write(a.path, "plain") end }
+ccad.command { name = "import_epw",
+  params = { properties = { path = { type = "string", ui = "open_path", extensions = { "epw" } } } },
+  run = function(a) ccad.data.set(nil, ccad.file.read(a.path)) end }
+"#;
+
+/// A plugins folder with `idf_tools` ([`IDF_TOOLS`]).
+fn idf_plugins_folder(name: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("ccad-plugin-idf-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let dir = root.join("idf_tools");
+    std::fs::create_dir_all(&dir).unwrap();
+    let manifest = "id = \"idf_tools\"\nname = \"IDF tools\"\nversion = \"1.0.0\"\napi = 2\n\n\
+                    [[exporters]]\ncommand = \"export_idf\"\nlabel = \"EnergyPlus (.idf)\"\n\n\
+                    [[exporters]]\ncommand = \"export_plain\"\nlabel = \"Plain text (.txt)\"\n\n\
+                    [[importers]]\ncommand = \"import_epw\"\nlabel = \"Weather (.epw)\"\n";
+    std::fs::write(dir.join("plugin.toml"), manifest).unwrap();
+    std::fs::write(dir.join("main.lua"), IDF_TOOLS).unwrap();
+    root
+}
+
+/// A plugin's exporters join the File and Insert tabs' Export groups and its
+/// importers the Insert tab's Import group; a chosen path opens the
+/// command's form with it set (its field has Browse…), or runs a command
+/// whose only parameter is the path at once.
+#[test]
+fn plugin_exporters_and_importers_join_the_ribbon() {
+    let folder = idf_plugins_folder("ribbon");
+    let mut state = state_with_plugins(folder.clone());
+    assert_eq!(state.plugins.exporters.len(), 2);
+    assert_eq!(state.plugins.importers.len(), 1);
+    state.ribbon_tab = RibbonTab::File;
+    let mut harness = wide_ribbon_harness(state);
+    harness.run();
+    assert!(harness.query_by_role_and_label(Role::Button, "EnergyPlus (.idf)").is_some(), "File tab, Export");
+    assert!(harness.query_by_role_and_label(Role::Button, "Weather (.epw)").is_none(), "no Import group there");
+    harness.state_mut().ribbon_tab = RibbonTab::Insert;
+    harness.run();
+    for label in ["EnergyPlus (.idf)", "Plain text (.txt)", "Weather (.epw)"] {
+        assert!(harness.query_by_role_and_label(Role::Button, label).is_some(), "Insert tab: {label}");
+    }
+    // The dialog cannot be driven: the path it would return opens the form.
+    let out = folder.join("model.idf");
+    let entry = harness.state().plugins.exporters[0].clone();
+    crate::plugins_ui::open_file_entry(harness.state_mut(), &entry, &out);
+    harness.run();
+    assert_eq!(form_field(harness.state(), "path").shown(), Some(&serde_json::json!(out.to_string_lossy())));
+    assert!(harness.query_by_role_and_label(Role::Button, &t!("pform-browse")).is_some(), "the path field has Browse");
+    harness.get_by_role_and_label(Role::Button, &t!("palette-run")).click();
+    harness.run();
+    assert!(std::fs::read_to_string(&out).unwrap().starts_with("Version,24.1;"));
+    // A command whose only parameter is the path runs at once.
+    let plain = folder.join("plain.txt");
+    let entry = harness.state().plugins.exporters[1].clone();
+    harness.state_mut().dialogs.plugin_form = None;
+    crate::plugins_ui::open_file_entry(harness.state_mut(), &entry, &plain);
+    assert!(harness.state().dialogs.plugin_form.is_none(), "it ran and had nothing to show");
+    assert_eq!(std::fs::read_to_string(&plain).unwrap(), "plain");
+}

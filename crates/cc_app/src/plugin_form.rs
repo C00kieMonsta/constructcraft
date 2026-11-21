@@ -13,7 +13,10 @@
 //! `elements` (element ids, picked in the view or taken from the selection,
 //! with an optional `category`), `point` (`[x, y]` in plan meters, picked in
 //! a plan), `level`, `view` and `type` (ids; `type` with an optional
-//! `category`) and `material` (a name), chosen from the project's. Required
+//! `category`) and `material` (a name), chosen from the project's, and
+//! `save_path`/`open_path` (a file path typed or chosen with Browse… in the
+//! app's save or open dialog, filtered by the property's `extensions`;
+//! the plugin may write or read that file while the command runs). Required
 //! fields come first, in the order `required` lists them; the others go
 //! under *More options*, and are sent only once the user sets them, so the
 //! command's own defaults apply.
@@ -93,6 +96,12 @@ pub enum Kind {
     },
     /// A material's name.
     Material,
+    /// A file path, to write (`save`) or to read, of one of `extensions`
+    /// (lowercase, without the dot; empty: any).
+    Path {
+        save: bool,
+        extensions: Vec<String>,
+    },
     /// Any JSON, typed; `want` is the schema's `object` or `array`, checked.
     Json {
         want: Option<String>,
@@ -351,6 +360,14 @@ pub fn kind_of(prop: &Value) -> Kind {
         Some("view") => return Kind::View,
         Some("type") => return Kind::Type { category: category() },
         Some("material") => return Kind::Material,
+        Some(ui @ ("save_path" | "open_path")) => {
+            let extensions = prop
+                .get("extensions")
+                .and_then(Value::as_array)
+                .map(|list| list.iter().filter_map(Value::as_str).map(str::to_lowercase).collect())
+                .unwrap_or_default();
+            return Kind::Path { save: ui == "save_path", extensions };
+        }
         _ => {}
     }
     match ty {
@@ -410,7 +427,7 @@ pub fn fits(kind: &Kind, v: &Value) -> bool {
         Kind::Number { .. } => v.is_number(),
         Kind::Boolean => v.is_boolean(),
         Kind::Choice { values, .. } => v.as_str().is_some_and(|s| values.iter().any(|x| x == s)),
-        Kind::Text | Kind::Material => v.is_string(),
+        Kind::Text | Kind::Material | Kind::Path { .. } => v.is_string(),
         Kind::Element { .. } | Kind::Level | Kind::View | Kind::Type { .. } => v.is_u64(),
         Kind::Elements { .. } => v.as_array().is_some_and(|ids| ids.iter().all(Value::is_u64)),
         Kind::Point => v.as_array().is_some_and(|p| p.len() == 2 && p.iter().all(Value::is_number)),
@@ -445,7 +462,7 @@ fn texts_of(kind: &Kind, v: &Value, fmt: &Fmt) -> [String; 2] {
     match kind {
         Kind::Number { length: true, .. } => [length(Some(v)), String::new()],
         Kind::Number { .. } => [number_text(v, fmt.comma), String::new()],
-        Kind::Text => [v.as_str().unwrap_or_default().to_string(), String::new()],
+        Kind::Text | Kind::Path { .. } => [v.as_str().unwrap_or_default().to_string(), String::new()],
         Kind::Point => [length(v.get(0)), length(v.get(1))],
         Kind::Json { .. } => [serde_json::to_string_pretty(v).unwrap_or_default(), String::new()],
         _ => Default::default(),
@@ -471,6 +488,7 @@ fn parse(kind: &Kind, texts: &[String; 2], fmt: &Fmt) -> Result<Option<Value>, P
             Ok(Some(json!(v as i64)))
         }
         Kind::Text => Ok((!texts[0].is_empty()).then(|| json!(texts[0]))),
+        Kind::Path { .. } => Ok((!first.is_empty()).then(|| json!(first))),
         Kind::Point => {
             let second = texts[1].trim();
             if first.is_empty() && second.is_empty() {
@@ -773,12 +791,24 @@ fn choices(state: &mut AppState, kind: &Kind) -> Vec<(Value, String)> {
 /// parameters runs at once, the dialog showing only what it printed or
 /// returned (or its error).
 pub fn open(state: &mut AppState, command: &str) {
+    open_prefilled(state, command, Map::new());
+}
+
+/// [`open`] with the fields named in `prefill` set to its values (a path
+/// chosen for an exporter or importer). A command whose only parameters
+/// are the prefilled ones runs at once.
+pub fn open_prefilled(state: &mut AppState, command: &str, prefill: Map<String, Value>) {
     let Some(info) = state.session.describe(command) else {
         state.message = t!("pform-unknown", "name" => command);
         return;
     };
     let fmt = Fmt::current();
     let mut fields = fields(&info.input_schema, &fmt);
+    for field in &mut fields {
+        if let Some(v) = prefill.get(&field.name).filter(|v| fits(&field.kind, v)) {
+            field.set_value(v.clone(), &fmt);
+        }
+    }
     // Element lists start from the selection.
     for field in &mut fields {
         if let Kind::Elements { category } = &field.kind {
@@ -805,9 +835,14 @@ pub fn open(state: &mut AppState, command: &str) {
         picking: None,
         revision: None,
     };
-    let no_parameters = info.input_schema.get("properties").and_then(Value::as_object).is_none_or(Map::is_empty);
-    if no_parameters && !run(state, &mut form, json!({})) {
-        return;
+    let others = info.input_schema.get("properties").and_then(Value::as_object).is_some_and(|props| {
+        props.keys().any(|name| !form.fields.iter().any(|f| f.name == *name && f.touched && prefill.contains_key(name)))
+    });
+    if !others {
+        let args = args(&form.fields).unwrap_or_else(|| json!({}));
+        if !run(state, &mut form, args) {
+            return;
+        }
     }
     state.dialogs.plugin_form = Some(form);
 }
@@ -1093,6 +1128,7 @@ fn value_cell(ui: &mut Ui, state: &AppState, field: &mut Field, fmt: &Fmt) -> bo
         Kind::Element { category } => return element_cell(ui, state, field, category.as_deref(), fmt),
         Kind::Elements { category } => elements_cell(ui, state, field, category.as_deref(), fmt),
         Kind::Point => return point_cell(ui, state, field, fmt),
+        Kind::Path { save, extensions } => path_cell(ui, field, save, &extensions, fmt),
         Kind::Json { .. } => {
             ui.add_space(4.0);
             ui.label(RichText::new(t!("pform-json")).color(PALETTE.text_faint));
@@ -1285,6 +1321,61 @@ fn point_cell(ui: &mut Ui, state: &AppState, field: &mut Field, fmt: &Fmt) -> bo
     text_field(ui, field, 0, Some(w), &format!("{name} x"), Some("x".into()), fmt);
     text_field(ui, field, 1, Some(w), &format!("{name} y"), Some("y".into()), fmt);
     pick_button(ui, why.as_deref(), t!("pform-pick-tip-point"))
+}
+
+/// A file path: the path typed, and Browse… to choose it in the save or
+/// open dialog.
+fn path_cell(ui: &mut Ui, field: &mut Field, save: bool, extensions: &[String], fmt: &Fmt) {
+    let browse = t!("pform-browse");
+    let w = (ui.available_width() - button_width(ui, &browse) - 2.0 * ui.spacing().item_spacing.x).max(24.0);
+    let hint = if field.required { t!("pform-required-hint") } else { t!("pform-default") };
+    let name = field.label.clone();
+    text_field(ui, field, 0, Some(w), &name, Some(hint), fmt);
+    if ui.button(browse).on_hover_text(t!("pform-browse-tip")).clicked()
+        && let Some(path) = choose_path(save, extensions, None, field.texts[0].trim())
+    {
+        field.set_value(json!(path.to_string_lossy()), fmt);
+    }
+}
+
+/// The app's save (`save`) or open dialog for a file of one of
+/// `extensions` (any when empty), the filter named `filter` (else the
+/// extensions), starting at `current` when it is a path. A saved path
+/// without an extension gets the first one.
+pub(crate) fn choose_path(
+    save: bool,
+    extensions: &[String],
+    filter: Option<&str>,
+    current: &str,
+) -> Option<std::path::PathBuf> {
+    let mut dialog = rfd::FileDialog::new();
+    if !extensions.is_empty() {
+        let list = extensions.iter().map(|e| format!("*.{e}")).collect::<Vec<_>>().join(", ");
+        let name = match filter {
+            Some(f) => f.to_string(),
+            None => t!("plug-file-filter", "extensions" => list),
+        };
+        dialog = dialog.add_filter(name, extensions);
+    }
+    let current = std::path::Path::new(current);
+    if !current.as_os_str().is_empty() {
+        if let Some(dir) = current.parent().filter(|d| d.is_dir()) {
+            dialog = dialog.set_directory(dir);
+        }
+        if let Some(name) = current.file_name() {
+            dialog = dialog.set_file_name(name.to_string_lossy());
+        }
+    }
+    if !save {
+        return dialog.pick_file();
+    }
+    let mut path = dialog.save_file()?;
+    if path.extension().is_none()
+        && let Some(first) = extensions.first()
+    {
+        path.set_extension(first);
+    }
+    Some(path)
 }
 
 /// A JSON field's editor, under its row, with what is wrong with it.

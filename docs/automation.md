@@ -671,7 +671,8 @@ ccad.command {
 
 - `run` gets the arguments as a table and returns the command's result (a table, a value or nothing). Missing `required` arguments are refused before it runs; `error("message", 0)` fails the command with that message.
 - **One undo step:** however many commands a plugin command runs, it is undone at once, and when it fails (an error, a failed `ccad.run`, a limit reached) everything it did is undone.
-- **What a command may run:** a `query` command only queries; an `edit` command queries and edits; commands that read or write files (import, export, save) need the `files` permission (without it, edit commands that read a file a parameter names, such as `cad_import` or `fill_pattern_import` with a `path`, refuse the path; their inline forms, such as `fill_pattern_import` with `text`, still work), and a command of kind `file` can only be declared with it. Opening or creating a project, `undo`, `redo` and `language_set` cannot run inside a plugin command, nor can another plugin's command.
+- **What a command may run:** a `query` command only queries; an `edit` command queries and edits; commands that read or write files (import, export, save) need the `files` permission (without it, edit commands that read a file a parameter names, such as `cad_import` or `fill_pattern_import` with a `path`, refuse the path; their inline forms, such as `fill_pattern_import` with `text`, still work), and a command of kind `file` can only be declared with it. Without `files`, a command still works with the files its arguments name in `save_path` and `open_path` parameters ([API 2](#files-without-the-files-permission)). Opening or creating a project, `undo`, `redo` and `language_set` cannot run inside a plugin command, nor can another plugin's command.
+- **These rules hold for everything a command runs:** the engine checks every command run while a plugin command runs (its scope), also the nodes of a graph it runs with `graph_run`; a graph's `plugin_data_set` node for another plugin's id is refused like a direct `ccad.run`. Lua scripts the user runs (`ccad lua`) are not restricted.
 - **The sandbox** is that of [Lua scripts](#lua-scripts), with the budget counted per command; each plugin has its own Lua state, which keeps its variables between commands. `require("a.b")` loads `a/b.lua` from the plugin's folder (once; files outside the folder are refused), and `ccad.plugin` holds its `id`, `name` and `version`. `ccad.run` works only while a command runs, not while the plugin loads.
 - **Permissions** are granted by whoever loads the plugin: `ccad --plugins` grants what the manifest asks for, since you named the folder.
 
@@ -753,8 +754,10 @@ A text that is exactly `%key%` is looked up when it is shown, in the current lan
 | `view` | `integer` | a view id |
 | `type` | `integer` | a type id (`category` narrows it) |
 | `material` | `string` | a material name |
+| `save_path` | `string` | a file to write (the app's save dialog); the command may write it |
+| `open_path` | `string` | a file to read (the app's open dialog); the command may read it |
 
-`category` (a category name) goes only with `element`, `elements` and `type`; `enum_labels` gives a label to each value of `enum` (as many strings); `title` is a short name for the parameter.
+`category` (a category name) goes only with `element`, `elements` and `type`; `extensions` (1 to 16 lowercase extensions of 1 to 16 letters or digits, without the dot, such as `{ "idf", "epw" }`) only with `save_path` and `open_path`; `enum_labels` gives a label to each value of `enum` (as many strings); `title` is a short name for the parameter.
 
 ```lua
 params = { properties = {
@@ -773,6 +776,34 @@ params = { properties = {
 | `ccad.data.list()` | `{ project = true/false, elements = { ids… } }` |
 
 `ccad.data.set` is an edit, so a `query` command cannot call it, and it is part of the command's one undo step. A plugin command reaches only its own data: running a `plugin_data_*` command through `ccad.run` or `ccad.try` with another plugin's id is refused (`a plugin reads and writes only its own data`). Lua scripts the user runs (`ccad lua`) reach any plugin's data.
+
+#### Files without the `files` permission
+
+A command that writes or reads a file the user chooses does not need the `files` permission: it takes the path in a `save_path` (to write) or `open_path` (to read) parameter, and while it runs, that path, and only it, is granted:
+
+- **Before it runs**, each top-level `save_path`/`open_path` argument is checked: a string, not empty, with one of the parameter's `extensions` when it lists them (in any case: `MODEL.IDF` is an `idf`), a file to read that exists, a file to write in a folder that exists. A path that fails is refused (`invalid_arguments`) and the command does not run. Paths are compared as files, not as text: `a/../model.idf` and the absolute path of `model.idf` are the same file.
+- **`ccad.file.read(path)`** returns the bytes of a granted `open_path` file as a Lua string (at most 64 MiB). **`ccad.file.write(path, data)`** writes a granted `save_path` file; `data` is a string or a list of strings, joined (for large outputs, build a list rather than one long string). A command writes at most 256 MiB in all. The direction is checked: a `save_path` file cannot be read, nor an `open_path` one written, and any other path is refused (`rejected`). `ccad.file` exists only in plugins, and works only while a command runs.
+- **Writes are kept until the command succeeds:** what `ccad.file.write` gives is held in memory and written only when the command ends without error, each file to a temporary file in its folder, then renamed over the target. A command that fails leaves no file and no partial file, and an existing file unchanged.
+- **The engine's own exports** work with the granted path too: a command may run `ifc_export`, `view_export`, `sheet_export`, `schedule_export_csv`, `analytical_export`, `view_render`, `component_save`, `fill_pattern_export` or `pipe_series_export` with its granted `save_path`, and imports such as `cad_import` with its `open_path`; with another path they are refused, and other file commands (`project_save`, `ifc_import`…) still need `files`. A file an engine command wrote stays even if the plugin command fails afterwards (only its model changes are undone).
+- A plugin with the `files` permission works with any file, as before; `ccad.file` still reads and writes only the granted paths.
+
+From the command line and MCP the path is an ordinary argument: `ccad --plugins ~/plugins run energy__export_idf path=model.idf`.
+
+#### Exporters and importers
+
+A plugin can add entries to the app's Export and Import lists:
+
+```toml
+[[exporters]]                    # at most 16
+command = "export_idf"           # a command with exactly one ui = "save_path" parameter
+label = "%export.idf%"           # e.g. "EnergyPlus model (.idf)"; at most 64 characters
+
+[[importers]]                    # at most 16
+command = "import_weather"       # a command with exactly one ui = "open_path" parameter
+label = "%import.epw%"
+```
+
+The file types come from the parameter's `extensions`. An entry whose command `main.lua` does not register, or whose command has no such parameter or more than one, is a load error; both need `api = 2`. In the app, clicking the entry opens the save (exporter) or open (importer) dialog for those extensions, then the command's form with the chosen path (or runs the command at once when the path is its only parameter). `ccad plugins` lists them (`exporters`, `importers`: command, label, parameter and extensions).
 
 Plugins are shared through the community index, [constructcraft-plugins](https://github.com/francisreboucas/constructcraft-plugins): one entry per plugin, with where to download each version and its checksum, submitted by pull request. In the app, *Manage → Plugins* installs, updates, turns off and removes plugins ([Plugins](interface.md#plugins)); without it, `ccad plugins install <file.zip> <folder>` installs a downloaded archive (checked the same way: safe paths, sizes, and a plugin that loads) and `ccad plugins remove <id> <folder>` removes one.
 

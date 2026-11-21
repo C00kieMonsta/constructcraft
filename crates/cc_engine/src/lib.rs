@@ -17,6 +17,7 @@ mod defaults;
 pub mod dimensions;
 mod error;
 pub mod extension;
+pub mod files;
 pub mod gltf;
 pub mod graph;
 pub mod i18n;
@@ -80,6 +81,7 @@ pub use defaults::{
 };
 pub use error::{EngineError, ErrorCode, Result};
 pub use extension::Extension;
+pub use files::{FileAccess, Grants, PluginScope};
 pub use refs::{Ref, category_name};
-pub use registry::{Command, CommandInfo, CommandKind, catalog, command_kind, describe};
+pub use registry::{Command, CommandInfo, CommandKind, catalog, checks_paths, command_kind, describe};
 pub use session::{Session, new_project, new_project_with};

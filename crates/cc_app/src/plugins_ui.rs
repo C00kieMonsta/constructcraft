@@ -1,7 +1,9 @@
 //! Plugins in the app: loading the plugins of the plugins folder into the
 //! session (their commands join the engine's catalog, the palette and the
-//! ribbon's *Plugin Commands* menu, and their buttons make the ribbon's
-//! Plugins tab, see [`unavailable`] for their `when`) and the Plugins window,
+//! ribbon's *Plugin Commands* menu, their buttons make the ribbon's
+//! Plugins tab, see [`unavailable`] for their `when`, and their exporters
+//! and importers join the ribbon's Export and Import groups, see
+//! [`run_file_entry`]) and the Plugins window,
 //! which turns them on and off, grants the `files` permission, edits their
 //! settings, removes them, and installs and updates them from the community
 //! index.
@@ -81,6 +83,15 @@ pub struct RibbonButton {
     pub button: cc_plugins::Button,
 }
 
+/// A loaded plugin's exporter or importer, for the ribbon's Export and
+/// Import groups.
+#[derive(Debug, Clone)]
+pub struct FileEntry {
+    /// The plugin's name, in the current language (the tooltip).
+    pub plugin: String,
+    pub action: cc_plugins::FileAction,
+}
+
 /// The settings of the plugin picked in the window, being edited.
 #[derive(Debug)]
 struct SettingsEdit {
@@ -123,6 +134,10 @@ pub struct Plugins {
     loaded_from: Option<PathBuf>,
     /// The loaded plugins' ribbon buttons, in load order then manifest order.
     pub buttons: Vec<RibbonButton>,
+    /// The loaded plugins' exporters and importers, in load order then
+    /// manifest order.
+    pub exporters: Vec<FileEntry>,
+    pub importers: Vec<FileEntry>,
     /// The titles of the loaded plugins' commands, by full name.
     titles: HashMap<String, String>,
     /// The settings being edited in the window.
@@ -215,6 +230,7 @@ pub fn load(state: &mut AppState) {
     // What the ribbon and the forms show, read before the host goes into
     // the session (which keeps it as an engine extension).
     let mut buttons = Vec::new();
+    let (mut exporters, mut importers) = (Vec::new(), Vec::new());
     let mut titles = HashMap::new();
     for plugin in host.plugins() {
         let descriptions: HashMap<String, String> = plugin.commands().map(|c| (c.name, c.description)).collect();
@@ -224,6 +240,9 @@ pub fn load(state: &mut AppState) {
             }
         }
         let name = plugin.display_name();
+        let entry = |action| FileEntry { plugin: name.clone(), action };
+        exporters.extend(plugin.exporters().into_iter().map(entry));
+        importers.extend(plugin.importers().into_iter().map(entry));
         for button in plugin.buttons() {
             buttons.push(RibbonButton {
                 plugin_id: plugin.manifest.id.clone(),
@@ -236,6 +255,8 @@ pub fn load(state: &mut AppState) {
     state.session.set_extension(Some(Box::new(host)));
     state.plugins.listed = listed;
     state.plugins.buttons = buttons;
+    state.plugins.exporters = exporters;
+    state.plugins.importers = importers;
     state.plugins.titles = titles;
     state.plugins.settings = None;
     state.plugins.loaded_from = state.prefs.plugins_dir();
@@ -282,6 +303,28 @@ pub fn unavailable(state: &AppState, when: &[When]) -> Option<String> {
         });
     }
     None
+}
+
+/// A plugin's exporter (`save`) or importer was clicked: the save or open
+/// dialog for its extensions first, then its command's form with the path
+/// chosen (or the command at once, when the path is its only parameter).
+pub fn run_file_entry(state: &mut AppState, entry: &FileEntry, save: bool) {
+    let action = &entry.action;
+    let start = match (save, action.extensions.first()) {
+        (true, Some(ext)) => format!("{}.{ext}", state.project().info.name),
+        _ => String::new(),
+    };
+    let Some(path) = crate::plugin_form::choose_path(save, &action.extensions, Some(&action.label), &start) else {
+        return;
+    };
+    open_file_entry(state, entry, &path);
+}
+
+/// The form of an exporter's or importer's command with `path` set.
+pub fn open_file_entry(state: &mut AppState, entry: &FileEntry, path: &std::path::Path) {
+    let mut prefill = Map::new();
+    prefill.insert(entry.action.param.clone(), json!(path.to_string_lossy()));
+    crate::plugin_form::open_prefilled(state, &entry.action.command, prefill);
 }
 
 /// The name a `view:<kind>` term gives a view category.

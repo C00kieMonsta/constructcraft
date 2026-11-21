@@ -6,7 +6,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod api2;
+mod files;
 mod lua;
+mod scope;
 mod store;
 
 /// Every `.rs` file of `tests/` is declared above, so none is skipped.

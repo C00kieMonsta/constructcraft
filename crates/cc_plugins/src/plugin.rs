@@ -29,6 +29,14 @@
 //! ui = "length"            # numbers only
 //! minimum = 0.5            # numbers and integers; also maximum
 //! # enum = ["a", "b"] and enum_labels = […] for strings
+//!
+//! [[exporters]]            # api 2: an entry of the app's Export list (at most 16)
+//! command = "export_idf"   # a command with exactly one ui = "save_path" parameter
+//! label = "%export.idf%"   # at most 64 characters, may be "%key%"
+//!
+//! [[importers]]            # api 2: an entry of the app's Import list (at most 16)
+//! command = "import_epw"   # a command with exactly one ui = "open_path" parameter
+//! label = "EnergyPlus weather (.epw)"
 //! ```
 //!
 //! `main.lua` registers commands with `ccad.command { name, title,
@@ -52,25 +60,41 @@
 //!   up in the current language each time they are listed;
 //! - UI hints on command parameters, checked when a command registers: `ui`
 //!   (`length` on a number, `element`/`level`/`view`/`type` on an integer,
-//!   `elements`/`point` on an array, `material` on a string), `category`
-//!   (with `element`, `elements` or `type`), `enum_labels` (one per `enum`
-//!   value) and `title`.
+//!   `elements`/`point` on an array, `material`, `save_path` and
+//!   `open_path` on a string), `category` (with `element`, `elements` or
+//!   `type`), `extensions` (with `save_path` or `open_path`), `enum_labels`
+//!   (one per `enum` value) and `title`;
+//! - files without the `files` permission: the path a command's
+//!   `save_path` argument names may be written, and an `open_path` one read,
+//!   during that run only (by `ccad.file` or by the engine's own exports and
+//!   imports), after its extension is checked against `extensions`; see
+//!   [`cc_engine::files`]. Files `ccad.file.write` writes are kept in memory
+//!   and written (each to a temporary file renamed into place) only when the
+//!   command succeeds; a file an engine command (`ifc_export`…) wrote during
+//!   a command that then fails stays.
+//!
+//! Every command a plugin command runs, also through `graph_run`, scripts
+//! or macros, is checked by the engine against the command's
+//! [`cc_engine::PluginScope`]: only its own plugin data, no `project_new`,
+//! `project_open`, `undo`, `redo` or `language_set`, no edits from a query
+//! command, and only its granted files (all files with `files`).
 //!
 //! Settings are kept per plugin in `<plugins folder>/.settings/<id>.json`
 //! ([`crate::store::read_settings`]), read by [`PluginHost::load_folder`];
 //! a plugin loaded from its own folder (not a folder of plugins) starts
 //! with the defaults.
 
-use crate::api::{API_VERSION, Access, Api, engine_error};
+use crate::api::FileRun;
+use crate::api::{API_VERSION, Api, engine_error};
 use crate::contributions::{
-    Button, ButtonSize, ButtonSpec, MAX_BUTTONS, MAX_ICON, MAX_SETTINGS, Setting, SettingSpec, When, check_param_hints,
-    current_values, resolve_schema, settings_json,
+    Button, ButtonSize, ButtonSpec, FileAction, FileActionSpec, MAX_BUTTONS, MAX_FILE_ACTIONS, MAX_ICON, MAX_SETTINGS,
+    Setting, SettingSpec, When, check_param_hints, current_values, path_params, resolve_schema, settings_json,
 };
 use crate::convert::{from_lua, to_lua};
 use crate::locales::Locales;
 use crate::sandbox::{Limits, Sandbox};
 use cc_engine::extension::SEPARATOR;
-use cc_engine::{CommandInfo, CommandKind, EngineError, Extension, Session};
+use cc_engine::{CommandInfo, CommandKind, EngineError, Extension, FileAccess, Grants, PluginScope, Session};
 use mlua::{Function, Lua, Table, Value as LuaValue};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value, json};
@@ -122,6 +146,12 @@ pub struct Manifest {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub settings: Vec<(String, SettingSpec)>,
+    /// Entries of the app's Export list (api 2).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exporters: Vec<FileActionSpec>,
+    /// Entries of the app's Import list (api 2).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub importers: Vec<FileActionSpec>,
 }
 
 /// The `[settings.*]` tables in the order the manifest writes them.
@@ -237,6 +267,17 @@ impl Manifest {
             return Err(format!("at most {MAX_SETTINGS} settings"));
         }
         self.setting_list()?;
+        for (key, list) in [("exporters", &self.exporters), ("importers", &self.importers)] {
+            if self.api < 2 && !list.is_empty() {
+                return Err(format!("{key} need api = 2"));
+            }
+            if list.len() > MAX_FILE_ACTIONS {
+                return Err(format!("at most {MAX_FILE_ACTIONS} {key}"));
+            }
+            for (i, a) in list.iter().enumerate() {
+                a.check().map_err(|e| format!("{key}[{}]: {e}", i + 1))?;
+            }
+        }
         Ok(())
     }
 
@@ -340,6 +381,15 @@ struct ButtonDef {
     when: Vec<When>,
 }
 
+/// An exporter or importer of the manifest, checked against its command.
+#[derive(Debug, Clone)]
+struct FileActionDef {
+    command: String,
+    label: String,
+    param: String,
+    extensions: Vec<String>,
+}
+
 /// A loaded plugin.
 pub struct Plugin {
     pub manifest: Manifest,
@@ -353,6 +403,8 @@ pub struct Plugin {
     buttons: Vec<ButtonDef>,
     /// Its settings, text as written.
     settings: Vec<Setting>,
+    exporters: Vec<FileActionDef>,
+    importers: Vec<FileActionDef>,
     /// The current value of each setting.
     values: Map<String, Value>,
     /// The metatable of `ccad.settings`, whose `__index` holds the values.
@@ -428,6 +480,8 @@ impl Plugin {
         if let Some(b) = buttons.iter().find(|b| !commands.iter().any(|c| c.short == b.command)) {
             return Err(fail(format!("a button runs the command \"{}\", which main.lua does not register", b.command)));
         }
+        let exporters = file_actions(&manifest.exporters, &commands, "exporters", "save_path").map_err(fail)?;
+        let importers = file_actions(&manifest.importers, &commands, "importers", "open_path").map_err(fail)?;
         let printed = sandbox.take_output();
         Ok(Plugin {
             manifest,
@@ -439,6 +493,8 @@ impl Plugin {
             locales,
             buttons,
             settings,
+            exporters,
+            importers,
             values,
             settings_meta,
             printed,
@@ -518,6 +574,27 @@ impl Plugin {
             .collect()
     }
 
+    /// Its exporters (the app's Export list), labels in the current language.
+    pub fn exporters(&self) -> Vec<FileAction> {
+        self.file_actions(&self.exporters)
+    }
+
+    /// Its importers (the app's Import list), labels in the current language.
+    pub fn importers(&self) -> Vec<FileAction> {
+        self.file_actions(&self.importers)
+    }
+
+    fn file_actions(&self, list: &[FileActionDef]) -> Vec<FileAction> {
+        list.iter()
+            .map(|a| FileAction {
+                command: format!("{}{SEPARATOR}{}", self.manifest.id, a.command),
+                label: self.resolve(&a.label),
+                param: a.param.clone(),
+                extensions: a.extensions.clone(),
+            })
+            .collect()
+    }
+
     /// Its settings, text in the current language.
     pub fn settings(&self) -> Vec<Setting> {
         self.settings.iter().map(|s| s.resolved(|t| self.resolve(t))).collect()
@@ -561,19 +638,96 @@ impl Plugin {
         if let Some(missing) = command.required.iter().find(|k| args.get(k.as_str()).is_none()) {
             return Some(Err(EngineError::invalid(format!("{name}: missing field `{missing}`"))));
         }
-        let access =
-            Access { edits: kind != CommandKind::Query, files: self.granted.files, history: false, language: false };
+        let grants = match grants(&name, &command.info.input_schema, &args) {
+            Ok(g) => g,
+            Err(e) => return Some(Err(e)),
+        };
+        let scope = PluginScope {
+            plugin: self.manifest.id.clone(),
+            edits: kind != CommandKind::Query,
+            files: if self.granted.files { FileAccess::All } else { FileAccess::Granted(grants.clone()) },
+        };
         let func = command.func.clone();
         if let Err(e) = fill_settings(&self.sandbox.lua, &self.settings_meta, &self.values) {
             return Some(Err(engine_error(&e)));
         }
         self.sandbox.reset_budget();
-        let result = self.api.with_session(&self.sandbox.lua, session, access, |lua| {
-            let out: LuaValue = func.call(to_lua(lua, &args)?)?;
-            from_lua(lua, &out).map_err(|e| mlua::Error::runtime(format!("{name}: the result: {e}")))
+        let files = RefCell::new(FileRun::new(grants));
+        let (lua, api) = (&self.sandbox.lua, &self.api);
+        let result = session.with_plugin_scope(scope, |session| {
+            api.with_session(lua, session, Some(&files), |lua| {
+                let out: LuaValue = func.call(to_lua(lua, &args)?)?;
+                from_lua(lua, &out).map_err(|e| mlua::Error::runtime(format!("{name}: the result: {e}")))
+            })
         });
-        Some(result.map_err(|e| engine_error(&e)))
+        // What it wrote with ccad.file reaches the disk only when it succeeded.
+        Some(result.map_err(|e| engine_error(&e)).and_then(|out| files.into_inner().commit().map(|()| out)))
     }
+}
+
+/// The files the top-level path arguments of the command `name` (whose
+/// parameters are `schema`) grant: a `save_path` one to write, an
+/// `open_path` one to read. Refused before the command runs: a path that is
+/// not a string, is empty, has an extension its `extensions` do not list, or
+/// cannot be resolved (a file to read that does not exist, a file to write in
+/// a folder that does not exist).
+fn grants(name: &str, schema: &Value, args: &Value) -> Result<Grants, EngineError> {
+    let mut grants = Grants::new();
+    for (param, ui, extensions) in path_params(schema) {
+        let Some(value) = args.get(&param) else { continue };
+        let bad = |m: String| EngineError::invalid(format!("{name}: `{param}`: {m}"));
+        let text = value.as_str().ok_or_else(|| bad("a path, as a string".into()))?;
+        if text.trim().is_empty() {
+            return Err(bad("an empty path".into()));
+        }
+        let path = Path::new(text);
+        if !extensions.is_empty() {
+            let ext = cc_engine::files::extension_of(path);
+            if !extensions.contains(&ext) {
+                return Err(bad(format!("{text}: the file must be .{}", extensions.join(", ."))));
+            }
+        }
+        if ui == "save_path" {
+            grants.grant_write(path).map_err(bad)?;
+        } else {
+            grants.grant_read(path).map_err(bad)?;
+        }
+    }
+    Ok(grants)
+}
+
+/// The manifest's exporters or importers (`key`), checked against the
+/// commands: each needs exactly one parameter with `ui` = `ui`.
+fn file_actions(
+    list: &[FileActionSpec],
+    commands: &[PluginCommand],
+    key: &str,
+    ui: &str,
+) -> Result<Vec<FileActionDef>, String> {
+    list.iter()
+        .enumerate()
+        .map(|(i, a)| {
+            let err = |m: String| format!("{key}[{}]: {m}", i + 1);
+            let c = commands
+                .iter()
+                .find(|c| c.short == a.command)
+                .ok_or_else(|| err(format!("the command \"{}\", which main.lua does not register", a.command)))?;
+            let params: Vec<_> = path_params(&c.info.input_schema).into_iter().filter(|(_, u, _)| u == ui).collect();
+            match params.as_slice() {
+                [(param, _, extensions)] => Ok(FileActionDef {
+                    command: a.command.clone(),
+                    label: a.label.clone(),
+                    param: param.clone(),
+                    extensions: extensions.clone(),
+                }),
+                _ => Err(err(format!(
+                    "the command \"{}\" needs exactly one parameter with ui = \"{ui}\" (it has {})",
+                    a.command,
+                    params.len()
+                ))),
+            }
+        })
+        .collect()
 }
 
 /// The manifest's buttons, checked against the plugin's folder (icons).
@@ -618,7 +772,7 @@ fn setup(
     values: &Map<String, Value>,
 ) -> mlua::Result<(Api, Vec<PluginCommand>, Table)> {
     let lua = &sandbox.lua;
-    let api = Api::install_for_plugin(lua, &manifest.id)?;
+    let api = Api::install_for_plugin(lua)?;
     let plugin = lua.create_table()?;
     plugin.raw_set("id", manifest.id.as_str())?;
     plugin.raw_set("name", manifest.name.as_str())?;
@@ -922,6 +1076,8 @@ impl PluginHost {
                         "commands": commands,
                         "buttons": p.buttons(),
                         "settings": settings,
+                        "exporters": p.exporters(),
+                        "importers": p.importers(),
                     })
                 })
                 .collect(),

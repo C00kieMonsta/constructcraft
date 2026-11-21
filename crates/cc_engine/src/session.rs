@@ -35,9 +35,12 @@ pub struct Session {
     extension: Option<Box<dyn crate::Extension>>,
     /// How many commands are running (a plugin command runs others).
     nesting: u32,
-    /// Whether the commands running may work with files (see
+    /// The files the commands running may read and write (see
     /// [`Session::with_files`]).
-    files: bool,
+    files: crate::FileAccess,
+    /// The scopes of the plugin commands running, outermost first (see
+    /// [`Session::with_plugin_scope`]).
+    scopes: Vec<crate::PluginScope>,
 }
 
 /// What a view's own geometry depends on: its phase (an index, when it
@@ -88,7 +91,8 @@ impl Session {
             temporary_revision: 0,
             extension: None,
             nesting: 0,
-            files: true,
+            files: crate::FileAccess::All,
+            scopes: Vec::new(),
         }
     }
 
@@ -104,11 +108,13 @@ impl Session {
     pub fn replace(&mut self, doc: Document) {
         let extension = self.extension.take();
         let nesting = self.nesting;
-        let files = self.files;
+        let files = std::mem::take(&mut self.files);
+        let scopes = std::mem::take(&mut self.scopes);
         *self = Self::new(doc);
         self.extension = extension;
         self.nesting = nesting;
         self.files = files;
+        self.scopes = scopes;
     }
 
     pub fn project(&self) -> &Project {
@@ -489,33 +495,123 @@ impl Session {
         self.nesting > 0
     }
 
-    /// Whether the commands running may read and write files: true unless a
-    /// caller without file access (a plugin without the `files` permission,
-    /// a graph run without `allow_files`) runs them.
+    /// Whether the commands running may read and write any file: true unless
+    /// a caller with less access (a plugin without the `files` permission, a
+    /// graph run without `allow_files`) runs them.
     pub fn files_allowed(&self) -> bool {
-        self.files
+        self.files.is_all()
     }
 
-    /// Run `f` with file access narrowed to `allowed` (it is never widened:
-    /// a caller without files cannot give them to what it runs).
-    pub fn with_files<R>(&mut self, allowed: bool, f: impl FnOnce(&mut Session) -> R) -> R {
-        let outer = self.files;
-        self.files = outer && allowed;
-        let result = f(self);
-        self.files = outer;
-        result
+    /// The files the commands running may read and write.
+    pub fn file_access(&self) -> &crate::FileAccess {
+        &self.files
     }
 
-    /// Refuse a file path given to a command (in its parameter `param`) when
-    /// the commands running may not work with files.
-    pub fn require_files(&self, param: &str) -> Result<()> {
-        if self.files {
-            Ok(())
-        } else {
-            Err(EngineError::rejected(format!(
+    /// Run `f` with file access narrowed to `access` (it is never widened: a
+    /// caller without files cannot give them to what it runs). The access is
+    /// restored however `f` ends.
+    pub fn with_files<R>(&mut self, access: crate::FileAccess, f: impl FnOnce(&mut Session) -> R) -> R {
+        let outer = self.files.clone();
+        self.files = outer.narrow(&access);
+        let scopes = self.scopes.len();
+        self.restoring(outer, scopes, f)
+    }
+
+    /// Run `f` (a plugin command) in `scope`: every command executed during
+    /// it, also by graphs, scripts or macros it starts, may touch only the
+    /// plugin's own data, may not replace the document, move in its history
+    /// or change the language, may edit only when `scope.edits`, and works
+    /// with the files `scope.files` allows. Scopes nest (each one holds) and
+    /// are restored however `f` ends.
+    pub fn with_plugin_scope<R>(&mut self, scope: crate::PluginScope, f: impl FnOnce(&mut Session) -> R) -> R {
+        let outer = self.files.clone();
+        self.files = outer.narrow(&scope.files);
+        let scopes = self.scopes.len();
+        self.scopes.push(scope);
+        self.restoring(outer, scopes, f)
+    }
+
+    /// The scope of the plugin command running (the innermost), if any.
+    pub fn plugin_scope(&self) -> Option<&crate::PluginScope> {
+        self.scopes.last()
+    }
+
+    /// Run `f`, then put back the file access `files` and the first `scopes`
+    /// scopes, also when `f` panics (the panic goes on).
+    fn restoring<R>(&mut self, files: crate::FileAccess, scopes: usize, f: impl FnOnce(&mut Session) -> R) -> R {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)));
+        self.files = files;
+        self.scopes.truncate(scopes);
+        match result {
+            Ok(r) => r,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    }
+
+    /// Refuse reading the file `path` given to a command (in its parameter
+    /// `param`) when the commands running may not read it.
+    pub fn require_read(&self, param: &str, path: &std::path::Path) -> Result<()> {
+        if self.files.may_read(path) { Ok(()) } else { Err(self.file_refused(param, path, "read")) }
+    }
+
+    /// Refuse writing the file `path` given to a command (in its parameter
+    /// `param`) when the commands running may not write it.
+    pub fn require_write(&self, param: &str, path: &std::path::Path) -> Result<()> {
+        if self.files.may_write(path) { Ok(()) } else { Err(self.file_refused(param, path, "write")) }
+    }
+
+    fn file_refused(&self, param: &str, path: &std::path::Path, verb: &str) -> EngineError {
+        match &self.files {
+            crate::FileAccess::Granted(_) => EngineError::rejected(format!(
+                "`{param}` ({}): this plugin command may not {verb} that file (without the \"files\" permission a \
+                 plugin works only with the files given in its save_path and open_path parameters)",
+                path.display()
+            )),
+            _ => EngineError::rejected(format!(
                 "`{param}` names a file, and this run may not work with files (a plugin needs the \"files\" \
                  permission, a graph `allow_files`)"
-            )))
+            )),
+        }
+    }
+
+    /// Why `name` may not run now, in the scopes of the plugin commands
+    /// running and with the file access of the run.
+    fn refusal(&self, name: &str, args: &Value) -> Option<EngineError> {
+        let kind = self.kind_of(name);
+        for scope in &self.scopes {
+            // A plugin command is one undo step of this document, in the
+            // user's language.
+            if matches!(name, "project_new" | "project_open" | "undo" | "redo" | "language_set") {
+                return Some(EngineError::rejected(format!("{name} cannot run inside a plugin command")));
+            }
+            if name.starts_with("plugin_data_") && args.get("plugin").and_then(Value::as_str) != Some(&scope.plugin) {
+                return Some(EngineError::rejected(format!(
+                    "{name}: a plugin reads and writes only its own data (plugin = \"{}\")",
+                    scope.plugin
+                )));
+            }
+            if !scope.edits && kind == Some(crate::CommandKind::Edit) {
+                return Some(EngineError::rejected(format!(
+                    "{name} changes the model, which a query command may not do"
+                )));
+            }
+        }
+        if kind != Some(crate::CommandKind::File) {
+            return None;
+        }
+        match &self.files {
+            crate::FileAccess::All => None,
+            crate::FileAccess::None => Some(EngineError::rejected(format!(
+                "{name} works with files, and this run may not (a plugin needs the \"files\" permission, a graph \
+                 `allow_files`)"
+            ))),
+            // A command that checks each path it touches may work with the
+            // granted ones.
+            crate::FileAccess::Granted(_) if crate::registry::checks_paths(name) => None,
+            crate::FileAccess::Granted(_) => Some(EngineError::rejected(format!(
+                "{name} works with files: a plugin without the \"files\" permission runs only the file commands that \
+                 write or read the paths given in its save_path and open_path parameters"
+            ))),
         }
     }
 
@@ -557,11 +653,8 @@ impl Session {
         // Commands run by another command are part of it, not steps of a macro.
         let recorded_args = (self.recording.is_some() && self.nesting == 0).then(|| args.clone());
         let first_id = self.doc.project.next_id();
-        if !self.files && self.kind_of(name) == Some(crate::CommandKind::File) {
-            return Err(EngineError::rejected(format!(
-                "{name} works with files, and this run may not (a plugin needs the \"files\" permission, a graph \
-                 `allow_files`)"
-            )));
+        if let Some(refused) = self.refusal(name, &args) {
+            return Err(refused);
         }
         let outer = self.nesting;
         self.nesting = outer.saturating_add(1);

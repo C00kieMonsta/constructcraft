@@ -672,7 +672,8 @@ ccad.command {
 
 - `run` recebe os argumentos numa tabela e devolve o resultado do comando (uma tabela, um valor ou nada). Argumentos `required` que faltam são recusados antes de ele rodar; `error("mensagem", 0)` faz o comando falhar com essa mensagem.
 - **Um passo de desfazer:** quantos comandos um comando de plugin executar, ele é desfeito de uma vez, e quando falha (um erro, um `ccad.run` que falhou, um limite atingido) tudo o que ele fez é desfeito.
-- **O que um comando pode executar:** um comando `query` só consulta; um `edit` consulta e edita; comandos que leem ou gravam arquivos (importar, exportar, salvar) precisam da permissão `files` (sem ela, comandos de edição que leem um arquivo indicado por um parâmetro, como `cad_import` ou `fill_pattern_import` com `path`, recusam o caminho; as formas sem arquivo, como `fill_pattern_import` com `text`, continuam funcionando), e só com ela se declara um comando do tipo `file`. Abrir ou criar um projeto, `undo`, `redo` e `language_set` não rodam dentro de um comando de plugin, nem o comando de outro plugin.
+- **O que um comando pode executar:** um comando `query` só consulta; um `edit` consulta e edita; comandos que leem ou gravam arquivos (importar, exportar, salvar) precisam da permissão `files` (sem ela, comandos de edição que leem um arquivo indicado por um parâmetro, como `cad_import` ou `fill_pattern_import` com `path`, recusam o caminho; as formas sem arquivo, como `fill_pattern_import` com `text`, continuam funcionando), e só com ela se declara um comando do tipo `file`. Sem `files`, um comando ainda trabalha com os arquivos que os argumentos dele indicam em parâmetros `save_path` e `open_path` ([API 2](#arquivos-sem-a-permissão-files)). Abrir ou criar um projeto, `undo`, `redo` e `language_set` não rodam dentro de um comando de plugin, nem o comando de outro plugin.
+- **Essas regras valem para tudo o que um comando executa:** o motor confere cada comando executado enquanto um comando de plugin roda (o escopo dele), também os nós de um grafo que ele roda com `graph_run`; um nó `plugin_data_set` com o id de outro plugin é recusado como um `ccad.run` direto. Os scripts Lua que o usuário roda (`ccad lua`) não têm restrição.
 - **O sandbox** é o dos [scripts Lua](#scripts-lua), com o limite contado por comando; cada plugin tem o seu próprio estado Lua, que guarda as variáveis entre um comando e outro. `require("a.b")` carrega `a/b.lua` da pasta do plugin (uma vez; arquivos fora da pasta são recusados), e `ccad.plugin` tem o `id`, o `name` e a `version` dele. `ccad.run` só funciona enquanto um comando roda, não enquanto o plugin carrega.
 - **As permissões** são concedidas por quem carrega o plugin: `ccad --plugins` concede o que o manifesto pede, já que você indicou a pasta.
 
@@ -754,8 +755,10 @@ Um texto que é exatamente `%chave%` é procurado quando é mostrado, no idioma 
 | `view` | `integer` | o id de uma vista |
 | `type` | `integer` | o id de um tipo (`category` restringe) |
 | `material` | `string` | o nome de um material |
+| `save_path` | `string` | um arquivo a gravar (a janela de salvar do aplicativo); o comando pode gravá-lo |
+| `open_path` | `string` | um arquivo a ler (a janela de abrir do aplicativo); o comando pode lê-lo |
 
-`category` (o nome de uma categoria) só acompanha `element`, `elements` e `type`; `enum_labels` dá um rótulo a cada valor de `enum` (o mesmo número de textos); `title` é um nome curto para o parâmetro.
+`category` (o nome de uma categoria) só acompanha `element`, `elements` e `type`; `extensions` (1 a 16 extensões em minúsculas, de 1 a 16 letras ou dígitos, sem o ponto, como `{ "idf", "epw" }`) só `save_path` e `open_path`; `enum_labels` dá um rótulo a cada valor de `enum` (o mesmo número de textos); `title` é um nome curto para o parâmetro.
 
 ```lua
 params = { properties = {
@@ -774,6 +777,34 @@ params = { properties = {
 | `ccad.data.list()` | `{ project = true/false, elements = { ids… } }` |
 
 `ccad.data.set` é uma edição, então um comando `query` não pode chamá-lo, e faz parte do passo único de desfazer do comando. Um comando de plugin alcança só os próprios dados: executar um comando `plugin_data_*` por `ccad.run` ou `ccad.try` com o id de outro plugin é recusado (`a plugin reads and writes only its own data`). Scripts Lua que o usuário roda (`ccad lua`) alcançam os dados de qualquer plugin.
+
+#### Arquivos sem a permissão `files`
+
+Um comando que grava ou lê um arquivo escolhido pelo usuário não precisa da permissão `files`: ele recebe o caminho num parâmetro `save_path` (para gravar) ou `open_path` (para ler) e, enquanto roda, esse caminho, e só ele, fica liberado:
+
+- **Antes de rodar**, cada argumento `save_path`/`open_path` do nível de cima é conferido: um texto, não vazio, com uma das `extensions` do parâmetro quando ele as lista (sem diferenciar maiúsculas: `MODELO.IDF` é um `idf`), um arquivo a ler que existe, um arquivo a gravar numa pasta que existe. Um caminho que falha é recusado (`invalid_arguments`) e o comando não roda. Os caminhos são comparados como arquivos, não como texto: `a/../modelo.idf` e o caminho absoluto de `modelo.idf` são o mesmo arquivo.
+- **`ccad.file.read(caminho)`** devolve os bytes de um arquivo `open_path` liberado como texto Lua (no máximo 64 MiB). **`ccad.file.write(caminho, dados)`** grava um arquivo `save_path` liberado; `dados` é um texto ou uma lista de textos, juntados (para saídas grandes, monte uma lista em vez de um texto longo). Um comando grava no máximo 256 MiB ao todo. A direção é conferida: um arquivo `save_path` não pode ser lido, nem um `open_path` gravado, e qualquer outro caminho é recusado (`rejected`). `ccad.file` só existe em plugins, e só funciona enquanto um comando roda.
+- **O que é gravado espera o comando terminar bem:** o que `ccad.file.write` recebe fica na memória e só é gravado quando o comando termina sem erro, cada arquivo num arquivo temporário na pasta dele, depois renomeado por cima do destino. Um comando que falha não deixa arquivo nem arquivo pela metade, e um arquivo que já existia fica como estava.
+- **As exportações do próprio motor** também usam o caminho liberado: um comando pode rodar `ifc_export`, `view_export`, `sheet_export`, `schedule_export_csv`, `analytical_export`, `view_render`, `component_save`, `fill_pattern_export` ou `pipe_series_export` com o seu `save_path`, e importações como `cad_import` com o seu `open_path`; com outro caminho são recusadas, e os demais comandos de arquivo (`project_save`, `ifc_import`…) continuam precisando de `files`. Um arquivo gravado por um comando do motor fica mesmo que o comando do plugin falhe depois (só as mudanças no modelo são desfeitas).
+- Um plugin com a permissão `files` trabalha com qualquer arquivo, como antes; `ccad.file` continua lendo e gravando só os caminhos liberados.
+
+Na linha de comando e no MCP o caminho é um argumento comum: `ccad --plugins ~/plugins run energy__export_idf path=modelo.idf`.
+
+#### Exportadores e importadores
+
+Um plugin pode acrescentar itens às listas de Exportar e Importar do aplicativo:
+
+```toml
+[[exporters]]                    # no máximo 16
+command = "export_idf"           # um comando com exatamente um parâmetro ui = "save_path"
+label = "%export.idf%"           # p. ex. "Modelo EnergyPlus (.idf)"; no máximo 64 caracteres
+
+[[importers]]                    # no máximo 16
+command = "import_weather"       # um comando com exatamente um parâmetro ui = "open_path"
+label = "%import.epw%"
+```
+
+Os tipos de arquivo vêm das `extensions` do parâmetro. Um item cujo comando o `main.lua` não registra, ou cujo comando não tem um parâmetro desses ou tem mais de um, é um erro de carga; os dois precisam de `api = 2`. No aplicativo, clicar no item abre a janela de salvar (exportador) ou de abrir (importador) para essas extensões e depois o formulário do comando com o caminho escolhido (ou roda o comando na hora, quando o caminho é o único parâmetro). `ccad plugins` os lista (`exporters`, `importers`: comando, rótulo, parâmetro e extensões).
 
 Os plugins são compartilhados pelo índice da comunidade, [constructcraft-plugins](https://github.com/francisreboucas/constructcraft-plugins): uma entrada por plugin, com de onde baixar cada versão e o checksum dela, enviada por pull request. No aplicativo, *Gerenciar → Plugins* instala, atualiza, desativa e remove plugins ([Plugins](interface.pt-BR.md#plugins)); sem ele, `ccad plugins install <arquivo.zip> <pasta>` instala um arquivo baixado (verificado do mesmo jeito: caminhos seguros, tamanhos e um plugin que carrega) e `ccad plugins remove <id> <pasta>` remove um.
 

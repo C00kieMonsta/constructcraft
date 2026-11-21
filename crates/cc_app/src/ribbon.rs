@@ -688,7 +688,8 @@ fn file_tab(ui: &mut Ui, state: &mut AppState) {
     use UiCommand::{CloseProject, ExportDxf, ExportIfc, ExportImage, ExportPdf, ExportSvg, New, Open, Save, SaveAs};
     group(ui, t!("group-project"), |ui| command_buttons(ui, state, &[New, Open, Save, SaveAs, CloseProject]));
     group(ui, t!("group-export"), |ui| {
-        command_buttons(ui, state, &[ExportIfc, ExportPdf, ExportSvg, ExportImage, ExportDxf])
+        command_buttons(ui, state, &[ExportIfc, ExportPdf, ExportSvg, ExportImage, ExportDxf]);
+        plugin_file_entries(ui, state, true);
     });
     group(ui, t!("group-settings"), |ui| command_button(ui, state, UiCommand::Preferences));
     group(ui, t!("group-help"), |ui| command_buttons(ui, state, &[UiCommand::About, UiCommand::CheckUpdates]));
@@ -702,8 +703,12 @@ fn insert_tab(ui: &mut Ui, state: &mut AppState) {
     };
     group(ui, t!("group-import"), |ui| {
         command_buttons(ui, state, &[ImportIfc, ImportCad, ImportSkp, ImportObj, ImportGltf, ImportImage]);
+        plugin_file_entries(ui, state, false);
     });
-    group(ui, t!("group-export"), |ui| command_buttons(ui, state, &[ExportIfc, ExportDxf]));
+    group(ui, t!("group-export"), |ui| {
+        command_buttons(ui, state, &[ExportIfc, ExportDxf]);
+        plugin_file_entries(ui, state, true);
+    });
     group(ui, t!("group-library"), |ui| command_buttons(ui, state, &[LoadComponent, ComponentLibrary]));
 }
 
@@ -1135,6 +1140,32 @@ fn plugin_tooltip(response: Response, state: &AppState, b: &RibbonButton, why: O
             ui.label(RichText::new(t!("tip-unavailable", "reason" => why)).color(PALETTE.warning));
         }
     })
+}
+
+/// The loaded plugins' exporters (`export`) or importers after the built-in
+/// entries of an Export or Import group: a separator, then one button each,
+/// its tooltip naming the plugin. A click asks for the file first (see
+/// [`crate::plugins_ui::run_file_entry`]).
+fn plugin_file_entries(ui: &mut Ui, state: &mut AppState, export: bool) {
+    let entries = if export { state.plugins.exporters.clone() } else { state.plugins.importers.clone() };
+    if entries.is_empty() {
+        return;
+    }
+    ui.separator();
+    let badge = if export { Badge::Export } else { Badge::Import };
+    for entry in &entries {
+        let r = big_button(ui, Glyph::Icon(Icon::Plugin, Some(badge)), &entry.action.label, false, true, false);
+        let r = r.on_hover_ui(|ui| {
+            ui.set_max_width(300.0);
+            ui.spacing_mut().item_spacing.y = 4.0;
+            ui.label(RichText::new(&entry.action.label).family(theme::semibold()).color(PALETTE.text));
+            ui.label(theme::muted(t!("tip-plugin", "name" => entry.plugin.clone())).size(11.0));
+        });
+        if r.clicked() {
+            state.ribbon_peek = false;
+            crate::plugins_ui::run_file_entry(state, entry, export);
+        }
+    }
 }
 
 /// Run Macro: a menu of the macros in the macros folder (see Preferences)

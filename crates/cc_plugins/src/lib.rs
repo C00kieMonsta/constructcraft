@@ -26,8 +26,8 @@ pub mod store;
 
 pub use cc_script::{convert, sandbox};
 
-pub use api::{API_VERSION, Access};
-pub use contributions::{Button, ButtonSize, Setting, SettingKind, When};
+pub use api::{API_VERSION, FileRun};
+pub use contributions::{Button, ButtonSize, FileAction, Setting, SettingKind, When};
 pub use locales::Locales;
 pub use plugin::{Manifest, Permissions, Plugin, PluginError, PluginHost};
 pub use sandbox::Limits;

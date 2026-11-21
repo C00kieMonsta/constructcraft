@@ -337,3 +337,45 @@ default = 1
     assert_eq!(summary[0]["settings"][0]["value"], 3.5);
     assert_eq!(summary[0]["api"], 2);
 }
+
+#[test]
+fn plugin_exporters_write_the_path_given() {
+    let dir = std::env::temp_dir().join(format!("ccad-cli-{}-exporters", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let plugin = dir.join("idf");
+    std::fs::create_dir_all(&plugin).unwrap();
+    let manifest = "id = \"idf\"\nname = \"IDF\"\nversion = \"1.0\"\napi = 2\n\n\
+                    [[exporters]]\ncommand = \"export\"\nlabel = \"EnergyPlus model (.idf)\"\n";
+    std::fs::write(plugin.join("plugin.toml"), manifest).unwrap();
+    std::fs::write(
+        plugin.join("main.lua"),
+        r#"ccad.command { name = "export", kind = "query",
+             params = { required = { "path" }, properties = {
+               path = { type = "string", ui = "save_path", extensions = { "idf" } } } },
+             run = function(a)
+               local levels = ccad.run("levels_list", {})
+               ccad.file.write(a.path, { "Version,24.1;\n", "! levels: ", tostring(#levels), "\n" })
+               return { path = a.path }
+             end }"#,
+    )
+    .unwrap();
+    let folder = dir.to_string_lossy().into_owned();
+    let out = dir.join("model.idf");
+    let arg = format!("path={}", out.to_string_lossy());
+    let (code, _, err) = ccad(&["--plugins", &folder, "run", "idf__export", &arg], "");
+    assert_eq!(code, 0, "{err}");
+    let text = std::fs::read_to_string(&out).unwrap();
+    assert!(text.starts_with("Version,24.1;\n! levels: "), "{text}");
+    // Another extension is refused before the command runs.
+    let bad = format!("path={}", dir.join("model.txt").to_string_lossy());
+    let (code, _, err) = ccad(&["--plugins", &folder, "run", "idf__export", &bad], "");
+    assert_ne!(code, 0);
+    assert!(err.contains(".idf"), "{err}");
+    assert!(!dir.join("model.txt").exists());
+    // The listing tells the exporter.
+    let (code, summary, err) = ccad(&["--plugins", &folder, "plugins"], "");
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(summary[0]["exporters"][0]["command"], "idf__export");
+    assert_eq!(summary[0]["exporters"][0]["extensions"], json!(["idf"]));
+    let _ = std::fs::remove_dir_all(&dir);
+}

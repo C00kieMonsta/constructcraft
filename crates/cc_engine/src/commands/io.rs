@@ -56,7 +56,9 @@ pub struct IfcExport {
 impl Command for IfcExport {
     const NAME: &'static str = "ifc_export";
     const KIND: CommandKind = CommandKind::File;
+    const CHECKS_PATHS: bool = true;
     fn run(self, s: &mut Session) -> Result<Value> {
+        s.require_write("path", &self.path)?;
         guard(|| cc_ifc::export_to_file(s.project(), &self.path))??;
         Ok(json!({ "path": self.path }))
     }
@@ -154,7 +156,9 @@ const TOO_LARGE_TO_CLEAN: &str = "the view is too large to remove its hidden lin
 impl Command for SheetExport {
     const NAME: &'static str = "sheet_export";
     const KIND: CommandKind = CommandKind::File;
+    const CHECKS_PATHS: bool = true;
     fn run(self, s: &mut Session) -> Result<Value> {
+        s.require_write("path", &self.path)?;
         let id = refs::view(s.project(), &self.sheet)?;
         if !matches!(s.project().view(id).map(|v| &v.kind), Some(ViewKind::Sheet { .. })) {
             return Err(EngineError::invalid("not a sheet"));
@@ -238,7 +242,9 @@ impl ViewExport {
 impl Command for ViewExport {
     const NAME: &'static str = "view_export";
     const KIND: CommandKind = CommandKind::File;
+    const CHECKS_PATHS: bool = true;
     fn run(self, s: &mut Session) -> Result<Value> {
+        s.require_write("path", &self.path)?;
         let ext = self.path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
         let format = self.format.map(|f| f.to_ascii_lowercase()).unwrap_or(ext);
         let dpi = refs::finite(self.dpi.unwrap_or(150.0), "dpi")?;
@@ -289,7 +295,9 @@ pub struct ScheduleExportCsv {
 impl Command for ScheduleExportCsv {
     const NAME: &'static str = "schedule_export_csv";
     const KIND: CommandKind = CommandKind::File;
+    const CHECKS_PATHS: bool = true;
     fn run(self, s: &mut Session) -> Result<Value> {
+        s.require_write("path", &self.path)?;
         let id = refs::view(s.project(), &self.view)?;
         let table = s.schedule(id).ok_or_else(|| EngineError::invalid("not a schedule view"))?;
         let cell = |c: &cc_views::Cell| match c {
@@ -316,7 +324,7 @@ impl Command for ComponentLoad {
     const KIND: CommandKind = CommandKind::Edit;
     const READS_FILES: bool = true;
     fn run(self, s: &mut Session) -> Result<Value> {
-        s.require_files("path")?;
+        s.require_read("path", &self.path)?;
         let file = guard(|| cc_core::component_file::load(&self.path))??;
         let ids = edit(s, t!("tx-load-component"), |e| {
             let wanted = file.types.len() + file.nested.len();
@@ -413,7 +421,7 @@ impl Command for SkpImport {
     const KIND: CommandKind = CommandKind::Edit;
     const READS_FILES: bool = true;
     fn run(self, s: &mut Session) -> Result<Value> {
-        s.require_files("path")?;
+        s.require_read("path", &self.path)?;
         let level = refs::level_or_first(s.project(), self.level.as_ref())?;
         let origin = refs::point(self.position.unwrap_or([0.0, 0.0]))?;
         let turn = refs::finite(self.rotation.unwrap_or(0.0), "rotation")?;
@@ -511,7 +519,7 @@ impl Command for ObjImport {
     const KIND: CommandKind = CommandKind::Edit;
     const READS_FILES: bool = true;
     fn run(self, s: &mut Session) -> Result<Value> {
-        s.require_files("path")?;
+        s.require_read("path", &self.path)?;
         let level = refs::level_or_first(s.project(), self.level.as_ref())?;
         let origin = refs::point(self.position.unwrap_or([0.0, 0.0]))?;
         let turn = refs::finite(self.rotation.unwrap_or(0.0), "rotation")?;
@@ -567,7 +575,7 @@ impl Command for GltfImport {
     const KIND: CommandKind = CommandKind::Edit;
     const READS_FILES: bool = true;
     fn run(self, s: &mut Session) -> Result<Value> {
-        s.require_files("path")?;
+        s.require_read("path", &self.path)?;
         use crate::gltf::GltfError;
         let level = refs::level_or_first(s.project(), self.level.as_ref())?;
         let origin = refs::point(self.position.unwrap_or([0.0, 0.0]))?;
@@ -641,7 +649,7 @@ impl Command for SkpComponentLoad {
     const KIND: CommandKind = CommandKind::Edit;
     const READS_FILES: bool = true;
     fn run(self, s: &mut Session) -> Result<Value> {
-        s.require_files("path")?;
+        s.require_read("path", &self.path)?;
         let model = read_skp(&self.path)?;
         let name = file_stem(&self.path);
         let conv = guard(|| crate::skp::convert_single(&model, &name))?.map_err(too_large)?;
@@ -717,7 +725,9 @@ pub struct ComponentSave {
 impl Command for ComponentSave {
     const NAME: &'static str = "component_save";
     const KIND: CommandKind = CommandKind::File;
+    const CHECKS_PATHS: bool = true;
     fn run(self, s: &mut Session) -> Result<Value> {
+        s.require_write("path", &self.path)?;
         let file = cc_core::component_file::extract(s.project(), &self.component)?;
         guard(|| cc_core::component_file::save(&file, &self.path))??;
         Ok(json!({ "path": self.path, "types": file.types.len() }))

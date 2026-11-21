@@ -26,8 +26,13 @@ pub trait Command: DeserializeOwned + JsonSchema {
     const KIND: CommandKind;
     /// Whether it may read a file named by one of its parameters (an import
     /// of an edit or query command); it then refuses the path when the run
-    /// may not work with files ([`Session::require_files`]).
+    /// may not read it ([`Session::require_read`]).
     const READS_FILES: bool = false;
+    /// Whether every file it reads or writes is named by a parameter that it
+    /// checks with [`Session::require_read`] or [`Session::require_write`]:
+    /// then a run limited to granted paths (a plugin command without the
+    /// `files` permission) may call it, though it is a `File` command.
+    const CHECKS_PATHS: bool = false;
     fn run(self, session: &mut Session) -> Result<Value>;
 }
 
@@ -135,6 +140,17 @@ macro_rules! registry {
                 }
             )*)*
             Err(EngineError::new(ErrorCode::UnknownCommand, format!("unknown command: {name}")))
+        }
+
+        /// Whether the built-in command `name` checks every path it reads or
+        /// writes ([`Command::CHECKS_PATHS`]).
+        pub fn checks_paths(name: &str) -> bool {
+            $($(
+                if name == <$c as Command>::NAME {
+                    return <$c as Command>::CHECKS_PATHS;
+                }
+            )*)*
+            false
         }
 
         /// The kind of a built-in command, without building the catalog.
