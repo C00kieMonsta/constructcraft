@@ -157,6 +157,8 @@ ccad [options] lua <file|-> [args]  run a Lua script
 ccad [options] plugins              list the plugins loaded with --plugins
 ccad plugins install <zip> <folder> install a plugin archive into a plugins folder
 ccad plugins remove <id> <folder>   remove an installed plugin
+ccad plugins new <folder> <id> [name=<name>]   a new plugin from the template
+ccad plugins test <plugin folder> [--filter <text>]   run its tests/*_test.lua
 ccad [options] mcp                  serve the commands over MCP (stdio)
 
 -p, --project <file>   open a project (.ccad, or .ifc to import) first
@@ -899,6 +901,39 @@ ccad.on("project_saved", function(e) print("saved to " .. e.path) end)
 - **Budget:** each handler call may take at most 50 million Lua instructions and 5 seconds (and the plugin's memory limit).
 - **Failures never fail the command:** an error or a budget overrun in a handler becomes a message (`[id] model_changed handler 1: …`, on standard error with `ccad`, in the status bar and the log in the app), and what that call stored is dropped. A handler that fails 3 times in a row is turned off until the plugins load again.
 - **Cost:** the lists of `model_changed` come from the project's undo machinery: while some plugin listens to it, each command notes the elements it touches as they were before it (once each), and compares them with what they are after; no geometry is rebuilt, and nothing is noted while no plugin listens.
+
+### Developing a plugin
+
+**Start from the template.** `ccad plugins new <folder> <id> [name=<name>]` makes `<folder>/<id>/` (refused when it exists or the id is invalid) with a plugin that loads and whose test passes: `plugin.toml` (API 2, one button, one setting), `main.lua` (one command with UI hints that reads `ccad.settings` and keeps `ccad.data`), `locales/en.toml` and `locales/pt-BR.toml`, `icons/<id>.svg`, `tests/basic_test.lua`, a `README.md`, and `types/ccad.d.lua` with a `.luarc.json` that points the Lua language server at it.
+
+```sh
+ccad plugins new ~/dev room_tools name="Room tools"
+ccad plugins test ~/dev/room_tools
+```
+
+**Types.** [`docs/lua/ccad.d.lua`](lua/ccad.d.lua) declares the whole `ccad` table for [LuaLS](https://luals.github.io/) (VS Code's Lua extension and other editors): `run`, `try`, `commands`, `describe`, `json`, `array`, `null`, `version`, `api`, `plugin`, the `ccad.command` spec with its parameters and UI hints, `settings`, `data`, `file`, `process` (request and result), `on` with the event names and payloads, and `ccad.test`. Put its folder in `workspace.library` of `.luarc.json` (the template does) to get completion and checks. A test fails when the runtime table has a name the file does not declare, so it stays complete.
+
+**Tests.** `ccad plugins test <plugin folder> [--filter <text>] [--tool <plugin>.<tool>=<path>]` runs each `tests/*_test.lua` of the plugin (in name order) as a Lua script with full access, like `ccad lua`, over a new project from the default metric template with the plugin loaded and granted what its manifest asks for (programs from `--tool`, as for `--plugins`). A file is one test, its top level; a file that defines global functions named `test_*` is one test per function, each in a new project of its own after the file's top level ran there (its setup). Names are `<file>` or `<file>::<function>`; `--filter` runs those whose name holds the text. `ccad.test` has the assertions, which raise an error at the line that called them:
+
+| | |
+|---|---|
+| `ccad.test.eq(actual, expected, msg)` | equal values; tables compared deeply (`expected [1,3], got [1,2]`) |
+| `ccad.test.near(actual, expected, tol, msg)` | numbers at most `tol` apart (default 1e-9) |
+| `ccad.test.fails(fn, pattern)` | `fn` raises an error whose text holds `pattern` (plain text, or a Lua pattern); returns the text |
+| `ccad.test.ok(value, msg)` | a true value; returns it |
+
+```lua
+-- tests/rooms_test.lua
+local t = ccad.test
+function test_a_room_has_four_walls()
+  ccad.run("quick_rooms__rectangle_room", { width = 4, depth = 3 })
+  t.eq(#ccad.run("elements_list", { category = "wall" }), 4)
+end
+```
+
+The output is one line per test, `PASS <name>` or `FAIL <name>: <message>` followed by what the test and the plugin printed, then `<n> passed, <m> failed`. The exit code is 0 when all passed, 1 when one failed (or none matched the filter), 2 for usage errors (no `plugin.toml`, no tests, a `--tool` that does not fit). [`examples/plugins/quick_rooms/tests`](../examples/plugins/quick_rooms/tests) is an example.
+
+**In the app.** The Plugins window's *Reload Plugins* loads every plugin again from its files (permissions stay; not while a plugin command runs). In *Preferences → File locations*, **Plugin developer mode** checks the plugins folder and the **Development folder** every second (the size and time of their `.lua`, `.toml` and `.svg` files) and reloads the plugins when one changed, with a message in the status bar; the reload waits while a plugin command runs. The development folder (a plugin's folder or a folder of plugins) loads in developer mode like the plugins folder, with the same permissions by id; a plugin in both loads from the development folder, and the console says so. The **Plugin console** (*Manage → Plugins*, or *Plugin Console* in the Plugins window) lists, with their time since the app started and their plugin, what plugins print, their load errors, their event handlers' errors and handlers turned off, and each load; it shows one plugin or all, *Clear* empties it and *Copy* copies what it shows; it keeps the last 2000 entries ([Plugins](interface.md#plugins)).
 
 ## Scripted components
 

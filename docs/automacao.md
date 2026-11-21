@@ -901,6 +901,39 @@ ccad.on("project_saved", function(e) print("salvo em " .. e.path) end)
 - **Falhas nunca fazem o comando falhar:** um erro ou um orçamento estourado num tratador vira uma mensagem (`[id] model_changed handler 1: …`, na saída de erro com o `ccad`, na barra de status e no log no aplicativo), e o que aquela chamada guardou é descartado. Um tratador que falha 3 vezes seguidas fica desligado até os plugins carregarem de novo.
 - **Custo:** as listas de `model_changed` vêm do mecanismo de desfazer do projeto: enquanto algum plugin escuta esse evento, cada comando anota os elementos que toca como eram antes dele (uma vez cada) e os compara com o que são depois; nenhuma geometria é reconstruída, e nada é anotado enquanto nenhum plugin escuta.
 
+### Desenvolvendo um plugin
+
+**Comece do modelo.** `ccad plugins new <pasta> <id> [name=<nome>]` cria `<pasta>/<id>/` (recusado quando já existe ou o id é inválido) com um plugin que carrega e cujo teste passa: `plugin.toml` (API 2, um botão, uma configuração), `main.lua` (um comando com dicas de interface que lê `ccad.settings` e guarda `ccad.data`), `locales/en.toml` e `locales/pt-BR.toml`, `icons/<id>.svg`, `tests/basic_test.lua`, um `README.md`, e `types/ccad.d.lua` com um `.luarc.json` que aponta o servidor de linguagem Lua para ele.
+
+```sh
+ccad plugins new ~/dev room_tools name="Ferramentas de sala"
+ccad plugins test ~/dev/room_tools
+```
+
+**Tipos.** [`docs/lua/ccad.d.lua`](lua/ccad.d.lua) declara a tabela `ccad` inteira para o [LuaLS](https://luals.github.io/) (a extensão Lua do VS Code e outros editores): `run`, `try`, `commands`, `describe`, `json`, `array`, `null`, `version`, `api`, `plugin`, a especificação de `ccad.command` com seus parâmetros e dicas de interface, `settings`, `data`, `file`, `process` (pedido e resultado), `on` com os nomes e os dados dos eventos, e `ccad.test`. Ponha a pasta dele em `workspace.library` do `.luarc.json` (o modelo já faz isso) para ter completação e verificações. Um teste falha quando a tabela em execução tem um nome que o arquivo não declara, então ele se mantém completo.
+
+**Testes.** `ccad plugins test <pasta do plugin> [--filter <texto>] [--tool <plugin>.<ferramenta>=<caminho>]` executa cada `tests/*_test.lua` do plugin (em ordem de nome) como um script Lua com acesso total, como `ccad lua`, sobre um projeto novo do modelo métrico padrão com o plugin carregado e com o que o manifesto pede (programas de `--tool`, como em `--plugins`). Um arquivo é um teste, seu nível superior; um arquivo que define funções globais com nome `test_*` é um teste por função, cada uma num projeto novo próprio depois que o nível superior do arquivo rodou nele (sua preparação). Os nomes são `<arquivo>` ou `<arquivo>::<função>`; `--filter` executa aqueles cujo nome contém o texto. `ccad.test` tem as verificações, que levantam um erro na linha que as chamou:
+
+| | |
+|---|---|
+| `ccad.test.eq(atual, esperado, msg)` | valores iguais; tabelas comparadas em profundidade (`expected [1,3], got [1,2]`) |
+| `ccad.test.near(atual, esperado, tol, msg)` | números a no máximo `tol` de distância (padrão 1e-9) |
+| `ccad.test.fails(fn, padrão)` | `fn` levanta um erro cujo texto contém `padrão` (texto simples ou um padrão Lua); devolve o texto |
+| `ccad.test.ok(valor, msg)` | um valor verdadeiro; devolve-o |
+
+```lua
+-- tests/rooms_test.lua
+local t = ccad.test
+function test_a_room_has_four_walls()
+  ccad.run("quick_rooms__rectangle_room", { width = 4, depth = 3 })
+  t.eq(#ccad.run("elements_list", { category = "wall" }), 4)
+end
+```
+
+A saída é uma linha por teste, `PASS <nome>` ou `FAIL <nome>: <mensagem>` seguida do que o teste e o plugin imprimiram, e então `<n> passed, <m> failed`. O código de saída é 0 quando todos passaram, 1 quando algum falhou (ou nenhum casou com o filtro), 2 para erros de uso (sem `plugin.toml`, sem testes, um `--tool` que não serve). [`examples/plugins/quick_rooms/tests`](../examples/plugins/quick_rooms/tests) é um exemplo.
+
+**No aplicativo.** *Recarregar plugins*, na janela Plugins, carrega de novo todos os plugins a partir dos arquivos (as permissões ficam; não enquanto um comando de plugin roda). Em *Preferências → Locais de arquivos*, o **Modo de desenvolvedor de plugins** verifica a pasta de plugins e a **Pasta de desenvolvimento** a cada segundo (o tamanho e a data dos arquivos `.lua`, `.toml` e `.svg`) e recarrega os plugins quando algum mudou, com uma mensagem na barra de status; a recarga espera enquanto um comando de plugin roda. A pasta de desenvolvimento (a pasta de um plugin ou uma pasta de plugins) carrega no modo de desenvolvedor como a pasta de plugins, com as mesmas permissões por id; um plugin nas duas carrega da pasta de desenvolvimento, e o console avisa. O **Console de plugins** (*Gerenciar → Plugins*, ou *Console de plugins* na janela Plugins) lista, com o tempo desde que o aplicativo abriu e o plugin, o que os plugins imprimem, seus erros de carregamento, os erros de seus tratadores de eventos e os tratadores desligados, e cada carregamento; mostra um plugin ou todos, *Limpar* o esvazia e *Copiar* copia o que ele mostra; guarda as últimas 2000 entradas ([Plugins](interface.pt-BR.md#plugins)).
+
 ## Componentes com script
 
 Uma peça de componente pode ser um **script**: código Lua que declara os parâmetros e os hotspots do componente e monta as peças a partir dos valores deles. O script é puro: ele vê os valores e nada mais (nem comandos, nem arquivos, nem o modelo), então roda uma vez para cada conjunto de valores; mover ou girar um componente já colocado não o roda de novo. [`examples/components/cabinet.lua`](../examples/components/cabinet.lua) é um exemplo completo.

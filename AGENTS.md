@@ -58,7 +58,7 @@ The crates in one line each:
 
 The detailed notes (types, functions, invariants, commands and app entry points of each feature) live in `docs/architecture/`, one file per area. **Before working on a feature, read the file that covers it** (or search the folder for the type or command name). **When a change adds or alters a feature, update its bullet there** (a new feature gets a new bullet in the file of its area), and add the topic to this list; do not put feature details in this file, which must stay under 40,000 characters.
 
-- [`docs/architecture/core.md`](docs/architecture/core.md) — cc_core, Components, cc_engine, Measurement systems, Visual programming graphs, cc_plugins, cc_cli.
+- [`docs/architecture/core.md`](docs/architecture/core.md) — cc_core, Components, cc_engine, Measurement systems, Visual programming graphs, cc_plugins, Plugin development, cc_cli.
 - [`docs/architecture/geometry.md`](docs/architecture/geometry.md) — cc_geom, cc_render, Joined pieces.
 - [`docs/architecture/walls.md`](docs/architecture/walls.md) — Curtain walls, Wall profiles, Spline walls, Niches.
 - [`docs/architecture/elements.md`](docs/architecture/elements.md) — Sketches, Roof coverings and framing, Conceptual masses, Terrain, Building pads, Shafts, Swept profiles.
@@ -69,7 +69,7 @@ The detailed notes (types, functions, invariants, commands and app entry points 
 - [`docs/architecture/views.md`](docs/architecture/views.md) — cc_views, Schedule definitions, Phases, Design options, Detail levels, Visual styles, View graphics, Drafting views, Callouts and detail views, Browser organization.
 - [`docs/architecture/annotation.md`](docs/architecture/annotation.md) — Dimensions, Tags, Level marks, Detail lines, Line styles and regions, Fill patterns, Detail components, Title blocks.
 - [`docs/architecture/site-sun-render.md`](docs/architecture/site-sun-render.md) — Site location, Sun studies, Rendering.
-- [`docs/architecture/app.md`](docs/architecture/app.md) — cc_app, Online component library (3D CraftHouse), Component thumbnails, Plugin command forms, Plugins tab and plugin settings, Plugin jobs and external programs.
+- [`docs/architecture/app.md`](docs/architecture/app.md) — cc_app, Online component library (3D CraftHouse), Component thumbnails, Plugin command forms, Plugins tab and plugin settings, Plugin console, reload and developer mode, Plugin jobs and external programs.
 
 ## UI conventions
 
