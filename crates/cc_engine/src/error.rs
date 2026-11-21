@@ -20,6 +20,13 @@ pub enum ErrorCode {
     /// A Lua script or plugin failed: a syntax or run-time error, or one of
     /// its limits (instructions, memory) reached.
     Script,
+    /// A plugin command waits for an external program and goes on in the
+    /// background: the session is not blocking, and
+    /// [`Session::poll_job`](crate::Session::poll_job) gives its result.
+    Pending,
+    /// The command was cancelled while it waited (see
+    /// [`Session::cancel_job`](crate::Session::cancel_job)).
+    Cancelled,
 }
 
 /// A command failure: a code for programs and a message for people.

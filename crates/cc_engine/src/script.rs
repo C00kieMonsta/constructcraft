@@ -573,7 +573,10 @@ impl Stepper {
         };
         let fail = |error| StepError { index, command: step.command.clone(), error };
         let args = active_level(session, &step.args).and_then(|l| resolve(&step.args, &self.results, l, 0));
-        let out = session.execute(&step.command, args.map_err(fail)?).map_err(fail)?;
+        let args = args.map_err(fail)?;
+        // A step that waits for an external program is waited for: the next
+        // step may need what it made.
+        let out = session.with_blocking(true, |s| s.execute(&step.command, args)).map_err(fail)?;
         self.results.push(out.clone());
         Ok(out)
     }

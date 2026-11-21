@@ -30,13 +30,21 @@
 //! `model_changed` join the undo step of the command that fired it (a
 //! dragged value stays one merged step); after the other events they are one
 //! undo step of their own. They are never recorded in a macro.
+//!
+//! A command of an extension may also wait for work outside the session (a
+//! plugin running an external program): [`Extension::start`] reports
+//! [`Outcome::Pending`] and the session keeps the command open (its undo
+//! step, its journal) until [`Extension::resume`] reports it done; see
+//! [`Session::poll_job`]. Meanwhile the session runs only queries, and no
+//! event fires.
 
-use crate::error::Result;
+use crate::error::{EngineError, ErrorCode, Result};
 use crate::registry::CommandInfo;
 use crate::session::Session;
 use cc_core::ElementId;
 use serde_json::{Map, Value, json};
 use std::path::PathBuf;
+use std::time::Duration;
 
 /// Separates an extension's id from its command's name in the full name
 /// (`<id>__<name>`). Built-in names never contain it.
@@ -174,6 +182,30 @@ impl Event {
     }
 }
 
+/// What starting or resuming an extension's command gives.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Outcome {
+    /// The command ended, with its result.
+    Done(Result<Value>),
+    /// The command waits for work outside the session (an external
+    /// program); the session goes on with it through [`Extension::resume`].
+    Pending,
+}
+
+/// A command left waiting, as its extension describes it (see
+/// [`Session::job`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct JobInfo {
+    /// The plugin's id.
+    pub plugin: String,
+    /// The plugin's name, in the current language.
+    pub plugin_name: String,
+    /// What it waits for (a program's name), in the current language.
+    pub tool: String,
+    /// The last line that work wrote (empty when none yet).
+    pub last_line: String,
+}
+
 /// A source of commands beyond the built-in catalog.
 pub trait Extension {
     /// The commands it adds, with their full names.
@@ -184,6 +216,32 @@ pub trait Extension {
     /// out of the session while it runs, so commands it runs through
     /// [`Session::execute`] reach the built-in catalog only.
     fn run(&mut self, session: &mut Session, name: &str, args: Value) -> Option<Result<Value>>;
+
+    /// Start the command `name`, like [`Extension::run`], except that it may
+    /// leave the command waiting for work outside the session
+    /// ([`Outcome::Pending`]); the session then calls [`Extension::resume`]
+    /// until it is done, or [`Extension::cancel`]. The default runs it at
+    /// once.
+    fn start(&mut self, session: &mut Session, name: &str, args: Value) -> Option<Outcome> {
+        self.run(session, name, args).map(Outcome::Done)
+    }
+
+    /// Go on with the command left waiting: wait at most `wait` for what it
+    /// waits for, and when that is done, run the command on (in its scope
+    /// again) until it ends or waits again. The extension is taken out of
+    /// the session meanwhile, as in [`Extension::run`].
+    fn resume(&mut self, _session: &mut Session, _wait: Duration) -> Outcome {
+        Outcome::Done(Err(EngineError::new(ErrorCode::Internal, "no command is waiting")))
+    }
+
+    /// Stop the command left waiting and what it waits for; the session
+    /// fails it as cancelled and undoes what it did.
+    fn cancel(&mut self, _session: &mut Session) {}
+
+    /// The command left waiting, if any.
+    fn job(&self) -> Option<JobInfo> {
+        None
+    }
 
     /// Messages for the user since the last call (what plugins printed).
     fn take_messages(&mut self) -> Vec<String> {

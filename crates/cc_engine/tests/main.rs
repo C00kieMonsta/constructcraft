@@ -38,6 +38,7 @@ mod graph;
 mod graphics;
 mod image;
 mod imperial_text;
+mod jobs;
 mod level_heights;
 mod level_rename;
 mod lightning_cabling;
