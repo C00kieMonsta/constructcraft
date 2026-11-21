@@ -41,6 +41,11 @@ pub struct Session {
     /// The scopes of the plugin commands running, outermost first (see
     /// [`Session::with_plugin_scope`]).
     scopes: Vec<crate::PluginScope>,
+    /// Whether the extension is handling an event (see [`Session::fire`]).
+    firing: bool,
+    /// Whether the document was replaced during the top-level command
+    /// running ([`Session::replace`]).
+    replaced: bool,
 }
 
 /// What a view's own geometry depends on: its phase (an index, when it
@@ -93,6 +98,8 @@ impl Session {
             nesting: 0,
             files: crate::FileAccess::All,
             scopes: Vec::new(),
+            firing: false,
+            replaced: false,
         }
     }
 
@@ -110,11 +117,15 @@ impl Session {
         let nesting = self.nesting;
         let files = std::mem::take(&mut self.files);
         let scopes = std::mem::take(&mut self.scopes);
+        let firing = self.firing;
         *self = Self::new(doc);
         self.extension = extension;
         self.nesting = nesting;
         self.files = files;
         self.scopes = scopes;
+        self.firing = firing;
+        // The command running fires `project_opened` when it ends.
+        self.replaced = true;
     }
 
     pub fn project(&self) -> &Project {
@@ -470,9 +481,72 @@ impl Session {
     }
 
     /// Set the source of commands beyond the built-in catalog (plugins), or
-    /// remove it with `None`; returns the one it replaces.
+    /// remove it with `None`; returns the one it replaces. A new extension
+    /// hears `project_opened` for the project the session holds (so plugins
+    /// set on an open project can start), unless a command is running.
     pub fn set_extension(&mut self, extension: Option<Box<dyn crate::Extension>>) -> Option<Box<dyn crate::Extension>> {
-        std::mem::replace(&mut self.extension, extension)
+        let old = std::mem::replace(&mut self.extension, extension);
+        if self.extension.is_some() && self.top_level() {
+            let path = self.doc.path.clone();
+            self.fire(crate::Event::ProjectOpened { new: path.is_none(), path });
+        }
+        old
+    }
+
+    /// Whether a command run now would be a top-level one: not run by a
+    /// command or an event handler.
+    fn top_level(&self) -> bool {
+        self.nesting == 0 && self.scopes.is_empty() && !self.firing
+    }
+
+    /// Whether the extension handles events of `kind`.
+    fn listens(&self, kind: crate::EventKind) -> bool {
+        self.extension.as_ref().is_some_and(|e| e.listens(kind))
+    }
+
+    /// Give `event` to the extension, if it listens: it is taken out of the
+    /// session meanwhile, and what it runs is nested (not top-level, not
+    /// recorded in a macro), so no event fires during it. A panic in it is
+    /// caught; the extension stays.
+    fn fire(&mut self, event: crate::Event) {
+        if !self.listens(event.kind()) {
+            return;
+        }
+        let Some(mut ext) = self.extension.take() else { return };
+        let (nesting, merge_key) = (self.nesting, self.merge_key.take());
+        self.nesting = nesting.saturating_add(1);
+        self.firing = true;
+        let _ = guard(|| ext.on_event(self, &event));
+        self.firing = false;
+        self.nesting = nesting;
+        self.merge_key = merge_key;
+        if self.extension.is_none() {
+            self.extension = Some(ext);
+        }
+    }
+
+    /// Run `f`, the handlers of the plugin `plugin` (named `name` for the
+    /// user) for `event`, in its scope: queries, plus `plugin_data_set` for
+    /// its own id (only queries after `undo` and `redo`, whose edits would
+    /// clear the redo history and come back on every undo), and no files.
+    /// What they change becomes one undo step of its own, named after the
+    /// plugin (`tx-plugin-event`); nothing when they change nothing.
+    pub fn with_event_scope<R>(
+        &mut self,
+        event: &crate::Event,
+        plugin: &str,
+        name: &str,
+        f: impl FnOnce(&mut Session) -> R,
+    ) -> R {
+        let edits = match event {
+            crate::Event::ModelChanged(c) if c.is_history() => crate::ScopeEdits::None,
+            _ => crate::ScopeEdits::OwnData,
+        };
+        let scope = crate::PluginScope { plugin: plugin.to_string(), edits, files: crate::FileAccess::None };
+        let depth = self.doc.undo_depth();
+        let out = self.with_plugin_scope(scope, f);
+        self.doc.squash_since(depth, t!("tx-plugin-event", "plugin" => name));
+        out
     }
 
     pub fn extension(&self) -> Option<&dyn crate::Extension> {
@@ -590,10 +664,23 @@ impl Session {
                     scope.plugin
                 )));
             }
-            if !scope.edits && kind == Some(crate::CommandKind::Edit) {
-                return Some(EngineError::rejected(format!(
-                    "{name} changes the model, which a query command may not do"
-                )));
+            if kind == Some(crate::CommandKind::Edit) {
+                match scope.edits {
+                    crate::ScopeEdits::All => {}
+                    // Its own id: checked above.
+                    crate::ScopeEdits::OwnData if name == "plugin_data_set" => {}
+                    crate::ScopeEdits::OwnData => {
+                        return Some(EngineError::rejected(format!(
+                            "{name} changes the model, which an event handler may not do (it may store its own \
+                             plugin data with plugin_data_set)"
+                        )));
+                    }
+                    crate::ScopeEdits::None => {
+                        return Some(EngineError::rejected(format!(
+                            "{name} changes the model, which a query command may not do"
+                        )));
+                    }
+                }
             }
         }
         if kind != Some(crate::CommandKind::File) {
@@ -646,16 +733,32 @@ impl Session {
     /// Run the command `name` with JSON `args`. A panic inside the command
     /// becomes an internal error and the document is kept. Commands of the
     /// extension (names with `__`) are one undo step however many commands
-    /// they run, and leave nothing behind when they fail.
+    /// they run, and leave nothing behind when they fail. A top-level
+    /// command fires the extension's events (see [`crate::extension`]).
     pub fn execute(&mut self, name: &str, args: Value) -> Result<Value> {
+        if let Some(refused) = self.refusal(name, &args) {
+            return Err(refused);
+        }
+        let top = self.top_level();
+        if top && name == "project_save" {
+            let path = args.get("path").and_then(Value::as_str).map(std::path::PathBuf::from);
+            if let Some(path) = path.or_else(|| self.doc.path.clone()) {
+                self.fire(crate::Event::ProjectSaving { path });
+            }
+        }
+        // What the command changes, for `model_changed`.
+        let journal = top && self.listens(crate::EventKind::ModelChanged);
+        if journal {
+            self.doc.start_journal();
+        }
+        if top {
+            self.replaced = false;
+        }
         let depth = self.doc.undo_depth();
         let merge_key = self.merge_key;
         // Commands run by another command are part of it, not steps of a macro.
         let recorded_args = (self.recording.is_some() && self.nesting == 0).then(|| args.clone());
         let first_id = self.doc.project.next_id();
-        if let Some(refused) = self.refusal(name, &args) {
-            return Err(refused);
-        }
         let outer = self.nesting;
         self.nesting = outer.saturating_add(1);
         // Names and messages a command writes follow the project's units.
@@ -673,7 +776,29 @@ impl Session {
             // Undo whatever the failed command left behind.
             while self.doc.undo_depth() > depth && self.doc.undo() {}
         }
+        if top {
+            let changes = if journal { self.doc.take_journal() } else { None };
+            if result.is_ok() {
+                self.fire_after(name, changes);
+            }
+        }
         result
+    }
+
+    /// The events of the top-level command `name` that succeeded, with what
+    /// its document's journal noted (`None` when it was off or the document
+    /// was replaced).
+    fn fire_after(&mut self, name: &str, changes: Option<cc_core::ElementChanges>) {
+        if std::mem::take(&mut self.replaced) {
+            let path = self.doc.path.clone();
+            self.fire(crate::Event::ProjectOpened { new: path.is_none(), path });
+        } else if name == "project_save" {
+            if let Some(path) = self.doc.path.clone() {
+                self.fire(crate::Event::ProjectSaved { path });
+            }
+        } else if let Some(changes) = changes.filter(|c| !c.is_empty()) {
+            self.fire(crate::Event::ModelChanged(crate::ModelChange::new(name, changes)));
+        }
     }
 
     fn execute_extension(&mut self, name: &str, args: Value, depth: usize) -> Result<Value> {

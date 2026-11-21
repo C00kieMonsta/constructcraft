@@ -807,6 +807,33 @@ The file types come from the parameter's `extensions`. An entry whose command `m
 
 Plugins are shared through the community index, [constructcraft-plugins](https://github.com/francisreboucas/constructcraft-plugins): one entry per plugin, with where to download each version and its checksum, submitted by pull request. In the app, *Manage → Plugins* installs, updates, turns off and removes plugins ([Plugins](interface.md#plugins)); without it, `ccad plugins install <file.zip> <folder>` installs a downloaded archive (checked the same way: safe paths, sizes, and a plugin that loads) and `ccad plugins remove <id> <folder>` removes one.
 
+#### Events
+
+A plugin can react to what happens to the project by registering handlers while `main.lua` loads:
+
+```lua
+ccad.on("model_changed", function(e)
+  local index = ccad.data.get(nil)
+  if index == ccad.null then index = { walls = 0 } end
+  index.walls = index.walls + #e.added - #e.removed   -- (a real index would look at the categories)
+  ccad.data.set(nil, index)                            -- its own data: allowed
+end)
+ccad.on("project_saved", function(e) print("saved to " .. e.path) end)
+```
+
+| Event | When | `e` |
+|---|---|---|
+| `project_opened` | after `project_open`, `project_new` or an import that replaces the project (also the app's Open and New), and once when the plugins are loaded on a session that already holds a project, so a plugin can start | `path` (`nil` when the project has no file yet), `new` (`true` when it has none) |
+| `project_saving` | before `project_save` writes the file (the app's Save and Save As, `ccad --save`) | `path` |
+| `project_saved` | after the file was written | `path` |
+| `model_changed` | after each command that changed the project: `undo` and `redo` too, and a plugin's command once, when it ends | `command` (the command's name: `"wall_create"`, `"undo"`, `"redo"`, `"quick_rooms__rectangle_room"`…), `added`, `modified`, `removed` (element ids, ascending, at most 10 000 each, with `truncated = true` when a list was cut), and `other = true` when something other than elements changed (types, views, levels, settings, the project's plugin data); then the lists may all be empty |
+
+- **Registration:** `ccad.on(event, handler)` works only while `main.lua` loads (later it raises an error, like `ccad.command`); an unknown event name is a load error; a plugin registers at most 32 handlers. Handlers run plugin by plugin in load order (in a folder of plugins, the folders' name order), then in the order they were registered.
+- **Which commands fire them:** the ones the user, a script or an agent runs, from the app, `ccad`, Lua scripts or MCP. What a plugin command runs is part of it (the command fires once, when it ends), and what a handler runs never fires anything, so handlers cannot start a loop. Each step of a macro or script (`ccad script`, `ccad lua`, the macro editor) is a command of its own and fires its own events, as each is its own undo step. Failed commands, queries and edits that change nothing fire nothing.
+- **What a handler may do:** query anything, and keep its own data up to date with `ccad.data.set` (`plugin_data_set` for its own id). Anything else that edits (`element_set`…) is refused, and so are files and other plugins' commands. After `undo` and `redo` handlers only query: plugin data is part of the project's history, so undo and redo already bring it back in step with the model (and an edit there would clear what can be redone). What a plugin's handlers store for one event is one undo step of its own, named after the plugin, and is not recorded in a macro being recorded; it is saved with the project like the rest (so storing in `project_opened` or `project_saved` leaves unsaved changes).
+- **Budget:** each handler call may take at most 50 million Lua instructions and 5 seconds (and the plugin's memory limit).
+- **Failures never fail the command:** an error or a budget overrun in a handler becomes a message (`[id] model_changed handler 1: …`, on standard error with `ccad`, in the status bar and the log in the app), and what that call stored is dropped. A handler that fails 3 times in a row is turned off until the plugins load again.
+- **Cost:** the lists of `model_changed` come from the project's undo machinery: while some plugin listens to it, each command notes the elements it touches as they were before it (once each), and compares them with what they are after; no geometry is rebuilt, and nothing is noted while no plugin listens.
 
 ## Scripted components
 

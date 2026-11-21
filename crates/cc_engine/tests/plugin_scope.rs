@@ -4,7 +4,7 @@
 // Test helpers outside #[test] functions may fail loudly.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use cc_engine::{ErrorCode, FileAccess, Grants, PluginScope, Session};
+use cc_engine::{ErrorCode, FileAccess, Grants, PluginScope, ScopeEdits, Session};
 use serde_json::json;
 
 fn scratch(name: &str) -> std::path::PathBuf {
@@ -15,7 +15,7 @@ fn scratch(name: &str) -> std::path::PathBuf {
 }
 
 fn scope(edits: bool, files: FileAccess) -> PluginScope {
-    PluginScope { plugin: "p".into(), edits, files }
+    PluginScope { plugin: "p".into(), edits: if edits { ScopeEdits::All } else { ScopeEdits::None }, files }
 }
 
 #[test]

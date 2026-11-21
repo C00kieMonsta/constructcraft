@@ -390,9 +390,11 @@ pub fn format(text: &str) -> Result<String> {
 enum Undo {
     /// It left nothing to undo (a query, or an edit that changed nothing).
     Nothing,
-    /// It left one step on top of the undo history: the history's depth
-    /// below it and its identity ([`cc_core::Document::undo_top_id`]).
-    Step { depth: usize, id: u64 },
+    /// It left steps on top of the undo history (one, plus one per plugin
+    /// whose event handlers changed something): the history's depth below
+    /// them, how many, and the top one's identity
+    /// ([`cc_core::Document::undo_top_id`]).
+    Step { depth: usize, steps: usize, id: u64 },
     /// It changed the undo history otherwise (it undid, or replaced the
     /// document): it cannot be stepped back.
     Unknown,
@@ -407,7 +409,7 @@ fn history(session: &Session) -> (usize, Option<u64>) {
 fn undo_left(before: (usize, Option<u64>), after: (usize, Option<u64>)) -> Undo {
     match (after.0.checked_sub(before.0), after.1) {
         (Some(0), _) if after.1 == before.1 => Undo::Nothing,
-        (Some(1), Some(id)) => Undo::Step { depth: before.0, id },
+        (Some(steps @ 1..), Some(id)) => Undo::Step { depth: before.0, steps, id },
         _ => Undo::Unknown,
     }
 }
@@ -535,8 +537,8 @@ impl Stepper {
         match last.undo {
             Undo::Nothing => {}
             Undo::Unknown => return Err(EngineError::rejected(crate::t!("macro-step-not-undoable"))),
-            Undo::Step { depth, id } => {
-                if history(session) != (depth + 1, Some(id)) {
+            Undo::Step { depth, steps, id } => {
+                if history(session) != (depth + steps, Some(id)) {
                     return Err(EngineError::rejected(crate::t!("macro-step-changed")));
                 }
                 session.undo_to(depth);

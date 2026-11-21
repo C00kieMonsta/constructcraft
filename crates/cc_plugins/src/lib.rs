@@ -14,6 +14,10 @@
 //!   their manifest ([`contributions`]), translate their text
 //!   ([`locales`]), give command parameters UI hints, and keep their own
 //!   data in the project (`ccad.data`).
+//! - Plugins react to the session's events with `ccad.on` (`project_opened`,
+//!   `project_saving`, `project_saved`, `model_changed`): handlers that may
+//!   query and keep their own data, run by [`PluginHost`] as the
+//!   extension's [`cc_engine::Extension::on_event`].
 //! - [`store`] installs plugins from the community index and keeps the
 //!   values of their settings.
 

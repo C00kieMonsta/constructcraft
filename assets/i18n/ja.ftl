@@ -210,6 +210,7 @@ tx-create-grid = グリッドを作成
 tx-create-dimension = 寸法を作成
 tx-create-text = テキストを作成
 tx-add-leader = 引き出し線を追加
+tx-plugin-event = プラグイン { $plugin }（イベント）
 tx-remove-leader = 引き出し線を削除
 msg-text-empty = テキストが空です。
 tpl-type-room = 部屋

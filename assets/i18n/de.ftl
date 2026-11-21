@@ -210,6 +210,7 @@ tx-create-grid = Raster erstellen
 tx-create-dimension = Bemaßung erstellen
 tx-create-text = Text erstellen
 tx-add-leader = Führungslinie hinzufügen
+tx-plugin-event = Plugin { $plugin } (Ereignis)
 tx-remove-leader = Führungslinie entfernen
 msg-text-empty = Der Text ist leer.
 tpl-type-room = Raum

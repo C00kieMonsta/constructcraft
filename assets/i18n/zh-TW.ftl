@@ -210,6 +210,7 @@ tx-create-grid = 建立軸線
 tx-create-dimension = 建立尺寸標註
 tx-create-text = 建立文字
 tx-add-leader = 新增引線
+tx-plugin-event = 外掛程式 { $plugin }（事件）
 tx-remove-leader = 移除引線
 msg-text-empty = 文字為空。
 tpl-type-room = 房間

@@ -210,6 +210,7 @@ tx-create-grid = Criar eixo
 tx-create-dimension = Criar cota
 tx-create-text = Criar texto
 tx-add-leader = Adicionar linha de chamada
+tx-plugin-event = Plugin { $plugin } (evento)
 tx-remove-leader = Remover linha de chamada
 msg-text-empty = O texto está vazio.
 tpl-type-room = Ambiente

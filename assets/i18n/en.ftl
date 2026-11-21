@@ -210,6 +210,7 @@ tx-create-grid = Create Grid
 tx-create-dimension = Create Dimension
 tx-create-text = Create Text
 tx-add-leader = Add Leader
+tx-plugin-event = Plugin { $plugin } (event)
 tx-remove-leader = Remove Leader
 msg-text-empty = The text is empty.
 tpl-type-room = Room

@@ -808,6 +808,34 @@ Os tipos de arquivo vêm das `extensions` do parâmetro. Um item cujo comando o 
 
 Os plugins são compartilhados pelo índice da comunidade, [constructcraft-plugins](https://github.com/francisreboucas/constructcraft-plugins): uma entrada por plugin, com de onde baixar cada versão e o checksum dela, enviada por pull request. No aplicativo, *Gerenciar → Plugins* instala, atualiza, desativa e remove plugins ([Plugins](interface.pt-BR.md#plugins)); sem ele, `ccad plugins install <arquivo.zip> <pasta>` instala um arquivo baixado (verificado do mesmo jeito: caminhos seguros, tamanhos e um plugin que carrega) e `ccad plugins remove <id> <pasta>` remove um.
 
+#### Eventos
+
+Um plugin pode reagir ao que acontece com o projeto registrando tratadores enquanto o `main.lua` carrega:
+
+```lua
+ccad.on("model_changed", function(e)
+  local indice = ccad.data.get(nil)
+  if indice == ccad.null then indice = { paredes = 0 } end
+  indice.paredes = indice.paredes + #e.added - #e.removed   -- (um índice de verdade olharia as categorias)
+  ccad.data.set(nil, indice)                                -- os próprios dados: permitido
+end)
+ccad.on("project_saved", function(e) print("salvo em " .. e.path) end)
+```
+
+| Evento | Quando | `e` |
+|---|---|---|
+| `project_opened` | depois de `project_open`, `project_new` ou de uma importação que substitui o projeto (também Abrir e Novo do aplicativo), e uma vez quando os plugins são carregados numa sessão que já tem um projeto, para o plugin começar | `path` (`nil` quando o projeto ainda não tem arquivo), `new` (`true` quando não tem) |
+| `project_saving` | antes de `project_save` gravar o arquivo (Salvar e Salvar como do aplicativo, `ccad --save`) | `path` |
+| `project_saved` | depois que o arquivo foi gravado | `path` |
+| `model_changed` | depois de cada comando que mudou o projeto: `undo` e `redo` também, e um comando de plugin uma vez, quando termina | `command` (o nome do comando: `"wall_create"`, `"undo"`, `"redo"`, `"quick_rooms__rectangle_room"`…), `added`, `modified`, `removed` (ids de elementos, em ordem crescente, no máximo 10 000 em cada, com `truncated = true` quando uma lista foi cortada), e `other = true` quando mudou algo além de elementos (tipos, vistas, níveis, configurações, os dados de plugins do projeto); aí as listas podem estar todas vazias |
+
+- **Registro:** `ccad.on(evento, tratador)` só funciona enquanto o `main.lua` carrega (depois levanta um erro, como `ccad.command`); um nome de evento desconhecido é um erro de carga; um plugin registra no máximo 32 tratadores. Os tratadores rodam plugin por plugin na ordem de carga (numa pasta de plugins, a ordem dos nomes das pastas) e depois na ordem em que foram registrados.
+- **Que comandos os disparam:** os que o usuário, um script ou um agente roda, pelo aplicativo, pelo `ccad`, por scripts Lua ou pelo MCP. O que um comando de plugin roda faz parte dele (o comando dispara uma vez, quando termina), e o que um tratador roda nunca dispara nada, então tratadores não entram em laço. Cada passo de uma macro ou script (`ccad script`, `ccad lua`, o editor de macros) é um comando próprio e dispara seus eventos, já que cada um é um passo de desfazer. Comandos que falham, consultas e edições que não mudam nada não disparam nada.
+- **O que um tratador pode fazer:** consultar qualquer coisa e manter os próprios dados em dia com `ccad.data.set` (`plugin_data_set` com o próprio id). Qualquer outra edição (`element_set`…) é recusada, assim como arquivos e comandos de outros plugins. Depois de `undo` e `redo` os tratadores só consultam: os dados de plugins fazem parte do histórico do projeto, então desfazer e refazer já os trazem de volta junto com o modelo (e uma edição ali apagaria o que pode ser refeito). O que os tratadores de um plugin guardam num evento é um passo de desfazer próprio, com o nome do plugin, e não é gravado numa macro sendo gravada; é salvo com o projeto como o resto (então guardar algo em `project_opened` ou `project_saved` deixa alterações não salvas).
+- **Orçamento:** cada chamada de tratador pode usar no máximo 50 milhões de instruções Lua e 5 segundos (e o limite de memória do plugin).
+- **Falhas nunca fazem o comando falhar:** um erro ou um orçamento estourado num tratador vira uma mensagem (`[id] model_changed handler 1: …`, na saída de erro com o `ccad`, na barra de status e no log no aplicativo), e o que aquela chamada guardou é descartado. Um tratador que falha 3 vezes seguidas fica desligado até os plugins carregarem de novo.
+- **Custo:** as listas de `model_changed` vêm do mecanismo de desfazer do projeto: enquanto algum plugin escuta esse evento, cada comando anota os elementos que toca como eram antes dele (uma vez cada) e os compara com o que são depois; nenhuma geometria é reconstruída, e nada é anotado enquanto nenhum plugin escuta.
+
 ## Componentes com script
 
 Uma peça de componente pode ser um **script**: código Lua que declara os parâmetros e os hotspots do componente e monta as peças a partir dos valores deles. O script é puro: ele vê os valores e nada mais (nem comandos, nem arquivos, nem o modelo), então roda uma vez para cada conjunto de valores; mover ou girar um componente já colocado não o roda de novo. [`examples/components/cabinet.lua`](../examples/components/cabinet.lua) é um exemplo completo.

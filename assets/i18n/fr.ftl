@@ -210,6 +210,7 @@ tx-create-grid = Créer un quadrillage
 tx-create-dimension = Créer une cote
 tx-create-text = Créer un texte
 tx-add-leader = Ajouter une ligne de repère
+tx-plugin-event = Plugin { $plugin } (événement)
 tx-remove-leader = Retirer une ligne de repère
 msg-text-empty = Le texte est vide.
 tpl-type-room = Pièce

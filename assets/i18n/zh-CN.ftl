@@ -210,6 +210,7 @@ tx-create-grid = 创建轴网
 tx-create-dimension = 创建尺寸标注
 tx-create-text = 创建文字
 tx-add-leader = 添加引线
+tx-plugin-event = 插件 { $plugin }（事件）
 tx-remove-leader = 删除引线
 msg-text-empty = 文字为空。
 tpl-type-room = 房间

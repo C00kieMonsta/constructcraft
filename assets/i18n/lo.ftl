@@ -201,6 +201,7 @@ tx-create-grid = ສ້າງເສັ້ນຕາໜ່າງ
 tx-create-dimension = ສ້າງເສັ້ນວັດແທກ
 tx-create-text = ສ້າງຂໍ້ຄວາມ
 tx-add-leader = ເພີ່ມເສັ້ນຊີ້
+tx-plugin-event = ປລັກອິນ { $plugin } (ເຫດການ)
 tx-remove-leader = ເອົາເສັ້ນຊີ້ອອກ
 msg-text-empty = ຂໍ້ຄວາມວ່າງເປົ່າ.
 tpl-type-room = ຫ້ອງ

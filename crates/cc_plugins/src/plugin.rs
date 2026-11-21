@@ -79,6 +79,20 @@
 //! `project_open`, `undo`, `redo` or `language_set`, no edits from a query
 //! command, and only its granted files (all files with `files`).
 //!
+//! `ccad.on(event, handler)`, also only while `main.lua` loads (at most
+//! [`MAX_HANDLERS`] per plugin; an unknown event name fails the load), makes
+//! `handler(e)` run on the session's events ([`cc_engine::Event`]):
+//! `project_opened` `{ path, new }`, `project_saving` and `project_saved`
+//! `{ path }`, and `model_changed` `{ command, added, modified, removed,
+//! truncated, other }`. Handlers run in plugin load order, then
+//! registration order, each with a smaller budget ([`EVENT_INSTRUCTIONS`],
+//! [`EVENT_TIME`]), inside [`Session::with_event_scope`]: queries and
+//! `ccad.data.set` for the plugin's own data (one undo step per plugin and
+//! event), no files. A handler's error never fails the command that fired
+//! it: it becomes a message (`[id] …`), the handler's own edits are dropped,
+//! and after [`MAX_FAILURES`] failures in a row the handler is turned off for
+//! the session.
+//!
 //! Settings are kept per plugin in `<plugins folder>/.settings/<id>.json`
 //! ([`crate::store::read_settings`]), read by [`PluginHost::load_folder`];
 //! a plugin loaded from its own folder (not a folder of plugins) starts
@@ -94,7 +108,10 @@ use crate::convert::{from_lua, to_lua};
 use crate::locales::Locales;
 use crate::sandbox::{Limits, Sandbox};
 use cc_engine::extension::SEPARATOR;
-use cc_engine::{CommandInfo, CommandKind, EngineError, Extension, FileAccess, Grants, PluginScope, Session};
+use cc_engine::{
+    CommandInfo, CommandKind, EngineError, Event, EventKind, Extension, FileAccess, Grants, PluginScope, ScopeEdits,
+    Session,
+};
 use mlua::{Function, Lua, Table, Value as LuaValue};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value, json};
@@ -113,6 +130,14 @@ const MAX_COMMANDS: usize = 256;
 const MAX_PLUGINS: usize = 256;
 /// Longest full command name (a model tool name).
 const MAX_NAME: usize = 64;
+/// Most event handlers one plugin registers (`ccad.on`).
+pub const MAX_HANDLERS: usize = 32;
+/// Lua instructions one event handler call may take (and [`EVENT_TIME`]).
+pub const EVENT_INSTRUCTIONS: u64 = 50_000_000;
+/// Time one event handler call may take.
+pub const EVENT_TIME: std::time::Duration = std::time::Duration::from_secs(5);
+/// Failures in a row after which a handler is turned off for the session.
+pub const MAX_FAILURES: u32 = 3;
 
 /// A plugin's `plugin.toml`.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -370,6 +395,16 @@ struct PluginCommand {
     func: Function,
 }
 
+/// A function a plugin gave `ccad.on`.
+struct Handler {
+    event: EventKind,
+    func: Function,
+    /// Its failures in a row.
+    failures: u32,
+    /// Turned off after [`MAX_FAILURES`] failures in a row.
+    off: bool,
+}
+
 /// A button of the manifest, checked.
 #[derive(Debug, Clone)]
 struct ButtonDef {
@@ -398,6 +433,8 @@ pub struct Plugin {
     sandbox: Sandbox,
     api: Api,
     commands: Vec<PluginCommand>,
+    /// Its event handlers, in registration order.
+    handlers: Vec<Handler>,
     /// Its translations (`None` under api 1: text is shown as written).
     locales: Option<Locales>,
     buttons: Vec<ButtonDef>,
@@ -475,7 +512,7 @@ impl Plugin {
         let settings = manifest.setting_list().map_err(fail)?;
         let values = current_values(&settings, stored);
         let sandbox = Sandbox::new(limits).map_err(|e| fail(engine_error(&e).message))?;
-        let (api, commands, settings_meta) =
+        let (api, commands, handlers, settings_meta) =
             setup(&sandbox, dir, &manifest, &source, &values).map_err(|e| fail(engine_error(&e).message))?;
         if let Some(b) = buttons.iter().find(|b| !commands.iter().any(|c| c.short == b.command)) {
             return Err(fail(format!("a button runs the command \"{}\", which main.lua does not register", b.command)));
@@ -490,6 +527,7 @@ impl Plugin {
             sandbox,
             api,
             commands,
+            handlers,
             locales,
             buttons,
             settings,
@@ -644,7 +682,7 @@ impl Plugin {
         };
         let scope = PluginScope {
             plugin: self.manifest.id.clone(),
-            edits: kind != CommandKind::Query,
+            edits: if kind == CommandKind::Query { ScopeEdits::None } else { ScopeEdits::All },
             files: if self.granted.files { FileAccess::All } else { FileAccess::Granted(grants.clone()) },
         };
         let func = command.func.clone();
@@ -662,6 +700,55 @@ impl Plugin {
         });
         // What it wrote with ccad.file reaches the disk only when it succeeded.
         Some(result.map_err(|e| engine_error(&e)).and_then(|out| files.into_inner().commit().map(|()| out)))
+    }
+
+    /// Whether it has a handler of `kind` that is on.
+    fn listens(&self, kind: EventKind) -> bool {
+        self.handlers.iter().any(|h| h.event == kind && !h.off)
+    }
+
+    /// Run its handlers of `event` (in registration order) in the event's
+    /// scope; returns the lines for the user (what they printed, their
+    /// errors).
+    fn handle(&mut self, session: &mut Session, event: &Event) -> Vec<String> {
+        let kind = event.kind();
+        let mut lines = Vec::new();
+        if let Err(e) = fill_settings(&self.sandbox.lua, &self.settings_meta, &self.values) {
+            lines.push(format!("{}: {}", kind.name(), engine_error(&e).message));
+            return lines;
+        }
+        let payload = event.payload();
+        let name = self.display_name();
+        let (sandbox, api, handlers) = (&self.sandbox, &self.api, &mut self.handlers);
+        session.with_event_scope(event, &self.manifest.id, &name, |session| {
+            for (n, handler) in handlers.iter_mut().filter(|h| h.event == kind).enumerate() {
+                if handler.off {
+                    continue;
+                }
+                sandbox.reset_budget_within(EVENT_INSTRUCTIONS, EVENT_TIME);
+                let depth = session.doc.undo_depth();
+                let func = handler.func.clone();
+                let result =
+                    api.with_session(&sandbox.lua, session, None, |lua| func.call::<()>(to_lua(lua, &payload)?));
+                lines.extend(sandbox.take_output());
+                let Err(e) = result else {
+                    handler.failures = 0;
+                    continue;
+                };
+                // What a failed handler changed goes, and cannot be redone.
+                session.doc.discard_since(depth);
+                let which = format!("{} handler {}", kind.name(), n + 1);
+                lines.push(format!("{which}: {}", engine_error(&e).message));
+                handler.failures = handler.failures.saturating_add(1);
+                if handler.failures >= MAX_FAILURES {
+                    handler.off = true;
+                    lines.push(format!(
+                        "{which} failed {MAX_FAILURES} times in a row: it is off until the plugins load again"
+                    ));
+                }
+            }
+        });
+        lines
     }
 }
 
@@ -761,16 +848,47 @@ fn buttons(dir: &Path, manifest: &Manifest) -> Result<Vec<ButtonDef>, String> {
 /// What `ccad.command` collected while the plugin loaded.
 type Registered = Rc<RefCell<Vec<PluginCommand>>>;
 
-/// Install the API, `require`, `ccad.settings`, `ccad.data` and
-/// `ccad.command`, and run the main file. Returns the API, the commands and
-/// the metatable of `ccad.settings`.
+/// `ccad.on(event, handler)`, adding to `sink`.
+fn on_fn(lua: &Lua, sink: Rc<RefCell<Vec<Handler>>>) -> mlua::Result<Function> {
+    lua.create_function(move |_, (name, func): (LuaValue, LuaValue)| {
+        let names = || EventKind::ALL.map(EventKind::name).join(", ");
+        let event = match &name {
+            LuaValue::String(s) => {
+                let text = s.to_string_lossy();
+                EventKind::from_name(&text).ok_or_else(|| {
+                    mlua::Error::runtime(format!("ccad.on: unknown event \"{text}\" (events: {})", names()))
+                })?
+            }
+            other => {
+                return Err(mlua::Error::runtime(format!(
+                    "ccad.on: the event is a {}, not a name (events: {})",
+                    other.type_name(),
+                    names()
+                )));
+            }
+        };
+        let LuaValue::Function(func) = func else {
+            return Err(mlua::Error::runtime(format!("ccad.on: the handler of {} is not a function", event.name())));
+        };
+        let mut list = sink.borrow_mut();
+        if list.len() >= MAX_HANDLERS {
+            return Err(mlua::Error::runtime(format!("ccad.on: a plugin registers at most {MAX_HANDLERS} handlers")));
+        }
+        list.push(Handler { event, func, failures: 0, off: false });
+        Ok(())
+    })
+}
+
+/// Install the API, `require`, `ccad.settings`, `ccad.data`, `ccad.command`
+/// and `ccad.on`, and run the main file. Returns the API, the commands, the
+/// event handlers and the metatable of `ccad.settings`.
 fn setup(
     sandbox: &Sandbox,
     dir: &Path,
     manifest: &Manifest,
     source: &str,
     values: &Map<String, Value>,
-) -> mlua::Result<(Api, Vec<PluginCommand>, Table)> {
+) -> mlua::Result<(Api, Vec<PluginCommand>, Vec<Handler>, Table)> {
     let lua = &sandbox.lua;
     let api = Api::install_for_plugin(lua)?;
     let plugin = lua.create_table()?;
@@ -806,6 +924,8 @@ fn setup(
         Ok(())
     })?;
     api.ccad.raw_set("command", command)?;
+    let handlers: Rc<RefCell<Vec<Handler>>> = Rc::default();
+    api.ccad.raw_set("on", on_fn(lua, handlers.clone())?)?;
 
     sandbox.reset_budget();
     let chunk_name = format!("@{}/{}", manifest.id, manifest.main);
@@ -816,8 +936,13 @@ fn setup(
         Err(mlua::Error::runtime("ccad.command can only be called while the plugin loads"))
     })?;
     api.ccad.raw_set("command", late)?;
+    let late_on = lua.create_function(|_, _: mlua::MultiValue| -> mlua::Result<()> {
+        Err(mlua::Error::runtime("ccad.on can only be called while the plugin loads"))
+    })?;
+    api.ccad.raw_set("on", late_on)?;
     let commands = std::mem::take(&mut *registered.borrow_mut());
-    Ok((api, commands, meta))
+    let handlers = std::mem::take(&mut *handlers.borrow_mut());
+    Ok((api, commands, handlers, meta))
 }
 
 /// Read one `ccad.command { … }` table of a plugin written for `version` of
@@ -1102,5 +1227,21 @@ impl Extension for PluginHost {
 
     fn take_messages(&mut self) -> Vec<String> {
         std::mem::take(&mut self.messages)
+    }
+
+    fn listens(&self, kind: EventKind) -> bool {
+        self.plugins.iter().any(|p| p.listens(kind))
+    }
+
+    /// The handlers of `event`, plugin by plugin in load order.
+    fn on_event(&mut self, session: &mut Session, event: &Event) {
+        for plugin in &mut self.plugins {
+            if !plugin.listens(event.kind()) {
+                continue;
+            }
+            let lines = plugin.handle(session, event);
+            let id = &plugin.manifest.id;
+            self.messages.extend(lines.into_iter().map(|line| format!("[{id}] {line}")));
+        }
     }
 }

@@ -210,6 +210,7 @@ tx-create-grid = Crear eje
 tx-create-dimension = Crear cota
 tx-create-text = Crear texto
 tx-add-leader = Añadir directriz
+tx-plugin-event = Plugin { $plugin } (evento)
 tx-remove-leader = Quitar directriz
 msg-text-empty = El texto está vacío.
 tpl-type-room = Habitación

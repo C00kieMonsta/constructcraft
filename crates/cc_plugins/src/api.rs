@@ -9,8 +9,9 @@
 //! - `ccad.null` (JSON null), `ccad.array(t)` (marks `t`, even empty, as a
 //!   list), `ccad.json.encode(v)` / `ccad.json.decode(s)`, `ccad.version`,
 //!   `ccad.api` (the plugin API version).
-//! - In plugins only (see [`crate::plugin`]): `ccad.plugin`, `ccad.command`,
-//!   `ccad.settings`, `ccad.data` and `ccad.file`.
+//! - In plugins only (see [`crate::plugin`]): `ccad.plugin`, `ccad.command`
+//!   and `ccad.on` (while the plugin loads), `ccad.settings`, `ccad.data` and
+//!   `ccad.file`.
 //!
 //! What a plugin command may do is not decided here: it runs inside a
 //! [`cc_engine::PluginScope`], which [`Session::execute`] checks for every

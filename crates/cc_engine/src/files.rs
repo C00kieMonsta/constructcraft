@@ -1,5 +1,5 @@
 //! What files the commands running may read and write ([`FileAccess`]), and
-//! the scope a plugin command runs in ([`PluginScope`]).
+//! the scope a plugin command or event handler runs in ([`PluginScope`]).
 //!
 //! A [`Session`](crate::Session) keeps the access of the commands running:
 //! everything for the user's own commands; nothing inside a graph run
@@ -122,17 +122,29 @@ impl FileAccess {
     }
 }
 
-/// What a plugin command may do while it runs: every command run during it
-/// (also by graphs, scripts or macros it starts) is checked against this by
-/// [`Session::execute`](crate::Session::execute).
+/// What a plugin command (or event handler) may do while it runs: every
+/// command run during it (also by graphs, scripts or macros it starts) is
+/// checked against this by [`Session::execute`](crate::Session::execute).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PluginScope {
     /// The plugin's id: its `plugin_data_*` calls must name it.
     pub plugin: String,
-    /// Whether commands that change the model may run (not in a query command).
-    pub edits: bool,
+    /// Which commands that change the model may run.
+    pub edits: ScopeEdits,
     /// The files it may read and write.
     pub files: FileAccess,
+}
+
+/// Which commands that change the model a [`PluginScope`] lets run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScopeEdits {
+    /// None (a query command).
+    None,
+    /// Only `plugin_data_set` for the scope's own plugin (an event handler
+    /// keeping its data up to date).
+    OwnData,
+    /// Any (an edit or file command).
+    All,
 }
 
 /// `path` made absolute (from the current folder) with `.` and `..` resolved

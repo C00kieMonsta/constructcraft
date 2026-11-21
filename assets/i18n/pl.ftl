@@ -210,6 +210,7 @@ tx-create-grid = Utwórz oś
 tx-create-dimension = Utwórz wymiar
 tx-create-text = Utwórz tekst
 tx-add-leader = Dodaj odnośnik
+tx-plugin-event = Wtyczka { $plugin } (zdarzenie)
 tx-remove-leader = Usuń odnośnik
 msg-text-empty = Tekst jest pusty.
 tpl-type-room = Pomieszczenie

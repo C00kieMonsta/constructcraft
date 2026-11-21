@@ -210,6 +210,7 @@ tx-create-grid = Crea griglia
 tx-create-dimension = Crea quota
 tx-create-text = Crea testo
 tx-add-leader = Aggiungi linea di richiamo
+tx-plugin-event = Plugin { $plugin } (evento)
 tx-remove-leader = Rimuovi linea di richiamo
 msg-text-empty = Il testo è vuoto.
 tpl-type-room = Locale

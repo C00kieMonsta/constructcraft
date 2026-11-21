@@ -240,6 +240,33 @@ fn plugins_add_commands() {
 }
 
 #[test]
+fn plugin_event_handlers_print_on_standard_error() {
+    let dir = std::env::temp_dir().join(format!("ccad-cli-{}-events", std::process::id()));
+    let plugin = dir.join("watch");
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(plugin.join("plugin.toml"), "id = \"watch\"\nname = \"Watch\"\nversion = \"1.0\"\napi = 2\n")
+        .unwrap();
+    std::fs::write(
+        plugin.join("main.lua"),
+        r#"ccad.on("project_saved", function(e) print("saved to " .. e.path) end)
+           ccad.on("model_changed", function(e) print("changed by " .. e.command) end)"#,
+    )
+    .unwrap();
+    let folder = dir.to_string_lossy().into_owned();
+    let file = dir.join("watched.ccad").to_string_lossy().into_owned();
+    let (code, _, err) =
+        ccad(&["--plugins", &folder, "--save-as", &file, "run", "wall_create", "start=[0,0]", "end=[3,0]"], "");
+    assert_eq!(code, 0, "{err}");
+    assert!(err.contains("[watch] changed by wall_create"), "{err}");
+    assert!(err.contains(&format!("[watch] saved to {file}")), "{err}");
+    // --save to the project's own file.
+    let (code, _, err) = ccad(&["--plugins", &folder, "-p", &file, "--save", "run", "project_info"], "");
+    assert_eq!(code, 0, "{err}");
+    assert!(err.contains("[watch] saved to"), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn plugins_install_and_remove() {
     let dir = std::env::temp_dir().join(format!("ccad-cli-{}-store", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

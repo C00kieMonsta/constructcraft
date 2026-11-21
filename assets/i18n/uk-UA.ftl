@@ -210,6 +210,7 @@ tx-create-grid = Створити координатну вісь
 tx-create-dimension = Створити розмір
 tx-create-text = Створити текст
 tx-add-leader = Додати виноску
+tx-plugin-event = Плагін { $plugin } (подія)
 tx-remove-leader = Видалити виноску
 msg-text-empty = Текст порожній.
 tpl-type-room = Приміщення

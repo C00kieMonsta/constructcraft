@@ -72,9 +72,9 @@ coroutine.resume = function(...) return check(raw_resume(...)) end
 #[derive(Debug, Clone)]
 pub struct Meter {
     spent: Rc<Cell<u64>>,
-    limit: u64,
+    /// The instructions of the current run (see [`Sandbox::reset_budget_within`]).
+    limit: Rc<Cell<u64>>,
     deadline: Rc<Cell<Instant>>,
-    time: Duration,
     max_string: usize,
 }
 
@@ -82,27 +82,27 @@ impl Meter {
     fn new(limits: Limits) -> Meter {
         let meter = Meter {
             spent: Rc::new(Cell::new(0)),
-            limit: limits.instructions,
+            limit: Rc::new(Cell::new(limits.instructions)),
             deadline: Rc::new(Cell::new(Instant::now())),
-            time: limits.time,
             max_string: MAX_STRING.min(limits.memory),
         };
-        meter.reset();
+        meter.reset(limits.instructions, limits.time);
         meter
     }
 
-    /// A full budget, from now.
-    fn reset(&self) {
+    /// A budget of `instructions` and `time`, from now.
+    fn reset(&self, instructions: u64, time: Duration) {
         self.spent.set(0);
+        self.limit.set(instructions);
         let now = Instant::now();
         // A time too long to add is as good as a year.
         let far = now.checked_add(Duration::from_secs(86_400 * 365)).unwrap_or(now);
-        self.deadline.set(now.checked_add(self.time).unwrap_or(far));
+        self.deadline.set(now.checked_add(time).unwrap_or(far));
     }
 
     /// Why the run must stop, if it must.
     pub fn exceeded(&self) -> Option<&'static str> {
-        if self.spent.get() > self.limit {
+        if self.spent.get() > self.limit.get() {
             Some(BUDGET_SPENT)
         } else if Instant::now() > self.deadline.get() {
             Some(TIME_SPENT)
@@ -282,7 +282,13 @@ impl Sandbox {
 
     /// Start a new run: a full instruction budget and time.
     pub fn reset_budget(&self) {
-        self.meter.reset();
+        self.meter.reset(self.limits.instructions, self.limits.time);
+    }
+
+    /// Start a new run with a smaller budget: at most `instructions` and
+    /// `time` (never more than the sandbox's limits).
+    pub fn reset_budget_within(&self, instructions: u64, time: Duration) {
+        self.meter.reset(instructions.min(self.limits.instructions), time.min(self.limits.time));
     }
 
     pub fn limits(&self) -> Limits {

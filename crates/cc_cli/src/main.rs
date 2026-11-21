@@ -244,14 +244,18 @@ fn plugin_settings(folder: &str, id: &str, pairs: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Save when asked (after the commands ran).
+/// Save when asked (after the commands ran), then show what plugins printed
+/// meanwhile (their `project_saving` and `project_saved` handlers).
 fn save(s: &mut Session, o: &Options) -> Result<(), EngineError> {
-    if let Some(path) = &o.save_as {
-        s.execute("project_save", json!({ "path": path }))?;
+    let result = if let Some(path) = &o.save_as {
+        s.execute("project_save", json!({ "path": path })).map(drop)
     } else if o.save {
-        s.execute("project_save", json!({}))?;
-    }
-    Ok(())
+        s.execute("project_save", json!({})).map(drop)
+    } else {
+        Ok(())
+    };
+    flush_messages(s);
+    result
 }
 
 fn main() -> ExitCode {
