@@ -707,6 +707,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             },
         );
         assert_eq!(project.repair(), 0);

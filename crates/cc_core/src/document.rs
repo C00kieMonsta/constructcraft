@@ -32,6 +32,7 @@ struct Settings {
     browser: crate::browser::BrowserOrganization,
     bar_marking: crate::bar_marks::BarMarking,
     sun_presets: Vec<crate::sun::SunPreset>,
+    plugin_data: crate::plugin_data::PluginData,
 }
 
 impl Settings {
@@ -59,6 +60,7 @@ impl Settings {
             browser: p.browser.clone(),
             bar_marking: p.bar_marking.clone(),
             sun_presets: p.sun_presets.clone(),
+            plugin_data: p.plugin_data.clone(),
         }
     }
 
@@ -85,6 +87,7 @@ impl Settings {
         p.browser = self.browser;
         p.bar_marking = self.bar_marking;
         p.sun_presets = self.sun_presets;
+        p.plugin_data = self.plugin_data;
     }
 }
 
@@ -626,6 +629,12 @@ impl<'a> EditCtx<'a> {
         &mut self.project.sun_presets
     }
 
+    /// The data plugins keep on the project (see [`crate::plugin_data`]).
+    pub fn plugin_data_mut(&mut self) -> &mut crate::plugin_data::PluginData {
+        self.touch_settings();
+        &mut self.project.plugin_data
+    }
+
     /// Views whose sun's ground level is gone (deleted by this edit) lose it.
     fn sync_sun_ground(&mut self) {
         let p = &*self.project;
@@ -882,6 +891,7 @@ impl<'a> EditCtx<'a> {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             });
             for (set_type, set) in sets {
                 let set_id = ElementId(self.alloc_id());
@@ -897,6 +907,7 @@ impl<'a> EditCtx<'a> {
                     phase_demolished: None,
                     design_option: None,
                     paints: Vec::new(),
+                    plugin_data: Default::default(),
                 });
             }
         }
@@ -1530,6 +1541,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             })
         })
     }
@@ -1577,6 +1589,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             })
         });
         doc.edit("delete", |e| e.remove_element(wall));
@@ -1615,6 +1628,7 @@ mod tests {
                     phase_demolished: None,
                     design_option: None,
                     paints: Vec::new(),
+                    plugin_data: Default::default(),
                 });
             }
             let selfie = ElementId(e.alloc_id());
@@ -1637,6 +1651,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             });
             e.remove_element(selfie);
             (a, b)

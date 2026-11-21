@@ -23,6 +23,7 @@ fn add(doc: &mut Document, category: Category, kind: ElementKind) -> ElementId {
             phase_demolished: None,
             design_option: None,
             paints: Vec::new(),
+            plugin_data: Default::default(),
         })
     })
 }
@@ -443,6 +444,7 @@ fn an_unrepaired_spline_wall_builds_without_panicking() {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             },
         );
         id

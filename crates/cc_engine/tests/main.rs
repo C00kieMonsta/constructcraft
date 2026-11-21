@@ -51,6 +51,7 @@ mod phases;
 mod pile_rebar;
 mod piles;
 mod pipes;
+mod plugin_data;
 mod profiles;
 mod project_templates;
 mod rebar_copy;

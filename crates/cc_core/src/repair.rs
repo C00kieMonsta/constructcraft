@@ -434,6 +434,12 @@ impl Project {
             repairs += crate::paint::repair(&mut e.paints, &|m| materials.contains(m));
         }
 
+        // Plugin data of bad plugin ids, not JSON or too large.
+        repairs += crate::plugin_data::repair(&mut self.plugin_data);
+        for e in self.elements.values_mut().filter(|e| !e.plugin_data.is_empty()) {
+            repairs += crate::plugin_data::repair(&mut e.plugin_data);
+        }
+
         // Mass floors on levels that are gone.
         let levels: std::collections::BTreeSet<_> = self.levels.iter().map(|l| l.id).collect();
         for e in self.elements.values_mut() {
@@ -1300,6 +1306,7 @@ mod tests {
                     phase_demolished: None,
                     design_option: None,
                     paints: Vec::new(),
+                    plugin_data: Default::default(),
                 },
             );
             id
@@ -1370,6 +1377,7 @@ mod tests {
                     phase_demolished: None,
                     design_option: None,
                     paints: Vec::new(),
+                    plugin_data: Default::default(),
                 },
             );
             id
@@ -1418,6 +1426,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             };
             p.elements.insert(id, e);
             ids.push(id);
@@ -1453,6 +1462,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             };
             p.elements.insert(id, e);
             id
@@ -1513,6 +1523,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             };
             p.elements.insert(id, e);
             ids.push(id);
@@ -1554,6 +1565,7 @@ mod tests {
             phase_demolished: None,
             design_option: None,
             paints: Vec::new(),
+            plugin_data: Default::default(),
         };
         p.elements.insert(id, e);
         assert_eq!(p.repair(), 3, "one too many, a NaN, a negative slope");
@@ -1585,6 +1597,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             };
             p.elements.insert(id, e);
             id
@@ -1657,6 +1670,7 @@ mod tests {
                     phase_demolished: None,
                     design_option: None,
                     paints: Vec::new(),
+                    plugin_data: Default::default(),
                 },
             );
         }

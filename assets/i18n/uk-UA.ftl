@@ -2926,6 +2926,7 @@ err-paint-no-face = у цій точці немає грані елемента
 err-paint-none = там немає фарбування, яке можна прибрати
 tx-paint = Пофарбувати грань
 tx-paint-remove = Прибрати фарбування
+tx-plugin-data = Дані плагіна
 mat-texture = Текстура
 mat-texture-pixels = { $w } × { $h } пікселів
 mat-texture-none = Немає зображення: грані показують колір.

@@ -2925,6 +2925,7 @@ err-paint-no-face = não há face do elemento nesse ponto
 err-paint-none = não há pintura para remover ali
 tx-paint = Pintar face
 tx-paint-remove = Remover pintura
+tx-plugin-data = Dados de plugin
 mat-texture = Textura
 mat-texture-pixels = { $w } × { $h } pixels
 mat-texture-none = Sem imagem: as faces mostram a cor.

@@ -19,6 +19,7 @@ Every command runs the same way from the desktop app, `ccad run` / `ccad script`
 - **Design options**: [`options_list`](#options_list), [`option_set_create`](#option_set_create), [`option_set_rename`](#option_set_rename), [`option_set_delete`](#option_set_delete), [`option_create`](#option_create), [`option_set`](#option_set), [`option_delete`](#option_delete), [`option_accept_primary`](#option_accept_primary), [`elements_option_set`](#elements_option_set), [`view_options_set`](#view_options_set), [`option_active_set`](#option_active_set)
 - **Visual programming**: [`graph_run`](#graph_run), [`graph_check`](#graph_check), [`graph_nodes`](#graph_nodes), [`graph_elements`](#graph_elements), [`graph_release`](#graph_release)
 - **Macros**: [`macro_check`](#macro_check), [`macro_format`](#macro_format)
+- **Plugin data**: [`plugin_data_get`](#plugin_data_get), [`plugin_data_set`](#plugin_data_set), [`plugin_data_list`](#plugin_data_list)
 
 ## Project and files
 
@@ -3989,3 +3990,32 @@ No parameters.
 | Parameter | Type | | Description |
 |---|---|---|---|
 | `text` | string | required | The macro to format. |
+
+## Plugin data
+
+### `plugin_data_get`
+
+*query* — The JSON value a plugin keeps on an element or on the project, or `null` when it keeps none.
+
+| Parameter | Type | | Description |
+|---|---|---|---|
+| `plugin` | string | required | Plugin id (lowercase letters, digits and single underscores, starting with a letter; at most 32). |
+| `element` | integer | optional | Element id (default: the project's own data). |
+
+### `plugin_data_set`
+
+*edit* — Keep a JSON value for a plugin on an element or on the project, replacing what that plugin kept there (`data: null` removes it). Saved in the project file; one undo step.
+
+| Parameter | Type | | Description |
+|---|---|---|---|
+| `data` | JSON | required | The value to keep (any JSON, at most 256 KiB as compact JSON text and nested at most 64 deep); `null` removes the plugin's data. |
+| `plugin` | string | required | Plugin id (lowercase letters, digits and single underscores, starting with a letter; at most 32). |
+| `element` | integer | optional | Element id (default: the project's own data). |
+
+### `plugin_data_list`
+
+*query* — Where a plugin keeps data: whether the project has some (`project`) and the ids of the elements that do (`elements`, ascending).
+
+| Parameter | Type | | Description |
+|---|---|---|---|
+| `plugin` | string | required | Plugin id (lowercase letters, digits and single underscores, starting with a letter; at most 32). |

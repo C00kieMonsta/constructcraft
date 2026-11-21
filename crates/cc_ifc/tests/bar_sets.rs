@@ -29,6 +29,7 @@ fn add(p: &mut Project, type_id: cc_core::ElementTypeId, kind: ElementKind) -> E
         phase_demolished: None,
         design_option: None,
         paints: Vec::new(),
+        plugin_data: Default::default(),
     };
     p.elements.insert(id, e);
     id

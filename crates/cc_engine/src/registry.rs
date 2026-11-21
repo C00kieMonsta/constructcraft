@@ -544,4 +544,9 @@ registry![
         macros::MacroCheck,
         macros::MacroFormat,
     ],
+    "Plugin data" => [
+        plugin_data::PluginDataGet,
+        plugin_data::PluginDataSet,
+        plugin_data::PluginDataList,
+    ],
 ];

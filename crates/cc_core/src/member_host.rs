@@ -354,6 +354,7 @@ impl crate::EditCtx<'_> {
                 phase_demolished,
                 design_option,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             });
             kept.push((role, id));
         }

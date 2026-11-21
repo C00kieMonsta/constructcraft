@@ -281,6 +281,7 @@ mod tests {
                     normal: DVec3::Y,
                     material: material.clone(),
                 }],
+                plugin_data: Default::default(),
             },
         );
         let geom = ModelGeometry::build(&p);

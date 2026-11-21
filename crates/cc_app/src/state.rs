@@ -644,6 +644,7 @@ impl AppState {
             phase_demolished: None,
             design_option: None,
             paints: Vec::new(),
+            plugin_data: Default::default(),
         }
         .category();
         let id = self.session.doc.edit(name, |e| {
@@ -666,6 +667,7 @@ impl AppState {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             })
         });
         self.selection = BTreeSet::from([id]);

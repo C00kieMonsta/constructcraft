@@ -2925,6 +2925,7 @@ err-paint-no-face = 該點沒有此元素的面
 err-paint-none = 該處沒有可移除的塗刷
 tx-paint = 塗刷面
 tx-paint-remove = 移除塗刷
+tx-plugin-data = 外掛資料
 mat-texture = 紋理
 mat-texture-pixels = { $w } × { $h } 像素
 mat-texture-none = 沒有影像：面顯示顏色。

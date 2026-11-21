@@ -2925,6 +2925,7 @@ err-paint-no-face = an diesem Punkt liegt keine Fläche des Elements
 err-paint-none = dort gibt es keinen Anstrich zu entfernen
 tx-paint = Fläche anstreichen
 tx-paint-remove = Anstrich entfernen
+tx-plugin-data = Plugin-Daten
 mat-texture = Textur
 mat-texture-pixels = { $w } × { $h } Pixel
 mat-texture-none = Kein Bild: Flächen zeigen die Farbe.

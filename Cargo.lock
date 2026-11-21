@@ -821,6 +821,7 @@ dependencies = [
 name = "cc_plugins"
 version = "0.13.0"
 dependencies = [
+ "cc_core",
  "cc_engine",
  "cc_script",
  "cc_skp",

@@ -2925,6 +2925,7 @@ err-paint-no-face = その点に要素の面がありません
 err-paint-none = そこには削除するペイントがありません
 tx-paint = 面をペイント
 tx-paint-remove = ペイントを削除
+tx-plugin-data = プラグインデータ
 mat-texture = テクスチャ
 mat-texture-pixels = { $w } × { $h } ピクセル
 mat-texture-none = 画像なし：面には色が表示されます。

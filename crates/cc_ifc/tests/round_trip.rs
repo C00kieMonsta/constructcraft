@@ -257,6 +257,7 @@ fn arc_walls_round_trip() {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             })
         };
         let arc = Wall { start: DVec2::new(4.0, 0.0), end: DVec2::new(-4.0, 0.0), bulge: 1.0, ..Default::default() };
@@ -351,6 +352,7 @@ fn framed_beams_round_trip() {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             });
         };
         let column = Column {
@@ -415,6 +417,7 @@ fn arc_beams_round_trip() {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             });
             id
         };
@@ -486,6 +489,7 @@ fn floor_openings_and_foundation_slabs_round_trip() {
             phase_demolished: None,
             design_option: None,
             paints: Vec::new(),
+            plugin_data: Default::default(),
         };
         project.elements.insert(id, e);
     }
@@ -609,6 +613,7 @@ fn lightning_protection_and_cabling_export_with_their_classes() {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             });
             id
         };
@@ -873,6 +878,7 @@ fn curtain_project() -> Project {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             });
         };
         add(e, plain, Wall { start: DVec2::new(0.0, 0.0), end: DVec2::new(10.0, 0.0), ..Default::default() });
@@ -1035,6 +1041,7 @@ fn window_operations_round_trip() {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             })
         };
         let wall_type = e.project().default_type(Category::Wall).unwrap();
@@ -1098,6 +1105,7 @@ fn door_operations_round_trip() {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             })
         };
         let wall_type = e.project().default_type(Category::Wall).unwrap();
@@ -1172,6 +1180,7 @@ fn clashing_type_names_import_as_one_type() {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             })
         };
         let wall_type = e.project().default_type(Category::Wall).unwrap();
@@ -1324,6 +1333,7 @@ fn profiles_project() -> Project {
                     phase_demolished: None,
                     design_option: None,
                     paints: Vec::new(),
+                    plugin_data: Default::default(),
                 });
             }
         }
@@ -1488,6 +1498,7 @@ fn add_plain(p: &mut Project, type_id: cc_core::ElementTypeId, kind: ElementKind
         phase_demolished: None,
         design_option: None,
         paints: Vec::new(),
+        plugin_data: Default::default(),
     };
     p.elements.insert(id, e);
     id

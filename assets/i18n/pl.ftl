@@ -2925,6 +2925,7 @@ err-paint-no-face = w tym punkcie nie ma ściany elementu
 err-paint-none = nie ma tam malowania do usunięcia
 tx-paint = Pomaluj ścianę
 tx-paint-remove = Usuń malowanie
+tx-plugin-data = Dane wtyczki
 mat-texture = Tekstura
 mat-texture-pixels = { $w } × { $h } pikseli
 mat-texture-none = Brak obrazu: ściany pokazują kolor.

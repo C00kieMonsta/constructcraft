@@ -106,18 +106,16 @@ impl std::fmt::Display for PluginError {
 impl std::error::Error for PluginError {}
 
 /// Whether `s` is a valid id or command name: a lowercase letter, then
-/// lowercase letters, digits and single underscores, not ending in one.
+/// lowercase letters, digits and single underscores, not ending in one
+/// (the rule of [`cc_core::plugin_data::valid_plugin_name`]).
 fn valid_name(s: &str) -> bool {
-    let mut chars = s.chars();
-    chars.next().is_some_and(|c| c.is_ascii_lowercase())
-        && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-        && !s.contains(SEPARATOR)
-        && !s.ends_with('_')
+    cc_core::plugin_data::valid_plugin_name(s) && !s.contains(SEPARATOR)
 }
 
-/// Whether `s` is a valid plugin id (see [`Manifest`]).
+/// Whether `s` is a valid plugin id (see [`Manifest`]): the rule of
+/// [`cc_core::plugin_data::valid_plugin_id`], which keys plugin data.
 pub fn valid_id(s: &str) -> bool {
-    valid_name(s) && s.len() <= 32
+    cc_core::plugin_data::valid_plugin_id(s) && !s.contains(SEPARATOR)
 }
 
 impl Manifest {
@@ -129,7 +127,7 @@ impl Manifest {
     }
 
     fn check(&self) -> Result<(), String> {
-        if !valid_name(&self.id) || self.id.len() > 32 {
+        if !valid_id(&self.id) {
             return Err(format!(
                 "id \"{}\": up to 32 lowercase letters, digits and single underscores, starting with a letter",
                 self.id

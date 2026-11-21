@@ -9,6 +9,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+cc_core.workspace = true
 cc_engine.workspace = true
 cc_script.workspace = true
 mlua.workspace = true

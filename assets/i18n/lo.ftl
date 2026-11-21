@@ -2927,6 +2927,7 @@ err-paint-no-face = ບໍ່ມີໜ້າຂອງອົງປະກອບຢ
 err-paint-none = ບໍ່ມີການທາສີທີ່ຈະລຶບຢູ່ບ່ອນນັ້ນ
 tx-paint = ທາສີໜ້າ
 tx-paint-remove = ລຶບການທາສີ
+tx-plugin-data = ຂໍ້ມູນປລັກອິນ
 mat-texture = ລາຍພື້ນຜິວ
 mat-texture-pixels = { $w } × { $h } ພິກເຊວ
 mat-texture-none = ບໍ່ມີຮູບ: ໜ້າສະແດງສີ.

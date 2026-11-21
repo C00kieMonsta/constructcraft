@@ -24,6 +24,7 @@ fn add(doc: &mut Document, category: Category, kind: ElementKind, type_id: Optio
             phase_demolished: None,
             design_option: None,
             paints: Vec::new(),
+            plugin_data: Default::default(),
         })
     })
 }
