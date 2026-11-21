@@ -78,6 +78,9 @@ pub struct Listed {
     pub has_settings: bool,
     /// Why it could not be read or loaded.
     pub error: Option<String>,
+    /// It comes from the development folder (developer mode): not removed
+    /// or set up from the window.
+    pub dev: bool,
 }
 
 /// A loaded plugin's ribbon button, with what its tooltip tells.
@@ -149,9 +152,9 @@ pub struct Plugins {
     tests: HashMap<(String, String), ToolTest>,
     /// The last install or removal, for the window.
     pub notice: Option<Result<String, String>>,
-    /// The folder the plugins were loaded from (loaded again when the
-    /// preference changes).
-    loaded_from: Option<PathBuf>,
+    /// The folders the plugins were loaded from (loaded again when the
+    /// preferences change): the plugins folder and the development folder.
+    loaded_from: Option<(Option<PathBuf>, Option<PathBuf>)>,
     /// The loaded plugins' ribbon buttons, in load order then manifest order.
     pub buttons: Vec<RibbonButton>,
     /// The loaded plugins' exporters and importers, in load order then
@@ -162,6 +165,10 @@ pub struct Plugins {
     titles: HashMap<String, String>,
     /// The settings being edited in the window.
     settings: Option<SettingsEdit>,
+    /// The Plugin console.
+    pub console: crate::plugin_console::Console,
+    /// Developer mode's watch of the plugin folders.
+    pub dev: crate::plugin_dev::Watcher,
 }
 
 impl Plugins {
@@ -181,83 +188,157 @@ impl Plugins {
     }
 }
 
-/// Load the plugins of the plugins folder into the session, as the
-/// preferences say (turned off ones are left out and run no code; `files`
-/// only where the user allowed it), and list them for the window.
+/// The folders the plugins load from: the plugins folder and, in developer
+/// mode, the development folder.
+fn sources(state: &AppState) -> (Option<PathBuf>, Option<PathBuf>) {
+    (state.prefs.plugins_dir(), state.prefs.plugin_dev_dir())
+}
+
+/// Whether a plugin command runs (it waits for an external program, or a
+/// form waits for it): the plugins are not loaded again meanwhile.
+pub fn busy(state: &AppState) -> bool {
+    state.session.has_job()
+        || state.dialogs.plugin_form.as_ref().is_some_and(crate::plugin_form::PluginForm::is_waiting)
+}
+
+/// A plugin found in a folder (whose `.tools` holds its programs' paths),
+/// as the window lists it.
+fn listed_item(
+    host: &PluginHost,
+    errors: &[cc_plugins::PluginError],
+    found: store::Installed,
+    folder: &std::path::Path,
+    dev: bool,
+) -> Listed {
+    let store::Installed { dir, manifest } = found;
+    let error = errors.iter().find(|e| e.dir == dir).map(|e| e.message.clone());
+    match manifest {
+        Ok(m) => {
+            let loaded = host.plugins().iter().find(|p| p.manifest.id == m.id && p.dir == dir);
+            let commands = loaded
+                .map(|p| p.commands().map(|c| (c.name.clone(), c.description.clone())).collect())
+                .unwrap_or_default();
+            // A plugin turned off is not loaded: its own text is
+            // looked up in its locales here.
+            let (name, description) = match loaded {
+                Some(p) => (p.display_name(), p.display_description()),
+                None if m.api >= 2 => match cc_plugins::Locales::load(&dir) {
+                    Ok(l) => (l.resolve(&m.name), l.resolve(&m.description)),
+                    Err(_) => (m.name.clone(), m.description.clone()),
+                },
+                None => (m.name.clone(), m.description.clone()),
+            };
+            // Read from the manifest, so a plugin turned off has them too.
+            let tools = cc_plugins::plugin::tools_schema(&dir, folder).map(|(_, t)| t).unwrap_or_default();
+            let suggestions = tools.iter().map(|t| cc_plugins::tools::find_on_path(&t.executables)).collect();
+            Listed {
+                asks_files: m.requested().files,
+                asks_tools: m.requested().tools,
+                tools,
+                suggestions,
+                has_settings: !m.settings.is_empty(),
+                id: m.id,
+                name,
+                version: m.version,
+                description,
+                authors: m.authors,
+                license: m.license,
+                homepage: m.homepage,
+                commands,
+                error,
+                dir,
+                dev,
+            }
+        }
+        Err(message) => Listed {
+            id: dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            name: dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            version: String::new(),
+            description: String::new(),
+            authors: Vec::new(),
+            license: String::new(),
+            homepage: String::new(),
+            asks_files: false,
+            asks_tools: false,
+            tools: Vec::new(),
+            suggestions: Vec::new(),
+            has_settings: false,
+            commands: Vec::new(),
+            error: Some(message),
+            dir,
+            dev,
+        },
+    }
+}
+
+/// The plugins of the development folder `dev`: the folder itself when it
+/// holds a manifest, else its subfolders that do.
+fn dev_plugins(dev: &std::path::Path) -> Vec<store::Installed> {
+    if dev.join(cc_plugins::plugin::MANIFEST).is_file() {
+        vec![store::Installed { dir: dev.to_path_buf(), manifest: cc_plugins::Manifest::read(dev) }]
+    } else {
+        store::installed(dev)
+    }
+}
+
+/// Load the plugins of the plugins folder (and, in developer mode, of the
+/// development folder, whose copy of a plugin wins over the installed one)
+/// into the session, as the preferences say (turned off ones are left out
+/// and run no code; `files` and `tools` only where the user allowed them,
+/// by id), and list them for the window. What they print and their load
+/// errors go to the console.
 pub fn load(state: &mut AppState) {
+    use crate::plugin_console::Kind;
     let mut host = PluginHost::new();
     let mut listed = Vec::new();
-    if let Some(folder) = state.prefs.plugins_dir() {
-        let off = state.prefs.plugins_off.clone();
-        let files = state.prefs.plugins_files.clone();
-        let tools = state.prefs.plugins_tools.clone();
-        let errors = host.load_folder(&folder, Limits::default(), |m| {
-            (!off.contains(&m.id)).then(|| Permissions { files: files.contains(&m.id), tools: tools.contains(&m.id) })
-        });
-        for found in store::installed(&folder) {
-            let error = errors.iter().find(|e| e.dir == found.dir).map(|e| e.message.clone());
-            let item = match found.manifest {
-                Ok(m) => {
-                    let loaded = host.plugins().iter().find(|p| p.manifest.id == m.id && p.dir == found.dir);
-                    let commands = loaded
-                        .map(|p| p.commands().map(|c| (c.name.clone(), c.description.clone())).collect())
-                        .unwrap_or_default();
-                    // A plugin turned off is not loaded: its own text is
-                    // looked up in its locales here.
-                    let (name, description) = match loaded {
-                        Some(p) => (p.display_name(), p.display_description()),
-                        None if m.api >= 2 => match cc_plugins::Locales::load(&found.dir) {
-                            Ok(l) => (l.resolve(&m.name), l.resolve(&m.description)),
-                            Err(_) => (m.name.clone(), m.description.clone()),
-                        },
-                        None => (m.name.clone(), m.description.clone()),
-                    };
-                    // Read from the manifest, so a plugin turned off has them too.
-                    let tools =
-                        cc_plugins::plugin::tools_schema(&found.dir, &folder).map(|(_, t)| t).unwrap_or_default();
-                    let suggestions = tools.iter().map(|t| cc_plugins::tools::find_on_path(&t.executables)).collect();
-                    Listed {
-                        asks_files: m.requested().files,
-                        asks_tools: m.requested().tools,
-                        tools,
-                        suggestions,
-                        has_settings: !m.settings.is_empty(),
-                        id: m.id,
-                        name,
-                        version: m.version,
-                        description,
-                        authors: m.authors,
-                        license: m.license,
-                        homepage: m.homepage,
-                        commands,
-                        error,
-                        dir: found.dir,
-                    }
-                }
-                Err(message) => Listed {
-                    id: found.dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-                    name: found.dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-                    version: String::new(),
-                    description: String::new(),
-                    authors: Vec::new(),
-                    license: String::new(),
-                    homepage: String::new(),
-                    asks_files: false,
-                    asks_tools: false,
-                    tools: Vec::new(),
-                    suggestions: Vec::new(),
-                    has_settings: false,
-                    commands: Vec::new(),
-                    error: Some(message),
-                    dir: found.dir,
-                },
-            };
-            listed.push(item);
+    let mut notes: Vec<(String, Kind, String)> = Vec::new();
+    let (folder, dev) = sources(state);
+    let off = state.prefs.plugins_off.clone();
+    let files = state.prefs.plugins_files.clone();
+    let tools = state.prefs.plugins_tools.clone();
+    let grant = |m: &cc_plugins::Manifest| {
+        (!off.contains(&m.id)).then(|| Permissions { files: files.contains(&m.id), tools: tools.contains(&m.id) })
+    };
+    let mut errors = Vec::new();
+    // The ids of the development folder, also of those that fail to load.
+    let mut dev_ids = std::collections::BTreeSet::new();
+    if let Some(dev) = &dev {
+        errors.extend(host.load_folder(dev, Limits::default(), grant));
+        for found in dev_plugins(dev) {
+            if let Ok(m) = &found.manifest {
+                dev_ids.insert(m.id.clone());
+            }
+            listed.push(listed_item(&host, &errors, found, dev, true));
         }
     }
-    for line in host.take_messages() {
-        log::info!("{line}");
+    if let Some(folder) = &folder {
+        let installed = store::installed(folder);
+        let overridden: Vec<String> = installed
+            .iter()
+            .filter_map(|f| f.manifest.as_ref().ok())
+            .filter(|m| dev_ids.contains(&m.id))
+            .map(|m| m.id.clone())
+            .collect();
+        for id in &overridden {
+            notes.push((id.clone(), Kind::Info, t!("pcon-dev-wins", "id" => id.clone())));
+        }
+        errors.extend(
+            host.load_folder(folder, Limits::default(), |m| if overridden.contains(&m.id) { None } else { grant(m) }),
+        );
+        for found in installed {
+            if found.manifest.as_ref().is_ok_and(|m| overridden.contains(&m.id)) {
+                continue;
+            }
+            listed.push(listed_item(&host, &errors, found, folder, false));
+        }
     }
+    for e in &errors {
+        let id = e.dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let id = if cc_plugins::plugin::valid_id(&id) { id } else { String::new() };
+        log::warn!("plugin not loaded: {e}");
+        notes.push((id, Kind::Error, e.message.clone()));
+    }
+    let printed = host.take_messages();
     // What the ribbon and the forms show, read before the host goes into
     // the session (which keeps it as an engine extension).
     let mut buttons = Vec::new();
@@ -283,6 +364,12 @@ pub fn load(state: &mut AppState) {
             });
         }
     }
+    let count = host.plugins().len();
+    state.plugins.console.push("", Kind::Info, t!("pcon-loaded", "count" => count));
+    for (plugin, kind, text) in notes {
+        state.plugins.console.push(&plugin, kind, text);
+    }
+    crate::plugin_console::record(state, &printed);
     state.session.set_extension(Some(Box::new(host)));
     state.plugins.listed = listed;
     state.plugins.buttons = buttons;
@@ -290,7 +377,7 @@ pub fn load(state: &mut AppState) {
     state.plugins.importers = importers;
     state.plugins.titles = titles;
     state.plugins.settings = None;
-    state.plugins.loaded_from = state.prefs.plugins_dir();
+    state.plugins.loaded_from = Some(sources(state));
 }
 
 /// Why a plugin button whose `when` is `when` is unavailable now (`None`:
@@ -374,17 +461,31 @@ fn view_kind(category: ViewCategory) -> &'static str {
     }
 }
 
-/// Every frame: load the plugins again when the plugins folder changed, and
-/// show what plugins printed while their commands ran (logged, the last one
+/// Every frame: load the plugins again when their folders changed (the
+/// preferences; not while a plugin command runs), and show what plugins
+/// printed while their commands ran (logged, in the console, the last one
 /// in the status bar).
 pub fn drain_messages(state: &mut AppState) {
-    if state.plugins.loaded_from != state.prefs.plugins_dir() {
+    if state.plugins.loaded_from != Some(sources(state)) && !busy(state) {
         load(state);
     }
-    for line in state.session.take_extension_messages() {
-        log::info!("{line}");
-        state.message = line;
+    let lines = state.session.take_extension_messages();
+    crate::plugin_console::record(state, &lines);
+    if let Some(last) = lines.into_iter().last() {
+        state.message = last;
     }
+}
+
+/// Load the plugins again (the Plugins window's Reload): the permissions
+/// stay, as they are kept by id. Not while a plugin command runs.
+pub fn reload(state: &mut AppState) {
+    if busy(state) {
+        state.message = t!("plug-reload-busy");
+        return;
+    }
+    load(state);
+    state.plugins.notice = None;
+    state.message = t!("plug-reloaded");
 }
 
 /// Open the Plugins window.
@@ -507,12 +608,18 @@ pub fn show(ctx: &Context, state: &mut AppState) {
         return;
     }
     poll(state);
-    let mut reload = 0;
+    let (mut reload_button, mut console_button) = (0, 0);
+    let busy = busy(state);
     let response = Dialog::new("plugins", t!("dlg-plugins")).width(860.0).show(
         ctx,
         |ui| body(ui, ctx, state),
         |f| {
-            reload = f.extra(t!("plug-reload"));
+            reload_button = f.extra(t!("plug-reload"));
+            if busy {
+                f.disable(reload_button);
+                f.tip(reload_button, t!("plug-reload-busy"));
+            }
+            console_button = f.extra(t!("action-plugin-console"));
             f.secondary(t!("action-close"));
         },
     );
@@ -521,9 +628,11 @@ pub fn show(ctx: &Context, state: &mut AppState) {
         return;
     }
     match response.clicked {
-        Some(i) if i == reload => {
-            load(state);
-            state.plugins.notice = None;
+        Some(i) if i == reload_button => reload(state),
+        // The console is not modal: the Plugins window closes so it can be used.
+        Some(i) if i == console_button => {
+            state.plugins.console.open = true;
+            state.plugins.open = false;
         }
         Some(_) => state.plugins.open = false,
         None => {}
@@ -627,6 +736,10 @@ fn installed_tab(ui: &mut Ui, ctx: &Context, state: &mut AppState) {
         if let Some(error) = &item.error {
             ui.label(RichText::new(t!("plug-error", "message" => error)).color(PALETTE.danger));
         }
+        if item.dev {
+            let text = t!("plug-dev-copy", "path" => item.dir.display().to_string());
+            ui.label(RichText::new(text).size(11.5).color(PALETTE.accent));
+        }
         ui.add_space(4.0);
         let mut on = !state.prefs.plugins_off.contains(&item.id);
         if ui.checkbox(&mut on, t!("plug-enabled")).changed() {
@@ -674,6 +787,10 @@ fn installed_tab(ui: &mut Ui, ctx: &Context, state: &mut AppState) {
                 }
             }
         });
+        // A development copy is set up and removed in its own folder.
+        if item.dev {
+            return;
+        }
         tool_action = tools_section(ui, ctx, state, &item);
         settings_action = settings_section(ui, state, &item);
         ui.add_space(6.0);

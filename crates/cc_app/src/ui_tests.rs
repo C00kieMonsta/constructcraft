@@ -7608,3 +7608,94 @@ fn the_plugins_window_chooses_and_tests_external_programs() {
     assert!(crate::plugins_ui::test_answer(harness.state(), "sim", "sleeper").is_some_and(|r| r.is_ok()));
     harness.run();
 }
+
+/// Reload loads the plugins again from their folder (a command added to
+/// `main.lua` joins the session, the permissions stay); the Plugin console
+/// lists what the plugins printed, filters by plugin and clears.
+#[test]
+fn plugins_reload_and_their_console() {
+    let root = plugins_folder("console");
+    let noisy = root.join("noisy");
+    std::fs::create_dir_all(&noisy).unwrap();
+    std::fs::write(noisy.join("plugin.toml"), "id = \"noisy\"\nname = \"Noisy\"\nversion = \"1.0\"\n").unwrap();
+    std::fs::write(noisy.join("main.lua"), "print('noisy is here')").unwrap();
+    let mut state = sample_state();
+    state.prefs.plugin_folder = Some(root.clone());
+    state.prefs.plugins_files.insert("room_tools".into());
+    crate::plugins_ui::load(&mut state);
+    assert!(state.session.kind_of("room_tools__two").is_none());
+    crate::plugins_ui::open(&mut state);
+    let mut harness = app_harness(state);
+    std::fs::write(
+        root.join("room_tools/main.lua"),
+        "ccad.command { name = 'two', run = function() print('two ran') end }",
+    )
+    .unwrap();
+    harness.get_by_role_and_label(Role::Button, &t!("plug-reload")).click();
+    harness.run();
+    assert!(harness.state().session.kind_of("room_tools__two").is_some(), "the new command is there");
+    assert!(harness.state().prefs.plugins_files.contains("room_tools"), "the permissions stay");
+    // The console, from the Plugins window.
+    harness.get_by_role_and_label(Role::Button, &t!("action-plugin-console")).click();
+    harness.run();
+    assert!(harness.state().plugins.console.open && !harness.state().plugins.open);
+    assert!(
+        harness.query_all_by_label_contains("noisy is here").count() == 2,
+        "printed while loading, and again on Reload"
+    );
+    harness.state_mut().session.execute("room_tools__two", serde_json::json!({})).unwrap();
+    harness.run();
+    assert!(harness.query_by_label_contains("two ran").is_some(), "printed by a command");
+    assert_eq!(harness.state().message, "[room_tools] two ran", "and in the status bar, as before");
+    // Only one plugin's entries.
+    let all = t!("pcon-all");
+    harness.query_all_by_role(Role::ComboBox).find(|n| n.value().as_deref() == Some(all.as_str())).unwrap().click();
+    harness.run();
+    harness.get_by_label("room_tools").click();
+    harness.run();
+    assert_eq!(harness.state().plugins.console.filter.as_deref(), Some("room_tools"));
+    assert!(harness.query_by_label_contains("noisy is here").is_none());
+    assert!(harness.query_by_label_contains("two ran").is_some());
+    harness.get_by_role_and_label(Role::Button, &t!("pcon-clear")).click();
+    harness.run();
+    assert!(harness.query_by_label_contains("two ran").is_none());
+    assert_eq!(harness.state().plugins.console.entries().count(), 0);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// In developer mode the development folder's plugins load too, its copy
+/// of a plugin wins over the installed one (noted in the console), and a
+/// change to one of its files loads the plugins again.
+#[test]
+fn developer_mode_loads_the_development_folder_and_reloads_on_change() {
+    let installed = plugins_folder("dev-installed");
+    let dev_root = std::env::temp_dir().join(format!("ccad-plugins-ui-{}-dev", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dev_root);
+    let dev = dev_root.join("room_tools");
+    std::fs::create_dir_all(&dev).unwrap();
+    std::fs::write(dev.join("plugin.toml"), "id = \"room_tools\"\nname = \"Room tools (dev)\"\nversion = \"0.4.0\"\n")
+        .unwrap();
+    std::fs::write(dev.join("main.lua"), "ccad.command { name = 'dev_only', run = function() end }").unwrap();
+    let mut state = sample_state();
+    state.prefs.plugin_folder = Some(installed.clone());
+    state.prefs.plugin_dev_folder = Some(dev.clone());
+    crate::plugins_ui::load(&mut state);
+    assert!(state.session.kind_of("room_tools__one_wall").is_some(), "not in developer mode: the installed one");
+    state.prefs.plugin_dev_mode = true;
+    let mut harness = app_harness(state);
+    harness.run();
+    let s = harness.state();
+    assert!(s.session.kind_of("room_tools__dev_only").is_some(), "the development copy");
+    assert!(s.session.kind_of("room_tools__one_wall").is_none());
+    assert!(s.plugins.listed.iter().any(|l| l.dev && l.id == "room_tools"));
+    let wins = t!("pcon-dev-wins", "id" => "room_tools");
+    assert!(s.plugins.console.entries().any(|e| e.text == wins), "noted in the console");
+    // A change is seen at the next listing (a second later).
+    std::fs::write(dev.join("main.lua"), "ccad.command { name = 'dev_two', run = function() end }").unwrap();
+    std::thread::sleep(crate::plugin_dev::INTERVAL + std::time::Duration::from_millis(100));
+    harness.run();
+    assert!(harness.state().session.kind_of("room_tools__dev_two").is_some(), "loaded again");
+    assert_eq!(harness.state().message, t!("plug-dev-reloaded"));
+    let _ = std::fs::remove_dir_all(&installed);
+    let _ = std::fs::remove_dir_all(&dev_root);
+}

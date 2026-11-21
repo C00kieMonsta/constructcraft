@@ -488,6 +488,7 @@ pub(crate) fn execute(
         _ => e.message,
     });
     let printed = state.session.take_extension_messages();
+    crate::plugin_console::record(state, &printed);
     (result, printed)
 }
 

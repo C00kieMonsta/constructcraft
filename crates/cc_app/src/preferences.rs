@@ -68,6 +68,10 @@ const PLUGINS_OFF_KEY: &str = "plugins_off";
 const PLUGINS_FILES_KEY: &str = "plugins_files";
 /// eframe storage key of the plugins allowed to run external programs (one id per line).
 const PLUGINS_TOOLS_KEY: &str = "plugins_tools";
+/// eframe storage key of plugin developer mode ("1": on).
+const PLUGIN_DEV_KEY: &str = "plugin_dev_mode";
+/// eframe storage key of the plugin development folder (empty: none).
+const PLUGIN_DEV_FOLDER_KEY: &str = "plugin_dev_folder";
 /// eframe storage key of where the side panels are docked (`side_panels::PanelLayout::to_text`).
 const PANELS_KEY: &str = "side_panels";
 /// eframe storage key of the Structure tab's material (`StructuralMaterial::code`).
@@ -147,6 +151,13 @@ pub struct Preferences {
     /// Plugins the user allowed to run external programs (the `tools`
     /// permission).
     pub plugins_tools: BTreeSet<String>,
+    /// Plugin developer mode: the plugins load again when a file of the
+    /// plugins folder or the development folder changes, and the
+    /// development folder's plugins are loaded (see [`crate::plugin_dev`]).
+    pub plugin_dev_mode: bool,
+    /// The folder of plugins being developed (a plugin's folder or a folder
+    /// of plugins), loaded in developer mode.
+    pub plugin_dev_folder: Option<PathBuf>,
     /// Where the Project Browser and Properties are docked.
     pub panels: crate::side_panels::PanelLayout,
     /// The material the Structure tab's column and beam tools place.
@@ -179,6 +190,8 @@ impl Default for Preferences {
             plugins_off: BTreeSet::new(),
             plugins_files: BTreeSet::new(),
             plugins_tools: BTreeSet::new(),
+            plugin_dev_mode: false,
+            plugin_dev_folder: None,
             panels: Default::default(),
             structure_material: Default::default(),
 
@@ -283,6 +296,8 @@ impl Preferences {
             plugins_off: get(PLUGINS_OFF_KEY).map(|v| id_lines(&v)).unwrap_or_default(),
             plugins_files: get(PLUGINS_FILES_KEY).map(|v| id_lines(&v)).unwrap_or_default(),
             plugins_tools: get(PLUGINS_TOOLS_KEY).map(|v| id_lines(&v)).unwrap_or_default(),
+            plugin_dev_mode: on(PLUGIN_DEV_KEY, d.plugin_dev_mode),
+            plugin_dev_folder: folder(get(PLUGIN_DEV_FOLDER_KEY)),
             panels: get(PANELS_KEY).and_then(|v| crate::side_panels::PanelLayout::from_text(&v)).unwrap_or_default(),
             structure_material: get(STRUCTURE_MATERIAL_KEY)
                 .and_then(|v| cc_core::StructuralMaterial::from_code(&v))
@@ -319,6 +334,8 @@ impl Preferences {
         set(PLUGINS_OFF_KEY, ids(&self.plugins_off));
         set(PLUGINS_FILES_KEY, ids(&self.plugins_files));
         set(PLUGINS_TOOLS_KEY, ids(&self.plugins_tools));
+        set(PLUGIN_DEV_KEY, flag(self.plugin_dev_mode));
+        set(PLUGIN_DEV_FOLDER_KEY, text(&self.plugin_dev_folder));
         set(PANELS_KEY, self.panels.to_text());
         set(STRUCTURE_MATERIAL_KEY, self.structure_material.code().to_string());
 
@@ -346,6 +363,12 @@ impl Preferences {
         // Tests never load the user's own plugins.
         let default = if cfg!(test) { None } else { crate::recovery::data_dir().map(|d| d.join("plugins")) };
         self.plugin_folder.clone().or(default)
+    }
+
+    /// The plugin development folder, in developer mode (`None` when off or
+    /// not set).
+    pub fn plugin_dev_dir(&self) -> Option<PathBuf> {
+        self.plugin_dev_folder.clone().filter(|_| self.plugin_dev_mode)
     }
 
     /// The interface zoom factor.
@@ -870,6 +893,9 @@ fn file_locations(ui: &mut Ui, state: &mut AppState) {
     folder_row(ui, &t!("pref-plugin-folder"), &mut state.prefs.plugin_folder);
     let default = crate::recovery::data_dir().map(|d| d.join("plugins").display().to_string()).unwrap_or_default();
     hint(ui, t!("pref-plugin-folder-hint", "path" => default));
+    check_row(ui, &t!("pref-plugin-dev"), &mut state.prefs.plugin_dev_mode, Some(t!("pref-plugin-dev-hint")));
+    folder_row(ui, &t!("pref-plugin-dev-folder"), &mut state.prefs.plugin_dev_folder);
+    hint(ui, t!("pref-plugin-dev-folder-hint"));
     group(ui, t!("lib-folders"), false);
     let folders = &mut state.prefs.library_folders;
     if folders.is_empty() {
@@ -1147,6 +1173,8 @@ mod tests {
             plugins_off: BTreeSet::from(["old_tool".to_string()]),
             plugins_files: BTreeSet::from(["exporter".to_string(), "importer".to_string()]),
             plugins_tools: BTreeSet::from(["simulator".to_string()]),
+            plugin_dev_mode: true,
+            plugin_dev_folder: Some(PathBuf::from("/dev/plugins")),
             panels: crate::side_panels::PanelLayout {
                 left: vec![],
                 right: vec![vec![crate::side_panels::Pane::Properties], vec![crate::side_panels::Pane::Browser]],

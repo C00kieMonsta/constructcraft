@@ -54,7 +54,9 @@ pub fn show(ctx: &Context, state: &mut AppState) {
     // Before the messages are drained: what a plugin command waiting printed goes to its form.
     crate::plugin_job::poll(ctx, state);
     crate::plugins_ui::drain_messages(state);
+    crate::plugin_dev::poll(ctx, state);
     crate::plugins_ui::show(ctx, state);
+    crate::plugin_console::show(ctx, state);
     crate::plugin_form::show(ctx, state);
     // Over the plugin windows.
     crate::plugin_job::show(ctx, state);

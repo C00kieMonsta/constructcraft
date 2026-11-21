@@ -873,6 +873,7 @@ fn is_empty(v: &Value) -> bool {
 fn run(state: &mut AppState, form: &mut PluginForm, args: Value) -> bool {
     let result = state.session.execute(&form.command, args);
     let printed = state.session.take_extension_messages();
+    crate::plugin_console::record(state, &printed);
     match result {
         Err(e) if e.code == cc_engine::ErrorCode::Pending => {
             form.waiting = Some(printed);

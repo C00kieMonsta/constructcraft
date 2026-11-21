@@ -40,13 +40,11 @@ pub fn cancel(state: &mut AppState) {
 /// to the status bar.
 fn finish(state: &mut AppState, result: cc_engine::Result<serde_json::Value>) {
     let printed = state.session.take_extension_messages();
+    crate::plugin_console::record(state, &printed);
     let waiting = state.dialogs.plugin_form.as_ref().is_some_and(crate::plugin_form::PluginForm::is_waiting);
     if waiting {
         crate::plugin_form::job_ended(state, result, printed);
         return;
-    }
-    for line in &printed {
-        log::info!("{line}");
     }
     state.message = match result {
         Ok(_) => t!("job-plugin-done"),

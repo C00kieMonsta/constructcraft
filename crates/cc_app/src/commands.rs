@@ -265,6 +265,8 @@ pub enum UiCommand {
     VisualProgramming,
     Plugins,
     PluginCommands,
+    /// Open or close the Plugin console.
+    PluginConsole,
     ToggleRibbon,
     CommandPalette,
 }
@@ -486,6 +488,7 @@ impl UiCommand {
             VisualProgramming,
             Plugins,
             PluginCommands,
+            PluginConsole,
             ToggleRibbon,
             CommandPalette,
         ]);
@@ -681,7 +684,7 @@ impl UiCommand {
             MacroRun => Icon::MacroRun,
             MacroEditor => Icon::MacroEdit,
             VisualProgramming => Icon::Graph,
-            Plugins | PluginCommands => Icon::Plugin,
+            Plugins | PluginCommands | PluginConsole => Icon::Plugin,
             ToggleRibbon => Icon::ChevronUp,
             CommandPalette => Icon::Search,
         }
@@ -916,6 +919,7 @@ impl UiCommand {
             VisualProgramming => t!("action-visual-programming"),
             Plugins => t!("action-plugins"),
             PluginCommands => t!("action-plugin-commands"),
+            PluginConsole => t!("action-plugin-console"),
             ToggleRibbon if state.ribbon_collapsed => t!("action-ribbon-expand"),
             ToggleRibbon => t!("action-ribbon-collapse"),
             CommandPalette => t!("action-command-palette"),
@@ -1150,6 +1154,7 @@ impl UiCommand {
             VisualProgramming => t!("cmd-desc-visual-programming"),
             Plugins => t!("cmd-desc-plugins"),
             PluginCommands => t!("cmd-desc-plugin-commands"),
+            PluginConsole => t!("cmd-desc-plugin-console"),
             ToggleRibbon => t!("cmd-desc-toggle-ribbon"),
             CommandPalette => t!("cmd-desc-command-palette"),
         }
@@ -1742,6 +1747,7 @@ impl UiCommand {
             ActiveOption => state.project().active_option().is_some(),
             VisualProgramming => state.graph.open,
             MacroEditor => state.macro_editor.open,
+            PluginConsole => state.plugins.console.open,
             ToggleRibbon => state.ribbon_collapsed,
             _ => false,
         }
@@ -2262,6 +2268,7 @@ pub fn run(state: &mut AppState, ctx: &egui::Context, command: UiCommand) {
         Plugins => crate::plugins_ui::open(state),
         // A menu in the ribbon; from the palette, the Plugins window.
         PluginCommands => crate::plugins_ui::open(state),
+        PluginConsole => crate::plugin_console::toggle(state),
         ToggleRibbon => state.ribbon_collapsed = !state.ribbon_collapsed,
         CommandPalette => crate::palette::toggle(state),
     }
