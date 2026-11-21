@@ -937,12 +937,14 @@ impl Project {
         }
         repairs += crate::tag::repair_tag_types(&mut self.types);
         let elevations = self.elevation_ids();
+        let level_ids: std::collections::BTreeSet<_> = self.levels.iter().map(|l| l.id).collect();
         let elements = &self.elements;
         let exists = |id: crate::ElementId| elements.contains_key(&id);
         for view in self.views.values_mut() {
             repairs += view.graphics.repair(&self.filters, Some(&exists));
             repairs += crate::tag::repair_view_tags(view, elements, &self.types);
             repairs += crate::view_mark::repair_view_marks(view, &elevations, &self.types);
+            repairs += crate::level_head::repair_view_level_heads(view, &level_ids);
             match view.template.map(|t| self.templates.get(&t)) {
                 Some(None) => {
                     view.template = None;

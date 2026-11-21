@@ -129,6 +129,10 @@ pub(crate) fn crop(d: &mut Drawing2D, project: &Project, view: ViewId, rect: Cro
     d.tags.retain(|t| rect.contains(t.center));
     d.marks.retain(|m| rect.contains(m.center));
     d.bubbles.retain(|b| rect.contains(b.center));
+    d.levels.retain(|l| rect.min.y <= l.a.y && l.a.y <= rect.max.y);
+    for l in &mut d.levels {
+        l.heads.retain(|h| rect.contains(h.point));
+    }
     d.sections.retain(|s| rect.contains(s.start) || rect.contains(s.end));
     d.callouts.retain(|c| rect.contains(c.tag) || rect.contains(c.rect.min) || rect.contains(c.rect.max));
 }

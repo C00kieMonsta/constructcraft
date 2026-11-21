@@ -459,6 +459,7 @@ registry![
         levels::LevelCreate,
         levels::LevelSet,
         levels::LevelDelete,
+        level_heads::LevelHeadSet,
         views::ViewCreate,
         views::ViewSet,
         schedule::ScheduleGet,

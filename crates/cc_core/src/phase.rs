@@ -256,6 +256,7 @@ impl Category {
                 | Category::ViewMark
                 | Category::DetailComponent
                 | Category::Grid
+                | Category::Level
                 | Category::CadImport
                 | Category::TitleBlock
         )

@@ -6,7 +6,7 @@
 //! overlap; sorting by centroid depth alone fails for large faces such as roofs.
 
 use crate::shadow::{self, Catch, Shadows};
-use crate::{Drawing2D, LineStyle, cut::POCHE, format};
+use crate::{Drawing2D, LineStyle, cut::POCHE};
 use cc_core::{CameraState, DetailLevel, Direction, ElementId, Project, ShadingSettings, TypeData, VisualStyle};
 use cc_geom::polygon::signed_area;
 use cc_geom::{ModelGeometry, clip_polygon, face_plane_segments};
@@ -827,37 +827,6 @@ pub(crate) fn chain_loops(segs: &[(DVec2, DVec2)]) -> Vec<Vec<DVec2>> {
     loops
 }
 
-/// Level lines across the drawing; before anything is modelled they span
-/// the grids, or a few meters from the origin.
-fn level_lines(d: &mut Drawing2D, project: &Project, frame: &Frame) {
-    let grid_xs: Vec<f64> = project
-        .elements
-        .values()
-        .filter_map(|e| match &e.kind {
-            cc_core::ElementKind::Grid(g) => Some([g.start, g.end]),
-            _ => None,
-        })
-        .flatten()
-        .map(|p| frame.project(DVec3::new(p.x, p.y, 0.0)).x)
-        .collect();
-    let span = match d.bounds() {
-        Some((lo, hi)) => (lo.x, hi.x),
-        None if !grid_xs.is_empty() => grid_xs.iter().fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(*x), b.max(*x))),
-        None => (0.0, 10.0),
-    };
-    let (x0, x1) = (span.0 - 1.5, span.1 + 1.5);
-    for level in &project.levels {
-        let y = frame.project(DVec3::new(0.0, 0.0, level.elevation)).y;
-        d.line(DVec2::new(x0, y), DVec2::new(x1, y), LineStyle::Annotation, None);
-        // Elevation target symbol: a small triangle on the line.
-        d.line(DVec2::new(x1, y), DVec2::new(x1 + 0.15, y + 0.2), LineStyle::Annotation, None);
-        d.line(DVec2::new(x1 + 0.15, y + 0.2), DVec2::new(x1 - 0.15, y + 0.2), LineStyle::Annotation, None);
-        d.line(DVec2::new(x1 - 0.15, y + 0.2), DVec2::new(x1, y), LineStyle::Annotation, None);
-        d.text(DVec2::new(x1 + 0.3, y + 0.12), &level.name, 2.5);
-        d.text(DVec2::new(x1 + 0.3, y - 0.18), format::elevation(level.elevation), 2.0);
-    }
-}
-
 /// The frame of an elevation looking `direction`.
 fn elevation_frame(direction: Direction) -> Frame {
     let toward = direction.look();
@@ -896,9 +865,7 @@ pub fn view_frame(view: &cc_core::View) -> Option<Frame> {
 
 pub fn elevation(project: &Project, geom: &ModelGeometry, direction: Direction, look: Look<'_>) -> Drawing2D {
     let frame = elevation_frame(direction);
-    let mut d = render(geom, &frame, None, look, &project.fill_patterns);
-    level_lines(&mut d, project, &frame);
-    d
+    render(geom, &frame, None, look, &project.fill_patterns)
 }
 
 pub fn section(
@@ -913,7 +880,6 @@ pub fn section(
     let cut = CutStyle { project, spacing: crate::cut::spacing(scale) };
     let mut d = render(geom, &frame, Some(cut), look, &project.fill_patterns);
     existing_ground(&mut d, geom, &frame);
-    level_lines(&mut d, project, &frame);
     d
 }
 
@@ -1027,20 +993,6 @@ mod tests {
         (doc, id)
     }
 
-    /// A new project shows its levels in elevations before anything is modelled.
-    #[test]
-    fn empty_elevation_shows_the_levels() {
-        let project = Project::from_template();
-        let geom = ModelGeometry::build(&project);
-        let d = elevation(&project, &geom, Direction::South, Look::plain());
-        for level in &project.levels {
-            assert!(
-                d.prims.iter().any(|p| matches!(p, Prim::Text { text, .. } if *text == level.name)),
-                "{}",
-                level.name
-            );
-        }
-    }
     /// Each visual style draws the same wall differently: the wireframe
     /// only lines (the far face's edges too), hidden line white faces,
     /// shaded the same faces and edges greyed by the light, consistent

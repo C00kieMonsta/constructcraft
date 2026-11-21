@@ -525,6 +525,18 @@ fn graphics_dialog(ctx: &Context, state: &mut AppState) {
                     }
                 });
             }
+            if let Target::View(v) = target {
+                let hidden = crate::level_head_ui::hidden_levels(state, v);
+                if !hidden.is_empty() {
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label(t!("vg-hidden-levels", "count" => hidden.len()));
+                        if ui.button(t!("vg-show-hidden-levels")).clicked() {
+                            crate::level_head_ui::show_hidden(state, v);
+                        }
+                    });
+                }
+            }
         },
         |f| {
             filters_button = f.extra(t!("vg-edit-filters"));
