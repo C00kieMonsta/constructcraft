@@ -6,8 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-### Added
+## [0.14.0] - 2026-11-22
 
+### Added
 
 - Create Similar (#405). With an element selected, *Create Similar* (CS, also on the Modify tab beside *Match Type Properties*) starts the tool that draws it, with its type: walls, doors, windows, floors, roofs, columns, beams, footings and foundation slabs, pipes, dimensions (in their mode), text, detail lines (in their style) and the other elements drawn with a tool. Several elements work when they are all of one type.
 - Locked dimensions (#447). In plans, a linear or aligned dimension whose two ends lie on elements can be locked: with the padlock beside its text when it is selected, *Locked* in its properties, or `dimension_lock`. A locked dimension keeps its value: moving the element at one end moves the element at the other with it, and on along a chain of locked dimensions, in one undo step. An edit that would still change it (both ends moved apart, or the other element pinned) is refused with a message, and `dimension_set_value` gives it a new value.
@@ -634,7 +635,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Closing the last open view tab crashed the application.
 - Per-wall volumes in schedules were wrong for walls joined at corners; they are now computed exactly.
 
-[Unreleased]: https://github.com/francisreboucas/constructcraft/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/francisreboucas/constructcraft/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/francisreboucas/constructcraft/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/francisreboucas/constructcraft/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/francisreboucas/constructcraft/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/francisreboucas/constructcraft/compare/v0.11.0...v0.11.1
