@@ -56,6 +56,7 @@ mod paint_cache;
 mod paint_ui;
 mod palette;
 mod phases_dialog;
+mod pipe_catalog_dialog;
 mod plugin_console;
 mod plugin_dev;
 mod plugin_form;

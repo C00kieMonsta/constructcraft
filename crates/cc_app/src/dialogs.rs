@@ -45,6 +45,8 @@ pub fn show(ctx: &Context, state: &mut AppState) {
     // After the material browser, type properties and graphics, which open it over themselves.
     crate::fill_patterns_dialog::show(ctx, state);
     crate::profiles_dialog::show(ctx, state);
+    // After type properties, which opens it over itself.
+    crate::pipe_catalog_dialog::show(ctx, state);
     crate::grid_frame_ui::show(ctx, state);
     crate::steel_building_ui::show(ctx, state);
     crate::wall_framing_ui::show(ctx, state);

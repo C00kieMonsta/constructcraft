@@ -977,6 +977,84 @@ fn type_dialog_harness(state: AppState) -> Harness<'static, AppState> {
     })
 }
 
+fn pipe_catalog_harness(state: AppState) -> Harness<'static, AppState> {
+    themed_harness(state, egui::vec2(1100.0, 900.0), egui::Theme::Light, |ui, state| {
+        crate::pipe_catalog_dialog::show(ui.ctx(), state)
+    })
+}
+
+/// The Pipe Catalog loads a built-in series with the sizes checked as pipe
+/// types, in one session: OK keeps them, Cancel takes them back.
+#[test]
+fn the_pipe_catalog_loads_a_series_and_makes_types() {
+    use crate::pipe_catalog_dialog::Selection;
+    let code = "BR-PVC-ESG-R";
+    let count = |s: &AppState| {
+        s.project()
+            .types
+            .values()
+            .filter(|t| s.project().pipe_row(&t.data).is_some_and(|(x, _)| x.code == code))
+            .count()
+    };
+    for keep in [true, false] {
+        let mut state = sample_state();
+        assert!(state.project().pipe_series_by_code(code).is_none());
+        crate::pipe_catalog_dialog::open_on(&mut state, Some(Selection::BuiltIn(code.into())));
+        let mut harness = pipe_catalog_harness(state);
+        harness.run();
+        // The first two sizes.
+        for _ in 0..2 {
+            let unchecked = harness
+                .query_all_by_role(Role::CheckBox)
+                .find(|n| n.accesskit_node().toggled() == Some(egui::accesskit::Toggled::False));
+            unchecked.unwrap().click();
+            harness.run();
+        }
+        harness.get_by_role_and_label(Role::Button, &t!("pipe-catalog-create-types")).click();
+        harness.run();
+        assert_eq!(count(harness.state()), 2, "{}", harness.state().message);
+        let selected = harness.state().dialogs.pipe_catalog.as_ref().and_then(|d| d.selected.clone());
+        assert!(matches!(selected, Some(Selection::Project(_))), "the project's copy is selected: {selected:?}");
+        let label = if keep { t!("action-ok") } else { t!("action-cancel") };
+        harness.get_by_role_and_label(Role::Button, &label).click();
+        harness.run();
+        assert!(harness.state().dialogs.pipe_catalog.is_none());
+        assert_eq!(count(harness.state()), if keep { 2 } else { 0 });
+        assert_eq!(harness.state().project().pipe_series_by_code(code).is_some(), keep);
+    }
+}
+
+/// A pipe type of a series picks its size from the series' rows and shows
+/// the row's diameters read-only.
+#[test]
+fn a_pipe_types_size_comes_from_its_series() {
+    let mut state = sample_state();
+    let pipe = state
+        .project()
+        .types
+        .values()
+        .find(|t| state.project().pipe_row(&t.data).is_some_and(|(s, r)| s.code == "BR-PVC-SOLD" && r.size == "25 mm"))
+        .unwrap()
+        .id;
+    state.dialogs.type_editor = Some(pipe);
+    let mut harness = type_dialog_harness(state);
+    harness.run();
+    assert!(harness.query_by_label("21,6 mm").is_some() || harness.query_by_label("21.6 mm").is_some(), "di 21.6 mm");
+    // Focused first, so the properties scroll to it.
+    let size = |h: &Harness<'static, AppState>| {
+        h.query_all_by_role(Role::ComboBox).any(|n| n.value().as_deref() == Some("25 mm"))
+    };
+    harness.query_all_by_role(Role::ComboBox).find(|n| n.value().as_deref() == Some("25 mm")).unwrap().focus();
+    harness.run();
+    assert!(size(&harness));
+    harness.query_all_by_role(Role::ComboBox).find(|n| n.value().as_deref() == Some("25 mm")).unwrap().click();
+    harness.run();
+    harness.get_by_label("32 mm").click();
+    harness.run();
+    let diameter = harness.state().project().element_type(pipe).and_then(|t| t.diameter());
+    assert_eq!(diameter, Some(0.032));
+}
+
 /// Duplicate a window type, type a name and press OK: the copy keeps the
 /// typed name (before, OK dropped a rename that Enter had not confirmed).
 #[test]
@@ -1616,7 +1694,7 @@ fn macro_menu_lists_the_macros_folder() {
     let mut state = sample_state();
     state.ribbon_tab = RibbonTab::Manage;
     state.prefs.macro_folder = Some(dir.clone());
-    let mut harness = ribbon_harness_sized(state, egui::vec2(1100.0, 400.0));
+    let mut harness = ribbon_harness_sized(state, egui::vec2(1300.0, 400.0));
     harness.get_by_role_and_label(Role::Button, &t!("action-macro-run")).click();
     harness.run();
     assert!(harness.query_by_label("walls").is_some());
@@ -1627,7 +1705,7 @@ fn macro_menu_lists_the_macros_folder() {
     // Without a folder: a hint and Browse….
     let mut state = sample_state();
     state.ribbon_tab = RibbonTab::Manage;
-    let mut harness = ribbon_harness_sized(state, egui::vec2(1100.0, 400.0));
+    let mut harness = ribbon_harness_sized(state, egui::vec2(1300.0, 400.0));
     harness.get_by_role_and_label(Role::Button, &t!("action-macro-run")).click();
     harness.run();
     assert!(harness.query_by_label(&t!("macro-no-folder")).is_some());
@@ -4491,6 +4569,7 @@ fn every_dialog_keeps_its_body_inside() {
         ("line styles".into(), Box::new(crate::line_styles_dialog::open)),
         ("tag types".into(), Box::new(crate::tag_type_ui::open_list)),
         ("fill patterns".into(), Box::new(crate::fill_patterns_dialog::open)),
+        ("pipe catalog".into(), Box::new(crate::pipe_catalog_dialog::open)),
         ("phases".into(), Box::new(crate::phases_dialog::open)),
         ("filters".into(), Box::new(crate::graphics_dialog::open_filters)),
         ("view templates".into(), Box::new(crate::graphics_dialog::open_templates)),

@@ -302,7 +302,28 @@ fn fittings(ui: &mut Ui, state: &mut AppState) {
             let sizes: Vec<String> =
                 r["diameters_mm"].as_array().into_iter().flatten().map(|d| format!("Ø{d}")).collect();
             ui.label(system);
-            ui.label(format!("{kind}{angle}"));
+            // A fitting of a pipe series' catalog by its name; one the series
+            // does not sell marked, with the reason.
+            match (r["name"].as_str(), r["missing"].as_bool()) {
+                (_, Some(true)) => {
+                    let reason = r["reason"].as_str().unwrap_or_default().to_string();
+                    ui.label(RichText::new(format!("⚠ {kind}{angle}")).color(PALETTE.danger)).on_hover_text(reason);
+                }
+                (Some(name), _) => {
+                    let pieces: Vec<&str> =
+                        r["pieces"].as_array().into_iter().flatten().filter_map(|p| p["name"].as_str()).collect();
+                    let label = ui.label(name);
+                    if pieces.len() > 1 {
+                        label.on_hover_text(pieces.join(
+                            "
+",
+                        ));
+                    }
+                }
+                _ => {
+                    ui.label(format!("{kind}{angle}"));
+                }
+            }
             ui.label(sizes.join(" × "));
             ui.label(r["count"].to_string());
             ui.end_row();
