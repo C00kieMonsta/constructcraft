@@ -4,16 +4,36 @@
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/licen%C3%A7a-GPL--3.0--or--later-blue.svg)](LICENSE)
 [![Rust 2024](https://img.shields.io/badge/rust-2024_edition-orange.svg?logo=rust)](https://www.rust-lang.org/)
 [![IFC4](https://img.shields.io/badge/IFC-exporta_IFC4_%C2%B7_importa_IFC2X3%2FIFC4-0a7bbb.svg)](https://technical.buildingsmart.org/standards/ifc/)
-[![Platforms](https://img.shields.io/badge/plataformas-Windows_%C2%B7_macOS_%C2%B7_Linux-lightgrey.svg)](#executar)
+[![Platforms](https://img.shields.io/badge/plataformas-Windows_%C2%B7_macOS_%C2%B7_Linux-lightgrey.svg)](#baixar)
 [![DCO](https://img.shields.io/badge/DCO-commits_assinados-brightgreen.svg)](CONTRIBUTING.md)
 [![Discord](https://img.shields.io/badge/Discord-entrar-5865F2.svg?logo=discord&logoColor=white)](https://discord.gg/y8ySJZjpK)
 [![Sponsor](https://img.shields.io/badge/Apoiar-%E2%9D%A4-ea4aaa.svg?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/francisreboucas)
 
 Software livre de **Modelagem de Informações da Construção (BIM)**, escrito em Rust e independente de qualquer fornecedor comercial.
 
-[English](README.md) · [Discord](https://discord.gg/y8ySJZjpK) · [Como contribuir](CONTRIBUTING.md) · [Código de conduta](CODE_OF_CONDUCT.md) · [Segurança](SECURITY.md)
+**[Baixar](#baixar)** · [English](README.md) · [Discord](https://discord.gg/y8ySJZjpK) · [Como contribuir](CONTRIBUTING.md) · [Código de conduta](CODE_OF_CONDUCT.md) · [Segurança](SECURITY.md)
 
 Um único modelo paramétrico é a fonte da verdade. Plantas, forros, cortes, elevações, vistas 3D, legendas, tabelas e folhas são *consultas* sobre esse modelo e se atualizam automaticamente a cada alteração.
+
+## Baixar
+
+Grátis e sem cadastro. Cada link baixa a versão mais recente:
+
+| Sistema | Baixar | Instalar |
+|---|---|---|
+| **Windows** (x64) | [**Instalador (.msi)**](https://github.com/francisreboucas/constructcraft/releases/latest/download/constructcraft-x86_64.msi) | Execute-o. Ele instala em Arquivos de Programas com atalho no menu Iniciar, abre arquivos `.ccad` e, opcionalmente, põe o `ccad` no PATH. Versões novas atualizam a instalação existente. |
+| **macOS**, Apple silicon | [**Imagem de disco (.dmg)**](https://github.com/francisreboucas/constructcraft/releases/latest/download/constructcraft-aarch64-apple-darwin.dmg) | Arraste o *ConstructCraft* para *Aplicativos*. |
+| **macOS**, Intel | [**Imagem de disco (.dmg)**](https://github.com/francisreboucas/constructcraft/releases/latest/download/constructcraft-x86_64-apple-darwin.dmg) | Arraste o *ConstructCraft* para *Aplicativos*. |
+| **Linux**, x86_64 | [**AppImage**](https://github.com/francisreboucas/constructcraft/releases/latest/download/constructcraft-x86_64.AppImage) · [Debian/Ubuntu (.deb)](https://github.com/francisreboucas/constructcraft/releases/latest/download/constructcraft_amd64.deb) | AppImage: dê `chmod +x` e execute. `.deb`: `sudo apt install ./constructcraft_amd64.deb`. |
+| **Linux**, arm64 | [**AppImage**](https://github.com/francisreboucas/constructcraft/releases/latest/download/constructcraft-aarch64.AppImage) · [Debian/Ubuntu (.deb)](https://github.com/francisreboucas/constructcraft/releases/latest/download/constructcraft_arm64.deb) | AppImage: dê `chmod +x` e execute. `.deb`: `sudo apt install ./constructcraft_arm64.deb`. |
+
+Qual é o seu Mac? No menu Apple, *Sobre Este Mac* mostra uma linha *Chip* com *Apple M…* nos Macs com Apple silicon e uma linha *Processador* com Intel nos Macs Intel. A [página de download](https://constructcraft.net/#download) escolhe o arquivo do seu sistema.
+
+Os dois pacotes para Linux trazem o atalho e o ícone; o `.deb` também registra o tipo de arquivo `.ccad` e instala o `ccad` em `/usr/bin`. As versões para Linux pedem glibc 2.35 ou posterior (Ubuntu 22.04, Debian 12 e mais novos) e driver Vulkan ou OpenGL.
+
+A página da [última versão](https://github.com/francisreboucas/constructcraft/releases/latest) tem todos os arquivos, também o `.zip` portátil para Windows, os arquivos compactados `.tar.gz` (o do macOS traz o `ccad`) e um `SHA256SUMS.txt` para conferi-los. As [versões anteriores](https://github.com/francisreboucas/constructcraft/releases) continuam lá.
+
+**Primeira abertura.** As compilações ainda não são assinadas. No Windows, o SmartScreen pode avisar sobre editor desconhecido: escolha *Mais informações → Executar assim mesmo*. No macOS, o Gatekeeper bloqueia a primeira abertura: clique com o botão direito (Control-clique) no aplicativo e escolha *Abrir* ou, no macOS 15 e posteriores, tente abrir uma vez e clique em *Abrir Mesmo Assim* em *Ajustes do Sistema → Privacidade e Segurança*.
 
 ## Familiar por design
 
@@ -47,18 +67,6 @@ A casa de exemplo, construída por [`examples/showcase.ccmacro`](examples/showca
 | Fases de obra (existente, demolido, novo) e filtros de vista colorindo as paredes pela espessura | Corte com hachura, níveis e o telhado |
 | [![Folha](docs/screenshots/pt-BR/sheet.png)](docs/screenshots/pt-BR/sheet.png) | [![Tabela de ambientes](docs/screenshots/pt-BR/schedule.png)](docs/screenshots/pt-BR/schedule.png) |
 | Folha A3 com a planta, um corte e a vista 3D | Tabela de ambientes com totais |
-
-## Instalar
-
-Cada [versão publicada](https://github.com/francisreboucas/constructcraft/releases) traz instaladores, arquivos compactados e um `SHA256SUMS.txt` para conferi-los:
-
-| Sistema | Instalador | Arquivo compactado |
-|---|---|---|
-| Windows (x64) | `constructcraft-vX.Y.Z-x86_64.msi`: instala em Arquivos de Programas com atalho no menu Iniciar, abre arquivos `.ccad` e, opcionalmente, põe o `ccad` no PATH. Versões novas atualizam a instalação existente. | `…-x86_64-pc-windows-msvc.zip` |
-| Linux (x86_64, arm64) | `constructcraft_X.Y.Z_amd64.deb` ou `…_arm64.deb` (Debian, Ubuntu: `sudo apt install ./constructcraft_X.Y.Z_amd64.deb`) ou `constructcraft-vX.Y.Z-x86_64.AppImage` ou `…-aarch64.AppImage` (dê `chmod +x` e execute). Ambos trazem o atalho e o ícone; o `.deb` também registra o tipo de arquivo `.ccad` e instala o `ccad` em `/usr/bin`. | `…-x86_64-unknown-linux-gnu.tar.gz`, `…-aarch64-unknown-linux-gnu.tar.gz` |
-| macOS | `constructcraft-vX.Y.Z-aarch64-apple-darwin.dmg` (Apple silicon) ou `…-x86_64-apple-darwin.dmg` (Intel): arraste o *ConstructCraft* para *Aplicativos*. | `…-apple-darwin.tar.gz` (com o `ccad`) |
-
-As compilações ainda não são assinadas. No Windows, o SmartScreen pode avisar sobre editor desconhecido: escolha *Mais informações → Executar assim mesmo*. No macOS, o Gatekeeper bloqueia a primeira abertura: clique com o botão direito (Control-clique) no aplicativo e escolha *Abrir* ou, no macOS 15 e posteriores, tente abrir uma vez e clique em *Abrir Mesmo Assim* em *Ajustes do Sistema → Privacidade e Segurança*. As versões para Linux pedem glibc 2.35 ou posterior (Ubuntu 22.04, Debian 12 e mais novos) e driver Vulkan ou OpenGL.
 
 ## Executar
 
