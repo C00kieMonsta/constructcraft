@@ -12,7 +12,9 @@
 //! which beat the category. An element is hidden when it is hidden in the
 //! view, its category is hidden, or any matching filter hides it.
 
-use crate::{Category, ElementId, FilterId, MepDiscipline, Pattern, ScheduleField, TemplateId, View, ViewKind};
+use crate::{
+    Category, ElementId, FilterId, LayerFunction, MepDiscipline, Pattern, ScheduleField, TemplateId, View, ViewKind,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -161,6 +163,68 @@ impl GraphicOverride {
     }
 }
 
+/// Cut line overrides of a category's layers by their function (its
+/// subcategories): the lines of a wall's layers where plans cut them (#452).
+/// `None`/empty keeps the category's.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LayerLines {
+    #[serde(skip_serializing_if = "LineGraphics::is_empty")]
+    pub structure: LineGraphics,
+    #[serde(skip_serializing_if = "LineGraphics::is_empty")]
+    pub substrate: LineGraphics,
+    #[serde(skip_serializing_if = "LineGraphics::is_empty")]
+    pub insulation: LineGraphics,
+    #[serde(skip_serializing_if = "LineGraphics::is_empty")]
+    pub finish: LineGraphics,
+    #[serde(skip_serializing_if = "LineGraphics::is_empty")]
+    pub membrane: LineGraphics,
+}
+
+impl LayerLines {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn get(&self, f: LayerFunction) -> LineGraphics {
+        match f {
+            LayerFunction::Structure => self.structure,
+            LayerFunction::Substrate => self.substrate,
+            LayerFunction::Insulation => self.insulation,
+            LayerFunction::Finish => self.finish,
+            LayerFunction::Membrane => self.membrane,
+        }
+    }
+
+    pub fn get_mut(&mut self, f: LayerFunction) -> &mut LineGraphics {
+        match f {
+            LayerFunction::Structure => &mut self.structure,
+            LayerFunction::Substrate => &mut self.substrate,
+            LayerFunction::Insulation => &mut self.insulation,
+            LayerFunction::Finish => &mut self.finish,
+            LayerFunction::Membrane => &mut self.membrane,
+        }
+    }
+
+    /// Reset weights that are not valid; returns how many.
+    pub fn repair(&mut self) -> usize {
+        let mut n = 0;
+        for f in LayerFunction::ALL {
+            let lines = self.get_mut(f);
+            if lines.weight.is_some_and(|w| !(w.is_finite() && w > 0.0 && w <= 10.0)) {
+                lines.weight = None;
+                n += 1;
+            }
+        }
+        n
+    }
+}
+
+/// The categories whose layers have subcategories in the view graphics.
+pub fn has_layer_lines(c: Category) -> bool {
+    c == Category::Wall
+}
+
 fn yes() -> bool {
     true
 }
@@ -176,11 +240,14 @@ pub struct CategoryGraphics {
     pub visible: bool,
     #[serde(default, skip_serializing_if = "GraphicOverride::is_empty")]
     pub overrides: GraphicOverride,
+    /// Its layers' cut lines by function (walls; see [`has_layer_lines`]).
+    #[serde(default, skip_serializing_if = "LayerLines::is_empty")]
+    pub layers: LayerLines,
 }
 
 impl Default for CategoryGraphics {
     fn default() -> Self {
-        Self { visible: true, overrides: GraphicOverride::default() }
+        Self { visible: true, overrides: GraphicOverride::default(), layers: LayerLines::default() }
     }
 }
 
@@ -268,6 +335,19 @@ impl ViewGraphics {
         matches: &mut dyn FnMut(FilterId) -> bool,
         phase: &GraphicOverride,
     ) -> Option<GraphicOverride> {
+        self.resolve_split(id, category, matches, phase).map(|(above, cat)| above.or(&cat.overrides))
+    }
+
+    /// [`Self::resolve_phased`] in two parts: what the element's own
+    /// override, the filters and its phase give, and its category's
+    /// graphics, so its layers' lines can rank between them (#452).
+    pub fn resolve_split(
+        &self,
+        id: ElementId,
+        category: Category,
+        matches: &mut dyn FnMut(FilterId) -> bool,
+        phase: &GraphicOverride,
+    ) -> Option<(GraphicOverride, CategoryGraphics)> {
         if self.hidden.contains(&id) {
             return None;
         }
@@ -284,7 +364,7 @@ impl ViewGraphics {
                 out = out.or(&f.overrides);
             }
         }
-        Some(out.or(phase).or(&cat.overrides))
+        Some((out.or(phase), cat))
     }
 
     /// Drop references to missing filters and elements and invalid values;
@@ -305,8 +385,12 @@ impl ViewGraphics {
             self.hidden.retain(|id| exists(*id));
             n += before - self.elements.len() - self.hidden.len();
         }
-        for c in self.categories.values_mut() {
-            n += c.overrides.repair();
+        for (category, c) in self.categories.iter_mut() {
+            n += c.overrides.repair() + c.layers.repair();
+            if !has_layer_lines(*category) && !c.layers.is_empty() {
+                c.layers = LayerLines::default();
+                n += 1;
+            }
         }
         for f in &mut self.filters {
             n += f.overrides.repair();
@@ -737,6 +821,7 @@ mod tests {
                 halftone: Some(true),
                 ..Default::default()
             },
+            ..Default::default()
         };
         g.set_category(Category::Wall, cat);
         let mut f1 = FilterUse::new(FilterId(1));
@@ -767,6 +852,43 @@ mod tests {
         assert!(g.resolve(ElementId(8), Category::Wall, &mut |_| false).is_none());
         g.set_category(Category::Door, CategoryGraphics { visible: false, ..Default::default() });
         assert!(g.resolve(ElementId(9), Category::Door, &mut |_| false).is_none());
+    }
+
+    /// A wall category's layer lines rank between the element, filters and
+    /// phase and the category's own lines; repair keeps them only on walls.
+    #[test]
+    fn layer_lines_rank_below_the_element_and_above_the_category() {
+        let mut g = ViewGraphics::default();
+        let mut cat = CategoryGraphics::default();
+        cat.overrides.cut_lines = LineGraphics { color: Some([1, 1, 1]), weight: Some(0.25), ..Default::default() };
+        cat.layers.structure.weight = Some(0.7);
+        g.set_category(Category::Wall, cat);
+        g.elements.insert(ElementId(7), GraphicOverride { cut_lines: line([4, 4, 4]), ..Default::default() });
+        let none = GraphicOverride::default();
+        let (above, cat) = g.resolve_split(ElementId(7), Category::Wall, &mut |_| false, &none).unwrap();
+        let lines = above.cut_lines.or(&cat.layers.get(LayerFunction::Structure)).or(&cat.overrides.cut_lines);
+        assert_eq!((lines.color, lines.weight), (Some([4, 4, 4]), Some(0.7)));
+        let finish = above.cut_lines.or(&cat.layers.get(LayerFunction::Finish)).or(&cat.overrides.cut_lines);
+        assert_eq!(finish.weight, Some(0.25));
+        // The whole element's lines are as before.
+        let r = g.resolve(ElementId(7), Category::Wall, &mut |_| false).unwrap();
+        assert_eq!((r.cut_lines.color, r.cut_lines.weight), (Some([4, 4, 4]), Some(0.25)));
+
+        // Invalid weights and layer lines of a category without layers are dropped.
+        let mut doors = CategoryGraphics::default();
+        doors.layers.finish.weight = Some(0.5);
+        g.set_category(Category::Door, doors);
+        if let Some(wall) = g.categories.get_mut(&Category::Wall) {
+            wall.layers.finish.weight = Some(f64::NAN);
+        }
+        assert_eq!(g.repair(&BTreeMap::new(), None), 3);
+        assert!(!g.categories.contains_key(&Category::Door));
+        assert_eq!(g.category(Category::Wall).layers.structure.weight, Some(0.7));
+        assert_eq!(g.category(Category::Wall).layers.finish, LineGraphics::default());
+        // Kept in files.
+        let text = ron::to_string(&g).unwrap();
+        assert!(text.contains("structure"), "{text}");
+        assert_eq!(ron::from_str::<ViewGraphics>(&text).unwrap(), g);
     }
 
     #[test]

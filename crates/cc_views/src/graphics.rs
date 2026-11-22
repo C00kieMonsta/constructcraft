@@ -6,8 +6,8 @@
 
 use crate::{Drawing2D, LineStyle, Pen, Prim, format};
 use cc_core::{
-    Element, ElementId, FilterParam, GraphicOverride, LineGraphics, Pattern, PhaseDisplay, PhaseFilter, PhaseState,
-    Project, TemporaryVisibility, View, ViewFilter, ViewGraphics,
+    CategoryGraphics, Element, ElementId, FilterParam, GraphicOverride, LineGraphics, Pattern, PhaseDisplay,
+    PhaseFilter, PhaseState, Project, TemporaryVisibility, View, ViewFilter, ViewGraphics,
 };
 use cc_geom::ModelGeometry;
 use std::collections::HashMap;
@@ -75,7 +75,7 @@ pub struct Resolver<'a> {
     geom: &'a ModelGeometry,
     graphics: &'a ViewGraphics,
     temporary: Option<&'a TemporaryVisibility>,
-    cache: HashMap<ElementId, Option<GraphicOverride>>,
+    cache: HashMap<ElementId, Option<(GraphicOverride, CategoryGraphics)>>,
     phase: Option<PhaseView<'a>>,
     /// Every element of the view shows by category (or not at all) in its phase.
     phase_trivial: bool,
@@ -121,18 +121,24 @@ impl<'a> Resolver<'a> {
     /// The overrides of an element, or `None` when it is hidden. Ids that
     /// are not elements are drawn as they are.
     pub fn style(&mut self, id: ElementId) -> Option<GraphicOverride> {
+        self.style_split(id).map(|(above, cat)| above.or(&cat.overrides))
+    }
+
+    /// [`Self::style`] in two parts: the element's own override, filters
+    /// and phase, and its category's graphics (with its layers' lines).
+    pub fn style_split(&mut self, id: ElementId) -> Option<(GraphicOverride, CategoryGraphics)> {
         if let Some(s) = self.cache.get(&id) {
             return *s;
         }
         let s = match self.project.element(id) {
-            None => Some(GraphicOverride::default()),
+            None => Some((GraphicOverride::default(), CategoryGraphics::default())),
             Some(e) if self.temporary.is_some_and(|t| !t.shows(id, e.category())) => None,
             Some(e) if self.options.as_ref().is_some_and(|shown| !self.project.option_shows(e, shown)) => None,
             Some(e) => {
                 let (project, geom) = (self.project, self.geom);
                 match self.phase.map_or(Some(GraphicOverride::default()), |ph| ph.style(project, e)) {
                     None => None,
-                    Some(phase) => self.graphics.resolve_phased(
+                    Some(phase) => self.graphics.resolve_split(
                         id,
                         e.category(),
                         &mut |f| project.filter(f).is_some_and(|filter| filter_matches(project, geom, filter, e)),
@@ -152,6 +158,7 @@ fn pen(lines: &LineGraphics, halftone: bool) -> Option<Pen> {
         weight: lines.weight,
         pattern: lines.pattern,
         halftone,
+        layer: None,
     })
 }
 
@@ -163,6 +170,7 @@ fn merge(own: Option<Pen>, over: Option<Pen>) -> Option<Pen> {
             weight: n.weight.or(o.weight),
             pattern: n.pattern.or(o.pattern),
             halftone: n.halftone || o.halftone,
+            layer: n.layer.or(o.layer),
         }),
         (o, n) => n.or(o),
     }
@@ -190,8 +198,9 @@ pub fn apply(d: &mut Drawing2D, resolver: &mut Resolver, scale: u32) {
             d.prims.push(prim);
             continue;
         };
-        let Some(g) = resolver.style(id) else { continue };
-        if g.is_empty() {
+        let Some((above, cat)) = resolver.style_split(id) else { continue };
+        let g = above.or(&cat.overrides);
+        if g.is_empty() && cat.layers.is_empty() {
             d.prims.push(prim);
             continue;
         }
@@ -201,10 +210,14 @@ pub fn apply(d: &mut Drawing2D, resolver: &mut Resolver, scale: u32) {
                 d.prims.push(Prim::Image { origin, u, v, image, element, faded: faded || halftone });
             }
             Prim::Line { a, b, style, element, pen: own } => {
-                let lines = match style {
-                    LineStyle::Hatch if g.cut_fill.pattern.is_some() => continue,
-                    LineStyle::Hatch => LineGraphics { color: g.cut_fill.color, ..Default::default() },
-                    LineStyle::Cut => g.cut_lines,
+                let layer = own.and_then(|p| p.layer).map(|f| cat.layers.get(f));
+                let lines = match (style, layer) {
+                    (LineStyle::Hatch, _) if g.cut_fill.pattern.is_some() => continue,
+                    (LineStyle::Hatch, _) => LineGraphics { color: g.cut_fill.color, ..Default::default() },
+                    // A layer's line: its subcategory's lines rank between the element's and the category's.
+                    (LineStyle::Cut, Some(l)) => above.cut_lines.or(&l).or(&cat.overrides.cut_lines),
+                    (LineStyle::Thin, Some(l)) => above.projection_lines.or(&l).or(&cat.overrides.projection_lines),
+                    (LineStyle::Cut, None) => g.cut_lines,
                     _ => g.projection_lines,
                 };
                 // Overrides replace what they set; a line's own pen (imported drawings) keeps the rest.

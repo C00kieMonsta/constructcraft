@@ -1809,6 +1809,7 @@ vg-transparency = 透明度
 vg-projection-lines = 投影线
 vg-surface-fill = 表面填充
 vg-cut-lines = 截面线
+vg-layers-hint = 子类别：按功能区分的各层剖切线
 vg-cut-fill = 截面填充
 vg-halftone = 半色调
 vg-model-categories = 模型类别

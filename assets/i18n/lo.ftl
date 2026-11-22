@@ -1769,6 +1769,7 @@ vg-transparency = ຄວາມໂປ່ງໃສ
 vg-projection-lines = ເສັ້ນສາຍຕາ (Projection)
 vg-surface-fill = ລວດລາຍພື້ນຜິວ
 vg-cut-lines = ເສັ້ນໜ້າຕັດ
+vg-layers-hint = ໝວດຍ່ອຍ: ເສັ້ນຕັດຂອງຊັ້ນຕາມໜ້າທີ່
 vg-cut-fill = ລວດລາຍໜ້າຕັດ
 vg-halftone = ສີຈາງ (Halftone)
 vg-model-categories = ໝວດໝູ່ແບບຈຳລອງ

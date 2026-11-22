@@ -1809,6 +1809,7 @@ vg-transparency = 透明度
 vg-projection-lines = 投影線
 vg-surface-fill = 表面塗りつぶし
 vg-cut-lines = 切断線
+vg-layers-hint = サブカテゴリ：機能別のレイヤーの切断線
 vg-cut-fill = 切断面塗りつぶし
 vg-halftone = ハーフトーン
 vg-model-categories = モデルカテゴリ
