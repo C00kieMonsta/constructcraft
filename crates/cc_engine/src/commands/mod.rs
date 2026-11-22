@@ -48,6 +48,7 @@ pub mod phases;
 pub mod pile_rebar;
 pub mod piles;
 pub mod pipes;
+pub mod plugin_data;
 pub mod profiles;
 pub mod project;
 pub mod query;
@@ -115,6 +116,7 @@ pub(crate) fn add_element(e: &mut EditCtx, level: LevelId, type_id: ElementTypeI
         phase_demolished: None,
         design_option: None,
         paints: Vec::new(),
+        plugin_data: Default::default(),
     };
     if matches!(element.category(), Category::Door | Category::Window) {
         element.mark = e.project().next_mark(element.category());

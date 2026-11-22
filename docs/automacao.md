@@ -139,6 +139,8 @@ ccad -p casa.ccad --save run cad_explode id=120
 | `io` | falha ao ler ou gravar um arquivo |
 | `internal` | um defeito; o projeto fica como estava |
 | `script` | um script ou plugin Lua falhou: erro de sintaxe ou de execução, ou um limite atingido |
+| `pending` | um comando de plugin continua em segundo plano, esperando um programa externo (só numa sessão que não bloqueia, veja [Programas externos](#programas-externos)) |
+| `cancelled` | um comando de plugin que esperava um programa externo foi cancelado; o que ele fez foi desfeito |
 
 ## Linha de comando: `ccad`
 
@@ -549,7 +551,7 @@ A tabela `ccad`:
 | `ccad.null` | o `null` do JSON (o `nil` do Lua omite o campo) |
 | `ccad.array(t)` | marca `t` como lista, para que uma tabela vazia vá como `[]` e não `{}` |
 | `ccad.json.encode(v)`, `ccad.json.decode(s)` | texto JSON de e para valores Lua |
-| `ccad.version`, `ccad.api` | a versão do ConstructCraft e a da API de plugins (1) |
+| `ccad.version`, `ccad.api` | a versão do ConstructCraft e a da API de plugins (2) |
 
 Argumentos e resultados são JSON: objetos são tabelas com chaves de texto, listas são sequências (`{ 0, 0 }` é um ponto), e `end`, palavra reservada do Lua, se escreve `["end"]`. Um número inteiro calculado com `/` (que em Lua sempre dá um número real) vai como inteiro, então `10 / 2` funciona onde se espera um id ou uma contagem.
 
@@ -626,7 +628,7 @@ Um plugin é uma pasta com um manifesto `plugin.toml` e código Lua que acrescen
 
 ```sh
 ccad --plugins examples/plugins commands                # o catálogo, com os comandos dos plugins
-ccad --plugins examples/plugins plugins                 # os plugins, as permissões e os comandos deles
+ccad --plugins examples/plugins plugins                 # os plugins: permissões, comandos, botões, configurações
 ccad --plugins examples/plugins run quick_rooms__rectangle_room width=4 depth=3 name=Escritório door=south
 claude mcp add constructcad -- ccad mcp --plugins /caminho/para/plugins
 ```
@@ -640,14 +642,14 @@ claude mcp add constructcad -- ccad mcp --plugins /caminho/para/plugins
 ```toml
 id = "quick_rooms"          # letras minúsculas, dígitos e sublinhados simples, até 32
 name = "Quick rooms"
-version = "0.1.0"
-api = 1                     # a API de plugins para a qual ele foi escrito
+version = "0.2.0"
+api = 2                     # a API de plugins para a qual ele foi escrito (1 ou 2, veja abaixo)
 description = "Rectangular rooms in one step, and wall totals by type."
 authors = ["…"]
 license = "GPL-3.0-or-later"
 homepage = "https://…"
 main = "main.lua"           # o padrão
-permissions = []            # ou ["files"], veja abaixo
+permissions = []            # ou ["files"], ["tools"] (api 2), veja abaixo
 ```
 
 `main.lua` roda uma vez quando o plugin carrega e registra comandos com `ccad.command`:
@@ -674,11 +676,265 @@ ccad.command {
 
 - `run` recebe os argumentos numa tabela e devolve o resultado do comando (uma tabela, um valor ou nada). Argumentos `required` que faltam são recusados antes de ele rodar; `error("mensagem", 0)` faz o comando falhar com essa mensagem.
 - **Um passo de desfazer:** quantos comandos um comando de plugin executar, ele é desfeito de uma vez, e quando falha (um erro, um `ccad.run` que falhou, um limite atingido) tudo o que ele fez é desfeito.
-- **O que um comando pode executar:** um comando `query` só consulta; um `edit` consulta e edita; comandos que leem ou gravam arquivos (importar, exportar, salvar) precisam da permissão `files` (sem ela, comandos de edição que leem um arquivo indicado por um parâmetro, como `cad_import` ou `fill_pattern_import` com `path`, recusam o caminho; as formas sem arquivo, como `fill_pattern_import` com `text`, continuam funcionando), e só com ela se declara um comando do tipo `file`. Abrir ou criar um projeto, `undo`, `redo` e `language_set` não rodam dentro de um comando de plugin, nem o comando de outro plugin.
+- **O que um comando pode executar:** um comando `query` só consulta; um `edit` consulta e edita; comandos que leem ou gravam arquivos (importar, exportar, salvar) precisam da permissão `files` (sem ela, comandos de edição que leem um arquivo indicado por um parâmetro, como `cad_import` ou `fill_pattern_import` com `path`, recusam o caminho; as formas sem arquivo, como `fill_pattern_import` com `text`, continuam funcionando), e só com ela se declara um comando do tipo `file`. Sem `files`, um comando ainda trabalha com os arquivos que os argumentos dele indicam em parâmetros `save_path` e `open_path` ([API 2](#arquivos-sem-a-permissão-files)). Abrir ou criar um projeto, `undo`, `redo` e `language_set` não rodam dentro de um comando de plugin, nem o comando de outro plugin.
+- **Essas regras valem para tudo o que um comando executa:** o motor confere cada comando executado enquanto um comando de plugin roda (o escopo dele), também os nós de um grafo que ele roda com `graph_run`; um nó `plugin_data_set` com o id de outro plugin é recusado como um `ccad.run` direto. Os scripts Lua que o usuário roda (`ccad lua`) não têm restrição.
 - **O sandbox** é o dos [scripts Lua](#scripts-lua), com o limite contado por comando; cada plugin tem o seu próprio estado Lua, que guarda as variáveis entre um comando e outro. `require("a.b")` carrega `a/b.lua` da pasta do plugin (uma vez; arquivos fora da pasta são recusados), e `ccad.plugin` tem o `id`, o `name` e a `version` dele. `ccad.run` só funciona enquanto um comando roda, não enquanto o plugin carrega.
-- **As permissões** são concedidas por quem carrega o plugin: `ccad --plugins` concede o que o manifesto pede, já que você indicou a pasta.
+- **As permissões** são concedidas por quem carrega o plugin: `ccad --plugins` concede o que o manifesto pede, já que você indicou a pasta. `files` deixa os comandos dele trabalharem com qualquer arquivo; `tools` (API 2) deixa que executem os programas externos que o usuário escolhe para as ferramentas dele ([Programas externos](#programas-externos)).
+
+### API de plugins 2: botões, configurações, traduções e dados
+
+Um plugin escrito para `api = 2` (`ccad.api` vale 2 nesta versão) também pode declarar botões da faixa de opções e configurações no manifesto, traduzir os seus textos e dar aos parâmetros dicas para a interface. Manifestos com `api = 1` carregam como antes; botões e configurações são recusados com `api = 1` (`buttons need api = 2`), de modo que o índice nunca oferece um plugin assim a uma versão que só conhece a API 1.
+
+```toml
+id = "quick_rooms"
+name = "%name%"                  # procurado em locales/<idioma>.toml
+version = "0.2.0"
+api = 2
+
+[[buttons]]                      # no máximo 64
+command = "rectangle_room"       # um comando que o main.lua registra (o nome curto)
+label = "%button.room%"          # no máximo 64 caracteres
+icon = "icons/room.svg"          # opcional: um SVG na pasta do plugin, no máximo 64 KiB
+panel = "%panel%"                # opcional: o painel da faixa (padrão: o nome do plugin)
+size = "large"                   # "large" (o padrão) ou "small"
+when = "view:floor_plan"         # opcional: quando o botão fica disponível
+
+[settings.default_height]        # no máximo 64; chaves como nomes de comando
+type = "number"                  # boolean, number, integer ou string
+default = 2.8                    # obrigatório, e tem de caber na configuração
+title = "%settings.height%"      # opcional (padrão: a chave legível, "Default height")
+description = "Altura das paredes que ele desenha"
+ui = "length"                    # opcional, só para números: mostrado nas unidades do projeto
+minimum = 2.0                    # números e inteiros; também maximum
+
+[settings.default_door]
+type = "string"
+default = "none"
+enum = ["none", "south", "east", "north", "west"]   # só para textos: os valores permitidos
+enum_labels = ["%side.none%", "%side.south%", "%side.east%", "%side.north%", "%side.west%"]   # opcional, um por valor
+```
+
+Um botão cujo comando o `main.lua` não registra é um erro de carregamento que cita o comando. **`when`** é uma lista de termos separados por vírgula que precisam valer todos:
+
+| Termo | Vale quando |
+|---|---|
+| `selection` | há pelo menos um elemento selecionado |
+| `selection:one` | há exatamente um elemento selecionado |
+| `selection:<categoria>` | há pelo menos um elemento selecionado e todos são da categoria (`wall`, `door`…; os nomes de `categories_list`) |
+| `view:<tipo>` | a vista ativa é `floor_plan`, `ceiling_plan`, `three_d`, `elevation`, `section`, `legend`, `drafting`, `schedule`, `diagram` ou `sheet` |
+
+Um termo, categoria ou tipo de vista desconhecido é um erro de carregamento.
+
+**Configurações.** `ccad.settings` tem o valor atual de cada configuração (o valor guardado, ou o padrão): é somente leitura (atribuir a ela gera um erro), existe enquanto o `main.lua` roda e é atualizada antes de cada comando. As configurações são listadas na ordem do manifesto. Os valores são guardados por plugin em `<pasta de plugins>/.settings/<id>.json`; valores guardados que não cabem mais no manifesto (uma chave desconhecida, um tipo errado, um valor fora de `enum`, `minimum` ou `maximum`) são descartados quando o plugin carrega, e um plugin carregado da própria pasta (não de uma pasta de plugins) começa com os padrões. Remover um plugin remove as configurações dele. Pela linha de comando:
+
+```sh
+ccad plugins settings ~/plugins quick_rooms                         # as configurações e os valores, em JSON
+ccad plugins settings ~/plugins quick_rooms default_height=3 default_door=north
+```
+
+Os valores se escrevem como os argumentos `key=value` do `run` (JSON ou texto simples; uma configuração de texto recebe o texto como está), são conferidos com o manifesto e guardados; um valor que não cabe é recusado e nada é gravado. Isso lê só o manifesto e as traduções: o código do plugin não roda.
+
+**Traduções.** Arquivos `locales/<código>.toml` na pasta do plugin, `<código>` um dos idiomas do ConstructCraft (`en`, `pt-BR`, `es`, `fr`, `de`, `it`, `lo`, `pl`, `uk-UA`, `zh-TW`, `zh-CN`, `ja`; outros arquivos são ignorados), têm linhas `chave = "texto"` ou tabelas cujas chaves se juntam com `.` (cada arquivo com no máximo 256 KiB; um arquivo que não é TOML de textos é um erro de carregamento):
+
+```toml
+# locales/pt-BR.toml
+name = "Salas rápidas"
+[button]
+room = "Sala"                 # a chave button.room
+[settings]
+height = "Altura padrão"
+```
+
+Um texto que é exatamente `%chave%` é procurado quando é mostrado, no idioma atual: o arquivo desse idioma, depois um do mesmo idioma base (`pt` para `pt-BR`), depois `en`; uma chave que não está em nenhum aparece como a própria chave. Isso vale para `name` e `description` do manifesto, `label` e `panel` dos botões, `title`, `description` e `enum_labels` das configurações, `title` e `description` dos comandos, e `title`, `description` e `enum_labels` de cada parâmetro. Trocar o idioma troca os textos na hora, sem recarregar os plugins. Com `api = 1` os textos aparecem como estão escritos.
+
+**Dicas dos parâmetros.** Um parâmetro de `params` pode dizer como a interface o pede; com `api = 2` as dicas são conferidas quando o comando é registrado (uma errada é um erro de carregamento), e passam inalteradas para os clientes MCP:
+
+| `ui` | Tipo do parâmetro | Pede |
+|---|---|---|
+| `length` | `number` | um comprimento, nas unidades do projeto |
+| `element` | `integer` | o id de um elemento (`category` restringe) |
+| `elements` | `array` | ids de elementos (`category` restringe) |
+| `point` | `array` | um ponto `[x, y]` |
+| `level` | `integer` | o id de um nível |
+| `view` | `integer` | o id de uma vista |
+| `type` | `integer` | o id de um tipo (`category` restringe) |
+| `material` | `string` | o nome de um material |
+| `save_path` | `string` | um arquivo a gravar (a janela de salvar do aplicativo); o comando pode gravá-lo |
+| `open_path` | `string` | um arquivo a ler (a janela de abrir do aplicativo); o comando pode lê-lo |
+
+`category` (o nome de uma categoria) só acompanha `element`, `elements` e `type`; `extensions` (1 a 16 extensões em minúsculas, de 1 a 16 letras ou dígitos, sem o ponto, como `{ "idf", "epw" }`) só `save_path` e `open_path`; `enum_labels` dá um rótulo a cada valor de `enum` (o mesmo número de textos); `title` é um nome curto para o parâmetro.
+
+```lua
+params = { properties = {
+  width = { type = "number", ui = "length", title = "%param.width%" },
+  wall = { type = "integer", ui = "element", category = "wall" },
+  side = { type = "string", enum = { "north", "south" }, enum_labels = { "%north%", "%south%" } },
+} }
+```
+
+**Dados do plugin.** Um plugin guarda os seus próprios dados no projeto, em elementos ou no próprio projeto, salvos no arquivo `.ccad` (os comandos `plugin_data_get`, `plugin_data_set` e `plugin_data_list` da [referência de comandos](commands.md)):
+
+| | |
+|---|---|
+| `ccad.data.get(elemento)` | o que o plugin guarda no elemento (`nil`: no projeto), ou `ccad.null` |
+| `ccad.data.set(elemento, valor)` | guarda `valor` (qualquer JSON, até 256 KiB) ali, no lugar do que havia; `nil` remove |
+| `ccad.data.list()` | `{ project = true/false, elements = { ids… } }` |
+
+`ccad.data.set` é uma edição, então um comando `query` não pode chamá-lo, e faz parte do passo único de desfazer do comando. Um comando de plugin alcança só os próprios dados: executar um comando `plugin_data_*` por `ccad.run` ou `ccad.try` com o id de outro plugin é recusado (`a plugin reads and writes only its own data`). Scripts Lua que o usuário roda (`ccad lua`) alcançam os dados de qualquer plugin.
+
+#### Arquivos sem a permissão `files`
+
+Um comando que grava ou lê um arquivo escolhido pelo usuário não precisa da permissão `files`: ele recebe o caminho num parâmetro `save_path` (para gravar) ou `open_path` (para ler) e, enquanto roda, esse caminho, e só ele, fica liberado:
+
+- **Antes de rodar**, cada argumento `save_path`/`open_path` do nível de cima é conferido: um texto, não vazio, com uma das `extensions` do parâmetro quando ele as lista (sem diferenciar maiúsculas: `MODELO.IDF` é um `idf`), um arquivo a ler que existe, um arquivo a gravar numa pasta que existe. Um caminho que falha é recusado (`invalid_arguments`) e o comando não roda. Os caminhos são comparados como arquivos, não como texto: `a/../modelo.idf` e o caminho absoluto de `modelo.idf` são o mesmo arquivo.
+- **`ccad.file.read(caminho)`** devolve os bytes de um arquivo `open_path` liberado como texto Lua (no máximo 64 MiB). **`ccad.file.write(caminho, dados)`** grava um arquivo `save_path` liberado; `dados` é um texto ou uma lista de textos, juntados (para saídas grandes, monte uma lista em vez de um texto longo). Um comando grava no máximo 256 MiB ao todo. A direção é conferida: um arquivo `save_path` não pode ser lido, nem um `open_path` gravado, e qualquer outro caminho é recusado (`rejected`). `ccad.file` só existe em plugins, e só funciona enquanto um comando roda.
+- **O que é gravado espera o comando terminar bem:** o que `ccad.file.write` recebe fica na memória e só é gravado quando o comando termina sem erro, cada arquivo num arquivo temporário na pasta dele, depois renomeado por cima do destino. Um comando que falha não deixa arquivo nem arquivo pela metade, e um arquivo que já existia fica como estava.
+- **As exportações do próprio motor** também usam o caminho liberado: um comando pode rodar `ifc_export`, `view_export`, `sheet_export`, `schedule_export_csv`, `analytical_export`, `view_render`, `component_save`, `fill_pattern_export` ou `pipe_series_export` com o seu `save_path`, e importações como `cad_import` com o seu `open_path`; com outro caminho são recusadas, e os demais comandos de arquivo (`project_save`, `ifc_import`…) continuam precisando de `files`. Um arquivo gravado por um comando do motor fica mesmo que o comando do plugin falhe depois (só as mudanças no modelo são desfeitas).
+- Um plugin com a permissão `files` trabalha com qualquer arquivo, como antes; `ccad.file` continua lendo e gravando só os caminhos liberados.
+
+Na linha de comando e no MCP o caminho é um argumento comum: `ccad --plugins ~/plugins run energy__export_idf path=modelo.idf`.
+
+#### Exportadores e importadores
+
+Um plugin pode acrescentar itens às listas de Exportar e Importar do aplicativo:
+
+```toml
+[[exporters]]                    # no máximo 16
+command = "export_idf"           # um comando com exatamente um parâmetro ui = "save_path"
+label = "%export.idf%"           # p. ex. "Modelo EnergyPlus (.idf)"; no máximo 64 caracteres
+
+[[importers]]                    # no máximo 16
+command = "import_weather"       # um comando com exatamente um parâmetro ui = "open_path"
+label = "%import.epw%"
+```
+
+Os tipos de arquivo vêm das `extensions` do parâmetro. Um item cujo comando o `main.lua` não registra, ou cujo comando não tem um parâmetro desses ou tem mais de um, é um erro de carga; os dois precisam de `api = 2`. No aplicativo, clicar no item abre a janela de salvar (exportador) ou de abrir (importador) para essas extensões e depois o formulário do comando com o caminho escolhido (ou roda o comando na hora, quando o caminho é o único parâmetro). `ccad plugins` os lista (`exporters`, `importers`: comando, rótulo, parâmetro e extensões).
 
 Os plugins são compartilhados pelo índice da comunidade, [constructcraft-plugins](https://github.com/francisreboucas/constructcraft-plugins): uma entrada por plugin, com de onde baixar cada versão e o checksum dela, enviada por pull request. No aplicativo, *Gerenciar → Plugins* instala, atualiza, desativa e remove plugins ([Plugins](interface.pt-BR.md#plugins)); sem ele, `ccad plugins install <arquivo.zip> <pasta>` instala um arquivo baixado (verificado do mesmo jeito: caminhos seguros, tamanhos e um plugin que carrega) e `ccad plugins remove <id> <pasta>` remove um.
+
+#### Programas externos
+
+Um plugin pode executar um programa instalado no computador, como o simulador EnergyPlus, quando o usuário permite e escolhe qual arquivo de programa é. O programa roda fora da sandbox, com as permissões do usuário, então nada roda sem a aprovação do usuário, e o aplicativo continua funcionando enquanto ele roda.
+
+```toml
+permissions = ["tools"]                          # precisa de api = 2
+
+[[tools]]                                        # no máximo 8
+id = "energyplus"                                # como um id de plugin; ccad.process.run usa esse nome
+name = "EnergyPlus"                              # pode ser "%chave%"
+executables = ["energyplus.exe", "energyplus"]   # os nomes de arquivo aceitos do programa
+homepage = "https://energyplus.net"              # opcional: onde obtê-lo
+version_args = ["--version"]                     # opcional: o que o "Testar" executa
+```
+
+`[[tools]]` sem a permissão `tools`, ou com `api = 1`, é um erro de carga; também são arquivos de lote (`.bat`, `.cmd`) e nomes com pastas em `executables`.
+
+**Aprovação.** Duas coisas são escolha do usuário, nunca do plugin:
+
+- **A permissão:** no aplicativo, *Permitir que execute programas externos* na janela Plugins (guardada por plugin, como a permissão `files`); `ccad --plugins` concede o que o manifesto pede, já que você indicou a pasta.
+- **O programa:** o caminho de cada ferramenta, escolhido na janela Plugins (*Programas externos*: *Procurar…*, ou *Usar …* para um programa com esse nome encontrado no `PATH`, que nunca é usado sozinho) e guardado em `<pasta de plugins>/.tools/<id do plugin>.json` (`{ "<id da ferramenta>": "<caminho absoluto>" }`; removido com o plugin). Um caminho só vale quando é um arquivo existente cujo nome é um dos `executables` (sem diferença de maiúsculas no Windows). Pela linha de comando:
+
+```sh
+ccad plugins tools ~/plugins energy                         # as ferramentas: caminho escolhido, por que não pode rodar, uma sugestão do PATH
+ccad plugins tools ~/plugins energy energyplus=/opt/EnergyPlus/energyplus --test   # escolhe e executa version_args
+ccad plugins tools ~/plugins energy energyplus=             # esquece
+ccad --plugins ~/plugins/energy --tool energy.energyplus=/opt/EnergyPlus/energyplus run energy__simulate
+```
+
+`--tool <plugin>.<ferramenta>=<caminho>` (repetível) dá um programa para uma execução, também a um plugin carregado da própria pasta, que não lê caminhos guardados; um caminho que não serve é informado na saída de erro e deixado de fora. `ccad plugins` lista as `tools` de cada plugin (`id`, `name`, `executables`, `homepage`, `path`, `problem`).
+
+**Executando.** Na função `run` de um comando:
+
+```lua
+local r = ccad.process.run("energyplus", {
+  args = { "-w", "in.epw", "-r", "in.idf" },     -- passados como estão, sem shell
+  files = { ["in.idf"] = texto_idf },             -- gravados antes na pasta da execução
+  copy = { ["in.epw"] = args.clima },             -- um arquivo dado ao comando para ler (open_path), copiado para lá
+  outputs = { "eplusout.csv", "eplustbl.htm", "*.err" },  -- lidos de volta; * casa quaisquer caracteres dentro de um nome
+  timeout = 600,                                  -- segundos: padrão 300, no máximo 7200
+})
+-- r = { code = 0, stdout = "…", stderr = "…", truncated = false, timed_out = false,
+--       files = { ["eplusout.csv"] = "…", ["eplusout.err"] = "…" } }
+```
+
+- **A pasta da execução:** cada execução ganha uma pasta nova só sua na pasta temporária do sistema (`constructcraft-<plugin>-<aleatório>`), que é a pasta de trabalho do programa; os `files` são gravados e os arquivos de `copy` copiados para ela, as `outputs` encontradas lá são lidas de volta (as não encontradas simplesmente não aparecem em `files`; links não são seguidos), e a pasta é apagada depois, também quando a execução falha, estoura o tempo ou é cancelada.
+- **Nomes** em `files`, `copy` e `outputs` são relativos à pasta da execução, nomes simples unidos por `/` (`sub/in.idf`): `..`, caminhos absolutos, unidades, `\`, `:` e nomes de dispositivo do Windows (`CON`, `NUL`, `COM1`…) são recusados.
+- **Sem shell:** o programa é iniciado diretamente, e cada argumento chega a ele como escrito: `&`, `;`, `|`, aspas e `$(…)` não significam nada.
+- **Ambiente:** o programa recebe do ambiente do aplicativo só `PATH`, `SystemRoot`, `TEMP`, `TMP`, `HOME`, `USERPROFILE`, `LANG` e `LC_*`; nada mais é repassado. A entrada padrão é vazia.
+- **Limites:** as entradas (`files` e `copy`) no máximo 256 MiB ao todo; cada saída no máximo 64 MiB e todas as saídas no máximo 256 MiB (além disso, a chamada levanta um erro); saída padrão e de erro guardadas até 1 MiB cada (`truncated = true` quando alguma foi cortada). Ao estourar o tempo o programa é encerrado e `timed_out = true` (sem `code`). Um código de saída diferente de zero é devolvido, não levantado: o plugin decide o que ele significa.
+- **Parada:** ao estourar o tempo ou ao cancelar, o programa é encerrado. Programas que ele mesmo iniciou podem continuar rodando: não são usados job objects nem grupos de processos.
+- **O que a aprovação significa:** o plugin decide os argumentos e os arquivos de entrada, então escolher um programa de uso geral para uma ferramenta (um shell, um interpretador de scripts) dá ao plugin tudo o que esse programa pode fazer; escolha o programa a que a ferramenta se destina.
+- **Erros** são levantados na chamada, como em `ccad.run`, e dizem o que fazer: sem a permissão `tools`, uma ferramenta que o manifesto não declara, nenhum programa escolhido (citando a janela Plugins, `ccad plugins tools` e `--tool`), um programa que não existe ou com outro nome, um nome inválido, um limite, um programa que não pôde iniciar. `pcall` os captura.
+- **Onde funciona:** só na própria função `run` de um comando (também dentro de `pcall`), não enquanto o `main.lua` carrega, não em tratadores de eventos, não numa corrotina que o plugin inicia, num módulo sendo carregado por `require` nem numa função chamada por uma função de biblioteca (como o comparador de `table.sort`). Scripts Lua que o usuário roda (`ccad lua`) não têm `ccad.process`.
+
+**O comando espera sem travar o aplicativo.** A função `run` de um comando roda numa corrotina: `ccad.process.run` entrega o programa a uma thread em segundo plano e o comando espera ali. Com o `ccad`, scripts, macros e MCP o comando simplesmente leva o tempo do programa; no aplicativo ele fica pendente: um diálogo mostra o plugin, o programa, o tempo decorrido e a última linha que ele escreveu, com *Cancelar* ([Plugins](interface.pt-BR.md#plugins)). Enquanto espera:
+
+- continua sendo um comando: suas edições antes e depois da espera são um só passo de desfazer, uma falha (ou *Cancelar*) desfaz todas, os arquivos que grava com `ccad.file.write` só são gravados quando termina sem erro, e `model_changed` dispara uma vez, quando termina;
+- a sessão só roda consultas: qualquer comando que edita, salva, abre ou exporta, `undo` e `redo`, e outros comandos de plugin são recusados (`a plugin command is running`), e nenhum evento dispara;
+- o tempo de espera não conta nos 60 segundos do comando: esse limite é do Lua; seu orçamento de instruções continua através da espera.
+
+Um comando pode executar vários programas, um depois do outro; *Cancelar* encerra o que está rodando e desfaz o comando (`cancelled`). No motor, `Session::set_blocking(false)` deixa esses comandos pendentes (`execute` devolve o código `pending`), `Session::poll_job` continua com eles e devolve o resultado quando terminam, `Session::job` descreve o que está esperando e `Session::cancel_job` o encerra; as sessões bloqueiam por padrão, e comandos rodados por outros comandos (grafos, scripts) e passos de macro são sempre esperados.
+
+#### Eventos
+
+Um plugin pode reagir ao que acontece com o projeto registrando tratadores enquanto o `main.lua` carrega:
+
+```lua
+ccad.on("model_changed", function(e)
+  local indice = ccad.data.get(nil)
+  if indice == ccad.null then indice = { paredes = 0 } end
+  indice.paredes = indice.paredes + #e.added - #e.removed   -- (um índice de verdade olharia as categorias)
+  ccad.data.set(nil, indice)                                -- os próprios dados: permitido
+end)
+ccad.on("project_saved", function(e) print("salvo em " .. e.path) end)
+```
+
+| Evento | Quando | `e` |
+|---|---|---|
+| `project_opened` | depois de `project_open`, `project_new` ou de uma importação que substitui o projeto (também Abrir e Novo do aplicativo, mas não Fechar), e uma vez quando os plugins são carregados numa sessão que já tem um projeto, para o plugin começar | `path` (`nil` quando o projeto ainda não tem arquivo), `new` (`true` quando não tem) |
+| `project_saving` | antes de `project_save` gravar o arquivo (Salvar e Salvar como do aplicativo, `ccad --save`) | `path` |
+| `project_saved` | depois que o arquivo foi gravado | `path` |
+| `model_changed` | depois de cada comando que mudou o projeto: `undo` e `redo` também, e um comando de plugin uma vez, quando termina | `command` (o nome do comando: `"wall_create"`, `"undo"`, `"redo"`, `"quick_rooms__rectangle_room"`…), `added`, `modified`, `removed` (ids de elementos, em ordem crescente, no máximo 10 000 em cada, com `truncated = true` quando uma lista foi cortada), e `other = true` quando mudou algo além de elementos (tipos, vistas, níveis, configurações, os dados de plugins do projeto); aí as listas podem estar todas vazias |
+
+- **Registro:** `ccad.on(evento, tratador)` só funciona enquanto o `main.lua` carrega (depois levanta um erro, como `ccad.command`); um nome de evento desconhecido é um erro de carga; um plugin registra no máximo 32 tratadores. Os tratadores rodam plugin por plugin na ordem de carga (numa pasta de plugins, a ordem dos nomes das pastas) e depois na ordem em que foram registrados.
+- **Que comandos os disparam:** os que o usuário, um script ou um agente roda, pelo aplicativo, pelo `ccad`, por scripts Lua ou pelo MCP. O que um comando de plugin roda faz parte dele (o comando dispara uma vez, quando termina), e o que um tratador roda nunca dispara nada, então tratadores não entram em laço. Cada passo de uma macro ou script (`ccad script`, `ccad lua`, o editor de macros) é um comando próprio e dispara seus eventos, já que cada um é um passo de desfazer. Comandos que falham, consultas e edições que não mudam nada não disparam nada.
+- **O que um tratador pode fazer:** consultar qualquer coisa e manter os próprios dados em dia com `ccad.data.set` (`plugin_data_set` com o próprio id). Qualquer outra edição (`element_set`…) é recusada, assim como arquivos e comandos de outros plugins. Depois de `undo` e `redo` os tratadores só consultam: os dados de plugins fazem parte do histórico do projeto, então desfazer e refazer já os trazem de volta junto com o modelo (e uma edição ali apagaria o que pode ser refeito). O que os tratadores guardam em `model_changed` entra no passo de desfazer do comando que mudou o modelo, então um desfazer leva os dois, e um valor sendo arrastado continua um só passo. O que guardam em `project_opened`, `project_saving` e `project_saved`, que não têm um passo assim, é um passo de desfazer próprio por plugin, com o nome do plugin. Nenhum dos dois é gravado numa macro sendo gravada. Os dados de plugins são salvos com o projeto como o resto: o que é guardado em `project_saving` vai para o arquivo, e guardar algo em `project_opened` ou `project_saved` deixa alterações não salvas.
+- **Orçamento:** cada chamada de tratador pode usar no máximo 50 milhões de instruções Lua e 5 segundos (e o limite de memória do plugin).
+- **Falhas nunca fazem o comando falhar:** um erro ou um orçamento estourado num tratador vira uma mensagem (`[id] model_changed handler 1: …`, na saída de erro com o `ccad`, na barra de status e no log no aplicativo), e o que aquela chamada guardou é descartado. Um tratador que falha 3 vezes seguidas fica desligado até os plugins carregarem de novo.
+- **Custo:** as listas de `model_changed` vêm do mecanismo de desfazer do projeto: enquanto algum plugin escuta esse evento, cada comando anota os elementos que toca como eram antes dele (uma vez cada) e os compara com o que são depois; nenhuma geometria é reconstruída, e nada é anotado enquanto nenhum plugin escuta.
+
+### Desenvolvendo um plugin
+
+**Comece do modelo.** `ccad plugins new <pasta> <id> [name=<nome>]` cria `<pasta>/<id>/` (recusado quando já existe ou o id é inválido) com um plugin que carrega e cujo teste passa: `plugin.toml` (API 2, um botão, uma configuração), `main.lua` (um comando com dicas de interface que lê `ccad.settings` e guarda `ccad.data`), `locales/en.toml` e `locales/pt-BR.toml`, `icons/<id>.svg`, `tests/basic_test.lua`, um `README.md`, e `types/ccad.d.lua` com um `.luarc.json` que aponta o servidor de linguagem Lua para ele.
+
+```sh
+ccad plugins new ~/dev room_tools name="Ferramentas de sala"
+ccad plugins test ~/dev/room_tools
+```
+
+**Tipos.** [`docs/lua/ccad.d.lua`](lua/ccad.d.lua) declara a tabela `ccad` inteira para o [LuaLS](https://luals.github.io/) (a extensão Lua do VS Code e outros editores): `run`, `try`, `commands`, `describe`, `json`, `array`, `null`, `version`, `api`, `plugin`, a especificação de `ccad.command` com seus parâmetros e dicas de interface, `settings`, `data`, `file`, `process` (pedido e resultado), `on` com os nomes e os dados dos eventos, e `ccad.test`. Ponha a pasta dele em `workspace.library` do `.luarc.json` (o modelo já faz isso) para ter completação e verificações. Um teste falha quando a tabela em execução tem um nome que o arquivo não declara, então ele se mantém completo.
+
+**Testes.** `ccad plugins test <pasta do plugin> [--filter <texto>] [--tool <plugin>.<ferramenta>=<caminho>]` executa cada `tests/*_test.lua` do plugin (em ordem de nome) como um script Lua com acesso total, como `ccad lua`, sobre um projeto novo do modelo métrico padrão com o plugin carregado e com o que o manifesto pede (programas de `--tool`, como em `--plugins`). Um arquivo é um teste, seu nível superior; um arquivo que define funções globais com nome `test_*` é um teste por função, cada uma num projeto novo próprio depois que o nível superior do arquivo rodou nele (sua preparação). Os nomes são `<arquivo>` ou `<arquivo>::<função>`; `--filter` executa aqueles cujo nome contém o texto. `ccad.test` tem as verificações, que levantam um erro na linha que as chamou:
+
+| | |
+|---|---|
+| `ccad.test.eq(atual, esperado, msg)` | valores iguais; tabelas comparadas em profundidade (`expected [1,3], got [1,2]`) |
+| `ccad.test.near(atual, esperado, tol, msg)` | números a no máximo `tol` de distância (padrão 1e-9) |
+| `ccad.test.fails(fn, padrão)` | `fn` levanta um erro cujo texto contém `padrão` (texto simples ou um padrão Lua); devolve o texto |
+| `ccad.test.ok(valor, msg)` | um valor verdadeiro; devolve-o |
+
+```lua
+-- tests/rooms_test.lua
+local t = ccad.test
+function test_a_room_has_four_walls()
+  ccad.run("quick_rooms__rectangle_room", { width = 4, depth = 3 })
+  t.eq(#ccad.run("elements_list", { category = "wall" }), 4)
+end
+```
+
+A saída é uma linha por teste, `PASS <nome>` ou `FAIL <nome>: <mensagem>` seguida do que o teste e o plugin imprimiram, e então `<n> passed, <m> failed`. O código de saída é 0 quando todos passaram, 1 quando algum falhou (ou nenhum casou com o filtro), 2 para erros de uso (sem `plugin.toml`, sem testes, um `--tool` que não serve). [`examples/plugins/quick_rooms/tests`](../examples/plugins/quick_rooms/tests) é um exemplo.
+
+**No aplicativo.** *Recarregar plugins*, na janela Plugins, carrega de novo todos os plugins a partir dos arquivos (as permissões ficam; não enquanto um comando de plugin roda). Em *Preferências → Locais de arquivos*, o **Modo de desenvolvedor de plugins** verifica a pasta de plugins e a **Pasta de desenvolvimento** a cada segundo (o tamanho e a data dos arquivos `.lua`, `.toml` e `.svg`) e recarrega os plugins quando algum mudou, com uma mensagem na barra de status; a recarga espera enquanto um comando de plugin roda. A pasta de desenvolvimento (a pasta de um plugin ou uma pasta de plugins) carrega no modo de desenvolvedor como a pasta de plugins, com as mesmas permissões por id; um plugin nas duas carrega da pasta de desenvolvimento, e o console avisa. O **Console de plugins** (*Gerenciar → Plugins*, ou *Console de plugins* na janela Plugins) lista, com o tempo desde que o aplicativo abriu e o plugin, o que os plugins imprimem, seus erros de carregamento, os erros de seus tratadores de eventos e os tratadores desligados, e cada carregamento; mostra um plugin ou todos, *Limpar* o esvazia e *Copiar* copia o que ele mostra; guarda as últimas 2000 entradas ([Plugins](interface.pt-BR.md#plugins)).
 
 ## Componentes com script
 

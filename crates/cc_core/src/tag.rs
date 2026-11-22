@@ -538,6 +538,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             },
         );
         let door_tag = p.tag_types_of(TagTarget::Door).next().unwrap().id;

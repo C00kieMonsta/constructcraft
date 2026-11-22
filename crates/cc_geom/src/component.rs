@@ -379,6 +379,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             });
             id
         });
@@ -466,6 +467,7 @@ mod tests {
             phase_demolished: None,
             design_option: None,
             paints: Vec::new(),
+            plugin_data: Default::default(),
         };
         let mut c = cc_core::Component::default();
         c.overrides.insert("width".into(), 3.0);

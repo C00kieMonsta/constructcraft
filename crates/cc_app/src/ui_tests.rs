@@ -44,6 +44,31 @@ fn themed_harness(
     harness
 }
 
+/// [`themed_harness`] for a UI that keeps repainting (a spinner): its first
+/// frames run without waiting for it to settle.
+fn spinning_harness(
+    state: AppState,
+    size: egui::Vec2,
+    draw: fn(&mut egui::Ui, &mut AppState),
+) -> Harness<'static, AppState> {
+    let mut themed = false;
+    let mut harness = Harness::builder().with_size(size).build_ui_state(
+        move |ui, state: &mut AppState| {
+            if !themed {
+                crate::theme::apply(ui.ctx());
+                ui.ctx().set_theme(egui::Theme::Light);
+                themed = true;
+                return;
+            }
+            crate::theme::sync(ui.ctx());
+            draw(ui, state)
+        },
+        state,
+    );
+    let _ = harness.try_run();
+    harness
+}
+
 fn ribbon_harness(state: AppState, width: f32) -> Harness<'static, AppState> {
     ribbon_harness_sized(state, egui::vec2(width, 150.0))
 }
@@ -2665,6 +2690,40 @@ fn plugins_folder(name: &str) -> std::path::PathBuf {
     root
 }
 
+/// Plugins hear `project_opened` for a new or opened project, not for the
+/// blank document behind the home screen after Close.
+#[test]
+fn closing_a_project_opens_none_for_plugins() {
+    let root = std::env::temp_dir().join(format!("ccad-plugins-ui-{}-events", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let dir = root.join("watch");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("plugin.toml"),
+        "id = \"watch\"
+name = \"Watch\"
+version = \"1.0\"
+api = 2
+",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("main.lua"),
+        "ccad.on('project_opened', function(e) print('opened ' .. tostring(e.new)) end)",
+    )
+    .unwrap();
+    let mut state = sample_state();
+    state.prefs.plugin_folder = Some(root.clone());
+    crate::plugins_ui::load(&mut state);
+    assert_eq!(state.session.take_extension_messages(), vec!["[watch] opened true"], "heard when loaded");
+    crate::actions::run_pending(&mut state, crate::state::PendingAction::Close);
+    assert!(state.session.take_extension_messages().is_empty(), "nothing opened on Close");
+    assert!(state.session.extension().is_some(), "the plugins stay");
+    crate::actions::run_pending(&mut state, crate::state::PendingAction::New(cc_core::MeasurementSystem::Metric));
+    assert_eq!(state.session.take_extension_messages(), vec!["[watch] opened true"]);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// The Plugins window lists the folder's plugins; turning one off takes its
 /// commands out of the session, and the loaded plugins stay with a new document.
 #[test]
@@ -2711,6 +2770,583 @@ fn plugin_commands_run_from_the_palette() {
     harness.run();
     assert_eq!(walls(harness.state()), before + 1);
     assert!(harness.query_by_label_contains("made a wall").is_some(), "what it printed is shown");
+}
+
+/// The plugin `form_tools`, whose commands take every kind of field.
+const FORM_TOOLS: &str = r#"
+ccad.command {
+  name = "mark_wall",
+  title = "Mark wall",
+  params = {
+    properties = {
+      wall = { type = "integer", ui = "element", category = "wall", description = "The wall to mark." },
+      note = { type = "string", default = "marked" },
+      walls = { type = "array", ui = "elements", category = "wall" },
+      at = { type = "array", ui = "point" },
+      flag = { type = "boolean" },
+      count = { type = "integer", minimum = 1, maximum = 9 },
+    },
+    required = { "wall" },
+  },
+  run = function(args)
+    ccad.run("element_set", { id = args.wall, comments = args.note or "marked" })
+  end,
+}
+
+ccad.command {
+  name = "wall_at",
+  title = "Wall at a point",
+  params = {
+    properties = {
+      at = { type = "array", ui = "point", description = "Where the wall starts." },
+      length = { type = "number", ui = "length", default = 2, minimum = 0.1 },
+    },
+    required = { "at", "length" },
+  },
+  run = function(args)
+    local id = ccad.run("wall_create", { start = args.at, ["end"] = { args.at[1] + args.length, args.at[2] } }).id
+    print("wall " .. id)
+    return { id = id }
+  end,
+}
+
+ccad.command {
+  name = "layout",
+  title = "Every field",
+  description = "A form with one field of each kind, all of them required, to see how it is laid out.",
+  params = {
+    properties = {
+      a_length = { type = "number", ui = "length", default = 2.5, minimum = 0.1 },
+      b_count = { type = "integer", default = 3 },
+      c_flag = { type = "boolean", default = true },
+      d_side = { type = "string", enum = { "left", "right" }, enum_labels = { "Left side", "Right side" } },
+      e_name = { type = "string", default = "A rather long default name to see how it is cut in its cell" },
+      f_wall = { type = "integer", ui = "element", category = "wall" },
+      g_walls = { type = "array", ui = "elements" },
+      h_at = { type = "array", ui = "point", default = { 1.5, 2.25 } },
+      i_level = { type = "integer", ui = "level" },
+      j_view = { type = "integer", ui = "view" },
+      k_type = { type = "integer", ui = "type", category = "wall" },
+      l_material = { type = "string", ui = "material" },
+      m_extra = { type = "object", default = { a = 1 } },
+    },
+    required = { "a_length", "b_count", "c_flag", "d_side", "e_name", "f_wall", "g_walls", "h_at", "i_level",
+      "j_view", "k_type", "l_material", "m_extra" },
+  },
+  run = function() end,
+}
+
+ccad.command { name = "noop", title = "Do nothing", run = function() end }
+
+ccad.command {
+  name = "count_walls",
+  title = "Count walls",
+  kind = "query",
+  run = function() return { walls = #ccad.run("elements_list", { category = "wall" }) } end,
+}
+
+ccad.command {
+  name = "report",
+  title = "Report",
+  kind = "query",
+  run = function()
+    print(string.rep("a long printed line ", 30))
+    return { text = string.rep("wide ", 60), list = { 1, 2, 3 } }
+  end,
+}
+
+ccad.command {
+  name = "fail",
+  title = "Always fails",
+  params = {
+    properties = { why = { type = "string", default = "no luck: " .. string.rep("the reason goes on ", 8) } },
+    required = { "why" },
+  },
+  run = function(args) print("trying") error(args.why, 0) end,
+}
+"#;
+
+/// A plugins folder with the plugin `form_tools` ([`FORM_TOOLS`]).
+fn form_plugins_folder(name: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("ccad-plugin-form-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let dir = root.join("form_tools");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("plugin.toml"), "id = \"form_tools\"\nname = \"Form tools\"\nversion = \"1.0.0\"\n")
+        .unwrap();
+    std::fs::write(dir.join("main.lua"), FORM_TOOLS).unwrap();
+    root
+}
+
+/// The sample house with the plugins of `folder` loaded.
+fn state_with_plugins(folder: std::path::PathBuf) -> AppState {
+    let mut state = sample_state();
+    state.prefs.plugin_folder = Some(folder);
+    crate::plugins_ui::load(&mut state);
+    state
+}
+
+fn form_field(state: &AppState, name: &str) -> crate::plugin_form::Field {
+    let form = state.dialogs.plugin_form.as_ref().expect("the form is open");
+    form.fields().iter().find(|f| f.name == name).cloned().expect("the field")
+}
+
+/// *Plugin Commands* opens the example plugin's command in its form: the
+/// lengths typed, Run creates the room as one undo step and shows what it
+/// returned; Run Again goes back to the form with the values kept.
+#[test]
+fn plugin_commands_open_their_form_from_the_ribbon() {
+    let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plugins");
+    let mut state = state_with_plugins(examples);
+    state.ribbon_tab = RibbonTab::Manage;
+    let walls =
+        |s: &AppState| s.project().elements.values().filter(|e| e.category() == cc_core::Category::Wall).count();
+    let before = (walls(&state), state.session.doc.undo_depth());
+    // Wide enough for the whole Manage tab.
+    let mut harness = themed_harness(state, egui::vec2(1800.0, 800.0), egui::Theme::Light, |ui, state| {
+        crate::app::shortcuts(ui.ctx(), state);
+        crate::ribbon::ribbon(ui, state);
+        crate::dialogs::show(ui.ctx(), state);
+    });
+    harness.get_by_role_and_label(Role::Button, &t!("action-plugin-commands")).click();
+    harness.run();
+    // The menu and the form show the command's title in the language (the
+    // tests run in pt-BR, the reference language); its lengths are typed in
+    // the project's units, or with a unit.
+    harness.get_by_role_and_label(Role::Button, "Sala retangular").click();
+    harness.run();
+    assert!(harness.state().dialogs.plugin_form.is_some(), "the menu opens the form");
+    assert!(harness.query_by_label("Sala retangular").is_some(), "titled by the command's title");
+    assert!(harness.query_by_label("Salas rápidas").is_some(), "the plugin's name by the title");
+    let run_disabled = |h: &Harness<'static, AppState>| {
+        h.get_by_role_and_label(Role::Button, &t!("palette-run")).accesskit_node().is_disabled()
+    };
+    assert!(run_disabled(&harness), "the width and depth are required");
+    let hint = harness.get_by_label("Largura").accesskit_node().placeholder().map(str::to_string);
+    assert_eq!(hint, Some(t!("pform-required-hint")), "an empty required field says so");
+    for (label, value) in [("Largura", "4 m"), ("Profundidade", "3 m")] {
+        harness.get_by_label(label).focus();
+        harness.run();
+        harness.get_by_label(label).type_text(value);
+        harness.run();
+    }
+    assert!(!run_disabled(&harness));
+    harness.get_by_role_and_label(Role::Button, &t!("palette-run")).click();
+    harness.run();
+    assert_eq!(walls(harness.state()), before.0 + 4);
+    assert_eq!(harness.state().session.doc.undo_depth(), before.1 + 1, "one undo step");
+    assert!(harness.state().dialogs.plugin_form.as_ref().unwrap().shows_result());
+    assert!(harness.query_by_label_contains("\"floor\"").is_some(), "what it returned is shown");
+    harness.get_by_role_and_label(Role::Button, &t!("pform-run-again")).click();
+    harness.run();
+    assert_eq!(harness.get_by_label("Largura").value().as_deref(), Some("4 m"), "the values are kept");
+    harness.get_by_role_and_label(Role::Button, &t!("action-cancel")).click();
+    harness.run();
+    assert!(harness.state().dialogs.plugin_form.is_none());
+}
+
+/// A copy of `from` (a folder) at `to`.
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let path = entry.unwrap().path();
+        let target = to.join(path.file_name().unwrap());
+        if path.is_dir() {
+            copy_dir(&path, &target);
+        } else {
+            std::fs::copy(&path, &target).unwrap();
+        }
+    }
+}
+
+/// A plugins folder with a copy of the example plugin, so its settings are
+/// written outside the sources.
+fn quick_rooms_folder(name: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("ccad-quick-rooms-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plugins/quick_rooms");
+    copy_dir(&example, &root.join("quick_rooms"));
+    root
+}
+
+/// The ribbon, the shortcuts and the dialogs, wide enough for every tab.
+fn wide_ribbon_harness(state: AppState) -> Harness<'static, AppState> {
+    themed_harness(state, egui::vec2(1800.0, 800.0), egui::Theme::Light, |ui, state| {
+        crate::app::shortcuts(ui.ctx(), state);
+        crate::ribbon::ribbon(ui, state);
+        crate::dialogs::show(ui.ctx(), state);
+    })
+}
+
+/// The Plugins tab is there only while a loaded plugin has buttons (a tab
+/// left picked falls back to Manage); its buttons carry the plugin's text
+/// in the language, follow a change of language, and open their form.
+#[test]
+fn the_plugins_tab_shows_the_plugins_buttons() {
+    let plugins_label = t!("ribbon-plugins");
+    let count = |h: &Harness<'static, AppState>| h.query_all_by_label(&plugins_label).count();
+    let mut state = sample_state();
+    state.ribbon_tab = RibbonTab::Plugins;
+    let mut harness = wide_ribbon_harness(state);
+    harness.run();
+    assert_eq!(harness.state().ribbon_tab, RibbonTab::Manage, "no plugin buttons: back to Manage");
+    let without = count(&harness);
+    let mut state = state_with_plugins(quick_rooms_folder("tab"));
+    state.ribbon_tab = RibbonTab::Manage;
+    let mut harness = wide_ribbon_harness(state);
+    harness.run();
+    assert_eq!(count(&harness), without + 1, "the Plugins tab is shown");
+    harness.state_mut().ribbon_tab = RibbonTab::Plugins;
+    harness.run();
+    assert!(harness.query_by_label("Salas rápidas").is_some(), "the panel, named in the language");
+    assert!(harness.query_by_role_and_label(Role::Button, "Totais de paredes").is_some());
+    harness.get_by_role_and_label(Role::Button, "Sala retangular").click();
+    harness.run();
+    let title = harness.state().plugins.command_title("quick_rooms__rectangle_room").map(str::to_string);
+    assert_eq!(title.as_deref(), Some("Sala retangular"));
+    assert!(harness.state().dialogs.plugin_form.is_some(), "the button opens the form");
+    assert!(harness.query_all_by_label("Sala retangular").count() >= 2, "the form is titled by the command's title");
+    // Another language: the plugins load again, their text in it.
+    crate::actions::set_language(harness.state_mut(), crate::i18n::Language::En);
+    let labels: Vec<String> = harness.state().plugins.buttons.iter().map(|b| b.button.label.clone()).collect();
+    assert_eq!(labels, ["Rectangular room", "Wall totals"]);
+    assert_eq!(harness.state().plugins.command_title("quick_rooms__wall_totals"), Some("Wall totals"));
+    crate::actions::set_language(harness.state_mut(), crate::i18n::Language::PtBr);
+}
+
+/// A plugins folder with `sel_tools`, whose small button needs walls selected.
+fn selection_plugins_folder(name: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("ccad-plugin-when-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let dir = root.join("sel_tools");
+    std::fs::create_dir_all(&dir).unwrap();
+    let manifest = "id = \"sel_tools\"\nname = \"Selection tools\"\nversion = \"1.0.0\"\napi = 2\n\n\
+                    [[buttons]]\ncommand = \"mark\"\nlabel = \"Mark walls\"\nsize = \"small\"\nwhen = \"selection:wall\"\n";
+    std::fs::write(dir.join("plugin.toml"), manifest).unwrap();
+    std::fs::write(dir.join("main.lua"), "ccad.command { name = 'mark', title = 'Mark walls', run = function() end }")
+        .unwrap();
+    root
+}
+
+/// A button with `when = "selection:wall"` is available only while walls,
+/// and nothing else, are selected; its tooltip tells why it is not.
+#[test]
+fn plugin_buttons_follow_their_when() {
+    use std::collections::BTreeSet;
+    let mut state = state_with_plugins(selection_plugins_folder("ribbon"));
+    state.ribbon_tab = RibbonTab::Plugins;
+    let wall = state.project().walls().map(|(e, _)| e.id).next().unwrap();
+    let door = state.project().elements.values().find(|e| e.category() == cc_core::Category::Door).unwrap().id;
+    let mut harness = wide_ribbon_harness(state);
+    harness.run();
+    let disabled = |h: &Harness<'static, AppState>| {
+        h.get_by_role_and_label(Role::Button, "Mark walls").accesskit_node().is_disabled()
+    };
+    assert!(disabled(&harness), "nothing selected");
+    harness.get_by_role_and_label(Role::Button, "Mark walls").hover();
+    harness.run();
+    let why = t!("plug-when-category", "category" => crate::actions::t_category(cc_core::Category::Wall));
+    assert!(harness.query_by_label_contains(&why).is_some(), "the tooltip says why");
+    harness.state_mut().selection = BTreeSet::from([wall]);
+    harness.run();
+    assert!(!disabled(&harness), "a wall selected");
+    harness.state_mut().selection = BTreeSet::from([wall, door]);
+    harness.run();
+    assert!(disabled(&harness), "a door too");
+    harness.state_mut().selection = BTreeSet::from([wall]);
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, "Mark walls").click();
+    harness.run();
+    assert_eq!(harness.state().message, t!("pform-done", "title" => "Mark walls"), "no parameters: it ran");
+}
+
+/// The Settings section of the Plugins window stores the values that
+/// differ from the defaults, keeps the stored one when a value typed does
+/// not fit, and the plugin loaded again runs with them; Reset to defaults
+/// empties them.
+#[test]
+fn plugin_settings_are_saved_and_used() {
+    let folder = quick_rooms_folder("settings");
+    let mut state = state_with_plugins(folder.clone());
+    crate::plugins_ui::open(&mut state);
+    state.plugins.selected = Some("quick_rooms".into());
+    let mut harness = app_harness(state);
+    harness.run();
+    assert!(harness.query_by_label(&t!("plug-settings")).is_some(), "the section");
+    let height = "Altura padrão das paredes";
+    let retype = |h: &mut Harness<'static, AppState>, text: &str| {
+        h.get_by_label(height).focus();
+        h.run();
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.get_by_label(height).type_text(text);
+        h.run();
+    };
+    retype(&mut harness, "3,5 m");
+    // The dialog's Save, after the quick access toolbar's.
+    harness.get_all_by_label(&t!("plug-settings-save")).last().unwrap().click();
+    harness.run();
+    let stored = |folder: &std::path::Path| cc_plugins::store::read_settings(folder, "quick_rooms");
+    assert_eq!(serde_json::Value::Object(stored(&folder)), serde_json::json!({"default_height": 3.5}));
+    // Below the minimum: shown as invalid, and the stored value stays.
+    retype(&mut harness, "1 m");
+    // The dialog's Save, after the quick access toolbar's.
+    harness.get_all_by_label(&t!("plug-settings-save")).last().unwrap().click();
+    harness.run();
+    assert_eq!(serde_json::Value::Object(stored(&folder)), serde_json::json!({"default_height": 3.5}));
+    // The plugin was loaded again with the setting: a room without a height uses it.
+    let out = harness
+        .state_mut()
+        .session
+        .execute("quick_rooms__rectangle_room", serde_json::json!({"width": 4, "depth": 3}))
+        .unwrap();
+    let south = cc_core::ElementId(out["walls"]["south"].as_u64().unwrap());
+    let wall_height = harness.state().project().walls().find(|(e, _)| e.id == south).map(|(_, w)| w.height);
+    assert_eq!(wall_height, Some(3.5));
+    let room = out["room"].as_u64().unwrap();
+    let data = harness
+        .state_mut()
+        .session
+        .execute("plugin_data_get", serde_json::json!({"plugin": "quick_rooms", "element": room}))
+        .unwrap();
+    assert_eq!(data, serde_json::json!({"width": 4, "depth": 3}), "the size kept on the room");
+    harness.get_by_role_and_label(Role::Button, &t!("plug-settings-reset")).click();
+    harness.run();
+    assert!(stored(&folder).is_empty(), "back to the defaults");
+    assert_eq!(harness.get_by_label(height).value().as_deref().map(|v| v.starts_with("2")), Some(true));
+    // Turned off, it can still be set, and the window says when it applies.
+    harness.get_by_label(&t!("plug-enabled")).click();
+    harness.run();
+    assert!(harness.query_by_label(height).is_some());
+    assert!(harness.query_by_label(&t!("plug-settings-off")).is_some());
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+/// Elements come from the selection: a list starts with the selected walls
+/// (not the door), and Selection fills a single wall when exactly one is selected.
+#[test]
+fn plugin_form_takes_the_selection() {
+    use std::collections::BTreeSet;
+    let mut state = state_with_plugins(form_plugins_folder("selection"));
+    let walls: Vec<cc_core::ElementId> = state.project().walls().map(|(e, _)| e.id).take(2).collect();
+    let door = state.project().elements.values().find(|e| e.category() == cc_core::Category::Door).unwrap().id;
+    state.selection = BTreeSet::from([walls[0], walls[1], door]);
+    crate::plugin_form::open(&mut state, "form_tools__mark_wall");
+    let ids = serde_json::json!(walls.iter().map(|w| w.0).collect::<Vec<_>>());
+    assert_eq!(form_field(&state, "walls").effective(), Some(&ids), "the selected walls, without the door");
+    let mut harness = app_harness(state);
+    let selection = |h: &Harness<'static, AppState>| {
+        h.get_by_role_and_label(Role::Button, &t!("pform-selection")).accesskit_node().is_disabled()
+    };
+    assert!(selection(&harness), "two walls are selected");
+    harness.state_mut().selection = BTreeSet::from([walls[0], door]);
+    harness.run();
+    assert!(!selection(&harness));
+    harness.get_by_role_and_label(Role::Button, &t!("pform-selection")).click();
+    harness.run();
+    assert_eq!(form_field(harness.state(), "wall").effective(), Some(&serde_json::json!(walls[0].0)));
+    assert!(harness.query_by_label_contains(&format!("#{} ", walls[0].0)).is_some(), "the wall is named");
+    harness.get_by_role_and_label(Role::Button, &t!("palette-run")).click();
+    harness.run();
+    assert_eq!(harness.state().project().element(walls[0]).unwrap().comments, "marked");
+    assert!(harness.state().dialogs.plugin_form.is_none(), "nothing to show: the form closes");
+    assert_eq!(harness.state().message, t!("pform-done", "title" => "Mark wall"));
+}
+
+/// Where the pick harness centers the plan, and its scale (points a meter).
+const PICK_ORIGIN: glam::DVec2 = glam::DVec2::new(36.0, 2.0);
+const PICK_SCALE: f64 = 20.0;
+const PICK_SIZE: egui::Vec2 = egui::vec2(900.0, 640.0);
+
+/// The active plan over the whole window with its tools, the dialogs over
+/// it and the keyboard shortcuts, as the app runs them.
+fn pick_harness(state: AppState) -> Harness<'static, AppState> {
+    themed_harness(state, PICK_SIZE, egui::Theme::Light, |ui, state| {
+        state.sync();
+        state.hint.begin_frame();
+        crate::app::shortcuts(ui.ctx(), state);
+        let (resp, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
+        let xf = crate::paint::Xf { screen: resp.rect.center(), origin: PICK_ORIGIN, scale: PICK_SCALE };
+        if let Some(view) = state.active_view.and_then(|v| state.project().view(v).cloned())
+            && let Some(drawing) = state.drawing(view.id)
+        {
+            crate::tools::handle(ui, &resp, &painter, state, &view, &xf, &drawing);
+        }
+        crate::dialogs::show(ui.ctx(), state);
+        state.hint.end_frame();
+    })
+}
+
+/// A click at the plan point `p` of the pick harness.
+fn click_plan(harness: &mut Harness<'static, AppState>, p: [f64; 2]) {
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, PICK_SIZE);
+    let xf = crate::paint::Xf { screen: rect.center(), origin: PICK_ORIGIN, scale: PICK_SCALE };
+    let pos = xf.to_screen(glam::DVec2::from(p));
+    harness.input_mut().events.push(egui::Event::PointerMoved(pos));
+    harness.run();
+    for pressed in [true, false] {
+        let button = egui::PointerButton::Primary;
+        harness.input_mut().events.push(egui::Event::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers: Default::default(),
+        });
+        harness.run();
+    }
+}
+
+/// The sample house with the form plugin, a wall and a column away from
+/// the house, and their plan active: (state, wall, column).
+fn pick_state(name: &str) -> (AppState, u64, u64) {
+    let mut state = state_with_plugins(form_plugins_folder(name));
+    let run = |s: &mut AppState, command: &str, args: serde_json::Value| {
+        s.session.execute(command, args).unwrap()["id"].as_u64().unwrap()
+    };
+    let wall = run(&mut state, "wall_create", serde_json::json!({"start": [30.0, 0.0], "end": [34.0, 0.0]}));
+    let column = run(&mut state, "column_create", serde_json::json!({"position": [40.0, 0.0]}));
+    let level = state.project().element(cc_core::ElementId(wall)).unwrap().level;
+    let plan = state.project().views.values().find(|v| v.is_plan() && v.level() == Some(level)).unwrap().id;
+    state.active_view = Some(plan);
+    (state, wall, column)
+}
+
+/// Pick hides the form and picks in the view: Esc brings the form back
+/// unchanged, an element of another category is refused with a notice, and
+/// a wall fills the field; Run then edits it.
+#[test]
+fn plugin_form_picks_an_element_in_the_view() {
+    use crate::tools::Tool;
+    let (mut state, wall, column) = pick_state("pick-element");
+    crate::plugin_form::open(&mut state, "form_tools__mark_wall");
+    let mut harness = pick_harness(state);
+    let shown = |h: &Harness<'static, AppState>| h.query_by_label(&t!("palette-run")).is_some();
+    assert!(shown(&harness));
+    harness.get_by_role_and_label(Role::Button, &t!("pform-pick")).click();
+    harness.run();
+    assert_eq!(harness.state().tool, Tool::Pick { point: false });
+    assert!(!shown(&harness), "the form is hidden while picking");
+    let prompt = t!("pform-pick-element-of", "category" => crate::actions::t_category(cc_core::Category::Wall));
+    assert_eq!(harness.state().hint.shown(), Some(prompt.as_str()), "the status bar prompts");
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert_eq!(harness.state().tool, Tool::Select);
+    assert!(shown(&harness), "Esc brings the form back");
+    assert_eq!(form_field(harness.state(), "wall").effective(), None, "unchanged");
+
+    harness.get_by_role_and_label(Role::Button, &t!("pform-pick")).click();
+    harness.run();
+    click_plan(&mut harness, [40.0, 0.0]);
+    assert_eq!(harness.state().tool, Tool::Pick { point: false }, "a column is not a wall: still picking");
+    assert!(harness.state().hint.shown().is_some_and(|h| h.contains(&prompt) && h.len() > prompt.len()));
+    assert_eq!(harness.state().dialogs.plugin_form.as_ref().unwrap().picking(), Some(0));
+    assert!(harness.state().project().element(cc_core::ElementId(column)).is_some());
+    click_plan(&mut harness, [32.0, 0.0]);
+    assert_eq!(harness.state().tool, Tool::Select);
+    assert!(shown(&harness), "the form comes back");
+    assert_eq!(form_field(harness.state(), "wall").effective(), Some(&serde_json::json!(wall)));
+    harness.get_by_role_and_label(Role::Button, &t!("palette-run")).click();
+    harness.run();
+    assert_eq!(harness.state().project().element(cc_core::ElementId(wall)).unwrap().comments, "marked");
+}
+
+/// A point field picks a point in the plan; the command's result and what
+/// it printed show after Run.
+#[test]
+fn plugin_form_picks_a_point_in_the_plan() {
+    let (mut state, _, _) = pick_state("pick-point");
+    let walls =
+        |s: &AppState| s.project().elements.values().filter(|e| e.category() == cc_core::Category::Wall).count();
+    let before = walls(&state);
+    crate::plugin_form::open(&mut state, "form_tools__wall_at");
+    let mut harness = pick_harness(state);
+    harness.get_by_role_and_label(Role::Button, &t!("pform-pick")).click();
+    harness.run();
+    assert_eq!(harness.state().tool, crate::tools::Tool::Pick { point: true });
+    click_plan(&mut harness, [38.0, 6.0]);
+    let at = form_field(harness.state(), "at").effective().cloned().unwrap();
+    let (x, y) = (at[0].as_f64().unwrap(), at[1].as_f64().unwrap());
+    assert!((x - 38.0).abs() < 0.05 && (y - 6.0).abs() < 0.05, "{at}");
+    harness.get_by_role_and_label(Role::Button, &t!("palette-run")).click();
+    harness.run();
+    assert_eq!(walls(harness.state()), before + 1);
+    assert!(harness.state().dialogs.plugin_form.as_ref().unwrap().shows_result());
+    assert!(harness.query_by_label_contains("[form_tools] wall").is_some(), "what it printed");
+    harness.get_all_by_label(&t!("action-close")).last().unwrap().click();
+    harness.run();
+    assert!(harness.state().dialogs.plugin_form.is_none());
+}
+
+/// The JSON button shows the arguments as JSON and reads them back; JSON
+/// the form cannot hold stays JSON, with the reason.
+#[test]
+fn plugin_form_goes_to_json_and_back() {
+    let mut state = state_with_plugins(form_plugins_folder("json"));
+    let wall = state.project().walls().map(|(e, _)| e.id).next().unwrap();
+    crate::plugin_form::open(&mut state, "form_tools__mark_wall");
+    let mut harness = app_harness(state);
+    let type_json = |h: &mut Harness<'static, AppState>, text: &str| {
+        h.get_by_role_and_label(Role::MultilineTextInput, &t!("palette-arguments")).focus();
+        h.run();
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.get_by_role_and_label(Role::MultilineTextInput, &t!("palette-arguments")).type_text(text);
+        h.run();
+    };
+    let form = |h: &Harness<'static, AppState>| h.state().dialogs.plugin_form.as_ref().unwrap().shows_json();
+    harness.get_by_role_and_label(Role::Button, &t!("pform-json")).click();
+    harness.run();
+    assert!(form(&harness));
+    type_json(&mut harness, r#"{"nope": 1}"#);
+    harness.get_by_role_and_label(Role::Button, &t!("pform-json")).click();
+    harness.run();
+    assert!(form(&harness), "an unknown property stays in JSON");
+    assert!(harness.query_by_label(&t!("pform-json-unknown", "name" => "nope")).is_some(), "with the reason");
+    type_json(&mut harness, &format!(r#"{{"wall": {}, "note": "via json"}}"#, wall.0));
+    harness.get_by_role_and_label(Role::Button, &t!("pform-json")).click();
+    harness.run();
+    assert!(!form(&harness), "back in the form");
+    assert_eq!(form_field(harness.state(), "note").effective(), Some(&serde_json::json!("via json")));
+    harness.get_by_role_and_label(Role::Button, &t!("palette-run")).click();
+    harness.run();
+    assert_eq!(harness.state().project().element(wall).unwrap().comments, "via json");
+}
+
+/// A command that fails leaves the form open with its message and what it
+/// printed; one without parameters runs at once, closing or showing its result.
+#[test]
+fn plugin_form_errors_and_commands_without_parameters() {
+    let mut state = state_with_plugins(form_plugins_folder("run"));
+    crate::plugin_form::open(&mut state, "form_tools__noop");
+    assert!(state.dialogs.plugin_form.is_none(), "nothing to ask nor to show");
+    assert_eq!(state.message, t!("pform-done", "title" => "Do nothing"));
+    crate::plugin_form::open(&mut state, "form_tools__fail");
+    let mut harness = app_harness(state);
+    harness.get_by_role_and_label(Role::Button, &t!("palette-run")).click();
+    harness.run();
+    let error = harness.state().dialogs.plugin_form.as_ref().unwrap().error().unwrap_or_default().to_string();
+    assert!(error.contains("[form_tools] trying") && error.contains("no luck"), "{error}");
+    assert!(harness.query_by_label_contains("no luck").is_some(), "shown in the form");
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(harness.state().dialogs.plugin_form.is_none());
+    let count = harness.state().project().walls().count();
+    crate::plugin_form::open(harness.state_mut(), "form_tools__count_walls");
+    harness.run();
+    assert!(harness.state().dialogs.plugin_form.as_ref().unwrap().shows_result());
+    assert!(harness.query_by_label_contains(&format!("\"walls\": {count}")).is_some());
+}
+
+/// The palette opens a plugin's command in its form.
+#[test]
+fn the_palette_opens_plugin_commands_in_their_form() {
+    let mut state = state_with_plugins(form_plugins_folder("palette"));
+    crate::palette::toggle(&mut state);
+    let mut harness = palette_harness(state);
+    harness.get_by_role(Role::TextInput).type_text("form_tools__mark_wall");
+    harness.run();
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    assert!(harness.state().palette.is_none());
+    assert!(harness.state().dialogs.plugin_form.is_some());
 }
 
 /// Installing from a local archive and removing a plugin, as the window does.
@@ -3873,6 +4509,69 @@ fn every_dialog_keeps_its_body_inside() {
     for section in [Section::General, Section::Interface, Section::FileLocations, Section::Saving, Section::Shortcuts] {
         opens.push((format!("preferences {section:?}"), Box::new(move |s| crate::preferences::open(s, section))));
     }
+    // A plugin command's form with every kind of field (a wall selected), as
+    // JSON, a result with long lines, and an error.
+    let plugins = form_plugins_folder("layout");
+    type Then = fn(&mut AppState);
+    let forms: [(&str, &'static str, Then); 4] = [
+        ("plugin form", "form_tools__layout", |_| {}),
+        ("plugin form json", "form_tools__layout", |s| {
+            if let Some(form) = s.dialogs.plugin_form.as_mut() {
+                form.toggle_json(&crate::plugin_form::Fmt::current());
+            }
+        }),
+        ("plugin form result", "form_tools__report", |_| {}),
+        ("plugin form error", "form_tools__fail", crate::plugin_form::run_open),
+    ];
+    for (name, command, then) in forms {
+        let plugins = plugins.clone();
+        opens.push((
+            name.into(),
+            Box::new(move |s| {
+                s.prefs.plugin_folder = Some(plugins.clone());
+                crate::plugins_ui::load(s);
+                let wall = s.project().walls().map(|(e, _)| e.id).next();
+                s.selection.extend(wall);
+                crate::plugin_form::open(s, command);
+                then(s);
+            }),
+        ));
+    }
+    // A plugin command waiting for its program, and the Plugins window
+    // showing a plugin's external programs.
+    let sim = sim_plugins_folder("layout");
+    let sim_job = sim.clone();
+    opens.push((
+        "plugin job".into(),
+        Box::new(move |s| {
+            s.prefs.plugins_tools.insert("sim".into());
+            s.prefs.plugin_folder = Some(sim_job.clone());
+            crate::plugins_ui::load(s);
+            crate::plugin_form::open(s, "sim__simulate");
+            assert!(s.session.has_job(), "{}", s.message);
+        }),
+    ));
+    opens.push((
+        "plugins tools".into(),
+        Box::new(move |s| {
+            s.prefs.plugins_tools.insert("sim".into());
+            s.prefs.plugin_folder = Some(sim.clone());
+            crate::plugins_ui::load(s);
+            crate::plugins_ui::open(s);
+            s.plugins.selected = Some("sim".into());
+        }),
+    ));
+    // The Plugins window with a plugin's settings shown.
+    let quick_rooms = quick_rooms_folder("layout");
+    opens.push((
+        "plugins settings".into(),
+        Box::new(move |s| {
+            s.prefs.plugin_folder = Some(quick_rooms.clone());
+            crate::plugins_ui::load(s);
+            crate::plugins_ui::open(s);
+            s.plugins.selected = Some("quick_rooms".into());
+        }),
+    ));
     // Sun Settings in each kind of sun, and in a 3D view.
     for (mode, three_d) in
         [("still", false), ("single_day", false), ("multi_day", false), ("lighting", false), ("multi_day", true)]
@@ -3950,7 +4649,8 @@ fn every_dialog_keeps_its_body_inside() {
         open(&mut state);
         let draw: fn(&mut egui::Ui, &mut AppState) = |ui, state| crate::dialogs::show(ui.ctx(), state);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let mut harness = themed_harness(state, egui::vec2(1500.0, 1000.0), egui::Theme::Light, draw);
+            // Some show a spinner (a plugin command waiting for its program).
+            let mut harness = spinning_harness(state, egui::vec2(1500.0, 1000.0), draw);
             for _ in 0..6 {
                 harness.step();
             }
@@ -6741,6 +7441,290 @@ fn closing_the_other_views_keeps_a_later_tab_shown() {
     assert_eq!(harness.state().state.active_view, Some(ids[1]));
     // The view is drawn: its zoom button is there.
     assert!(harness.query_by_label(&t!("canvas-zoom-menu")).is_some());
+}
+
+/// The plugin `idf_tools`: an exporter with an option, one with only its
+/// path, and an importer.
+const IDF_TOOLS: &str = r#"
+ccad.command { name = "export_idf", kind = "query", title = "Export IDF",
+  params = { required = { "path" }, properties = {
+    path = { type = "string", ui = "save_path", extensions = { "idf" }, title = "File" },
+    comment = { type = "string" } } },
+  run = function(a) ccad.file.write(a.path, "Version,24.1; ! " .. (a.comment or "")) end }
+ccad.command { name = "export_plain", kind = "query",
+  params = { properties = { path = { type = "string", ui = "save_path", extensions = { "txt" } } } },
+  run = function(a) ccad.file.write(a.path, "plain") end }
+ccad.command { name = "import_epw",
+  params = { properties = { path = { type = "string", ui = "open_path", extensions = { "epw" } } } },
+  run = function(a) ccad.data.set(nil, ccad.file.read(a.path)) end }
+"#;
+
+/// A plugins folder with `idf_tools` ([`IDF_TOOLS`]).
+fn idf_plugins_folder(name: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("ccad-plugin-idf-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let dir = root.join("idf_tools");
+    std::fs::create_dir_all(&dir).unwrap();
+    let manifest = "id = \"idf_tools\"\nname = \"IDF tools\"\nversion = \"1.0.0\"\napi = 2\n\n\
+                    [[exporters]]\ncommand = \"export_idf\"\nlabel = \"EnergyPlus (.idf)\"\n\n\
+                    [[exporters]]\ncommand = \"export_plain\"\nlabel = \"Plain text (.txt)\"\n\n\
+                    [[importers]]\ncommand = \"import_epw\"\nlabel = \"Weather (.epw)\"\n";
+    std::fs::write(dir.join("plugin.toml"), manifest).unwrap();
+    std::fs::write(dir.join("main.lua"), IDF_TOOLS).unwrap();
+    root
+}
+
+/// A plugin's exporters join the File and Insert tabs' Export groups and its
+/// importers the Insert tab's Import group; a chosen path opens the
+/// command's form with it set (its field has Browse…), or runs a command
+/// whose only parameter is the path at once.
+#[test]
+fn plugin_exporters_and_importers_join_the_ribbon() {
+    let folder = idf_plugins_folder("ribbon");
+    let mut state = state_with_plugins(folder.clone());
+    assert_eq!(state.plugins.exporters.len(), 2);
+    assert_eq!(state.plugins.importers.len(), 1);
+    state.ribbon_tab = RibbonTab::File;
+    let mut harness = wide_ribbon_harness(state);
+    harness.run();
+    assert!(harness.query_by_role_and_label(Role::Button, "EnergyPlus (.idf)").is_some(), "File tab, Export");
+    assert!(harness.query_by_role_and_label(Role::Button, "Weather (.epw)").is_none(), "no Import group there");
+    harness.state_mut().ribbon_tab = RibbonTab::Insert;
+    harness.run();
+    for label in ["EnergyPlus (.idf)", "Plain text (.txt)", "Weather (.epw)"] {
+        assert!(harness.query_by_role_and_label(Role::Button, label).is_some(), "Insert tab: {label}");
+    }
+    // The dialog cannot be driven: the path it would return opens the form.
+    let out = folder.join("model.idf");
+    let entry = harness.state().plugins.exporters[0].clone();
+    crate::plugins_ui::open_file_entry(harness.state_mut(), &entry, &out);
+    harness.run();
+    assert_eq!(form_field(harness.state(), "path").shown(), Some(&serde_json::json!(out.to_string_lossy())));
+    assert!(harness.query_by_role_and_label(Role::Button, &t!("pform-browse")).is_some(), "the path field has Browse");
+    harness.get_by_role_and_label(Role::Button, &t!("palette-run")).click();
+    harness.run();
+    assert!(std::fs::read_to_string(&out).unwrap().starts_with("Version,24.1;"));
+    // A command whose only parameter is the path runs at once.
+    let plain = folder.join("plain.txt");
+    let entry = harness.state().plugins.exporters[1].clone();
+    harness.state_mut().dialogs.plugin_form = None;
+    crate::plugins_ui::open_file_entry(harness.state_mut(), &entry, &plain);
+    assert!(harness.state().dialogs.plugin_form.is_none(), "it ran and had nothing to show");
+    assert_eq!(std::fs::read_to_string(&plain).unwrap(), "plain");
+}
+
+/// A program on every CI system that waits about `secs` seconds, with its
+/// arguments: the stand-in for a simulator.
+fn sleeper(secs: u32) -> (std::path::PathBuf, Vec<String>) {
+    if cfg!(windows) {
+        let root = std::env::var_os("SystemRoot").map_or_else(|| "C:\\Windows".into(), std::path::PathBuf::from);
+        (root.join("System32").join("PING.EXE"), vec!["-n".into(), (secs + 1).to_string(), "127.0.0.1".into()])
+    } else {
+        ("/bin/sleep".into(), vec![secs.to_string()])
+    }
+}
+
+/// A folder with the plugin `sim`: its command `simulate` draws a wall, then
+/// runs its tool `sleeper` ([`sleeper`], chosen in `.tools/sim.json`) for
+/// 30 seconds, then draws another wall.
+fn sim_plugins_folder(name: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("ccad-sim-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let dir = root.join("sim");
+    std::fs::create_dir_all(&dir).unwrap();
+    let (program, args) = sleeper(30);
+    let (_, test_args) = sleeper(0);
+    let list = |a: &[String]| a.iter().map(|x| format!("\"{x}\"")).collect::<Vec<_>>().join(", ");
+    let manifest = format!(
+        "id = \"sim\"\nname = \"Simulator plugin\"\nversion = \"1.0\"\napi = 2\npermissions = [\"tools\"]\n\n\
+         [[tools]]\nid = \"sleeper\"\nname = \"Sleeper\"\nexecutables = [\"ping.exe\", \"sleep\"]\n\
+         homepage = \"https://example.org/sleeper\"\nversion_args = [{}]\n",
+        list(&test_args)
+    );
+    std::fs::write(dir.join("plugin.toml"), manifest).unwrap();
+    let main = format!(
+        "ccad.command {{ name = \"simulate\", title = \"Simulate\", run = function()\n\
+           ccad.run(\"wall_create\", {{ start = {{ 0, 0 }}, [\"end\"] = {{ 5, 0 }} }})\n\
+           local r = ccad.process.run(\"sleeper\", {{ args = {{ {} }}, timeout = 120 }})\n\
+           ccad.run(\"wall_create\", {{ start = {{ 0, 3 }}, [\"end\"] = {{ 5, 3 }} }})\n\
+           return {{ code = r.code }}\n\
+         end }}\n",
+        list(&args)
+    );
+    std::fs::write(dir.join("main.lua"), main).unwrap();
+    let paths = std::collections::BTreeMap::from([("sleeper".to_string(), program)]);
+    cc_plugins::tools::write_tool_paths(&root, "sim", &paths).unwrap();
+    root
+}
+
+/// A plugin command running an external program leaves the app working: a
+/// modal dialog names the plugin and the program, shortcuts wait, and
+/// Cancel stops the program and undoes what the command did.
+#[test]
+fn a_plugin_command_waiting_for_a_program_shows_progress_and_cancels() {
+    let mut state = sample_state();
+    state.prefs.plugins_tools.insert("sim".into());
+    state.prefs.plugin_folder = Some(sim_plugins_folder("cancel"));
+    crate::plugins_ui::load(&mut state);
+    let (walls, depth) = (wall_count(&state), state.session.doc.undo_depth());
+    crate::plugin_form::open(&mut state, "sim__simulate");
+    assert!(state.session.has_job(), "{}", state.message);
+    assert!(state.dialogs.plugin_form.as_ref().unwrap().is_waiting());
+    assert!(crate::jobs::busy(&state), "shortcuts and dropped files wait");
+    assert_eq!(wall_count(&state), walls + 1, "the first wall is drawn meanwhile");
+    let mut harness = spinning_harness(state, egui::vec2(1200.0, 800.0), |ui, state| {
+        crate::app::shortcuts(ui.ctx(), state);
+        crate::dialogs::show(ui.ctx(), state);
+    });
+    assert!(harness.query_by_label("Simulator plugin").is_some(), "the dialog is titled after the plugin");
+    assert!(harness.query_by_label(&t!("job-plugin-running", "tool" => "Sleeper")).is_some());
+    // The command's form waits behind it.
+    assert!(harness.query_by_label(&t!("palette-run")).is_none());
+    // Undo waits too: the command's step is still open.
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    harness.run_steps(2);
+    assert_eq!(wall_count(harness.state()), walls + 1);
+    harness.get_by_label(&t!("action-cancel")).click();
+    harness.run_steps(2);
+    let state = harness.state();
+    assert!(!state.session.has_job());
+    assert!(state.dialogs.plugin_form.is_some(), "the form shows how it ended");
+    assert_eq!(state.dialogs.plugin_form.as_ref().unwrap().error(), Some(t!("job-plugin-cancelled").as_str()));
+    assert_eq!((wall_count(state), state.session.doc.undo_depth()), (walls, depth), "nothing stays");
+    assert!(harness.query_by_label(&t!("job-plugin-running", "tool" => "Sleeper")).is_none());
+}
+
+/// The Plugins window grants the `tools` permission and chooses each tool's
+/// program: a program of another name is refused, a chosen one is stored
+/// and *Test* runs its version check.
+#[test]
+fn the_plugins_window_chooses_and_tests_external_programs() {
+    let folder = sim_plugins_folder("window");
+    let program = cc_plugins::tools::read_tool_paths(&folder, "sim")["sleeper"].clone();
+    cc_plugins::tools::write_tool_paths(&folder, "sim", &Default::default()).unwrap();
+    let mut state = sample_state();
+    state.prefs.plugin_folder = Some(folder.clone());
+    crate::plugins_ui::load(&mut state);
+    crate::plugins_ui::open(&mut state);
+    state.plugins.selected = Some("sim".into());
+    let mut harness = themed_harness(state, egui::vec2(1200.0, 900.0), egui::Theme::Light, |ui, state| {
+        crate::dialogs::show(ui.ctx(), state);
+    });
+    harness.run();
+    assert!(harness.query_by_label(&t!("plug-programs")).is_some());
+    assert!(harness.query_by_label("Sleeper").is_some());
+    assert!(harness.query_by_label(&t!("plug-program-none")).is_some());
+    harness.get_by_label(&t!("plug-tools")).click();
+    harness.run();
+    assert!(harness.state().prefs.plugins_tools.contains("sim"), "the permission is granted");
+    // Browse… picks a file: one of another name is refused.
+    let other = folder.join("other.exe");
+    std::fs::write(&other, "x").unwrap();
+    crate::plugins_ui::choose_program_for_test(harness.state_mut(), "sim", "sleeper", &other);
+    assert!(matches!(harness.state().plugins.notice, Some(Err(_))));
+    assert!(cc_plugins::tools::read_tool_paths(&folder, "sim").is_empty());
+    crate::plugins_ui::choose_program_for_test(harness.state_mut(), "sim", "sleeper", &program);
+    assert!(matches!(harness.state().plugins.notice, Some(Ok(_))), "{:?}", harness.state().plugins.notice);
+    assert_eq!(cc_plugins::tools::read_tool_paths(&folder, "sim")["sleeper"], program);
+    harness.run();
+    assert!(harness.query_by_label(&program.display().to_string()).is_some());
+    harness.get_by_label(&t!("plug-program-test")).click();
+    // A spinner while it runs.
+    harness.run_steps(2);
+    crate::plugins_ui::finish_tests(harness.state_mut());
+    assert!(crate::plugins_ui::test_answer(harness.state(), "sim", "sleeper").is_some_and(|r| r.is_ok()));
+    harness.run();
+}
+
+/// Reload loads the plugins again from their folder (a command added to
+/// `main.lua` joins the session, the permissions stay); the Plugin console
+/// lists what the plugins printed, filters by plugin and clears.
+#[test]
+fn plugins_reload_and_their_console() {
+    let root = plugins_folder("console");
+    let noisy = root.join("noisy");
+    std::fs::create_dir_all(&noisy).unwrap();
+    std::fs::write(noisy.join("plugin.toml"), "id = \"noisy\"\nname = \"Noisy\"\nversion = \"1.0\"\n").unwrap();
+    std::fs::write(noisy.join("main.lua"), "print('noisy is here')").unwrap();
+    let mut state = sample_state();
+    state.prefs.plugin_folder = Some(root.clone());
+    state.prefs.plugins_files.insert("room_tools".into());
+    crate::plugins_ui::load(&mut state);
+    assert!(state.session.kind_of("room_tools__two").is_none());
+    crate::plugins_ui::open(&mut state);
+    let mut harness = app_harness(state);
+    std::fs::write(
+        root.join("room_tools/main.lua"),
+        "ccad.command { name = 'two', run = function() print('two ran') end }",
+    )
+    .unwrap();
+    harness.get_by_role_and_label(Role::Button, &t!("plug-reload")).click();
+    harness.run();
+    assert!(harness.state().session.kind_of("room_tools__two").is_some(), "the new command is there");
+    assert!(harness.state().prefs.plugins_files.contains("room_tools"), "the permissions stay");
+    // The console, from the Plugins window.
+    harness.get_by_role_and_label(Role::Button, &t!("action-plugin-console")).click();
+    harness.run();
+    assert!(harness.state().plugins.console.open && !harness.state().plugins.open);
+    assert!(
+        harness.query_all_by_label_contains("noisy is here").count() == 2,
+        "printed while loading, and again on Reload"
+    );
+    harness.state_mut().session.execute("room_tools__two", serde_json::json!({})).unwrap();
+    harness.run();
+    assert!(harness.query_by_label_contains("two ran").is_some(), "printed by a command");
+    assert_eq!(harness.state().message, "[room_tools] two ran", "and in the status bar, as before");
+    // Only one plugin's entries.
+    let all = t!("pcon-all");
+    harness.query_all_by_role(Role::ComboBox).find(|n| n.value().as_deref() == Some(all.as_str())).unwrap().click();
+    harness.run();
+    harness.get_by_label("room_tools").click();
+    harness.run();
+    assert_eq!(harness.state().plugins.console.filter.as_deref(), Some("room_tools"));
+    assert!(harness.query_by_label_contains("noisy is here").is_none());
+    assert!(harness.query_by_label_contains("two ran").is_some());
+    harness.get_by_role_and_label(Role::Button, &t!("pcon-clear")).click();
+    harness.run();
+    assert!(harness.query_by_label_contains("two ran").is_none());
+    assert_eq!(harness.state().plugins.console.entries().count(), 0);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// In developer mode the development folder's plugins load too, its copy
+/// of a plugin wins over the installed one (noted in the console), and a
+/// change to one of its files loads the plugins again.
+#[test]
+fn developer_mode_loads_the_development_folder_and_reloads_on_change() {
+    let installed = plugins_folder("dev-installed");
+    let dev_root = std::env::temp_dir().join(format!("ccad-plugins-ui-{}-dev", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dev_root);
+    let dev = dev_root.join("room_tools");
+    std::fs::create_dir_all(&dev).unwrap();
+    std::fs::write(dev.join("plugin.toml"), "id = \"room_tools\"\nname = \"Room tools (dev)\"\nversion = \"0.4.0\"\n")
+        .unwrap();
+    std::fs::write(dev.join("main.lua"), "ccad.command { name = 'dev_only', run = function() end }").unwrap();
+    let mut state = sample_state();
+    state.prefs.plugin_folder = Some(installed.clone());
+    state.prefs.plugin_dev_folder = Some(dev.clone());
+    crate::plugins_ui::load(&mut state);
+    assert!(state.session.kind_of("room_tools__one_wall").is_some(), "not in developer mode: the installed one");
+    state.prefs.plugin_dev_mode = true;
+    let mut harness = app_harness(state);
+    harness.run();
+    let s = harness.state();
+    assert!(s.session.kind_of("room_tools__dev_only").is_some(), "the development copy");
+    assert!(s.session.kind_of("room_tools__one_wall").is_none());
+    assert!(s.plugins.listed.iter().any(|l| l.dev && l.id == "room_tools"));
+    let wins = t!("pcon-dev-wins", "id" => "room_tools");
+    assert!(s.plugins.console.entries().any(|e| e.text == wins), "noted in the console");
+    // A change is seen at the next listing (a second later).
+    std::fs::write(dev.join("main.lua"), "ccad.command { name = 'dev_two', run = function() end }").unwrap();
+    std::thread::sleep(crate::plugin_dev::INTERVAL + std::time::Duration::from_millis(100));
+    harness.run();
+    assert!(harness.state().session.kind_of("room_tools__dev_two").is_some(), "loaded again");
+    assert_eq!(harness.state().message, t!("plug-dev-reloaded"));
+    let _ = std::fs::remove_dir_all(&installed);
+    let _ = std::fs::remove_dir_all(&dev_root);
 }
 
 /// In an elevation a level's head is dragged up off its line with an elbow

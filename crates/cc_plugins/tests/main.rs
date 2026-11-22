@@ -5,8 +5,14 @@
 // Test helpers outside #[test] functions may fail loudly.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod api2;
+mod events;
+mod files;
 mod lua;
+mod process;
+mod scope;
 mod store;
+mod testing;
 
 /// Every `.rs` file of `tests/` is declared above, so none is skipped.
 #[test]

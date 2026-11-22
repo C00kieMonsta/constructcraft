@@ -17,6 +17,7 @@ mod defaults;
 pub mod dimensions;
 mod error;
 pub mod extension;
+pub mod files;
 pub mod gltf;
 pub mod graph;
 pub mod i18n;
@@ -79,7 +80,8 @@ pub use defaults::{
     pipe_offset, tray_offset, walls_loop, walls_loop_at,
 };
 pub use error::{EngineError, ErrorCode, Result};
-pub use extension::Extension;
+pub use extension::{Event, EventKind, Extension, JobInfo, ModelChange, Outcome};
+pub use files::{FileAccess, Grants, PluginScope, ScopeEdits};
 pub use refs::{Ref, category_name};
-pub use registry::{Command, CommandInfo, CommandKind, catalog, command_kind, describe};
-pub use session::{Session, new_project, new_project_with};
+pub use registry::{Command, CommandInfo, CommandKind, catalog, checks_paths, command_kind, describe};
+pub use session::{Job, Session, new_project, new_project_with};

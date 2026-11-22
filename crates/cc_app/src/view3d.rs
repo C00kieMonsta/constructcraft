@@ -518,6 +518,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState, view_id: ViewId, render_state: Op
     let mut opening_pick = None;
     let mut attach_pick = None;
     let mut paint_pick = None;
+    let mut form_pick = None;
     // The modify tools that work in 3D take the clicks themselves (see `modify3d`).
     let modifying = crate::modify3d::works_in_3d(&state.tool);
     if resp.clicked()
@@ -545,6 +546,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState, view_id: ViewId, render_state: Op
         let demolishing = state.tool == crate::tools::Tool::Demolish;
         let placing = matches!(state.tool, crate::tools::Tool::Hosted { .. });
         let attaching = state.tool == crate::tools::Tool::AttachTop;
+        let form_picking = matches!(state.tool, crate::tools::Tool::Pick { .. });
         let painting = match state.tool {
             crate::tools::Tool::Paint { remove } => Some(remove),
             _ => None,
@@ -553,6 +555,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState, view_id: ViewId, render_state: Op
             _ if painting.is_some() => paint_pick = painting.map(|remove| (remove, picked.map(|(id, _)| id), ray)),
             _ if demolishing => demolish_pick = Some(picked.map(|(id, _)| id)),
             _ if attaching => attach_pick = Some(picked.map(|(id, _)| id)),
+            _ if form_picking => form_pick = Some(picked.map(|(id, _)| id)),
             Some((id, t)) if placing && project.element(id).is_some_and(|e| e.as_wall().is_some()) => {
                 let hit = ray.origin + ray.dir * t;
                 opening_pick = Some((id, glam::DVec2::new(hit.x, hit.y)));
@@ -683,6 +686,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState, view_id: ViewId, render_state: Op
     }
     if let Some(picked) = attach_pick {
         crate::modify::attach_pick(state, picked);
+    }
+    if let Some(picked) = form_pick {
+        crate::plugin_form::picked_element(state, picked);
     }
     if let Some((remove, picked, ray)) = paint_pick {
         crate::paint_ui::pick(state, view_id, remove, picked, ray);

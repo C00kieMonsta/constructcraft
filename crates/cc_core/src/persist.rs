@@ -9,7 +9,9 @@ use std::path::Path;
 /// `RisePer12` (`6:12`), which older builds cannot read.
 /// 31 (30 is taken by another change): wall elevation profiles
 /// (`Wall::profile`), which older builds would drop.
-pub const FORMAT_VERSION: u32 = 32;
+/// 33: plugin data on elements and the project (`plugin_data`), which older
+/// builds would drop.
+pub const FORMAT_VERSION: u32 = 33;
 
 /// Largest project file read, bytes (pictures and textures are kept in it).
 pub const MAX_FILE_BYTES: u64 = 1 << 30;
@@ -355,6 +357,7 @@ mod tests {
             phase_demolished: None,
             design_option: None,
             paints: Vec::new(),
+            plugin_data: Default::default(),
         };
         p.elements.insert(id, e);
         let text = to_ron(&p).unwrap();

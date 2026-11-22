@@ -6,6 +6,10 @@ use cc_views::Drawing2D;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
+
+/// How long [`Session::wait_job`] waits for the extension at a time.
+const WAIT_STEP: Duration = Duration::from_millis(100);
 
 /// An open project with its derived geometry and drawings, rebuilt lazily
 /// when the document changes.
@@ -35,9 +39,65 @@ pub struct Session {
     extension: Option<Box<dyn crate::Extension>>,
     /// How many commands are running (a plugin command runs others).
     nesting: u32,
-    /// Whether the commands running may work with files (see
+    /// The files the commands running may read and write (see
     /// [`Session::with_files`]).
-    files: bool,
+    files: crate::FileAccess,
+    /// The scopes of the plugin commands running, outermost first (see
+    /// [`Session::with_plugin_scope`]).
+    scopes: Vec<crate::PluginScope>,
+    /// Whether the extension is handling an event (see [`Session::fire`]).
+    firing: bool,
+    /// Whether the document was replaced during the top-level command
+    /// running ([`Session::replace`]).
+    replaced: bool,
+    /// Whether the event being handled follows an edit command that left its
+    /// own undo step on top, which handlers' edits join (see
+    /// [`Session::with_event_scope`]).
+    fold_events: bool,
+    /// Whether [`Session::execute`] waits for a plugin command that waits for
+    /// an external program (the default), or leaves it pending (see
+    /// [`Session::set_blocking`]).
+    blocking: bool,
+    /// The plugin command left waiting, if any (see [`Session::poll_job`]).
+    job: Option<PendingJob>,
+}
+
+/// What [`Session::execute`] noted before a command ran, to finish it when
+/// it ends (at once, or after it waited).
+#[derive(Debug, Clone)]
+struct Begun {
+    name: String,
+    /// Run by the user (not by a command or an event handler).
+    top: bool,
+    /// The document's journal was started for it (`model_changed`).
+    journal: bool,
+    /// Undo depth before it ran.
+    depth: usize,
+    /// Undo depth and top step before it ran.
+    history: (usize, Option<u64>),
+    merge_key: Option<u64>,
+    /// Its arguments, when a macro is being recorded.
+    recorded_args: Option<Value>,
+    /// The id counter before it ran.
+    first_id: u64,
+}
+
+/// A plugin command waiting for an external program.
+#[derive(Debug, Clone)]
+struct PendingJob {
+    begun: Begun,
+    started: Instant,
+}
+
+/// A plugin command left waiting (see [`Session::job`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Job {
+    /// The command's full name (`<plugin>__<name>`).
+    pub command: String,
+    /// What the plugin says it waits for.
+    pub info: crate::JobInfo,
+    /// Time since the command started.
+    pub elapsed: Duration,
 }
 
 /// What a view's own geometry depends on: its phase (an index, when it
@@ -88,7 +148,13 @@ impl Session {
             temporary_revision: 0,
             extension: None,
             nesting: 0,
-            files: true,
+            files: crate::FileAccess::All,
+            scopes: Vec::new(),
+            firing: false,
+            replaced: false,
+            fold_events: false,
+            blocking: true,
+            job: None,
         }
     }
 
@@ -102,13 +168,23 @@ impl Session {
 
     /// Replace the document (new, open, import), dropping derived data.
     pub fn replace(&mut self, doc: Document) {
+        // A command left waiting belongs to the document that goes.
+        self.cancel_job();
         let extension = self.extension.take();
         let nesting = self.nesting;
-        let files = self.files;
+        let files = std::mem::take(&mut self.files);
+        let scopes = std::mem::take(&mut self.scopes);
+        let firing = self.firing;
+        let blocking = self.blocking;
         *self = Self::new(doc);
+        self.blocking = blocking;
         self.extension = extension;
         self.nesting = nesting;
         self.files = files;
+        self.scopes = scopes;
+        self.firing = firing;
+        // The command running fires `project_opened` when it ends.
+        self.replaced = true;
     }
 
     pub fn project(&self) -> &Project {
@@ -464,8 +540,90 @@ impl Session {
     }
 
     /// Set the source of commands beyond the built-in catalog (plugins), or
-    /// remove it with `None`; returns the one it replaces.
+    /// remove it with `None`; returns the one it replaces. A new extension
+    /// hears `project_opened` for the project the session holds (so plugins
+    /// set on an open project can start), unless a command is running.
     pub fn set_extension(&mut self, extension: Option<Box<dyn crate::Extension>>) -> Option<Box<dyn crate::Extension>> {
+        // A command left waiting lives in the extension that goes.
+        self.cancel_job();
+        let old = std::mem::replace(&mut self.extension, extension);
+        if self.extension.is_some() && self.top_level() {
+            let path = self.doc.path.clone();
+            self.fire(crate::Event::ProjectOpened { new: path.is_none(), path });
+        }
+        old
+    }
+
+    /// Whether a command run now would be a top-level one: not run by a
+    /// command or an event handler, nor while a plugin command waits.
+    fn top_level(&self) -> bool {
+        self.nesting == 0 && self.scopes.is_empty() && !self.firing && self.job.is_none()
+    }
+
+    /// Whether the extension handles events of `kind`.
+    fn listens(&self, kind: crate::EventKind) -> bool {
+        self.extension.as_ref().is_some_and(|e| e.listens(kind))
+    }
+
+    /// Give `event` to the extension, if it listens: it is taken out of the
+    /// session meanwhile, and what it runs is nested (not top-level, not
+    /// recorded in a macro), so no event fires during it. A panic in it is
+    /// caught; the extension stays.
+    fn fire(&mut self, event: crate::Event) {
+        if !self.listens(event.kind()) {
+            return;
+        }
+        let Some(mut ext) = self.extension.take() else { return };
+        let (nesting, merge_key) = (self.nesting, self.merge_key.take());
+        self.nesting = nesting.saturating_add(1);
+        self.firing = true;
+        let _ = guard(|| ext.on_event(self, &event));
+        self.firing = false;
+        self.nesting = nesting;
+        self.merge_key = merge_key;
+        if self.extension.is_none() {
+            self.extension = Some(ext);
+        }
+    }
+
+    /// Run `f`, the handlers of the plugin `plugin` (named `name` for the
+    /// user) for `event`, in its scope: queries, plus `plugin_data_set` for
+    /// its own id (only queries after `undo` and `redo`, whose edits would
+    /// clear the redo history and come back on every undo), and no files.
+    /// What they change after an edit command (`model_changed`) joins that
+    /// command's undo step, so one undo takes back both and a dragged value
+    /// stays one merged step; after other events (or a command that left no
+    /// step of its own) it becomes one undo step of its own, named after the
+    /// plugin (`tx-plugin-event`). Nothing when they change nothing.
+    pub fn with_event_scope<R>(
+        &mut self,
+        event: &crate::Event,
+        plugin: &str,
+        name: &str,
+        f: impl FnOnce(&mut Session) -> R,
+    ) -> R {
+        let edits = match event {
+            crate::Event::ModelChanged(c) if c.is_history() => crate::ScopeEdits::None,
+            _ => crate::ScopeEdits::OwnData,
+        };
+        let scope = crate::PluginScope { plugin: plugin.to_string(), edits, files: crate::FileAccess::None };
+        let mark = self.doc.history_mark();
+        let out = self.with_plugin_scope(scope, f);
+        let fold = self.fold_events && matches!(event, crate::Event::ModelChanged(_));
+        if !(fold && self.doc.fold_since(mark)) {
+            self.doc.squash_since(mark.depth(), t!("tx-plugin-event", "plugin" => name));
+        }
+        out
+    }
+
+    /// [`Session::set_extension`] without `project_opened`: moving the loaded
+    /// plugins to a session whose project the user did not open (the app's
+    /// blank document after closing a project).
+    pub fn set_extension_quietly(
+        &mut self,
+        extension: Option<Box<dyn crate::Extension>>,
+    ) -> Option<Box<dyn crate::Extension>> {
+        self.cancel_job();
         std::mem::replace(&mut self.extension, extension)
     }
 
@@ -489,33 +647,147 @@ impl Session {
         self.nesting > 0
     }
 
-    /// Whether the commands running may read and write files: true unless a
-    /// caller without file access (a plugin without the `files` permission,
-    /// a graph run without `allow_files`) runs them.
+    /// Whether the commands running may read and write any file: true unless
+    /// a caller with less access (a plugin without the `files` permission, a
+    /// graph run without `allow_files`) runs them.
     pub fn files_allowed(&self) -> bool {
-        self.files
+        self.files.is_all()
     }
 
-    /// Run `f` with file access narrowed to `allowed` (it is never widened:
-    /// a caller without files cannot give them to what it runs).
-    pub fn with_files<R>(&mut self, allowed: bool, f: impl FnOnce(&mut Session) -> R) -> R {
-        let outer = self.files;
-        self.files = outer && allowed;
-        let result = f(self);
-        self.files = outer;
-        result
+    /// The files the commands running may read and write.
+    pub fn file_access(&self) -> &crate::FileAccess {
+        &self.files
     }
 
-    /// Refuse a file path given to a command (in its parameter `param`) when
-    /// the commands running may not work with files.
-    pub fn require_files(&self, param: &str) -> Result<()> {
-        if self.files {
-            Ok(())
-        } else {
-            Err(EngineError::rejected(format!(
+    /// Run `f` with file access narrowed to `access` (it is never widened: a
+    /// caller without files cannot give them to what it runs). The access is
+    /// restored however `f` ends.
+    pub fn with_files<R>(&mut self, access: crate::FileAccess, f: impl FnOnce(&mut Session) -> R) -> R {
+        let outer = self.files.clone();
+        self.files = outer.narrow(&access);
+        let scopes = self.scopes.len();
+        self.restoring(outer, scopes, f)
+    }
+
+    /// Run `f` (a plugin command) in `scope`: every command executed during
+    /// it, also by graphs, scripts or macros it starts, may touch only the
+    /// plugin's own data, may not replace the document, move in its history
+    /// or change the language, may edit only when `scope.edits`, and works
+    /// with the files `scope.files` allows. Scopes nest (each one holds) and
+    /// are restored however `f` ends.
+    pub fn with_plugin_scope<R>(&mut self, scope: crate::PluginScope, f: impl FnOnce(&mut Session) -> R) -> R {
+        let outer = self.files.clone();
+        self.files = outer.narrow(&scope.files);
+        let scopes = self.scopes.len();
+        self.scopes.push(scope);
+        self.restoring(outer, scopes, f)
+    }
+
+    /// The scope of the plugin command running (the innermost), if any.
+    pub fn plugin_scope(&self) -> Option<&crate::PluginScope> {
+        self.scopes.last()
+    }
+
+    /// Run `f`, then put back the file access `files` and the first `scopes`
+    /// scopes, also when `f` panics (the panic goes on).
+    fn restoring<R>(&mut self, files: crate::FileAccess, scopes: usize, f: impl FnOnce(&mut Session) -> R) -> R {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)));
+        self.files = files;
+        self.scopes.truncate(scopes);
+        match result {
+            Ok(r) => r,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    }
+
+    /// Refuse reading the file `path` given to a command (in its parameter
+    /// `param`) when the commands running may not read it.
+    pub fn require_read(&self, param: &str, path: &std::path::Path) -> Result<()> {
+        if self.files.may_read(path) { Ok(()) } else { Err(self.file_refused(param, path, "read")) }
+    }
+
+    /// Refuse writing the file `path` given to a command (in its parameter
+    /// `param`) when the commands running may not write it.
+    pub fn require_write(&self, param: &str, path: &std::path::Path) -> Result<()> {
+        if self.files.may_write(path) { Ok(()) } else { Err(self.file_refused(param, path, "write")) }
+    }
+
+    fn file_refused(&self, param: &str, path: &std::path::Path, verb: &str) -> EngineError {
+        match &self.files {
+            crate::FileAccess::Granted(_) => EngineError::rejected(format!(
+                "`{param}` ({}): this plugin command may not {verb} that file (without the \"files\" permission a \
+                 plugin works only with the files given in its save_path and open_path parameters)",
+                path.display()
+            )),
+            _ => EngineError::rejected(format!(
                 "`{param}` names a file, and this run may not work with files (a plugin needs the \"files\" \
                  permission, a graph `allow_files`)"
-            )))
+            )),
+        }
+    }
+
+    /// Why `name` may not run now, in the scopes of the plugin commands
+    /// running and with the file access of the run.
+    fn refusal(&self, name: &str, args: &Value) -> Option<EngineError> {
+        let kind = self.kind_of(name);
+        // While a plugin command waits, its undo step is open: only queries
+        // run (what the command runs when it goes on is not refused, as the
+        // job is taken out of the session meanwhile).
+        if let Some(job) = &self.job
+            && (crate::extension::is_extension_name(name) || kind != Some(crate::CommandKind::Query))
+        {
+            return Some(EngineError::rejected(format!(
+                "{name}: a plugin command is running ({}); wait for it to end or cancel it",
+                job.begun.name
+            )));
+        }
+        for scope in &self.scopes {
+            // A plugin command is one undo step of this document, in the
+            // user's language.
+            if matches!(name, "project_new" | "project_open" | "undo" | "redo" | "language_set") {
+                return Some(EngineError::rejected(format!("{name} cannot run inside a plugin command")));
+            }
+            if name.starts_with("plugin_data_") && args.get("plugin").and_then(Value::as_str) != Some(&scope.plugin) {
+                return Some(EngineError::rejected(format!(
+                    "{name}: a plugin reads and writes only its own data (plugin = \"{}\")",
+                    scope.plugin
+                )));
+            }
+            if kind == Some(crate::CommandKind::Edit) {
+                match scope.edits {
+                    crate::ScopeEdits::All => {}
+                    // Its own id: checked above.
+                    crate::ScopeEdits::OwnData if name == "plugin_data_set" => {}
+                    crate::ScopeEdits::OwnData => {
+                        return Some(EngineError::rejected(format!(
+                            "{name} changes the model, which an event handler may not do (it may store its own \
+                             plugin data with plugin_data_set)"
+                        )));
+                    }
+                    crate::ScopeEdits::None => {
+                        return Some(EngineError::rejected(format!(
+                            "{name} changes the model, which a query command may not do"
+                        )));
+                    }
+                }
+            }
+        }
+        if kind != Some(crate::CommandKind::File) {
+            return None;
+        }
+        match &self.files {
+            crate::FileAccess::All => None,
+            crate::FileAccess::None => Some(EngineError::rejected(format!(
+                "{name} works with files, and this run may not (a plugin needs the \"files\" permission, a graph \
+                 `allow_files`)"
+            ))),
+            // A command that checks each path it touches may work with the
+            // granted ones.
+            crate::FileAccess::Granted(_) if crate::registry::checks_paths(name) => None,
+            crate::FileAccess::Granted(_) => Some(EngineError::rejected(format!(
+                "{name} works with files: a plugin without the \"files\" permission runs only the file commands that \
+                 write or read the paths given in its save_path and open_path parameters"
+            ))),
         }
     }
 
@@ -550,67 +822,265 @@ impl Session {
     /// Run the command `name` with JSON `args`. A panic inside the command
     /// becomes an internal error and the document is kept. Commands of the
     /// extension (names with `__`) are one undo step however many commands
-    /// they run, and leave nothing behind when they fail.
+    /// they run, and leave nothing behind when they fail. A top-level
+    /// command fires the extension's events (see [`crate::extension`]).
+    ///
+    /// A plugin command that waits for an external program is waited for
+    /// when the session is blocking (the default) or the command was run by
+    /// another command; otherwise it is left pending and this returns
+    /// [`ErrorCode::Pending`]: [`Session::poll_job`] goes on with it, and
+    /// meanwhile only queries run.
     pub fn execute(&mut self, name: &str, args: Value) -> Result<Value> {
-        let depth = self.doc.undo_depth();
-        let merge_key = self.merge_key;
-        // Commands run by another command are part of it, not steps of a macro.
-        let recorded_args = (self.recording.is_some() && self.nesting == 0).then(|| args.clone());
-        let first_id = self.doc.project.next_id();
-        if !self.files && self.kind_of(name) == Some(crate::CommandKind::File) {
-            return Err(EngineError::rejected(format!(
-                "{name} works with files, and this run may not (a plugin needs the \"files\" permission, a graph \
-                 `allow_files`)"
-            )));
+        if let Some(refused) = self.refusal(name, &args) {
+            return Err(refused);
         }
+        let top = self.top_level();
+        if top && name == "project_save" {
+            let path = args.get("path").and_then(Value::as_str).map(std::path::PathBuf::from);
+            if let Some(path) = path.or_else(|| self.doc.path.clone()) {
+                self.fire(crate::Event::ProjectSaving { path });
+            }
+        }
+        // What the command changes, for `model_changed`.
+        let journal = top && self.listens(crate::EventKind::ModelChanged);
+        if journal {
+            self.doc.start_journal();
+        }
+        if top {
+            self.replaced = false;
+        }
+        let depth = self.doc.undo_depth();
+        let begun = Begun {
+            name: name.to_string(),
+            top,
+            journal,
+            depth,
+            history: (depth, self.doc.undo_top_id()),
+            merge_key: self.merge_key,
+            // Commands run by another command are part of it, not steps of a macro.
+            recorded_args: (self.recording.is_some() && self.nesting == 0).then(|| args.clone()),
+            first_id: self.doc.project.next_id(),
+        };
         let outer = self.nesting;
         self.nesting = outer.saturating_add(1);
         // Names and messages a command writes follow the project's units.
         self.sync_units();
-        let result = if crate::extension::is_extension_name(name) {
-            self.execute_extension(name, args, depth)
+        let outcome = if crate::extension::is_extension_name(name) {
+            self.start_extension(name, args)
         } else {
-            guard(|| crate::registry::dispatch(self, name, args)).and_then(|r| r)
+            crate::Outcome::Done(guard(|| crate::registry::dispatch(self, name, args)).and_then(|r| r))
         };
         self.nesting = outer;
+        match outcome {
+            crate::Outcome::Done(result) => self.finish(begun, result),
+            crate::Outcome::Pending => {
+                self.job = Some(PendingJob { begun, started: Instant::now() });
+                if self.blocking || !top {
+                    return self.wait_job().unwrap_or_else(|| {
+                        Err(EngineError::new(ErrorCode::Internal, format!("{name}: the command was lost")))
+                    });
+                }
+                let tool = self.job().map(|j| j.info.tool).filter(|t| !t.is_empty());
+                Err(EngineError::new(
+                    ErrorCode::Pending,
+                    format!("{name} is running {} in the background", tool.as_deref().unwrap_or("a program")),
+                ))
+            }
+        }
+    }
+
+    /// End the command `begun` with `result`: an extension's command is
+    /// squashed into one undo step (undone when it failed), a command that
+    /// succeeded is recorded in the macro being recorded, and a top-level
+    /// one fires its events.
+    fn finish(&mut self, begun: Begun, result: Result<Value>) -> Result<Value> {
+        let Begun { name, top, journal, depth, history, merge_key, recorded_args, first_id } = begun;
+        if crate::extension::is_extension_name(&name) {
+            match &result {
+                Ok(_) => {
+                    self.doc.squash_since(depth, &name);
+                }
+                // What a cancelled command did goes, and cannot be redone.
+                Err(EngineError { code: ErrorCode::Cancelled, .. }) => self.doc.discard_since(depth),
+                Err(_) => self.undo_to(depth),
+            }
+        }
         if let (Ok(out), Some(args)) = (&result, recorded_args) {
-            self.record(name, args, out, first_id, merge_key, depth);
+            self.record(&name, args, out, first_id, merge_key, depth);
         }
         if let Err(EngineError { code: ErrorCode::Internal, .. }) = &result {
             // Undo whatever the failed command left behind.
             while self.doc.undo_depth() > depth && self.doc.undo() {}
         }
+        if top {
+            let changes = if journal { self.doc.take_journal() } else { None };
+            if result.is_ok() {
+                self.fire_after(&name, changes, history);
+            }
+        }
         result
     }
 
-    fn execute_extension(&mut self, name: &str, args: Value, depth: usize) -> Result<Value> {
+    /// The events of the top-level command `name` that succeeded, with what
+    /// its document's journal noted (`None` when it was off or the document
+    /// was replaced) and the undo history's depth and top step before it.
+    fn fire_after(&mut self, name: &str, changes: Option<cc_core::ElementChanges>, history: (usize, Option<u64>)) {
+        if std::mem::take(&mut self.replaced) {
+            let path = self.doc.path.clone();
+            self.fire(crate::Event::ProjectOpened { new: path.is_none(), path });
+        } else if name == "project_save" {
+            if let Some(path) = self.doc.path.clone() {
+                self.fire(crate::Event::ProjectSaved { path });
+            }
+        } else if let Some(changes) = changes.filter(|c| !c.is_empty()) {
+            let change = crate::ModelChange::new(name, changes);
+            // The command left a step of its own on top (a new one, or one it
+            // merged into), unless it moved in the history.
+            let now = (self.doc.undo_depth(), self.doc.undo_top_id());
+            self.fold_events = !change.is_history() && now != history && now.0 >= history.0;
+            self.fire(crate::Event::ModelChanged(change));
+            self.fold_events = false;
+        }
+    }
+
+    fn start_extension(&mut self, name: &str, args: Value) -> crate::Outcome {
         let Some(mut ext) = self.extension.take() else {
             let message = if self.nesting > 1 {
                 format!("{name}: a plugin command cannot run inside another plugin command")
             } else {
                 format!("unknown command: {name}")
             };
-            return Err(EngineError::new(ErrorCode::UnknownCommand, message));
+            return crate::Outcome::Done(Err(EngineError::new(ErrorCode::UnknownCommand, message)));
         };
         // Its edits are squashed into one step: none merges with an earlier one.
         self.merge_key = None;
         self.doc.break_merge();
-        let result = guard(|| ext.run(self, name, args));
+        let outcome = guard(|| ext.start(self, name, args));
         if self.extension.is_none() {
             self.extension = Some(ext);
         }
-        let result = match result {
-            Ok(Some(r)) => r,
-            Ok(None) => Err(EngineError::new(ErrorCode::UnknownCommand, format!("unknown command: {name}"))),
-            Err(e) => Err(e),
-        };
-        match &result {
-            Ok(_) => {
-                self.doc.squash_since(depth, name);
-            }
-            Err(_) => self.undo_to(depth),
+        match outcome {
+            Ok(Some(o)) => o,
+            Ok(None) => crate::Outcome::Done(Err(EngineError::new(
+                ErrorCode::UnknownCommand,
+                format!("unknown command: {name}"),
+            ))),
+            Err(e) => crate::Outcome::Done(Err(e)),
         }
-        result
+    }
+
+    /// Wait for plugin commands that wait for an external program (`true`,
+    /// the default: the command line, scripts, MCP), or leave them pending
+    /// (`false`: the app, which calls [`Session::poll_job`] every frame).
+    /// Commands run by other commands (graphs, scripts) and the steps of
+    /// [`crate::script`] are always waited for.
+    pub fn set_blocking(&mut self, blocking: bool) {
+        self.blocking = blocking;
+    }
+
+    /// Whether [`Session::execute`] waits for plugin commands that wait.
+    pub fn is_blocking(&self) -> bool {
+        self.blocking
+    }
+
+    /// Run `f` with [`Session::set_blocking`] set to `blocking`, then put the
+    /// previous mode back (also when `f` panics).
+    pub fn with_blocking<R>(&mut self, blocking: bool, f: impl FnOnce(&mut Session) -> R) -> R {
+        let outer = std::mem::replace(&mut self.blocking, blocking);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)));
+        self.blocking = outer;
+        match result {
+            Ok(r) => r,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    }
+
+    /// Whether a plugin command is waiting (see [`Session::poll_job`]).
+    pub fn has_job(&self) -> bool {
+        self.job.is_some()
+    }
+
+    /// The plugin command waiting, if any: its name, what the plugin says it
+    /// waits for, and the time since it started.
+    pub fn job(&self) -> Option<Job> {
+        let job = self.job.as_ref()?;
+        let info = self.extension.as_ref().and_then(|e| e.job()).unwrap_or_default();
+        Some(Job { command: job.begun.name.clone(), info, elapsed: job.started.elapsed() })
+    }
+
+    /// Go on with the plugin command waiting, without waiting: `None` while
+    /// it still waits (or when none does); its result once it ended, finished
+    /// like any command (one undo step, undone when it failed, its events
+    /// fired).
+    pub fn poll_job(&mut self) -> Option<Result<Value>> {
+        self.drive_job(Duration::ZERO)
+    }
+
+    /// Wait for the plugin command waiting to end; its result (`None` when
+    /// none waits).
+    pub fn wait_job(&mut self) -> Option<Result<Value>> {
+        while self.job.is_some() {
+            if let Some(result) = self.drive_job(WAIT_STEP) {
+                return Some(result);
+            }
+        }
+        None
+    }
+
+    /// Cancel the plugin command waiting: what it waits for is stopped and
+    /// the command fails ([`ErrorCode::Cancelled`]), leaving nothing behind.
+    /// `None` when none waits.
+    pub fn cancel_job(&mut self) -> Option<Result<Value>> {
+        let job = self.job.take()?;
+        if let Some(mut ext) = self.extension.take() {
+            let outer = self.nesting;
+            self.nesting = outer.saturating_add(1);
+            let _ = guard(|| ext.cancel(self));
+            self.nesting = outer;
+            if self.extension.is_none() {
+                self.extension = Some(ext);
+            }
+        }
+        let message = format!("{}: cancelled", job.begun.name);
+        Some(self.finish(job.begun, Err(EngineError::new(ErrorCode::Cancelled, message))))
+    }
+
+    /// Let the extension go on with the command waiting, waiting at most
+    /// `wait`; its result when it ended.
+    fn drive_job(&mut self, wait: Duration) -> Option<Result<Value>> {
+        let job = self.job.take()?;
+        let outcome = match self.extension.take() {
+            None => crate::Outcome::Done(Err(EngineError::new(
+                ErrorCode::Internal,
+                format!("{}: the plugins were unloaded while it ran", job.begun.name),
+            ))),
+            Some(mut ext) => {
+                let (outer, merge_key) = (self.nesting, self.merge_key.take());
+                // What it runs now is part of it, as when it started.
+                self.nesting = outer.saturating_add(1);
+                self.sync_units();
+                let outcome = match guard(|| ext.resume(self, wait)) {
+                    Ok(o) => o,
+                    Err(e) => {
+                        let _ = guard(|| ext.cancel(self));
+                        crate::Outcome::Done(Err(e))
+                    }
+                };
+                self.nesting = outer;
+                self.merge_key = merge_key;
+                if self.extension.is_none() {
+                    self.extension = Some(ext);
+                }
+                outcome
+            }
+        };
+        match outcome {
+            crate::Outcome::Pending => {
+                self.job = Some(job);
+                None
+            }
+            crate::Outcome::Done(result) => Some(self.finish(job.begun, result)),
+        }
     }
 }
 

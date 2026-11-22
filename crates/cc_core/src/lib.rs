@@ -50,6 +50,7 @@ pub mod pipe_catalog;
 pub mod pipe_file;
 pub mod pipe_series;
 mod pipe_series_project;
+pub mod plugin_data;
 pub mod profile;
 pub mod profile_catalog;
 pub mod profile_sweep;
@@ -107,7 +108,7 @@ pub use design_option::{DesignOption, OptionSet};
 pub use detail::{DetailLine, DetailStyle, LineStyleDef, LineStyleRef};
 pub use detail_component::DetailComponent;
 pub use dim_refs::{DimRef, Projection, RefAnchor, RefHeight, RefTarget};
-pub use document::{Document, EditCtx, Transaction};
+pub use document::{Document, EditCtx, ElementChanges, HistoryMark, Transaction};
 pub use element::{
     AnchorHook, Anchorage, BarEnd, BarFace, Beam, BeamLateral, BeamVertical, Ceiling, Column, Component, Dimension,
     DimensionKind, Element, ElementKind, FaceBars, Floor, Foundation, FoundationShape, Grid, Hosted, Leader,

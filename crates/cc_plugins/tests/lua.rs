@@ -193,10 +193,8 @@ fn the_sandbox_has_no_files_or_code_loading() {
 #[test]
 fn runaway_scripts_stop() {
     let mut s = Session::default();
-    let small = ScriptOptions {
-        limits: Limits { instructions: 2_000_000, memory: 16 * 1024 * 1024, ..Limits::default() },
-        ..Default::default()
-    };
+    let small =
+        ScriptOptions { limits: Limits { instructions: 2_000_000, memory: 16 * 1024 * 1024, ..Limits::default() } };
     let run = |s: &mut Session, src: &str| run_script(s, src, "t.lua", json!({}), small).result.unwrap_err();
     for src in [
         "while true do end",
@@ -310,7 +308,7 @@ fn plugins_without_files_cannot_import_by_path() {
 fn granted_files_permission_needs_the_manifest() {
     let dir = room_tools("grant");
     let mut plugin = Plugin::load(&dir, Limits::default()).unwrap();
-    plugin.grant(Permissions { files: true });
+    plugin.grant(Permissions { files: true, ..Permissions::NONE });
     assert_eq!(plugin.granted(), Permissions::NONE, "the manifest does not ask for files");
 }
 

@@ -253,7 +253,7 @@ fn imports_by_path_need_the_runs_file_access() {
     let e = r["nodes"]["2"]["error"].as_str().unwrap();
     assert!(!e.contains("may not work with files"), "{r}");
     // A graph file named by path is refused the same way inside a run without files.
-    s.with_files(false, |s| {
+    s.with_files(cc_engine::FileAccess::None, |s| {
         let e = s.execute("graph_check", json!({"path": "examples/graphs/house.ccgraph"})).unwrap_err();
         assert!(e.message.contains("may not work with files"), "{e:?}");
         let e = s.execute("project_save", json!({"path": "x.ccad"})).unwrap_err();

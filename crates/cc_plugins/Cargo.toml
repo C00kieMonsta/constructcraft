@@ -9,6 +9,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+cc_core.workspace = true
 cc_engine.workspace = true
 cc_script.workspace = true
 mlua.workspace = true
@@ -20,6 +21,14 @@ toml.workspace = true
 
 [lints]
 workspace = true
+
+# A small program the tests of `ccad.process.run` run as an external tool;
+# not part of ConstructCraft.
+[[bin]]
+name = "cc_plugins_test_tool"
+path = "src/bin/test_tool.rs"
+test = false
+doc = false
 
 [[test]]
 name = "main"

@@ -1502,6 +1502,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             })
         });
         let geom = ModelGeometry::build(&doc.project);
@@ -1541,6 +1542,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             })
         });
         let geom = ModelGeometry::build(&doc.project);
@@ -1571,6 +1573,7 @@ mod tests {
             phase_demolished: None,
             design_option: None,
             paints: Vec::new(),
+            plugin_data: Default::default(),
         };
         let conn = doc.edit("t", |e| {
             let column_t = e.project().default_type(Category::Column).unwrap();
@@ -1627,6 +1630,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             });
             (id, half, t0, t2)
         });
@@ -1694,6 +1698,7 @@ mod tests {
             phase_demolished: None,
             design_option: None,
             paints: Vec::new(),
+            plugin_data: Default::default(),
         };
         let (wall, column) = doc.edit("t", |e| {
             let wall_t = e.project().default_type(Category::Wall).unwrap();
@@ -1781,6 +1786,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             });
             let dr = ElementId(e.alloc_id());
             e.add_element(Element {
@@ -1801,6 +1807,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             });
             (w, dr)
         });
@@ -1857,6 +1864,7 @@ mod tests {
                     phase_demolished: None,
                     design_option: None,
                     paints: Vec::new(),
+                    plugin_data: Default::default(),
                 });
                 id
             })
@@ -1936,6 +1944,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             });
             w
         });
@@ -2033,6 +2042,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             });
             id
         });
@@ -2128,6 +2138,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             });
             id
         });

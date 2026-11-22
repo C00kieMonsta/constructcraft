@@ -762,6 +762,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             })
         });
         assert!(doc.project.type_section(&doc.project.types[&type_id].data).is_none());

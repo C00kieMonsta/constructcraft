@@ -240,6 +240,33 @@ fn plugins_add_commands() {
 }
 
 #[test]
+fn plugin_event_handlers_print_on_standard_error() {
+    let dir = std::env::temp_dir().join(format!("ccad-cli-{}-events", std::process::id()));
+    let plugin = dir.join("watch");
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(plugin.join("plugin.toml"), "id = \"watch\"\nname = \"Watch\"\nversion = \"1.0\"\napi = 2\n")
+        .unwrap();
+    std::fs::write(
+        plugin.join("main.lua"),
+        r#"ccad.on("project_saved", function(e) print("saved to " .. e.path) end)
+           ccad.on("model_changed", function(e) print("changed by " .. e.command) end)"#,
+    )
+    .unwrap();
+    let folder = dir.to_string_lossy().into_owned();
+    let file = dir.join("watched.ccad").to_string_lossy().into_owned();
+    let (code, _, err) =
+        ccad(&["--plugins", &folder, "--save-as", &file, "run", "wall_create", "start=[0,0]", "end=[3,0]"], "");
+    assert_eq!(code, 0, "{err}");
+    assert!(err.contains("[watch] changed by wall_create"), "{err}");
+    assert!(err.contains(&format!("[watch] saved to {file}")), "{err}");
+    // --save to the project's own file.
+    let (code, _, err) = ccad(&["--plugins", &folder, "-p", &file, "--save", "run", "project_info"], "");
+    assert_eq!(code, 0, "{err}");
+    assert!(err.contains("[watch] saved to"), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn plugins_install_and_remove() {
     let dir = std::env::temp_dir().join(format!("ccad-cli-{}-store", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -259,4 +286,313 @@ fn plugins_install_and_remove() {
     assert!(!plugin.exists());
     assert_eq!(ccad(&["plugins", "remove", "tools", &folder], "").0, 1);
     assert_eq!(ccad(&["plugins", "frobnicate"], "").0, 2);
+}
+
+#[test]
+fn plugins_settings_are_shown_and_stored() {
+    let dir = std::env::temp_dir().join(format!("ccad-cli-{}-settings", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let plugin = dir.join("tools");
+    std::fs::create_dir_all(plugin.join("locales")).unwrap();
+    std::fs::write(
+        plugin.join("plugin.toml"),
+        r#"id = "tools"
+name = "Tools"
+version = "2.0"
+api = 2
+
+[settings.height]
+type = "number"
+default = 2.8
+title = "%height%"
+minimum = 1
+
+[settings.mode]
+type = "string"
+default = "fast"
+enum = ["fast", "exact"]
+
+[settings.label]
+type = "string"
+default = "A"
+
+[settings.count]
+type = "integer"
+default = 1
+"#,
+    )
+    .unwrap();
+    std::fs::write(plugin.join("locales").join("en.toml"), "height = \"Wall height\"\n").unwrap();
+    // The code does not run to show or change settings.
+    std::fs::write(plugin.join("main.lua"), "error('ran')").unwrap();
+    let folder = dir.to_string_lossy().into_owned();
+    let (code, out, err) = ccad(&["plugins", "settings", &folder, "tools"], "");
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out["id"], "tools");
+    let settings = out["settings"].as_array().unwrap();
+    assert_eq!(settings.len(), 4);
+    assert_eq!(settings[0]["key"], "height");
+    assert_eq!(settings[0]["title"], "Wall height");
+    assert_eq!(settings[0]["value"], 2.8);
+    assert_eq!(settings[1]["enum"], json!(["fast", "exact"]));
+
+    let (code, out, err) =
+        ccad(&["plugins", "settings", &folder, "tools", "height=3.5", "mode=exact", "label=42", "count=3"], "");
+    assert_eq!(code, 0, "{err}");
+    let values: Vec<&Value> = out["settings"].as_array().unwrap().iter().map(|s| &s["value"]).collect();
+    assert_eq!(values, [&json!(3.5), &json!("exact"), &json!("42"), &json!(3)]);
+    let stored: Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join(".settings").join("tools.json")).unwrap()).unwrap();
+    assert_eq!(stored, json!({"height": 3.5, "mode": "exact", "label": "42", "count": 3}));
+    let (_, out, _) = ccad(&["plugins", "settings", &folder, "tools"], "");
+    assert_eq!(out["settings"][0]["value"], 3.5);
+
+    // Values that do not fit are refused and nothing is written.
+    for bad in ["height=0.5", "mode=slow", "count=1.5", "height=tall", "nope=1", "height"] {
+        let (code, _, err) = ccad(&["plugins", "settings", &folder, "tools", bad, "count=5"], "");
+        assert_eq!(code, 2, "{bad}: {err}");
+    }
+    let (_, out, _) = ccad(&["plugins", "settings", &folder, "tools"], "");
+    assert_eq!(out["settings"][3]["value"], 3);
+    // An unknown plugin or a bad id.
+    assert_eq!(ccad(&["plugins", "settings", &folder, "other"], "").0, 1);
+    assert_eq!(ccad(&["plugins", "settings", &folder, "Bad Id"], "").0, 2);
+    // The plugins of the folder start with the stored values.
+    std::fs::write(plugin.join("main.lua"), "").unwrap();
+    let (code, summary, err) = ccad(&["--plugins", &folder, "plugins"], "");
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(summary[0]["settings"][0]["value"], 3.5);
+    assert_eq!(summary[0]["api"], 2);
+}
+
+#[test]
+fn plugin_exporters_write_the_path_given() {
+    let dir = std::env::temp_dir().join(format!("ccad-cli-{}-exporters", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let plugin = dir.join("idf");
+    std::fs::create_dir_all(&plugin).unwrap();
+    let manifest = "id = \"idf\"\nname = \"IDF\"\nversion = \"1.0\"\napi = 2\n\n\
+                    [[exporters]]\ncommand = \"export\"\nlabel = \"EnergyPlus model (.idf)\"\n";
+    std::fs::write(plugin.join("plugin.toml"), manifest).unwrap();
+    std::fs::write(
+        plugin.join("main.lua"),
+        r#"ccad.command { name = "export", kind = "query",
+             params = { required = { "path" }, properties = {
+               path = { type = "string", ui = "save_path", extensions = { "idf" } } } },
+             run = function(a)
+               local levels = ccad.run("levels_list", {})
+               ccad.file.write(a.path, { "Version,24.1;\n", "! levels: ", tostring(#levels), "\n" })
+               return { path = a.path }
+             end }"#,
+    )
+    .unwrap();
+    let folder = dir.to_string_lossy().into_owned();
+    let out = dir.join("model.idf");
+    let arg = format!("path={}", out.to_string_lossy());
+    let (code, _, err) = ccad(&["--plugins", &folder, "run", "idf__export", &arg], "");
+    assert_eq!(code, 0, "{err}");
+    let text = std::fs::read_to_string(&out).unwrap();
+    assert!(text.starts_with("Version,24.1;\n! levels: "), "{text}");
+    // Another extension is refused before the command runs.
+    let bad = format!("path={}", dir.join("model.txt").to_string_lossy());
+    let (code, _, err) = ccad(&["--plugins", &folder, "run", "idf__export", &bad], "");
+    assert_ne!(code, 0);
+    assert!(err.contains(".idf"), "{err}");
+    assert!(!dir.join("model.txt").exists());
+    // The listing tells the exporter.
+    let (code, summary, err) = ccad(&["--plugins", &folder, "plugins"], "");
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(summary[0]["exporters"][0]["command"], "idf__export");
+    assert_eq!(summary[0]["exporters"][0]["extensions"], json!(["idf"]));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `ccad plugins tools` shows and stores the program a plugin's tool runs
+/// (here `ccad` itself), `--tool` gives it for one run, and the plugin runs
+/// it with `ccad.process.run`, waited for.
+#[test]
+fn plugin_tools_are_chosen_and_run() {
+    let dir = std::env::temp_dir().join(format!("ccad-cli-{}-tools", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let plugin = dir.join("runner");
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(
+        plugin.join("plugin.toml"),
+        r#"id = "runner"
+name = "Runner"
+version = "1.0"
+api = 2
+permissions = ["tools"]
+
+[[tools]]
+id = "self"
+name = "ConstructCraft CLI"
+executables = ["ccad.exe", "ccad"]
+version_args = ["--version"]
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        plugin.join("main.lua"),
+        r#"ccad.command { name = "version", kind = "query", run = function()
+  local r = ccad.process.run("self", { args = { "--version" } })
+  return { code = r.code, out = r.stdout }
+end }"#,
+    )
+    .unwrap();
+    let folder = dir.to_string_lossy().into_owned();
+    let exe = env!("CARGO_BIN_EXE_ccad");
+    let (code, out, err) = ccad(&["plugins", "tools", &folder, "runner"], "");
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out["tools"][0]["id"], "self");
+    assert_eq!(out["tools"][0]["path"], Value::Null);
+    assert_eq!(out["tools"][0]["problem"], "no program chosen");
+
+    // Not chosen: the command says what to configure.
+    let (code, _, err) = ccad(&["--plugins", &folder, "run", "runner__version"], "");
+    assert_eq!(code, 1);
+    assert!(err.contains("no program was chosen for ConstructCraft CLI (self)"), "{err}");
+
+    // A program of another name is refused, and nothing is stored.
+    let manifest = plugin.join("plugin.toml").to_string_lossy().into_owned();
+    let (code, _, err) = ccad(&["plugins", "tools", &folder, "runner", &format!("self={manifest}")], "");
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("must be named ccad.exe or ccad"), "{err}");
+    assert_eq!(ccad(&["plugins", "tools", &folder, "runner", "other=x"], "").0, 2);
+    assert!(!dir.join(".tools").join("runner.json").exists());
+
+    let (code, out, err) = ccad(&["plugins", "tools", &folder, "runner", &format!("self={exe}"), "--test"], "");
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out["tools"][0]["problem"], Value::Null);
+    assert_eq!(out["tools"][0]["test"]["ok"], true, "{out}");
+    assert!(out["tools"][0]["test"]["output"].as_str().unwrap().starts_with("ccad "), "{out}");
+    let stored: Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join(".tools").join("runner.json")).unwrap()).unwrap();
+    assert_eq!(std::path::PathBuf::from(stored["self"].as_str().unwrap()), std::path::PathBuf::from(exe));
+
+    // The folder of plugins runs it, waited for.
+    let (code, out, err) = ccad(&["--plugins", &folder, "run", "runner__version"], "");
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out["code"], 0);
+    assert!(out["out"].as_str().unwrap().starts_with("ccad "), "{out}");
+    let (_, summary, _) = ccad(&["--plugins", &folder, "plugins"], "");
+    assert_eq!(summary[0]["granted"]["tools"], true);
+    assert_eq!(summary[0]["tools"][0]["problem"], Value::Null);
+
+    // `self=` forgets it.
+    let (code, out, _) = ccad(&["plugins", "tools", &folder, "runner", "self="], "");
+    assert_eq!((code, out["tools"][0]["path"].clone()), (0, Value::Null));
+    assert!(!dir.join(".tools").join("runner.json").exists());
+
+    // --tool gives it for one run, also to a plugin loaded from its own folder.
+    let single = plugin.to_string_lossy().into_owned();
+    let tool = format!("runner.self={exe}");
+    let (code, out, err) = ccad(&["--plugins", &single, "--tool", &tool, "run", "runner__version"], "");
+    assert_eq!(code, 0, "{err}");
+    assert!(out["out"].as_str().unwrap().starts_with("ccad "), "{out}");
+    let bad = format!("runner.self={manifest}");
+    let (code, _, err) = ccad(&["--plugins", &single, "--tool", &bad, "run", "runner__version"], "");
+    assert_eq!(code, 1);
+    assert!(err.contains("--tool runner.self") && err.contains("must be named"), "{err}");
+    assert_eq!(ccad(&["--tool", "nonsense", "commands"], "").0, 2);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The output of `ccad` as text, its exit code and standard error.
+fn ccad_text(args: &[&str]) -> (i32, String, String) {
+    let out = Command::new(env!("CARGO_BIN_EXE_ccad")).args(args).env("CCAD_LANG", "en").output().unwrap();
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn the_example_plugin_passes_its_tests() {
+    let folder = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/plugins/quick_rooms");
+    let (code, out, err) = ccad_text(&["plugins", "test", folder]);
+    assert_eq!(code, 0, "{out}\n{err}");
+    assert!(out.contains("PASS quick_rooms_test.lua::test_a_room_has_four_walls_a_floor_and_a_room"), "{out}");
+    assert!(out.contains("PASS quick_rooms_test.lua::test_walls_take_the_default_height_setting"), "{out}");
+    assert!(out.trim_end().ends_with("5 passed, 0 failed"), "{out}");
+    let (code, out, _) = ccad_text(&["plugins", "test", folder, "--filter", "door"]);
+    assert_eq!(code, 0);
+    assert_eq!(out.lines().count(), 2, "one test and the summary: {out}");
+}
+
+#[test]
+fn plugin_tests_report_failures_with_exit_codes() {
+    let dir = std::env::temp_dir().join(format!("ccad-cli-{}-plugin-tests", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("tests")).unwrap();
+    std::fs::write(dir.join("plugin.toml"), "id = \"t\"\nname = \"T\"\nversion = \"1\"\napi = 2\n").unwrap();
+    std::fs::write(dir.join("main.lua"), "ccad.command { name = 'n', run = function() print('ran n') return 1 end }")
+        .unwrap();
+    std::fs::write(
+        dir.join("tests/n_test.lua"),
+        "function test_good() ccad.test.eq(ccad.run('t__n'), 1) end\n\
+         function test_bad() ccad.run('t__n') ccad.test.eq(ccad.run('t__n'), 2, 'the answer') end",
+    )
+    .unwrap();
+    let folder = dir.to_string_lossy().into_owned();
+    let (code, out, _) = ccad_text(&["plugins", "test", &folder]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("PASS n_test.lua::test_good"), "{out}");
+    assert!(out.contains("FAIL n_test.lua::test_bad: ") && out.contains("the answer: expected 2, got 1"), "{out}");
+    assert!(out.contains("    [t] ran n"), "what the failed test printed: {out}");
+    assert!(out.contains("1 passed, 1 failed"), "{out}");
+    let (code, out, _) = ccad_text(&["plugins", "test", &folder, "--filter", "good"]);
+    assert_eq!((code, out.contains("1 passed, 0 failed")), (0, true), "{out}");
+    let (code, _, err) = ccad_text(&["plugins", "test", &folder, "--filter", "nothing"]);
+    assert_eq!(code, 1, "no test matches: {err}");
+    // Usage errors.
+    assert_eq!(ccad_text(&["plugins", "test"]).0, 2);
+    assert_eq!(ccad_text(&["plugins", "test", &folder, "--frobnicate"]).0, 2);
+    let empty = dir.join("tests").to_string_lossy().into_owned();
+    assert_eq!(ccad_text(&["plugins", "test", &empty]).0, 2, "not a plugin");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_new_plugin_loads_and_passes_its_test() {
+    let dir = std::env::temp_dir().join(format!("ccad-cli-{}-new-plugin", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let folder = dir.to_string_lossy().into_owned();
+    let (code, out, err) = ccad(&["plugins", "new", &folder, "my_walls", "name=My \"walls\""], "");
+    assert_eq!(code, 0, "{err}");
+    let plugin = dir.join("my_walls");
+    assert_eq!(out["created"].as_str().map(std::path::PathBuf::from), Some(plugin.clone()));
+    for file in [
+        "plugin.toml",
+        "main.lua",
+        "locales/en.toml",
+        "locales/pt-BR.toml",
+        "icons/my_walls.svg",
+        "tests/basic_test.lua",
+        "README.md",
+        ".luarc.json",
+        "types/ccad.d.lua",
+    ] {
+        assert!(plugin.join(file).is_file(), "{file}");
+    }
+    let luarc: Value = serde_json::from_str(&std::fs::read_to_string(plugin.join(".luarc.json")).unwrap()).unwrap();
+    assert_eq!(luarc["workspace.library"], json!(["types"]));
+    // It loads, with its name, button and setting.
+    let path = plugin.to_string_lossy().into_owned();
+    let (code, summary, err) = ccad(&["--plugins", &path, "plugins"], "");
+    assert_eq!(code, 0, "{err}");
+    assert!(!err.contains("not loaded"), "{err}");
+    assert_eq!(summary[0]["name"], "My \"walls\"");
+    assert_eq!(summary[0]["buttons"][0]["command"], "my_walls__wall_line");
+    assert_eq!(summary[0]["settings"][0]["key"], "wall_height");
+    // Its tests pass.
+    let (code, out, err) = ccad_text(&["plugins", "test", &path]);
+    assert_eq!(code, 0, "{out}\n{err}");
+    assert!(out.contains("2 passed, 0 failed"), "{out}");
+    // An existing folder or a bad id is refused.
+    assert_eq!(ccad(&["plugins", "new", &folder, "my_walls"], "").0, 2);
+    assert_eq!(ccad(&["plugins", "new", &folder, "Bad-Id"], "").0, 2);
+    assert!(!dir.join("Bad-Id").exists());
+    let _ = std::fs::remove_dir_all(&dir);
 }

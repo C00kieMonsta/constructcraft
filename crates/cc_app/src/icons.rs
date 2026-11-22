@@ -5,8 +5,10 @@
 //! kind of action a command is. Textures are cached per icon, layer and
 //! size, so each one is rasterized once.
 
+use cc_plugins::contributions::MAX_ICON;
 use egui::{Color32, ColorImage, Context, Painter, Rect, TextureHandle, TextureOptions};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -758,14 +760,23 @@ fn paint_badge(painter: &Painter, rect: Rect, badge: Badge, tones: Tones) {
 }
 
 fn paint_layer(painter: &Painter, rect: Rect, icon: Icon, layer: Layer, color: Color32) {
+    let (target, px) = pixel_square(painter, rect);
+    let Some(Some(texture)) = texture(painter.ctx(), icon, layer, px) else { return };
+    paint_texture(painter, &texture, target, color);
+}
+
+/// The largest square of whole physical pixels centered in `rect`, placed
+/// on the pixel grid (which keeps the strokes crisp), and its side in pixels.
+fn pixel_square(painter: &Painter, rect: Rect) -> (Rect, u32) {
     let ppp = painter.pixels_per_point();
     let side = rect.width().min(rect.height());
-    // Whole physical pixels, placed on the pixel grid, keep the strokes crisp.
     let px = (side * ppp).round().clamp(1.0, 512.0);
     let size = px / ppp;
     let min = ((rect.center() - egui::vec2(size, size) / 2.0) * ppp).round() / ppp;
-    let target = Rect::from_min_size(min, egui::vec2(size, size));
-    let Some(Some(texture)) = texture(painter.ctx(), icon, layer, px as u32) else { return };
+    (Rect::from_min_size(min, egui::vec2(size, size)), px as u32)
+}
+
+fn paint_texture(painter: &Painter, texture: &TextureHandle, target: Rect, color: Color32) {
     let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
     painter.image(texture.id(), target, uv, color);
 }
@@ -791,11 +802,87 @@ fn texture(ctx: &Context, icon: Icon, layer: Layer, px: u32) -> Option<Option<Te
 fn rasterize(icon: Icon, layer: Layer, px: u32) -> Option<ColorImage> {
     let source = layer_source(icon.source(), layer);
     let tree = resvg::usvg::Tree::from_str(&source, &resvg::usvg::Options::default()).ok()?;
+    render(&tree, px)
+}
+
+fn render(tree: &resvg::usvg::Tree, px: u32) -> Option<ColorImage> {
     let mut pixmap = resvg::tiny_skia::Pixmap::new(px, px)?;
     let scale = px as f32 / tree.size().width().max(tree.size().height());
-    resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(scale, scale), &mut pixmap.as_mut());
+    resvg::render(tree, resvg::tiny_skia::Transform::from_scale(scale, scale), &mut pixmap.as_mut());
     let side = px as usize;
     Some(ColorImage::from_rgba_premultiplied([side, side], pixmap.data()))
+}
+
+// --- Plugin icons ---
+
+/// Rasterized plugin icons by (file, layer, side in physical pixels);
+/// `None` when a layer is empty or the file could not be read or drawn.
+#[derive(Clone, Default)]
+struct FileCache(Arc<std::sync::Mutex<FileTextures>>);
+
+type FileTextures = HashMap<(PathBuf, Layer, u32), Option<TextureHandle>>;
+
+/// Paint the SVG file `path` (a plugin's icon) in two tones, as built-in
+/// icons are painted, so one drawn in their style (white strokes, soft
+/// fills at 20%) follows the theme. False when the file cannot be read or
+/// drawn, so the caller paints a fallback.
+pub fn paint_file_toned(painter: &Painter, rect: Rect, path: &Path, tones: Tones) -> bool {
+    let (target, px) = pixel_square(painter, rect);
+    let ctx = painter.ctx();
+    let Some(ink) = file_texture(ctx, path, Layer::Ink, px) else { return false };
+    if let Some(tint) = file_texture(ctx, path, Layer::Tint, px) {
+        paint_texture(painter, &tint, target, tones.tint);
+    }
+    paint_texture(painter, &ink, target, tones.ink);
+    true
+}
+
+/// The cached texture of a layer of a plugin's icon (`None`: empty or failed).
+fn file_texture(ctx: &Context, path: &Path, layer: Layer, px: u32) -> Option<TextureHandle> {
+    let cache = ctx.data_mut(|d| d.get_temp_mut_or_default::<FileCache>(egui::Id::new("plugin-icon-cache")).clone());
+    let mut map = cache.0.lock().ok()?;
+    let texture = map.entry((path.to_path_buf(), layer, px)).or_insert_with(|| {
+        let image = read_svg(path).and_then(|source| rasterize_untrusted(&source, layer, px));
+        if image.is_none() && layer == Layer::Ink {
+            log::warn!("the plugin icon {} could not be drawn", path.display());
+        }
+        image.filter(|image| image.pixels.iter().any(|p| p.a() > 0)).map(|image| {
+            let name = format!("plugin-icon-{}-{layer:?}-{px}", path.display());
+            ctx.load_texture(name, image, TextureOptions::LINEAR)
+        })
+    });
+    texture.clone()
+}
+
+/// The text of a plugin's SVG file, at most [`MAX_ICON`] bytes (the
+/// manifest's limit, checked again: the file may have changed since).
+fn read_svg(path: &Path) -> Option<String> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).ok()?;
+    let mut text = String::new();
+    file.take(MAX_ICON + 1).read_to_string(&mut text).ok()?;
+    (text.len() as u64 <= MAX_ICON).then_some(text)
+}
+
+/// Options for SVG written by someone else: nothing outside its text is
+/// reached. There is no folder to resolve relative paths against,
+/// `<image>` references (files and data URLs alike) resolve to nothing,
+/// and no font is loaded, so text is skipped.
+fn untrusted_options() -> resvg::usvg::Options<'static> {
+    resvg::usvg::Options {
+        resources_dir: None,
+        image_href_resolver: resvg::usvg::ImageHrefResolver {
+            resolve_data: Box::new(|_, _, _| None),
+            resolve_string: Box::new(|_, _| None),
+        },
+        ..resvg::usvg::Options::default()
+    }
+}
+
+/// Render a layer of a plugin's SVG (see [`untrusted_options`]).
+fn rasterize_untrusted(source: &str, layer: Layer, px: u32) -> Option<ColorImage> {
+    let tree = resvg::usvg::Tree::from_str(&layer_source(source, layer), &untrusted_options()).ok()?;
+    render(&tree, px)
 }
 
 #[cfg(test)]
@@ -827,6 +914,43 @@ mod tests {
             let image = rasterize(icon, Layer::Tint, 20).unwrap_or_else(|| panic!("{icon:?} fill does not rasterize"));
             assert!(image.pixels.iter().any(|p| p.a() > 0), "{icon:?} fill is empty");
         }
+    }
+
+    /// Plugin icons reach nothing outside their text: an `<image>` naming a
+    /// file draws only with the trusted (default) options; text and broken
+    /// or oversized files are skipped.
+    #[test]
+    fn plugin_icons_load_no_external_resources() {
+        let dir = std::env::temp_dir().join(format!("ccad-icon-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = dir.join("red.png");
+        let file = std::fs::File::create(&png).unwrap();
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(file), 4, 4);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().unwrap().write_image_data(&[255u8; 64]).unwrap();
+        let href = png.to_string_lossy().replace('\\', "/");
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><image href="{href}" width="24" height="24"/></svg>"#
+        );
+        let inked = |image: Option<ColorImage>| image.is_some_and(|i| i.pixels.iter().any(|p| p.a() > 0));
+        let trusted = resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default()).unwrap();
+        assert!(inked(render(&trusted, 20)), "the default options load the file");
+        assert!(!inked(rasterize_untrusted(&svg, Layer::Ink, 20)), "a plugin icon does not");
+        let text = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><text x="2" y="20">A</text></svg>"#;
+        assert!(!inked(rasterize_untrusted(text, Layer::Ink, 20)), "no fonts: text is skipped");
+        assert!(rasterize_untrusted("<svg", Layer::Ink, 20).is_none());
+        // The example plugin's icons are drawn in the house style: two layers.
+        let icons = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plugins/quick_rooms/icons");
+        for name in ["room.svg", "totals.svg"] {
+            let source = read_svg(&icons.join(name)).unwrap();
+            assert!(inked(rasterize_untrusted(&source, Layer::Ink, 20)), "{name}");
+            assert!(inked(rasterize_untrusted(&source, Layer::Tint, 20)), "{name} soft fill");
+        }
+        let big = dir.join("big.svg");
+        std::fs::write(&big, " ".repeat(MAX_ICON as usize + 1)).unwrap();
+        assert!(read_svg(&big).is_none(), "too large");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// `ICON_SHEET=path.png cargo test -p cc_app icon_sheet` writes every

@@ -176,7 +176,7 @@ impl Command for CadImportFile {
     const KIND: CommandKind = CommandKind::Edit;
     const READS_FILES: bool = true;
     fn run(self, s: &mut Session) -> Result<Value> {
-        s.require_files("path")?;
+        s.require_read("path", &self.path)?;
         let (view_id, level) = import_view(s, &self.view)?;
         let (center, auto) = align_arg(self.align.as_deref(), (false, false))?;
         let units = self.units.as_deref().map(units_arg).transpose()?;
@@ -476,7 +476,7 @@ impl Command for ImageImport {
     const KIND: CommandKind = CommandKind::Edit;
     const READS_FILES: bool = true;
     fn run(self, s: &mut Session) -> Result<Value> {
-        s.require_files("path")?;
+        s.require_read("path", &self.path)?;
         let (view_id, level) = import_view(s, &self.view)?;
         let (center, _) = align_arg(self.align.as_deref(), (true, false))?;
         let rotation_deg = refs::finite(self.rotation.unwrap_or(0.0), "rotation")?;

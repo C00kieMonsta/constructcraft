@@ -61,7 +61,9 @@ const FORMATS: [&str; 5] = ["png", "jpg", "jpeg", "exr", "hdr"];
 impl Command for ViewRender {
     const NAME: &'static str = "view_render";
     const KIND: CommandKind = CommandKind::File;
+    const CHECKS_PATHS: bool = true;
     fn run(self, s: &mut Session) -> Result<Value> {
+        s.require_write("path", &self.path)?;
         let id = refs::view(s.project(), &self.view)?;
         let view = s.project().view(id).ok_or_else(|| EngineError::not_found("view"))?;
         let ViewKind::ThreeD { camera, .. } = &view.kind else {

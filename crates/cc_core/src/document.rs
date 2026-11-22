@@ -32,6 +32,7 @@ struct Settings {
     browser: crate::browser::BrowserOrganization,
     bar_marking: crate::bar_marks::BarMarking,
     sun_presets: Vec<crate::sun::SunPreset>,
+    plugin_data: crate::plugin_data::PluginData,
 }
 
 impl Settings {
@@ -59,6 +60,7 @@ impl Settings {
             browser: p.browser.clone(),
             bar_marking: p.bar_marking.clone(),
             sun_presets: p.sun_presets.clone(),
+            plugin_data: p.plugin_data.clone(),
         }
     }
 
@@ -85,6 +87,7 @@ impl Settings {
         p.browser = self.browser;
         p.bar_marking = self.bar_marking;
         p.sun_presets = self.sun_presets;
+        p.plugin_data = self.plugin_data;
     }
 }
 
@@ -630,6 +633,12 @@ impl<'a> EditCtx<'a> {
         &mut self.project.sun_presets
     }
 
+    /// The data plugins keep on the project (see [`crate::plugin_data`]).
+    pub fn plugin_data_mut(&mut self) -> &mut crate::plugin_data::PluginData {
+        self.touch_settings();
+        &mut self.project.plugin_data
+    }
+
     /// Views whose sun's ground level is gone (deleted by this edit) lose it.
     fn sync_sun_ground(&mut self) {
         let p = &*self.project;
@@ -886,6 +895,7 @@ impl<'a> EditCtx<'a> {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             });
             for (set_type, set) in sets {
                 let set_id = ElementId(self.alloc_id());
@@ -901,6 +911,7 @@ impl<'a> EditCtx<'a> {
                     phase_demolished: None,
                     design_option: None,
                     paints: Vec::new(),
+                    plugin_data: Default::default(),
                 });
             }
         }
@@ -1193,6 +1204,60 @@ impl<'a> EditCtx<'a> {
     }
 }
 
+/// What a [`Document`] notes while its journal is on (see
+/// [`Document::start_journal`]): each element's state before the first
+/// change since, and whether anything else changed.
+#[derive(Debug, Clone, Default)]
+struct Journal {
+    before: BTreeMap<ElementId, Option<Element>>,
+    other: bool,
+}
+
+impl Journal {
+    /// Note the state before `tx` is applied (`forward`: done or redone;
+    /// otherwise undone).
+    fn note(&mut self, tx: &Transaction, forward: bool) {
+        for (id, (before, after)) in &tx.elements {
+            self.before.entry(*id).or_insert_with(|| if forward { before.clone() } else { after.clone() });
+        }
+        if !tx.views.is_empty() || !tx.types.is_empty() || tx.settings.is_some() {
+            self.other = true;
+        }
+    }
+}
+
+/// The net changes to a document's elements since its journal was started
+/// ([`Document::take_journal`]): ids in ascending order.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ElementChanges {
+    pub added: Vec<ElementId>,
+    pub modified: Vec<ElementId>,
+    pub removed: Vec<ElementId>,
+    /// Something other than elements changed too (types, views, levels,
+    /// settings, plugin data of the project).
+    pub other: bool,
+}
+
+impl ElementChanges {
+    pub fn is_empty(&self) -> bool {
+        self.added.is_empty() && self.modified.is_empty() && self.removed.is_empty() && !self.other
+    }
+}
+
+/// A point of a [`Document`]'s undo history ([`Document::history_mark`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HistoryMark {
+    depth: usize,
+    merge_key: Option<u64>,
+}
+
+impl HistoryMark {
+    /// The undo depth then.
+    pub fn depth(&self) -> usize {
+        self.depth
+    }
+}
+
 /// An open project plus its undo history and file state. Cloned to run a
 /// long command (an import) on another thread while the app keeps drawing.
 #[derive(Clone)]
@@ -1212,6 +1277,8 @@ pub struct Document {
     /// The phase new elements are built in (the active view's; `None`:
     /// the last phase). Display state: not saved, not undone.
     pub creation_phase: Option<crate::PhaseId>,
+    /// What changed since [`Document::start_journal`], while it is on.
+    journal: Option<Journal>,
 }
 
 impl Document {
@@ -1228,6 +1295,92 @@ impl Document {
             last_merge_key: None,
             serials: 0,
             creation_phase: None,
+            journal: None,
+        }
+    }
+
+    /// Start noting which elements the edits, undos and redos from now on
+    /// change (anew, if it was on). Each change notes the state of the
+    /// elements it touches before it, once per element (one clone), so the
+    /// cost follows the size of the changes; nothing is noted while it is
+    /// off.
+    pub fn start_journal(&mut self) {
+        self.journal = Some(Journal::default());
+    }
+
+    /// Stop the journal and return the net changes since it started: an
+    /// element is added, removed or modified when its state now differs from
+    /// its state then (compared with `PartialEq`), so changes that cancel out
+    /// leave nothing. `None` when the journal was off.
+    pub fn take_journal(&mut self) -> Option<ElementChanges> {
+        let journal = self.journal.take()?;
+        let mut changes = ElementChanges { other: journal.other, ..ElementChanges::default() };
+        for (id, before) in journal.before {
+            match (before, self.project.elements.get(&id)) {
+                (None, Some(_)) => changes.added.push(id),
+                (Some(_), None) => changes.removed.push(id),
+                (Some(b), Some(a)) if b != *a => changes.modified.push(id),
+                _ => {}
+            }
+        }
+        Some(changes)
+    }
+
+    /// Note `tx` in the journal, if it is on (before it is applied).
+    fn note(&mut self, tx: &Transaction, forward: bool) {
+        if let Some(j) = &mut self.journal {
+            j.note(tx, forward);
+        }
+    }
+
+    /// Where the undo history stands: its depth and the merge key of its
+    /// last step (see [`Document::fold_since`]).
+    pub fn history_mark(&self) -> HistoryMark {
+        HistoryMark { depth: self.undo.len(), merge_key: self.last_merge_key }
+    }
+
+    /// Fold the undo steps recorded since `mark` into the step that was on
+    /// top of the history then, which keeps its name (follow-up edits that
+    /// belong to it, like a plugin's event handlers keeping their data in
+    /// step with the edit). Its merge key stays too, so the next edit merged
+    /// with that key (a value still being dragged) still merges into it. The
+    /// folded step gets a new identity ([`Document::undo_top_id`]). Returns
+    /// whether anything was folded: nothing is when no step was recorded
+    /// since, or when there was no step to fold into.
+    pub fn fold_since(&mut self, mark: HistoryMark) -> bool {
+        if mark.depth == 0 || mark.depth > self.undo.len() {
+            return false;
+        }
+        if mark.depth == self.undo.len() {
+            // Nothing recorded since (or what was is discarded): the merge
+            // goes on as it was.
+            self.last_merge_key = mark.merge_key;
+            return false;
+        }
+        let newer = self.undo.split_off(mark.depth);
+        let serial = self.next_serial();
+        let Some(top) = self.undo.last_mut() else { return false };
+        for tx in newer {
+            top.merge(tx);
+        }
+        top.prune();
+        top.serial = serial;
+        if top.is_empty() {
+            self.undo.pop();
+        }
+        self.last_merge_key = mark.merge_key;
+        true
+    }
+
+    /// Undo the steps recorded since undo depth `depth` and drop them: they
+    /// cannot be redone (edits that failed, like a plugin event handler's).
+    pub fn discard_since(&mut self, depth: usize) {
+        while self.undo.len() > depth {
+            let Some(tx) = self.undo.pop() else { break };
+            self.note(&tx, false);
+            tx.apply(&mut self.project, false);
+            self.last_merge_key = None;
+            self.revision += 1;
         }
     }
 
@@ -1347,6 +1500,7 @@ impl Document {
         let result = f(&mut ctx);
         let tx = ctx.finish();
         if !tx.is_empty() {
+            self.note(&tx, true);
             let serial = self.next_serial();
             match self.undo.last_mut() {
                 Some(last) if merge_key.is_some() && merge_key == self.last_merge_key && self.redo.is_empty() => {
@@ -1396,6 +1550,7 @@ impl Document {
             return outcome;
         }
         if !tx.is_empty() {
+            self.note(&tx, true);
             let serial = self.next_serial();
             match self.undo.last_mut() {
                 Some(last) if merge_key.is_some() && merge_key == self.last_merge_key && self.redo.is_empty() => {
@@ -1429,6 +1584,7 @@ impl Document {
 
     pub fn undo(&mut self) -> bool {
         let Some(tx) = self.undo.pop() else { return false };
+        self.note(&tx, false);
         tx.apply(&mut self.project, false);
         self.redo.push(tx);
         self.last_merge_key = None;
@@ -1438,6 +1594,7 @@ impl Document {
 
     pub fn redo(&mut self) -> bool {
         let Some(tx) = self.redo.pop() else { return false };
+        self.note(&tx, true);
         tx.apply(&mut self.project, true);
         self.undo.push(tx);
         self.last_merge_key = None;
@@ -1534,8 +1691,71 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             })
         })
+    }
+
+    #[test]
+    fn folded_edits_join_the_top_step_and_keep_its_merge() {
+        let mut doc = Document::new(Project::from_template());
+        let before = doc.project.clone();
+        // Nothing to fold into.
+        let mark = doc.history_mark();
+        doc.edit("a", |e| e.info_mut().name = "a".into());
+        assert!(!doc.fold_since(mark) && doc.undo_depth() == 1);
+        // A dragged value: each tick merges, follow-up edits fold into it.
+        let depth = doc.undo_depth();
+        for i in 0..3 {
+            doc.edit_merged("drag", 7, |e| e.info_mut().number = i.to_string());
+            let mark = doc.history_mark();
+            doc.edit("follow", |e| e.info_mut().client = format!("c{i}"));
+            assert!(doc.fold_since(mark));
+            assert_eq!((doc.undo_depth(), doc.undo_name()), (depth + 1, Some("drag")));
+        }
+        // Nothing recorded since: the merge goes on.
+        let mark = doc.history_mark();
+        assert!(!doc.fold_since(mark));
+        doc.edit_merged("drag", 7, |e| e.info_mut().number = "9".into());
+        assert_eq!(doc.undo_depth(), depth + 1);
+        // One undo takes back the drag and what followed it.
+        assert!(doc.undo());
+        assert_eq!((&doc.project.info.number, &doc.project.info.client), (&before.info.number, &before.info.client));
+        assert_eq!(doc.project.info.name, "a");
+        assert!(doc.undo());
+        assert_eq!(doc.project, before);
+    }
+
+    #[test]
+    fn the_journal_reports_net_element_changes() {
+        let mut doc = Document::new(Project::from_template());
+        assert_eq!(doc.take_journal(), None);
+        let kept = add_wall(&mut doc);
+        doc.start_journal();
+        let added = add_wall(&mut doc);
+        doc.edit("move", |e| e.element_mut(kept).unwrap().translate(DVec2::new(1.0, 0.0)));
+        let changes = doc.take_journal().unwrap();
+        assert_eq!((changes.added, changes.modified, changes.removed), (vec![added], vec![kept], vec![]));
+        assert!(!changes.other && doc.take_journal().is_none());
+        // Undone: the wall added is removed, the moved one back where it was.
+        doc.start_journal();
+        assert!(doc.undo() && doc.undo());
+        let changes = doc.take_journal().unwrap();
+        assert_eq!((changes.added, changes.modified, changes.removed), (vec![], vec![kept], vec![added]));
+        // Changes that cancel out, and changes to settings only.
+        doc.start_journal();
+        assert!(doc.redo() && doc.undo());
+        doc.edit("name", |e| e.info_mut().name = "x".into());
+        let changes = doc.take_journal().unwrap();
+        assert!(changes.added.is_empty() && changes.modified.is_empty() && changes.removed.is_empty());
+        assert!(changes.other && !changes.is_empty());
+        // Discarded steps cannot be redone.
+        let depth = doc.undo_depth();
+        add_wall(&mut doc);
+        doc.discard_since(depth);
+        assert_eq!(doc.undo_depth(), depth);
+        assert!(!doc.can_redo());
+        assert_eq!(doc.project.elements.len(), 1);
     }
 
     #[test]
@@ -1581,6 +1801,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             })
         });
         doc.edit("delete", |e| e.remove_element(wall));
@@ -1619,6 +1840,7 @@ mod tests {
                     phase_demolished: None,
                     design_option: None,
                     paints: Vec::new(),
+                    plugin_data: Default::default(),
                 });
             }
             let selfie = ElementId(e.alloc_id());
@@ -1641,6 +1863,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             });
             e.remove_element(selfie);
             (a, b)

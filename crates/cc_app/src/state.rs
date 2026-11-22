@@ -25,6 +25,8 @@ pub enum RibbonTab {
     Annotate,
     View,
     Manage,
+    /// The buttons of the loaded plugins (shown only when there are some).
+    Plugins,
 }
 
 /// An action that discards unsaved changes, waiting for confirmation.
@@ -128,6 +130,8 @@ pub struct Dialogs {
     pub obj_options: crate::obj_ui::ObjOptions,
     /// The Preferences window.
     pub preferences: Option<crate::preferences::PreferencesDialog>,
+    /// The form of a plugin command (see [`crate::plugin_form`]).
+    pub plugin_form: Option<crate::plugin_form::PluginForm>,
 }
 
 /// A status bar text that lasts while something sets it every frame, such
@@ -319,6 +323,9 @@ pub struct AppState {
 impl AppState {
     pub fn new(doc: Document) -> Self {
         let mut session = Session::new(doc);
+        // Plugin commands that wait for an external program are driven by
+        // `plugin_job` every frame, behind its progress dialog.
+        session.set_blocking(false);
         session.sync();
         Self {
             session,
@@ -400,8 +407,20 @@ impl AppState {
         }
     }
 
-    /// Replace the document (new/open), resetting view state.
+    /// Replace the document (new/open), resetting view state. The plugins
+    /// hear `project_opened` for it.
     pub fn replace_document(&mut self, doc: Document) {
+        self.replace_document_with(doc, true);
+    }
+
+    /// Replace the document by the blank one behind the home screen after
+    /// closing a project: like [`AppState::replace_document`], but the
+    /// plugins hear no `project_opened` (no project was opened).
+    pub fn close_document(&mut self, doc: Document) {
+        self.replace_document_with(doc, false);
+    }
+
+    fn replace_document_with(&mut self, doc: Document, opened: bool) {
         let message = std::mem::take(&mut self.message);
         // Kept, as the tools' other sizes are reset to the metric defaults
         // (`follow_system` then sets them for the new project).
@@ -432,7 +451,11 @@ impl AppState {
         self.recent = recent;
         self.updates = updates;
         self.plugins = plugins;
-        self.session.set_extension(extension);
+        if opened {
+            self.session.set_extension(extension);
+        } else {
+            self.session.set_extension_quietly(extension);
+        }
         self.prefs = prefs;
         self.ribbon_collapsed = ribbon_collapsed;
         self.thumbnail_jobs = jobs;
@@ -644,6 +667,7 @@ impl AppState {
             phase_demolished: None,
             design_option: None,
             paints: Vec::new(),
+            plugin_data: Default::default(),
         }
         .category();
         let id = self.session.doc.edit(name, |e| {
@@ -666,6 +690,7 @@ impl AppState {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             })
         });
         self.selection = BTreeSet::from([id]);

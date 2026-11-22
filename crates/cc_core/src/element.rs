@@ -30,6 +30,9 @@ pub struct Element {
     /// Faces painted with a material of their own (see [`crate::paint`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub paints: Vec<crate::paint::FacePaint>,
+    /// Data plugins keep on the element, by plugin id (see [`crate::plugin_data`]).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub plugin_data: crate::plugin_data::PluginData,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

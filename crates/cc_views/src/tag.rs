@@ -513,6 +513,7 @@ mod tests {
             phase_demolished: None,
             design_option: None,
             paints: Vec::new(),
+            plugin_data: Default::default(),
         };
         assert_eq!(expand_line(&ctx, &e, " {Mark}  {Comments} {{x}} {Nothing}"), "P1 two words {x}");
         assert_eq!(expand_line(&ctx, &e, "{Name} {Number} {Area}"), "Sala 7 —", "a room not enclosed has no area");

@@ -469,6 +469,7 @@ mod tests {
             phase_demolished: demolished,
             design_option: None,
             paints: Vec::new(),
+            plugin_data: Default::default(),
         };
         e.uid = crate::Uid::generate();
         p.elements.insert(id, e);

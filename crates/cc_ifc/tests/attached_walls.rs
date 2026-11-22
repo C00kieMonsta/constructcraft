@@ -27,6 +27,7 @@ fn add(e: &mut EditCtx, category: Category, mark: &str, kind: ElementKind) -> El
         phase_demolished: None,
         design_option: None,
         paints: Vec::new(),
+        plugin_data: Default::default(),
     })
 }
 

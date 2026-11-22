@@ -531,6 +531,7 @@ mod tests {
                     phase_demolished: None,
                     design_option: None,
                     paints: Vec::new(),
+                    plugin_data: Default::default(),
                 });
                 id
             };
@@ -647,6 +648,7 @@ mod tests {
                     phase_demolished: None,
                     design_option: None,
                     paints: Vec::new(),
+                    plugin_data: Default::default(),
                 })
             };
             let tray = add(tray_t, ElementKind::CableTray(MepSegment::new(DVec2::ZERO, DVec2::new(6.0, 0.0), 2.6)));
@@ -721,6 +723,7 @@ mod tests {
                     phase_demolished: None,
                     design_option: None,
                     paints: Vec::new(),
+                    plugin_data: Default::default(),
                 })
             };
             let run = MepSegment::new(DVec2::ZERO, DVec2::new(6.0, 0.0), -0.5);

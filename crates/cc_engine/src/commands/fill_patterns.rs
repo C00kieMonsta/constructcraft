@@ -491,7 +491,7 @@ impl Command for FillPatternImport {
     fn run(self, s: &mut Session) -> Result<Value> {
         let text = match (&self.path, self.text) {
             (Some(path), None) => {
-                s.require_files("path")?;
+                s.require_read("path", path)?;
                 let len = std::fs::metadata(path)?.len();
                 if len > pat::MAX_PAT_BYTES as u64 {
                     return Err(EngineError::invalid(format!(
@@ -620,7 +620,11 @@ pub struct FillPatternExport {
 impl Command for FillPatternExport {
     const NAME: &'static str = "fill_pattern_export";
     const KIND: CommandKind = CommandKind::File;
+    const CHECKS_PATHS: bool = true;
     fn run(self, s: &mut Session) -> Result<Value> {
+        if let Some(path) = &self.path {
+            s.require_write("path", path)?;
+        }
         let p = s.project();
         let chosen: Vec<FillPattern> = match &self.patterns {
             Some(refs_) => refs_

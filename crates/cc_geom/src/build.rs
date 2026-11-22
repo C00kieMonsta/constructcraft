@@ -1731,6 +1731,7 @@ mod tests {
                     phase_demolished: None,
                     design_option: None,
                     paints: Vec::new(),
+                    plugin_data: Default::default(),
                 });
             }
             let id = ElementId(e.alloc_id());
@@ -1752,6 +1753,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             });
             let id = ElementId(e.alloc_id());
             e.add_element(Element {
@@ -1766,6 +1768,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             });
         });
         doc
@@ -1792,6 +1795,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: None,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             });
         });
         (doc, beam)
@@ -1887,6 +1891,7 @@ mod tests {
                     phase_demolished: None,
                     design_option: None,
                     paints: Vec::new(),
+                    plugin_data: Default::default(),
                 })
             };
             let arc =
@@ -1998,6 +2003,7 @@ mod tests {
                     phase_demolished: None,
                     design_option: None,
                     paints: Vec::new(),
+                    plugin_data: Default::default(),
                 })
             };
             let top = WallTop::Level { level: upper, offset: 0.0 };

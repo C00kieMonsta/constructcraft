@@ -2,7 +2,7 @@
 //! The script gets its arguments as `ccad.args` (and as `...`), and what it
 //! returns is its result.
 
-use crate::api::{Access, Api, engine_error};
+use crate::api::{Api, engine_error};
 use crate::convert::{from_lua, to_lua};
 use crate::sandbox::{Limits, Sandbox};
 use cc_engine::{EngineError, ErrorCode, Session};
@@ -12,17 +12,12 @@ use serde_json::Value;
 /// Largest script accepted, in bytes.
 pub const MAX_SCRIPT: usize = 4 * 1024 * 1024;
 
-/// How a script runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// How a script runs. Scripts are the user's own: the commands they run
+/// are not restricted (unlike a plugin command's, see
+/// [`cc_engine::PluginScope`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ScriptOptions {
     pub limits: Limits,
-    pub access: Access,
-}
-
-impl Default for ScriptOptions {
-    fn default() -> Self {
-        Self { limits: Limits::default(), access: Access::ALL }
-    }
 }
 
 /// What a script did: its result (or error) and the lines it printed.
@@ -50,18 +45,11 @@ pub fn run_script(
         Ok(s) => s,
         Err(e) => return ScriptOutput { result: Err(engine_error(&e)), output: Vec::new() },
     };
-    let result = run_in(&sandbox, session, source, name, &args, options.access);
+    let result = run_in(&sandbox, session, source, name, &args);
     ScriptOutput { result: result.map_err(|e| engine_error(&e)), output: sandbox.take_output() }
 }
 
-fn run_in(
-    sandbox: &Sandbox,
-    session: &mut Session,
-    source: &str,
-    name: &str,
-    args: &Value,
-    access: Access,
-) -> mlua::Result<Value> {
+fn run_in(sandbox: &Sandbox, session: &mut Session, source: &str, name: &str, args: &Value) -> mlua::Result<Value> {
     let lua = &sandbox.lua;
     let api = Api::install(lua)?;
     let lua_args = to_lua(lua, args)?;
@@ -69,7 +57,7 @@ fn run_in(
     // Text only: binary chunks could crash the interpreter.
     let chunk = lua.load(source).set_name(format!("@{name}")).set_mode(mlua::ChunkMode::Text).into_function()?;
     sandbox.reset_budget();
-    api.with_session(lua, session, access, |lua| {
+    api.with_session(lua, session, None, |lua| {
         let out: LuaValue = chunk.call(lua_args)?;
         from_lua(lua, &out).map_err(|e| mlua::Error::runtime(format!("the script's result: {e}")))
     })

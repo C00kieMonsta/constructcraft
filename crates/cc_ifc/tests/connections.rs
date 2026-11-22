@@ -24,6 +24,7 @@ fn add(e: &mut EditCtx, level: LevelId, type_id: ElementTypeId, kind: ElementKin
         phase_demolished: None,
         design_option: None,
         paints: Vec::new(),
+        plugin_data: Default::default(),
     })
 }
 

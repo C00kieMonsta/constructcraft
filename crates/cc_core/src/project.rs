@@ -119,6 +119,10 @@ pub struct Project {
     /// Named sun settings views can take (see [`crate::sun`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sun_presets: Vec<crate::sun::SunPreset>,
+    /// Data plugins keep on the project, by plugin id (see
+    /// [`crate::plugin_data`]; tracked as settings).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub plugin_data: crate::plugin_data::PluginData,
     /// The design option new elements go into and views without a choice of
     /// their own show for its set: session state, not saved nor undone (set
     /// through [`crate::Document::set_active_option`]).
@@ -164,6 +168,7 @@ impl Project {
             browser: Default::default(),
             bar_marking: Default::default(),
             sun_presets: Vec::new(),
+            plugin_data: BTreeMap::new(),
             active_option: None,
             next_id: 1,
         }
@@ -1063,6 +1068,7 @@ impl Project {
             profiles,
             pipe_series,
             sun_presets,
+            plugin_data,
             active_option,
             next_id,
         } = self;
@@ -1092,6 +1098,7 @@ impl Project {
             profiles: profiles.clone(),
             pipe_series: pipe_series.clone(),
             sun_presets: sun_presets.clone(),
+            plugin_data: plugin_data.clone(),
             active_option: *active_option,
             next_id: *next_id,
         }

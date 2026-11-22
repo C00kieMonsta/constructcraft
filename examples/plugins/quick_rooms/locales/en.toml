@@ -1,0 +1,62 @@
+name = "Quick rooms"
+description = "Rectangular rooms in one step, and wall totals by type."
+panel = "Quick rooms"
+
+[button]
+room = "Rectangular room"
+totals = "Wall totals"
+
+[room]
+title = "Rectangular room"
+description = "Four walls around a rectangle, its floor and its room, with an optional door centered on one side. Returns the ids it created."
+
+[totals]
+title = "Wall totals"
+description = "Count and total length of the walls of each type (meters)."
+
+[param.x]
+title = "West side"
+description = "Where the west side is (default 0)."
+
+[param.y]
+title = "South side"
+description = "Where the south side is (default 0)."
+
+[param.width]
+title = "Width"
+description = "Size along x."
+
+[param.depth]
+title = "Depth"
+description = "Size along y."
+
+[param.height]
+title = "Wall height"
+description = "Height of the walls (default: the plugin's setting)."
+
+[param.level]
+title = "Level"
+description = "The level of the room (default: the lowest level)."
+
+[param.name]
+title = "Room name"
+description = "The name of the room."
+
+[param.door]
+title = "Door"
+description = "The side with a door (default: the plugin's setting)."
+
+[side]
+none = "No door"
+south = "South"
+east = "East"
+north = "North"
+west = "West"
+
+[settings.height]
+title = "Default wall height"
+description = "Height of the walls when the command is not given one."
+
+[settings.door]
+title = "Default door"
+description = "The side with a door when the command is not given one."

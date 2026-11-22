@@ -238,7 +238,8 @@ impl Evaluator {
     pub fn run(&mut self, session: &mut Session, graph: &Graph, inputs: &BTreeMap<String, Value>) -> RunReport {
         // Its commands work with files only when the run allows it, also
         // those that read a file a parameter names.
-        session.with_files(graph.allow_files, |session| self.run_nodes(session, graph, inputs))
+        let access = if graph.allow_files { crate::FileAccess::All } else { crate::FileAccess::None };
+        session.with_files(access, |session| self.run_nodes(session, graph, inputs))
     }
 
     fn run_nodes(&mut self, session: &mut Session, graph: &Graph, inputs: &BTreeMap<String, Value>) -> RunReport {

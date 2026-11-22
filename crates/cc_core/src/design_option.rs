@@ -264,6 +264,7 @@ mod tests {
                 phase_demolished: None,
                 design_option: option,
                 paints: Vec::new(),
+                plugin_data: Default::default(),
             },
         );
         id

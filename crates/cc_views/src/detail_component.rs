@@ -274,6 +274,7 @@ mod tests {
             phase_demolished: None,
             design_option: None,
             paints: Vec::new(),
+            plugin_data: Default::default(),
         };
         p.elements.insert(e.id, e);
         let mut d = Drawing2D::default();
