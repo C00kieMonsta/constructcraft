@@ -564,7 +564,22 @@ fn value_cached(project: &Project, geom: &ModelGeometry, e: &Element, field: Sch
             .and_then(|id| project.profile(*id))
             .map_or(Value::Missing, |p| Value::Text(p.name.clone())),
         F::LinearMass => ty.map_or(Value::Missing, |t| linear_mass(project, &t.data)),
-        F::CutLength => geom.beams.get(&e.id).map_or(Value::Missing, |b| Value::Length(b.cut_length())),
+        F::CutLength => match e.kind {
+            ElementKind::Pipe(_) => geom.pipe_cut_length(e.id).map_or(Value::Missing, Value::Length),
+            _ => geom.beams.get(&e.id).map_or(Value::Missing, |b| Value::Length(b.cut_length())),
+        },
+        F::InsideDiameter => match ty.filter(|_| matches!(e.kind, ElementKind::Pipe(_))) {
+            Some(t) => t.inside_diameter(project).map_or(Value::Missing, |d| {
+                Value::Measured(format!("Ø {}", format::size(d, format::MetricSize::Mm(1))), d)
+            }),
+            None => Value::Missing,
+        },
+        F::Series | F::Size => match ty.filter(|_| matches!(e.kind, ElementKind::Pipe(_))) {
+            Some(t) => project.pipe_row(&t.data).map_or(Value::Missing, |(series, row)| {
+                Value::Text(if field == F::Series { series.name.clone() } else { row.size.clone() })
+            }),
+            None => Value::Missing,
+        },
         F::Material => ty.map_or(Value::Missing, |t| text(t.main_material())),
         F::Diameter => {
             match valve_pipe(project, e).map_or(ty, |pipe| project.element_type(pipe.type_id)).map(|t| &t.data) {

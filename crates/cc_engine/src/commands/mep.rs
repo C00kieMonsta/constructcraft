@@ -666,13 +666,55 @@ impl Command for CircuitLoads {
 }
 
 /// The fittings where pipes and conduits meet, counted by category, kind,
-/// angle (elbows), diameters and system: the fittings takeoff.
+/// angle (elbows), diameters and system: the fittings takeoff. Pipe
+/// fittings whose runs are all of one pipe series are matched to its
+/// catalog: they add their `name`, the series `code`, `size` and `size2`,
+/// a `status` (`matched`, `composite`: a main fitting plus reducers, or
+/// `missing`: the series sells no such fitting), `missing` with the
+/// `reason` (and its `reason_code`: angle, size or sizes), and, for
+/// composites, the `pieces` (name, kind, size, size2).
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct MepFittings {
     /// Level id or name (default: every level).
     #[serde(default)]
     pub level: Option<Ref>,
+}
+
+/// The name, kind and sizes of a catalog row.
+fn catalog_piece(series: &cc_core::PipeSeries, row: &cc_core::CatalogFitting) -> Value {
+    let word = crate::i18n::tr(cc_geom::fitting_catalog::kind_key(row.kind));
+    json!({
+        "name": cc_geom::fitting_catalog::fitting_name(&word, row, series),
+        "kind": row.kind.code(),
+        "size": row.size,
+        "size2": row.size2,
+    })
+}
+
+/// What `mep_fittings` adds for a fitting matched to its series' catalog.
+pub(crate) fn catalog_json(p: &Project, f: &cc_geom::mep_net::Fitting, item: &mut serde_json::Map<String, Value>) {
+    use cc_geom::fitting_catalog::MatchStatus;
+    let Some(m) = &f.catalog else { return };
+    let Some(series) = p.pipe_series.get(&m.series) else { return };
+    item.insert("series".into(), json!(series.code));
+    item.insert("status".into(), json!(m.status.code()));
+    item.insert("missing".into(), json!(m.is_missing()));
+    if let MatchStatus::Missing(reason) = m.status {
+        item.insert("reason".into(), json!(crate::i18n::tr(reason.key())));
+        item.insert("reason_code".into(), json!(reason.code()));
+        return;
+    }
+    let pieces: Vec<Value> =
+        m.pieces.iter().filter_map(|x| series.fittings.get(x.row)).map(|r| catalog_piece(series, r)).collect();
+    if let Some(main) = pieces.first().and_then(|v| v.as_object()) {
+        for k in ["name", "size", "size2"] {
+            item.insert(k.into(), main.get(k).cloned().unwrap_or(Value::Null));
+        }
+    }
+    if m.status == MatchStatus::Composite {
+        item.insert("pieces".into(), json!(pieces));
+    }
 }
 
 impl Command for MepFittings {
@@ -687,17 +729,21 @@ impl Command for MepFittings {
             let mm: Vec<u64> = f.diameters().iter().map(|d| (d * 1000.0).round() as u64).collect();
             let system = f.system.and_then(|id| p.system(id)).map(|s| s.label().to_string());
             let kind = f.kind.key().trim_start_matches("fitting-").to_string();
-            let item = json!({
+            let mut item = json!({
                 "category": refs::category_name(f.category),
                 "kind": kind,
                 "angle": f.kind.nominal_angle(),
                 "diameters_mm": mm,
                 "system": system,
             });
+            if let Some(o) = item.as_object_mut() {
+                catalog_json(p, f, o);
+            }
             let entry = counts.entry(item.to_string()).or_insert((item, 0));
             entry.1 += 1;
         }
         let total: usize = counts.values().map(|c| c.1).sum();
+        let missing: usize = counts.values().filter(|c| c.0["missing"] == json!(true)).map(|c| c.1).sum();
         let items: Vec<Value> = counts
             .into_values()
             .map(|(mut item, n)| {
@@ -707,7 +753,7 @@ impl Command for MepFittings {
                 item
             })
             .collect();
-        Ok(json!({"fittings": items, "total": total}))
+        Ok(json!({"fittings": items, "total": total, "missing": missing}))
     }
 }
 

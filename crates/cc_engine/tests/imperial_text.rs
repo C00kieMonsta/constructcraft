@@ -399,7 +399,7 @@ fn the_metric_scene_reads_as_before() {
         ";Ø 10,0 mm;2;3,00;6,00;3,70 kg;",
         ";0,20 m × 0,20 m;Rect 20x20;96,00 kg/m;3,00;0,120 m³;",
         ";1,00 m × 1,00 m;;1,00 m²;0,40;0,400 m³;",
-        ";Ø 20 mm;3,05;CW;0,0 %;",
+        ";Ø 20 mm;Ø 17,0 mm;Tubo PVC soldável;20 mm;3,05;3,05;CW;0,0 %;",
         ";Descida;Ø 8,0 mm;",
         ";1,20;8,3 %;",
         // The rebar totals: 2 bars of 3 m (3.70 kg) and 20 stirrups of 5 mm, each around a
