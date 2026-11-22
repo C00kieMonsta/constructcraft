@@ -1,0 +1,225 @@
+{%- comment -%}
+  Layout of every Markdown page of the site (guides, references, notes), in the
+  ConstructCraft Network look shared with the home page (index.html, a plain
+  page that does not use it). Styles: assets/css/network.css.
+{%- endcomment -%}
+{%- assign url = page.url -%}
+{%- if url contains "pt-BR" or url contains "automacao" or url contains "modelagem-de-componentes" -%}
+  {%- assign pt = true -%}
+{%- else -%}
+  {%- assign pt = false -%}
+{%- endif -%}
+{%- comment -%} The same page in the other language, when it has one. {%- endcomment -%}
+{%- case url -%}
+  {%- when "/interface.html" -%}{%- assign en_url = "/interface.html" -%}{%- assign pt_url = "/interface.pt-BR.html" -%}
+  {%- when "/interface.pt-BR.html" -%}{%- assign en_url = "/interface.html" -%}{%- assign pt_url = "/interface.pt-BR.html" -%}
+  {%- when "/automation.html" -%}{%- assign en_url = "/automation.html" -%}{%- assign pt_url = "/automacao.html" -%}
+  {%- when "/automacao.html" -%}{%- assign en_url = "/automation.html" -%}{%- assign pt_url = "/automacao.html" -%}
+  {%- when "/component-modeling.html" -%}{%- assign en_url = "/component-modeling.html" -%}{%- assign pt_url = "/modelagem-de-componentes.html" -%}
+  {%- when "/modelagem-de-componentes.html" -%}{%- assign en_url = "/component-modeling.html" -%}{%- assign pt_url = "/modelagem-de-componentes.html" -%}
+  {%- when "/api.html" -%}{%- assign en_url = "/api.html" -%}{%- assign pt_url = "/api.pt-BR.html" -%}
+  {%- when "/api.pt-BR.html" -%}{%- assign en_url = "/api.html" -%}{%- assign pt_url = "/api.pt-BR.html" -%}
+  {%- else -%}{%- assign en_url = nil -%}{%- assign pt_url = nil -%}
+{%- endcase -%}
+<!doctype html>
+<html lang="{% if pt %}pt-BR{% else %}en{% endif %}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b1220">
+{% seo %}
+<link rel="icon" type="image/png" href="{{ '/assets/icon.png' | relative_url }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ '/assets/css/network.css' | relative_url }}">
+</head>
+<body>
+<a class="skip" href="#content">{% if pt %}Pular para o conteúdo{% else %}Skip to content{% endif %}</a>
+
+<div class="netbar">
+  <div class="wrap">
+    <nav aria-label="{% if pt %}Rede ConstructCraft{% else %}ConstructCraft network{% endif %}">
+      <span class="label">{% if pt %}Rede{% else %}Network{% endif %}</span>
+      <a href="{{ '/' | relative_url }}">ConstructCraft</a>
+      <a href="https://3dcrafthouse.constructcraft.net/">3D CraftHouse</a>
+      <a href="https://marketplace.constructcraft.net/">Marketplace</a>
+      <a href="{{ '/#docs' | relative_url }}" aria-current="page">Docs</a>
+      <a href="{{ '/#community' | relative_url }}">{% if pt %}Comunidade{% else %}Community{% endif %}</a>
+    </nav>
+    <div class="tools">
+      {%- if en_url %}
+      <div class="lang-links" role="group" aria-label="Language / Idioma">
+        <a href="{{ en_url | relative_url }}" hreflang="en" lang="en"{% unless pt %} aria-current="true"{% endunless %}>EN</a>
+        <a href="{{ pt_url | relative_url }}" hreflang="pt-BR" lang="pt-BR"{% if pt %} aria-current="true"{% endif %}>PT</a>
+      </div>
+      {%- endif %}
+    </div>
+  </div>
+</div>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="{{ '/' | relative_url }}"><img src="{{ '/assets/icon.png' | relative_url }}" alt="" width="28" height="28">ConstructCraft <small>Docs</small></a>
+    <nav aria-label="{% if pt %}Seções{% else %}Sections{% endif %}">
+      <a href="{{ '/#features' | relative_url }}">{% if pt %}Produto{% else %}Product{% endif %}</a>
+      <a href="{{ '/#ecosystem' | relative_url }}">{% if pt %}Ecossistema{% else %}Ecosystem{% endif %}</a>
+      <a href="{{ '/#community' | relative_url }}">{% if pt %}Comunidade{% else %}Community{% endif %}</a>
+      <a href="https://github.com/francisreboucas/constructcraft">GitHub</a>
+    </nav>
+    <a class="btn-accent" href="{{ '/#download' | relative_url }}">{% if pt %}Baixar grátis{% else %}Download free{% endif %}</a>
+  </div>
+</header>
+
+<div class="wrap docs">
+  <aside class="side" aria-label="{% if pt %}Documentação{% else %}Documentation{% endif %}">
+    <details open>
+      <summary>{% if pt %}Navegar na documentação{% else %}Browse the docs{% endif %}</summary>
+      <div class="inner">
+        {%- if pt %}
+        <h2>Guias</h2>
+        <ul>
+          <li><a href="{{ '/interface.pt-BR.html' | relative_url }}"{% if url == "/interface.pt-BR.html" %} aria-current="page"{% endif %}>Interface</a></li>
+          <li><a href="{{ '/modelagem-de-componentes.html' | relative_url }}"{% if url == "/modelagem-de-componentes.html" %} aria-current="page"{% endif %}>Modelagem de componentes</a></li>
+          <li><a href="{{ '/automacao.html' | relative_url }}"{% if url == "/automacao.html" %} aria-current="page"{% endif %}>Automação</a></li>
+        </ul>
+        <h2>Referência</h2>
+        <ul>
+          <li><a href="{{ '/commands.html' | relative_url }}"{% if url == "/commands.html" %} aria-current="page"{% endif %}>Comandos do motor</a></li>
+          <li><a href="{{ '/api.pt-BR.html' | relative_url }}"{% if url == "/api.pt-BR.html" %} aria-current="page"{% endif %}>Visão geral da API</a></li>
+          <li><a href="{{ '/api/' | relative_url }}"{% if url contains "/api/" %} aria-current="page"{% endif %}>API por crate</a></li>
+        </ul>
+        <h2>Projeto</h2>
+        <ul>
+          <li><a href="https://github.com/francisreboucas/constructcraft/blob/main/CONTRIBUTING.md">Como contribuir</a></li>
+          <li><a href="https://github.com/francisreboucas/constructcraft/releases">Novidades</a></li>
+          <li><a href="https://discord.gg/y8ySJZjpK">Discord</a></li>
+        </ul>
+        {%- else %}
+        <h2>Guides</h2>
+        <ul>
+          <li><a href="{{ '/interface.html' | relative_url }}"{% if url == "/interface.html" %} aria-current="page"{% endif %}>Interface</a></li>
+          <li><a href="{{ '/component-modeling.html' | relative_url }}"{% if url == "/component-modeling.html" %} aria-current="page"{% endif %}>Component modeling</a></li>
+          <li><a href="{{ '/automation.html' | relative_url }}"{% if url == "/automation.html" %} aria-current="page"{% endif %}>Automation</a></li>
+        </ul>
+        <h2>Reference</h2>
+        <ul>
+          <li><a href="{{ '/commands.html' | relative_url }}"{% if url == "/commands.html" %} aria-current="page"{% endif %}>Engine commands</a></li>
+          <li><a href="{{ '/api.html' | relative_url }}"{% if url == "/api.html" %} aria-current="page"{% endif %}>API overview</a></li>
+          <li><a href="{{ '/api/' | relative_url }}"{% if url contains "/api/" %} aria-current="page"{% endif %}>API by crate</a></li>
+        </ul>
+        <h2>Project</h2>
+        <ul>
+          <li><a href="https://github.com/francisreboucas/constructcraft/blob/main/CONTRIBUTING.md">Contributing</a></li>
+          <li><a href="https://github.com/francisreboucas/constructcraft/releases">What's new</a></li>
+          <li><a href="https://discord.gg/y8ySJZjpK">Discord</a></li>
+        </ul>
+        {%- endif %}
+      </div>
+    </details>
+  </aside>
+
+  <main class="prose" id="content" tabindex="-1">
+    <div class="crumbs"><a href="{{ '/' | relative_url }}">ConstructCraft</a> / <a href="{{ '/#docs' | relative_url }}">Docs</a></div>
+    {{ content }}
+    <div class="page-foot">
+      <a href="https://github.com/francisreboucas/constructcraft/edit/main/docs/{{ page.path }}">{% if pt %}Editar esta página no GitHub{% else %}Edit this page on GitHub{% endif %}</a>
+      <a href="https://github.com/francisreboucas/constructcraft/issues/new">{% if pt %}Relatar um problema na documentação{% else %}Report a problem with the docs{% endif %}</a>
+    </div>
+  </main>
+
+  <nav class="toc" id="toc" aria-label="{% if pt %}Nesta página{% else %}On this page{% endif %}" hidden>
+    <h2>{% if pt %}Nesta página{% else %}On this page{% endif %}</h2>
+    <ul id="toc-list"></ul>
+  </nav>
+</div>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="cols">
+      <div class="about">
+        <a class="brand" href="{{ '/' | relative_url }}"><img src="{{ '/assets/icon.png' | relative_url }}" alt="" width="28" height="28">ConstructCraft</a>
+        <p>{% if pt %}BIM livre e de código aberto, escrito em Rust. Software livre sob a{% else %}Free and open source BIM, written in Rust. Free software under{% endif %} <a href="https://github.com/francisreboucas/constructcraft/blob/main/LICENSE">GPL-3.0-or-later</a>.</p>
+      </div>
+      <div class="col">
+        <strong>{% if pt %}Produto{% else %}Product{% endif %}</strong>
+        <a href="{{ '/#features' | relative_url }}">{% if pt %}Recursos{% else %}Features{% endif %}</a>
+        <a href="{{ '/#download' | relative_url }}">{% if pt %}Baixar{% else %}Download{% endif %}</a>
+        <a href="https://github.com/francisreboucas/constructcraft/releases">{% if pt %}Novidades{% else %}What's new{% endif %}</a>
+      </div>
+      <div class="col">
+        <strong>{% if pt %}Ecossistema{% else %}Ecosystem{% endif %}</strong>
+        <a href="https://3dcrafthouse.constructcraft.net/">3D CraftHouse</a>
+        <a href="https://marketplace.constructcraft.net/">Marketplace</a>
+        <a href="{{ '/commands.html' | relative_url }}">{% if pt %}Comandos{% else %}Commands{% endif %}</a>
+      </div>
+      <div class="col">
+        <strong>{% if pt %}Comunidade{% else %}Community{% endif %}</strong>
+        <a href="https://discord.gg/y8ySJZjpK">Discord</a>
+        <a href="https://github.com/francisreboucas/constructcraft">GitHub</a>
+        <a href="https://github.com/sponsors/francisreboucas">{% if pt %}Patrocinar{% else %}Sponsor{% endif %}</a>
+      </div>
+    </div>
+    <div class="base">
+      <span>© ConstructCraft contributors · GPL-3.0-or-later</span>
+      <span>constructcraft.net · 3dcrafthouse · marketplace</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  var prose = document.getElementById("content");
+  // Wide tables scroll inside their own box instead of widening the page.
+  prose.querySelectorAll("table").forEach(function (t) {
+    var box = document.createElement("div");
+    box.className = "table-wrap";
+    t.parentNode.insertBefore(box, t);
+    box.appendChild(t);
+  });
+  // Anchor links on headings, and the "On this page" list from the h2s.
+  var list = document.getElementById("toc-list");
+  var heads = prose.querySelectorAll("h2[id], h3[id], h4[id]");
+  var items = [];
+  heads.forEach(function (h) {
+    var a = document.createElement("a");
+    a.className = "anchor";
+    a.href = "#" + h.id;
+    a.setAttribute("aria-hidden", "true");
+    a.tabIndex = -1;
+    a.textContent = "#";
+    h.insertBefore(a, h.firstChild);
+    if (h.tagName === "H2") {
+      var li = document.createElement("li");
+      var link = document.createElement("a");
+      link.href = "#" + h.id;
+      link.textContent = h.textContent.replace(/^#/, "").trim();
+      li.appendChild(link);
+      list.appendChild(li);
+      items.push({ head: h, link: link });
+    }
+  });
+  if (items.length >= 2 && items.length <= 60) {
+    document.getElementById("toc").hidden = false;
+    if ("IntersectionObserver" in window) {
+      var current = null;
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (!e.isIntersecting) return;
+          items.forEach(function (it) { it.link.classList.toggle("on", it.head === e.target); });
+          current = e.target;
+        });
+      }, { rootMargin: "-90px 0px -70% 0px" });
+      items.forEach(function (it) { io.observe(it.head); });
+    }
+  }
+  // On phones the navigation starts closed.
+  if (window.matchMedia("(max-width: 860px)").matches) {
+    var d = document.querySelector(".side details");
+    if (d) d.open = false;
+  }
+})();
+</script>
+</body>
+</html>
