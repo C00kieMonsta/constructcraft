@@ -28,6 +28,8 @@ browser-duplicate = 复制
 browser-duplicate-detailing = 带详图复制
 browser-delete = 删除
 browser-place-on-sheet = 放置到当前图纸
+browser-move-to-sheet = 移至当前图纸
+browser-move-to-sheet-hint = 将视图从图纸 { $sheet } 移除，并放到当前图纸上。
 
 # Tab titles
 tab-floor-plan = 楼层平面：{ $name }
@@ -390,7 +392,7 @@ msg-opening-past-wall-end = 洞口会超出墙的端点
 msg-sketch-invalid = 边界至少需要 3 个点，且面积不能为零。
 msg-section-hint = 在平面图中单击两个点以定义剖面线。
 msg-no-wall-loop = 在此标高上未找到封闭的墙体环。
-msg-view-already-placed = 此视图已放置在图纸上。
+msg-view-already-placed = 此视图已在图纸 { $sheet } 上。
 msg-level-in-use = 该标高上有图元，无法删除。
 msg-new-project = 已创建新项目。
 msg-project-closed = 项目已关闭。

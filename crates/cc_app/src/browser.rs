@@ -267,9 +267,24 @@ fn view_row(ui: &mut Ui, state: &mut AppState, id: ViewId, lasts: &[bool]) {
             .filter(|s| matches!(state.project().view(*s).map(|v| &v.kind), Some(ViewKind::Sheet { .. })) && *s != id)
         {
             let placeable = state.project().view(id).is_some_and(|v| v.placeable());
-            if placeable && ui.button(t!("browser-place-on-sheet")).clicked() {
-                actions::place_on_sheet(state, sheet, id);
-                ui.close();
+            // A view is on one sheet at most: one on another sheet is moved here.
+            match actions::sheet_of(state.project(), id) {
+                _ if !placeable => {}
+                Some(on) if on == sheet => {}
+                Some(on) => {
+                    let from = state.view_title(on);
+                    let button = ui.button(t!("browser-move-to-sheet"));
+                    if button.on_hover_text(t!("browser-move-to-sheet-hint", "sheet" => from)).clicked() {
+                        actions::place_on_sheet(state, sheet, id, true);
+                        ui.close();
+                    }
+                }
+                None => {
+                    if ui.button(t!("browser-place-on-sheet")).clicked() {
+                        actions::place_on_sheet(state, sheet, id, false);
+                        ui.close();
+                    }
+                }
             }
         }
         ui.separator();

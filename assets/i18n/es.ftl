@@ -28,6 +28,8 @@ browser-duplicate = Duplicar
 browser-duplicate-detailing = Duplicar con detalles
 browser-delete = Eliminar
 browser-place-on-sheet = Colocar en la hoja activa
+browser-move-to-sheet = Mover a la hoja activa
+browser-move-to-sheet-hint = Quita la vista de la hoja { $sheet } y la coloca en la hoja activa.
 
 # Títulos de pestañas
 tab-floor-plan = Planta: { $name }
@@ -390,7 +392,7 @@ msg-opening-past-wall-end = La abertura sobrepasaría el extremo del muro
 msg-sketch-invalid = El contorno necesita al menos 3 puntos y un área distinta de cero.
 msg-section-hint = Haga clic en dos puntos de una planta para definir la línea de sección.
 msg-no-wall-loop = No se encontró ningún contorno cerrado de muros en este nivel.
-msg-view-already-placed = Esta vista ya está colocada en una hoja.
+msg-view-already-placed = Esta vista ya está en la hoja { $sheet }.
 msg-level-in-use = El nivel tiene elementos y no se puede eliminar.
 msg-new-project = Nuevo proyecto creado.
 msg-project-closed = Proyecto cerrado.

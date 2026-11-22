@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- A view already on another sheet can be moved to the active sheet (#451). The project browser's menu offers *Move to active sheet* for it instead of *Place on active sheet*, with the sheet it is on in the tooltip, and `sheet_place_view` takes `move_from_sheet`; the move is one undo step. Placing such a view without it is still refused, and the message now names the sheet it is on.
 - The metric template's bar types carry their steel grade (CA-60 for Ø 5,0 mm, CA-50 from Ø 6,3 mm up), and it has a Ø 6,3 mm type, the usual stirrup size, so imported Ø6.3 bars take it instead of a new type named after the file (#437); the imperial template gains a #7 bar to match. Both are added last, so the other template ids stay (the showcase macro's ids move up by one). Existing projects keep their types.
 - Plugin commands run from the ribbon, the *Plugin Commands* menu and the palette open their form instead of the palette's JSON arguments.
 - A plugin's limits are checked by the engine for every command it runs, including those run by a graph or a macro it starts, rather than only for the commands its Lua code calls.

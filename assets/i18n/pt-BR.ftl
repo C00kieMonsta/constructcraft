@@ -28,6 +28,8 @@ browser-duplicate = Duplicar
 browser-duplicate-detailing = Duplicar com detalhamento
 browser-delete = Excluir
 browser-place-on-sheet = Inserir na folha ativa
+browser-move-to-sheet = Mover para a folha ativa
+browser-move-to-sheet-hint = Tira a vista da folha { $sheet } e a coloca na folha ativa.
 
 # Títulos de abas
 tab-floor-plan = Planta: { $name }
@@ -390,7 +392,7 @@ msg-opening-past-wall-end = A abertura passaria do fim da parede
 msg-sketch-invalid = O contorno precisa de pelo menos 3 pontos e área maior que zero.
 msg-section-hint = Clique dois pontos em uma planta para definir a linha de corte.
 msg-no-wall-loop = Não foi encontrado um contorno fechado de paredes neste nível.
-msg-view-already-placed = Esta vista já está em uma folha.
+msg-view-already-placed = Esta vista já está na folha { $sheet }.
 msg-level-in-use = O nível possui elementos e não pode ser excluído.
 msg-new-project = Novo projeto criado.
 msg-project-closed = Projeto fechado.

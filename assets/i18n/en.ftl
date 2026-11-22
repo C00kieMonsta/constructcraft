@@ -28,6 +28,8 @@ browser-duplicate = Duplicate
 browser-duplicate-detailing = Duplicate with Detailing
 browser-delete = Delete
 browser-place-on-sheet = Place on active sheet
+browser-move-to-sheet = Move to active sheet
+browser-move-to-sheet-hint = Takes the view off sheet { $sheet } and places it on the active sheet.
 
 # Tab titles
 tab-floor-plan = Floor Plan: { $name }
@@ -390,7 +392,7 @@ msg-opening-past-wall-end = The opening would run past the end of the wall
 msg-sketch-invalid = The boundary needs at least 3 points and a non-zero area.
 msg-section-hint = Click two points in a plan to define the section line.
 msg-no-wall-loop = No closed loop of walls was found on this level.
-msg-view-already-placed = This view is already placed on a sheet.
+msg-view-already-placed = This view is already on sheet { $sheet }.
 msg-level-in-use = The level has elements and cannot be deleted.
 msg-new-project = New project created.
 msg-project-closed = Project closed.

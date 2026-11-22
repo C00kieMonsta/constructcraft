@@ -3449,13 +3449,14 @@ No parameters.
 
 ### `sheet_place_view`
 
-*edit* — Place a view on a sheet at `center` (paper millimeters; default left of center). A view can be on only one sheet; sheets cannot be placed.
+*edit* — Place a view on a sheet at `center` (paper millimeters; default left of center). A view can be on only one sheet; sheets cannot be placed. With `move_from_sheet`, a view already on another sheet is moved here.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
 | `sheet` | id or name | required | A level, type, view or material: its numeric id or its name. |
 | `view` | id or name | required | A level, type, view or material: its numeric id or its name. |
 | `center` | [x, y] | optional | Center of the viewport on the sheet, paper millimeters. |
+| `move_from_sheet` | boolean | optional | Move the view here when it is already on another sheet (one undo step), instead of refusing. |
 
 ### `sheet_remove_viewport`
 

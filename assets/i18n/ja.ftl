@@ -28,6 +28,8 @@ browser-duplicate = 複製
 browser-duplicate-detailing = 詳細付きで複製
 browser-delete = 削除
 browser-place-on-sheet = アクティブなシートに配置
+browser-move-to-sheet = アクティブなシートへ移動
+browser-move-to-sheet-hint = ビューをシート { $sheet } から外し、アクティブなシートに配置します。
 
 # Tab titles
 tab-floor-plan = 平面図: { $name }
@@ -390,7 +392,7 @@ msg-opening-past-wall-end = 開口部が壁の端を越えます
 msg-sketch-invalid = 境界には少なくとも 3 つのポイントが必要であり、面積がゼロ以外である必要があります。
 msg-section-hint = 平面図で 2 つのポイントをクリックして断面線を定義します。
 msg-no-wall-loop = このレベルに閉じられた壁のループが見つかりません。
-msg-view-already-placed = このビューはすでにシートに配置されています。
+msg-view-already-placed = このビューはすでにシート { $sheet } にあります。
 msg-level-in-use = このレベルには要素が含まれているため削除できません。
 msg-new-project = 新規プロジェクトを作成しました。
 msg-project-closed = プロジェクトを閉じました。

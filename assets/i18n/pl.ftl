@@ -28,6 +28,8 @@ browser-duplicate = Duplikuj
 browser-duplicate-detailing = Duplikuj ze szczegółami
 browser-delete = Usuń
 browser-place-on-sheet = Umieść na aktywnym arkuszu
+browser-move-to-sheet = Przenieś na aktywny arkusz
+browser-move-to-sheet-hint = Zdejmuje widok z arkusza { $sheet } i umieszcza go na aktywnym arkuszu.
 
 # Tytuły kart
 tab-floor-plan = Rzut kondygnacji: { $name }
@@ -390,7 +392,7 @@ msg-opening-past-wall-end = Otwór wyszedłby poza koniec ściany
 msg-sketch-invalid = Obrys wymaga co najmniej 3 punktów i niezerowego pola.
 msg-section-hint = Kliknij dwa punkty na rzucie, aby wyznaczyć linię przekroju.
 msg-no-wall-loop = Nie znaleziono zamkniętej pętli ścian na tym poziomie.
-msg-view-already-placed = Ten widok jest już umieszczony na arkuszu.
+msg-view-already-placed = Ten widok jest już na arkuszu { $sheet }.
 msg-level-in-use = Poziom zawiera elementy i nie może zostać usunięty.
 msg-new-project = Utworzono nowy projekt.
 msg-project-closed = Projekt zamknięty.
