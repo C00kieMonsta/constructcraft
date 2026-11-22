@@ -2086,14 +2086,14 @@ impl<'a> Exporter<'a> {
             let conductor = f.category == cc_core::Category::LightningConductor;
             let (entity, kind, name) = match (pipe, f.kind) {
                 // Lightning conductors meet in clamps: connectors, junctions where they branch.
-                (_, K::Tee | K::Cross) if conductor => ("IFCCABLEFITTING", "JUNCTION", "Junction"),
+                (_, K::Tee | K::Wye | K::Cross) if conductor => ("IFCCABLEFITTING", "JUNCTION", "Junction"),
                 _ if conductor => ("IFCCABLEFITTING", "CONNECTOR", "Connector"),
                 (true, K::Elbow { .. }) => ("IFCPIPEFITTING", "BEND", "Elbow"),
-                (true, K::Tee | K::Cross) => ("IFCPIPEFITTING", "JUNCTION", "Junction"),
+                (true, K::Tee | K::Wye | K::Cross) => ("IFCPIPEFITTING", "JUNCTION", "Junction"),
                 (true, K::Coupling) => ("IFCPIPEFITTING", "CONNECTOR", "Coupling"),
                 (true, K::Reducer) => ("IFCPIPEFITTING", "TRANSITION", "Reducer"),
                 (false, K::Elbow { .. }) => ("IFCCABLECARRIERFITTING", "BEND", "Bend"),
-                (false, K::Tee) => ("IFCCABLECARRIERFITTING", "TEE", "Tee"),
+                (false, K::Tee | K::Wye) => ("IFCCABLECARRIERFITTING", "TEE", "Tee"),
                 (false, K::Cross) => ("IFCCABLECARRIERFITTING", "CROSS", "Cross"),
                 (false, K::Reducer) => ("IFCCABLECARRIERFITTING", "REDUCER", "Reducer"),
                 (false, K::Coupling) => ("IFCCABLECARRIERFITTING", "NOTDEFINED", "Coupling"),

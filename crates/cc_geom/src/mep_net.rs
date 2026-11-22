@@ -7,7 +7,9 @@
 //! conduit (they meet in boxes), cable trays to any cable tray. Fittings
 //! are derived like wall joins: an elbow where two runs turn, a coupling
 //! (or a reducer, between diameters or tray widths) where they continue
-//! straight, a tee where three branches meet and a cross from four.
+//! straight, a tee where three branches meet (a wye where a pipe branch meets
+//! the run at 45°) and a cross from four. Pipe fittings whose runs are all of
+//! one pipe series are matched to its catalog ([`crate::fitting_catalog`]).
 
 use crate::{SegmentGeom, ValveGeom};
 use cc_core::{Category, ElementId, ElementKind, LevelId, MepData, Project, SystemId};
@@ -35,6 +37,8 @@ pub enum FittingKind {
     /// Two runs of different diameters continuing straight.
     Reducer,
     Tee,
+    /// Three pipes where the branch meets the run at 45° (± [`crate::fitting_catalog::ANGLE_TOL`]).
+    Wye,
     Cross,
 }
 
@@ -45,6 +49,7 @@ impl FittingKind {
             FittingKind::Coupling => "fitting-coupling",
             FittingKind::Reducer => "fitting-reducer",
             FittingKind::Tee => "fitting-tee",
+            FittingKind::Wye => "fitting-wye",
             FittingKind::Cross => "fitting-cross",
         }
     }
@@ -75,6 +80,11 @@ pub struct Fitting {
     pub runs: Vec<ElementId>,
     /// Unit direction and diameter of each branch leaving the node.
     pub branches: Vec<(DVec3, f64)>,
+    /// The run of each branch.
+    pub branch_runs: Vec<ElementId>,
+    /// The match in the catalog of the runs' pipe series (None when the
+    /// runs are not all pipes of one series).
+    pub catalog: Option<crate::fitting_catalog::FittingMatch>,
 }
 
 impl Fitting {
@@ -141,6 +151,23 @@ fn group(e: &cc_core::Element) -> Option<(Category, Option<SystemId>)> {
         ElementKind::LightningConductor(_) => Some((Category::LightningConductor, None)),
         _ => None,
     }
+}
+
+/// Whether three branches are a run and a branch meeting it at 45°: the
+/// most opposite pair is straight within the angle tolerance and the third
+/// is 45° from one of them.
+fn is_wye(b: &[(ElementId, DVec3, f64)]) -> bool {
+    use crate::fitting_catalog::ANGLE_TOL;
+    let [x, y, z] = b else { return false };
+    let pairs = [(x, y, z), (x, z, y), (y, z, x)];
+    let Some((i, j, k)) = pairs.iter().min_by(|p, q| p.0.1.dot(p.1.1).total_cmp(&q.0.1.dot(q.1.1))) else {
+        return false;
+    };
+    if 180.0 - i.1.angle_between(j.1).to_degrees() > ANGLE_TOL {
+        return false;
+    }
+    let angle = k.1.angle_between(i.1).min(k.1.angle_between(j.1)).to_degrees();
+    (angle - 45.0).abs() <= ANGLE_TOL
 }
 
 /// A grid cell of one group's nodes.
@@ -282,11 +309,17 @@ impl MepNetwork {
                         FittingKind::Coupling
                     }
                 }
+                3 if node.category == Category::Pipe && is_wye(&b) => FittingKind::Wye,
                 3 => FittingKind::Tee,
                 _ => FittingKind::Cross,
             };
             let mut runs: Vec<ElementId> = b.iter().map(|x| x.0).collect();
             runs.dedup();
+            let dirs: Vec<DVec3> = b.iter().map(|x| x.1).collect();
+            let branch_runs: Vec<ElementId> = b.iter().map(|x| x.0).collect();
+            let catalog = (node.category == Category::Pipe)
+                .then(|| crate::fitting_catalog::match_fitting(project, kind, node.point, &dirs, &branch_runs))
+                .flatten();
             net.fittings.push(Fitting {
                 kind,
                 category: node.category,
@@ -296,6 +329,8 @@ impl MepNetwork {
                 system: node.system,
                 runs,
                 branches: b.iter().map(|x| (x.1, x.2)).collect(),
+                branch_runs,
+                catalog,
             });
         }
         // Fixtures on pipe nodes, devices on conduit nodes: each connector on

@@ -249,6 +249,11 @@ impl crate::ModelGeometry {
                 let h = t.height * 0.5;
                 let (a, b) = (f.point - dir * w, f.point + dir * w);
                 solid.add_polygons(bar(a, b, section_frame(dir), [-w, w, -h, -h + k]));
+            } else if let Some(m) = f.catalog.as_ref().filter(|m| !m.pieces.is_empty()) {
+                // Pipe fittings of the catalog: each piece's body.
+                for b in m.pieces.iter().flat_map(|p| &p.bodies) {
+                    solid.add_polygons(cylinder(b.a, b.b, b.radius));
+                }
             } else {
                 // Pipes and conduits: a socket a little wider than the pipe on each branch, part of the first run.
                 for &(dir, d) in &f.branches {
@@ -257,7 +262,34 @@ impl crate::ModelGeometry {
             }
             self.solids.push(solid);
         }
+        self.pipe_cuts = pipe_cut_lengths(&self.mep, &self.segments);
     }
+
+    /// The cut length of pipe `id`: its length less the laying lengths of
+    /// the catalog fittings on it (None when it is not a pipe run).
+    pub fn pipe_cut_length(&self, id: ElementId) -> Option<f64> {
+        self.pipe_cuts.get(&id).copied()
+    }
+}
+
+/// Each pipe run's length less the laying lengths of the matched (or
+/// composite) catalog fittings at its ends and on its middle, never below
+/// zero. Pipe bodies still run to the nodes; only the takeoff changes.
+pub fn pipe_cut_lengths(
+    net: &crate::mep_net::MepNetwork,
+    segments: &std::collections::BTreeMap<ElementId, SegmentGeom>,
+) -> std::collections::BTreeMap<ElementId, f64> {
+    let mut cuts: std::collections::BTreeMap<ElementId, f64> =
+        segments.iter().filter(|(_, g)| g.tray.is_none()).map(|(id, g)| (*id, g.length())).collect();
+    for f in net.fittings.iter().filter(|f| f.category == cc_core::Category::Pipe) {
+        let Some(m) = f.catalog.as_ref().filter(|m| !m.is_missing()) else { continue };
+        for (run, laying) in f.branch_runs.iter().zip(&m.laying) {
+            if let Some(c) = cuts.get_mut(run) {
+                *c = (*c - laying).max(0.0);
+            }
+        }
+    }
+    cuts
 }
 
 #[cfg(test)]

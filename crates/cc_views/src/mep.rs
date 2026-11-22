@@ -254,7 +254,7 @@ fn fitting(d: &mut Drawing2D, project: &Project, f: &cc_geom::mep_net::Fitting, 
     let id = f.runs.first().copied();
     let c = DVec2::new(f.point.x, f.point.y);
     match (f.category, f.kind) {
-        (cc_core::Category::Conduit, K::Tee | K::Cross) => {
+        (cc_core::Category::Conduit, K::Tee | K::Wye | K::Cross) => {
             let h = 1.5 * mm;
             let square =
                 vec![c + DVec2::new(-h, -h), c + DVec2::new(h, -h), c + DVec2::new(h, h), c + DVec2::new(-h, h)];

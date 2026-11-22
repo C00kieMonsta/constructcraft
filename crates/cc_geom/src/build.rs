@@ -179,6 +179,10 @@ pub struct ModelGeometry {
     pub valves: BTreeMap<ElementId, crate::mep::ValveGeom>,
     /// Where pipes, conduits and cable trays meet: nodes, fittings, valves and attached fixtures and devices.
     pub mep: crate::mep_net::MepNetwork,
+    /// Cut length of each pipe, conduit and lightning conductor run: its
+    /// length less the laying lengths of the catalog fittings on it
+    /// ([`Self::pipe_cut_length`]).
+    pub pipe_cuts: BTreeMap<ElementId, f64>,
     /// Foundations: plan outline and elevations (strips meet at corners like beams).
     pub foundations: BTreeMap<ElementId, FoundationGeom>,
     /// Boundary of each enclosed room (missing when the room is not enclosed).
