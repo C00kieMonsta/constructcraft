@@ -28,8 +28,8 @@ impl Cell {
 pub struct Table {
     pub headers: Vec<&'static str>,
     pub rows: Vec<Row>,
-    /// Totals row aligned with `headers` (the first cell holds the row count);
-    /// empty when totals are hidden.
+    /// Totals row aligned with `headers` (the first cell holds the row count,
+    /// unless its column is totaled); empty when totals are hidden.
     pub totals: Vec<String>,
     /// A table under this one (a bending schedule's summary per diameter).
     pub summary: Option<Box<Table>>,
@@ -67,8 +67,8 @@ pub struct Row {
     pub heading: bool,
     /// A bar's shape drawn in cell `.0` instead of its text (bending schedules).
     pub sketch: Option<(usize, crate::bending::BarSketch)>,
-    /// A group's footer: how many elements it holds in its first cell, and
-    /// its totals in the totaled columns.
+    /// A group's footer: how many elements it holds in its first cell (unless
+    /// that column is totaled), and its totals in the totaled columns.
     pub footer: bool,
 }
 
@@ -883,6 +883,9 @@ pub fn schedule_where(
             })
             .collect()
     };
+    // The count of a footer or the totals row goes in the first cell, unless
+    // that column is totaled: its total is not written over (#434).
+    let count_first = !shown.first().is_some_and(|&i| totaled(i));
     // A footer: the count of its elements first, then the totals of the totaled columns.
     let footer_of = |element: cc_core::ElementId, count: usize, sums: &[f64]| {
         let mut cells: Vec<Cell> = shown
@@ -891,7 +894,7 @@ pub fn schedule_where(
                 Cell::Text(if totaled(i) { total_text(i, sums.get(i).copied().unwrap_or(0.0)) } else { String::new() })
             })
             .collect();
-        if let Some(first) = cells.first_mut() {
+        if let Some(first) = cells.first_mut().filter(|_| count_first) {
             *first = Cell::Text(count.to_string());
         }
         Row { footer: true, ..Row::new(element, cells) }
@@ -959,7 +962,7 @@ pub fn schedule_where(
                 total_text(i, items.iter().filter_map(|item| item.sums.get(i)).sum())
             })
             .collect();
-        if let Some(first) = totals.first_mut() {
+        if let Some(first) = totals.first_mut().filter(|_| count_first) {
             *first = items.iter().map(|item| item.count).sum::<usize>().to_string();
         }
         totals

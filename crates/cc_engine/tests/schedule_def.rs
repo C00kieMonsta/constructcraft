@@ -168,6 +168,28 @@ fn sorting_runs_in_levels_with_headings_and_footers() {
     assert_eq!(fails(&mut s, "schedule_set", json!({"view": view, "sorting": many})), ErrorCode::InvalidArguments);
 }
 
+/// When the first column is totaled, footers and the totals row show its
+/// total there, not the element count over it (#434).
+#[test]
+fn a_totaled_first_column_keeps_its_total() {
+    let mut s = Session::default();
+    let (view, levels) = walls(&mut s);
+    let m = |v: f64| cc_views::format::meters(v);
+    let desc = levels[0] > levels[1];
+    let level = json!({"field": "Level", "descending": desc, "footer": true});
+    let def = json!({"view": view, "fields": ["Length"], "sorting": [level], "itemize": false});
+    run(&mut s, "schedule_set", def);
+    let got = rows(&mut s, view);
+    let footers: Vec<String> = got.iter().filter(|r| r.1).map(|r| r.2[0].clone()).collect();
+    assert_eq!(footers, [m(10.0), m(8.0)], "{got:?}");
+    let table = run(&mut s, "schedule_table", json!({"view": view}));
+    assert_eq!(table["totals"], json!([m(18.0)]));
+    // A first column that is not totaled still holds the count.
+    run(&mut s, "schedule_set", json!({"view": view, "fields": ["Level", "Length"]}));
+    let table = run(&mut s, "schedule_table", json!({"view": view}));
+    assert_eq!(table["totals"], json!(["5", m(18.0)]));
+}
+
 #[test]
 fn rows_may_stand_for_the_elements_alike() {
     let mut s = Session::default();
