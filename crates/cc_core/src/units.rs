@@ -295,6 +295,10 @@ pub struct Units {
     pub currency: String,
     pub currency_decimals: u8,
     pub style: NumberStyle,
+    /// Write bar diameters with a decimal point (`Ø12.5`) whatever the
+    /// number style, as many drawings do while other numbers keep the
+    /// comma (#437).
+    pub diameter_point: bool,
 }
 
 impl Default for Units {
@@ -308,6 +312,7 @@ impl Default for Units {
             currency: String::new(),
             currency_decimals: 2,
             style: NumberStyle::Language,
+            diameter_point: false,
         }
     }
 }

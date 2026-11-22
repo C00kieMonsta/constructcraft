@@ -12,6 +12,8 @@ use glam::DVec2;
 
 /// A name key and a value.
 pub(crate) type Sized1 = (&'static str, f64);
+/// A bar type: key, diameter, steel grade (empty for none).
+pub(crate) type Rebar = (&'static str, f64, &'static str);
 /// A name key and two values.
 pub(crate) type Sized2 = (&'static str, f64, f64);
 /// A name key and three values.
@@ -61,8 +63,10 @@ pub(crate) struct TemplateSpec {
     pub column_steel_tube: Sized2,
     /// Steel I beam: key, (width, height, web, flange).
     pub beam_steel_i: (&'static str, [f64; 4]),
-    /// Reinforcing bars: key, diameter.
-    pub rebars: [Sized1; 5],
+    /// Reinforcing bars: key, diameter, steel grade (empty for none).
+    pub rebars: [Rebar; 5],
+    /// One more bar type, added last so the template's other ids stay (#437).
+    pub extra_rebar: Rebar,
     /// Pad, strip and slab footings: key, width, length, thickness.
     pub footings: [Sized3; 3],
     /// Stair: key, width, maximum riser, tread.
@@ -134,13 +138,16 @@ const METRIC: TemplateSpec = TemplateSpec {
     column_steel_h: ("tpl-type-column-steel-h", 0.2, 0.009, 0.015),
     column_steel_tube: ("tpl-type-column-steel-tube", 0.15, 0.006),
     beam_steel_i: ("tpl-type-beam-steel-i", [0.15, 0.3, 0.0071, 0.0107]),
+    // The usual bar diameters of NBR 7480: CA-60 wire for 5.0 mm, CA-50
+    // bars from 6.3 mm up (#437).
     rebars: [
-        ("tpl-type-rebar-5", 0.005),
-        ("tpl-type-rebar-8", 0.008),
-        ("tpl-type-rebar-10", 0.010),
-        ("tpl-type-rebar-12", 0.0125),
-        ("tpl-type-rebar-16", 0.016),
+        ("tpl-type-rebar-5", 0.005, "CA-60"),
+        ("tpl-type-rebar-8", 0.008, "CA-50"),
+        ("tpl-type-rebar-10", 0.010, "CA-50"),
+        ("tpl-type-rebar-12", 0.0125, "CA-50"),
+        ("tpl-type-rebar-16", 0.016, "CA-50"),
     ],
+    extra_rebar: ("tpl-type-rebar-6", 0.0063, "CA-50"),
     footings: [
         ("tpl-type-footing-pad", 1.0, 1.0, 0.4),
         ("tpl-type-footing-strip", 0.2, 1.0, 0.4),
@@ -210,12 +217,13 @@ const IMPERIAL: TemplateSpec = TemplateSpec {
     beam_steel_i: ("tpl-imp-type-beam-steel-i", [6.5 * INCH, 12.0 * INCH, 0.25 * INCH, 0.375 * INCH]),
     // Bar sizes #n are n/8" across.
     rebars: [
-        ("tpl-imp-type-rebar-3", 0.375 * INCH),
-        ("tpl-imp-type-rebar-4", 0.5 * INCH),
-        ("tpl-imp-type-rebar-5", 0.625 * INCH),
-        ("tpl-imp-type-rebar-6", 0.75 * INCH),
-        ("tpl-imp-type-rebar-8", 1.0 * INCH),
+        ("tpl-imp-type-rebar-3", 0.375 * INCH, ""),
+        ("tpl-imp-type-rebar-4", 0.5 * INCH, ""),
+        ("tpl-imp-type-rebar-5", 0.625 * INCH, ""),
+        ("tpl-imp-type-rebar-6", 0.75 * INCH, ""),
+        ("tpl-imp-type-rebar-8", 1.0 * INCH, ""),
     ],
+    extra_rebar: ("tpl-imp-type-rebar-7", 0.875 * INCH, ""),
     footings: [
         ("tpl-imp-type-footing-pad", 3.0 * FOOT, 3.0 * FOOT, 12.0 * INCH),
         ("tpl-imp-type-footing-strip", 8.0 * INCH, 3.0 * FOOT, 16.0 * INCH),
@@ -445,10 +453,16 @@ mod tests {
         assert_eq!(p.units, crate::Units::default());
         let levels: Vec<_> = p.levels.iter().map(|l| (l.id, l.elevation)).collect();
         assert_eq!(levels, [(LevelId(1), 0.0), (LevelId(2), 3.0)]);
-        assert_eq!((p.types.len(), p.views.len(), p.materials.len(), p.profiles.len()), (76, 15, 13, 6));
-        // The two pipe series take ids 110 and 111, the niche type (issue #304) 112 and
-        // the concrete wall types (issue #366) the last ones.
-        assert_eq!(p.next_id(), 116);
+        assert_eq!((p.types.len(), p.views.len(), p.materials.len(), p.profiles.len()), (77, 15, 13, 6));
+        // The two pipe series take ids 110 and 111, the niche type (issue #304) 112,
+        // the concrete wall types (issue #366) 113 to 115 and the Ø 6,3 mm bar
+        // type (issue #437) the last one.
+        assert_eq!(p.next_id(), 117);
+        let bar = &p.types[&ElementTypeId(116)];
+        assert_eq!((bar.category(), bar.name.as_str()), (Category::Rebar, "Barra Ø 6,3 mm"));
+        assert!(
+            matches!(&bar.data, TypeData::Rebar { diameter, grade, .. } if *diameter == 0.0063 && grade == "CA-50")
+        );
         for (id, name, thickness) in [
             (113, "Parede de concreto 15 cm", 0.15),
             (114, "Parede de concreto 20 cm", 0.2),

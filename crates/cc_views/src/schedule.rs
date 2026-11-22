@@ -569,7 +569,7 @@ fn value_cached(project: &Project, geom: &ModelGeometry, e: &Element, field: Sch
         F::Diameter => {
             match valve_pipe(project, e).map_or(ty, |pipe| project.element_type(pipe.type_id)).map(|t| &t.data) {
                 Some(TypeData::Rebar { diameter, .. } | TypeData::LightningConductor { diameter, .. }) => {
-                    let text = format!("Ø {}", format::size(*diameter, format::MetricSize::Mm(1)));
+                    let text = format!("Ø {}", format::bar_size(*diameter));
                     Value::Measured(text, *diameter)
                 }
                 Some(TypeData::Pipe { diameter, .. } | TypeData::Conduit { diameter, .. }) => {

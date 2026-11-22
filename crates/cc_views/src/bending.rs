@@ -270,7 +270,7 @@ pub fn draw_sketch(d: &mut Drawing2D, sketch: &BarSketch, (lo, hi): (DVec2, DVec
 
 /// A rebar diameter as schedules write it (`Ø 12,5 mm`, `Ø 1/2"`).
 pub fn diameter_text(diameter: f64) -> String {
-    format!("Ø {}", format::size(diameter, format::MetricSize::Mm(1)))
+    format!("Ø {}", format::bar_size(diameter))
 }
 
 /// One row of a bending schedule: the bars of one mark (in one partition

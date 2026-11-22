@@ -596,9 +596,30 @@ pub fn trimmed(value: f64, decimals: usize) -> String {
     trimmed_with(&u, c, value, decimals)
 }
 
+/// The units and decimal symbol bar diameters are written with: a decimal
+/// point when the project asks for one (`Units::diameter_point`, #437).
+fn bar_current() -> (Units, bool) {
+    let (mut units, comma) = current();
+    if units.diameter_point {
+        units.style = cc_core::NumberStyle::PointDecimal;
+    }
+    (units, comma)
+}
+
 /// A bar diameter as bar tags write it: `Ø12.5` (millimeters), `Ø1/2"` in imperial projects.
 pub fn bar_diameter(meters: f64) -> String {
-    if imperial() { format!("Ø{}", inch_size(meters)) } else { format!("Ø{}", trimmed(meters * 1000.0, 1)) }
+    if imperial() {
+        return format!("Ø{}", inch_size(meters));
+    }
+    let (units, comma) = bar_current();
+    format!("Ø{}", trimmed_with(&units, comma, meters * 1000.0, 1))
+}
+
+/// A bar diameter as schedules write it: `12,5 mm` (or `12.5 mm` with
+/// `Units::diameter_point`), `1/2"` in imperial projects.
+pub fn bar_size(meters: f64) -> String {
+    let (units, comma) = bar_current();
+    size_with(&units, comma, meters, MetricSize::Mm(1))
 }
 
 /// The scale 1:`n` in the current units (see [`scale_with`]).
@@ -695,6 +716,27 @@ pub fn elevation(value: f64) -> String {
 mod tests {
     use super::*;
     use cc_core::{LengthUnit, NumberStyle, SlopeUnit};
+
+    /// Bar diameters follow the number style unless the project asks for
+    /// a decimal point, which leaves every other number alone (#437).
+    #[test]
+    fn bar_diameters_may_take_a_point() {
+        set_decimal_comma(true);
+        let mut u = Units { style: NumberStyle::CommaDecimal, ..Units::default() };
+        set_units(&u);
+        assert_eq!(bar_diameter(0.0125), "Ø12,5");
+        assert_eq!(bar_size(0.0063), "6,3 mm");
+        u.diameter_point = true;
+        set_units(&u);
+        assert_eq!(bar_diameter(0.0125), "Ø12.5");
+        assert_eq!(bar_diameter(0.010), "Ø10");
+        assert_eq!(bar_size(0.0063), "6.3 mm");
+        assert_eq!(length(0.8), "0,80 m");
+        assert_eq!(size(0.0125, MetricSize::Mm(1)), "12,5 mm");
+        // Imperial bars keep their fractions.
+        set_units(&Units { diameter_point: true, ..Units::imperial() });
+        assert_eq!(bar_diameter(0.5 * cc_core::units::INCH), "Ø1/2\"");
+    }
 
     #[test]
     fn defaults_match_the_language() {

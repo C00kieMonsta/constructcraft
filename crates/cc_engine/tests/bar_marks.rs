@@ -202,6 +202,51 @@ fn grades_part_marks_and_the_type_gives_the_mass() {
     assert!(s.execute("type_set", bad).is_err());
 }
 
+/// The template's bar types carry their steel grade, Ø 6,3 mm among them,
+/// and the bending schedule writes it; with `diameter_point` the schedule
+/// writes diameters with a point and every other number with the comma (#437).
+#[test]
+fn template_bars_have_grades_and_diameters_may_take_a_point() {
+    use cc_core::{Category, TypeData};
+    let mut s = Session::default();
+    let grades: BTreeMap<String, String> = s
+        .project()
+        .types_of(Category::Rebar)
+        .filter_map(|t| match &t.data {
+            TypeData::Rebar { diameter, grade, .. } => Some((format!("{:.1}", diameter * 1000.0), grade.clone())),
+            _ => None,
+        })
+        .collect();
+    let expected = [("5.0", "CA-60"), ("6.3", "CA-50"), ("8.0", "CA-50"), ("10.0", "CA-50"), ("12.5", "CA-50")];
+    for (d, g) in expected.into_iter().chain([("16.0", "CA-50")]) {
+        assert_eq!(grades.get(d).map(String::as_str), Some(g), "{grades:?}");
+    }
+
+    reinforced(&mut s);
+    run(&mut s, "units_set", json!({"values": {"style": "CommaDecimal"}}));
+    let view = id(&run(&mut s, "bending_schedule_create", json!({})));
+    let cells = |s: &mut Session| -> Vec<String> {
+        let table = run(s, "schedule_table", json!({"view": view}));
+        let rows = table["rows"].as_array().unwrap().clone();
+        rows.iter()
+            .flat_map(|r| r["cells"].as_array().unwrap().clone())
+            .filter_map(|c| c.as_str().map(String::from))
+            .collect()
+    };
+    let before = cells(&mut s);
+    assert!(before.iter().any(|c| c == "CA-50"), "the grade column: {before:?}");
+    let diameters =
+        |cells: &[String]| -> Vec<String> { cells.iter().filter(|c| c.starts_with("Ø ")).cloned().collect() };
+    assert!(!diameters(&before).is_empty() && diameters(&before).iter().all(|c| c.contains(',')), "{before:?}");
+
+    run(&mut s, "units_set", json!({"values": {"diameter_point": true}}));
+    let after = cells(&mut s);
+    let d = diameters(&after);
+    assert!(!d.is_empty() && d.iter().all(|c| c.contains('.') && !c.contains(',')), "{d:?}");
+    let others: Vec<&String> = after.iter().filter(|c| !c.starts_with("Ø ") && c.contains(['.', ','])).collect();
+    assert!(!others.is_empty() && others.iter().all(|c| !c.contains('.')), "{others:?}");
+}
+
 /// The bars of a cylinder: ring bars are arcs with their radius, and the
 /// two walls' rings of one face are one mark.
 #[test]
