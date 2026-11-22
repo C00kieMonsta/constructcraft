@@ -117,8 +117,9 @@ pub use element::{
 };
 pub use fill_pattern::{FillPattern, FillPatternKind, PatternLine};
 pub use graphics::{
-    CategoryGraphics, FillGraphics, FilterOp, FilterParam, FilterRule, FilterUse, GraphicOverride, LineGraphics,
-    LinePattern, TemplateIncludes, TemporaryVisibility, ViewFilter, ViewGraphics, ViewTemplate,
+    CategoryGraphics, FillGraphics, FilterOp, FilterParam, FilterRule, FilterUse, GraphicOverride, LayerLines,
+    LineGraphics, LinePattern, TemplateIncludes, TemporaryVisibility, ViewFilter, ViewGraphics, ViewTemplate,
+    has_layer_lines,
 };
 pub use ids::{
     BrowserSchemeId, ElementId, ElementTypeId, FillPatternId, FilterId, GroupId, LevelId, LineStyleId, OptionId,

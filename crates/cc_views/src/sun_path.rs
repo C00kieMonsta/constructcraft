@@ -511,6 +511,7 @@ pub fn draw(d: &mut Drawing2D, project: &Project, geom: &ModelGeometry, view: &V
         weight: Some(weight),
         pattern,
         halftone: false,
+        layer: None,
     };
     let line = |d: &mut Drawing2D, pts: &[DVec2], closed: bool, pen: Pen| {
         let n = pts.len();

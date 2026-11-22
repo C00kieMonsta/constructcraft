@@ -99,6 +99,34 @@ pub(crate) fn patched(current: &GraphicOverride, patch: Option<&Value>, reset: b
     Ok(out)
 }
 
+/// Apply a merge patch to a category's layer lines (#452).
+fn patched_layers(category: Category, current: &cc_core::LayerLines, patch: &Value) -> Result<cc_core::LayerLines> {
+    if !cc_core::has_layer_lines(category) {
+        return Err(EngineError::invalid("only walls have layer subcategories"));
+    }
+    let names: Vec<&str> = cc_core::LayerFunction::ALL.iter().map(|f| layer_name(*f)).collect();
+    let Some(map) = patch.as_object() else { return Err(EngineError::invalid("layers must be an object")) };
+    if let Some(bad) = map.keys().find(|k| !names.contains(&k.as_str())) {
+        return Err(EngineError::invalid(format!("unknown layer function `{bad}` (one of {})", names.join(", "))));
+    }
+    let mut out = patch_value(current, patch)?;
+    if out.repair() > 0 {
+        return Err(EngineError::invalid("weights must be between 0 and 10 mm"));
+    }
+    Ok(out)
+}
+
+/// A layer function's name in `layers` (as [`cc_core::LayerLines`] writes it).
+fn layer_name(f: cc_core::LayerFunction) -> &'static str {
+    match f {
+        cc_core::LayerFunction::Structure => "structure",
+        cc_core::LayerFunction::Substrate => "substrate",
+        cc_core::LayerFunction::Insulation => "insulation",
+        cc_core::LayerFunction::Finish => "finish",
+        cc_core::LayerFunction::Membrane => "membrane",
+    }
+}
+
 pub(crate) fn overrides_json(o: &GraphicOverride) -> Value {
     serde_json::to_value(o).unwrap_or(json!({}))
 }
@@ -117,7 +145,11 @@ fn graphics_json(p: &Project, g: &ViewGraphics) -> Value {
     json!({
         "categories": Category::ALL.iter().map(|c| {
             let cg = g.category(*c);
-            json!({"category": refs::category_name(*c), "visible": cg.visible, "overrides": overrides_json(&cg.overrides)})
+            let mut out = json!({"category": refs::category_name(*c), "visible": cg.visible, "overrides": overrides_json(&cg.overrides)});
+            if cc_core::has_layer_lines(*c) {
+                out["layers"] = serde_json::to_value(cg.layers).unwrap_or(json!({}));
+            }
+            out
         }).collect::<Vec<_>>(),
         "filters": g.filters.iter().map(|f| filter_use_json(p, f)).collect::<Vec<_>>(),
         "elements": g.elements.iter().map(|(id, o)| json!({"id": id.0, "overrides": overrides_json(o)})).collect::<Vec<_>>(),
@@ -144,7 +176,9 @@ fn temporary_json(t: &TemporaryVisibility) -> Value {
 /// objects like `{"cut_lines": {"color": [255, 0, 0], "weight": 0.5,
 /// "pattern": "Dash"}, "projection_lines": {..}, "cut_fill": {"color": [..],
 /// "pattern": "Solid"}, "surface_fill": {..}, "halftone": true,
-/// "transparency": 0.5}` (absent attributes are not overridden).
+/// "transparency": 0.5}` (absent attributes are not overridden). Walls also
+/// give `layers`, the cut lines of their layers by function (see
+/// `view_graphics_set`).
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ViewGraphicsGet {
@@ -180,7 +214,9 @@ impl Command for ViewGraphicsGet {
 /// Show or hide a category in a view (or view template) and change its
 /// graphic overrides: `overrides` is merged into the current ones (`null`
 /// resets one attribute; see `view_graphics_get`), `reset` clears them
-/// first. Refused when the view's template controls its categories.
+/// first; `layers` does the same for the cut lines of a wall's layers by
+/// their function, its subcategories. Refused when the view's template
+/// controls its categories.
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ViewGraphicsSet {
@@ -198,7 +234,14 @@ pub struct ViewGraphicsSet {
     /// Overrides to merge.
     #[serde(default)]
     pub overrides: Option<Value>,
-    /// Clear the category's overrides before merging.
+    /// The cut lines of the category's layers by function (its subcategories;
+    /// walls only), merged like `overrides`: `{"structure": {"weight": 0.7},
+    /// "finish": {"color": [128, 128, 128], "weight": 0.18}}`, with
+    /// `substrate`, `insulation` and `membrane` too; a layer line takes them
+    /// over the category's lines, under the element's own, filters and phase.
+    #[serde(default)]
+    pub layers: Option<Value>,
+    /// Clear the category's overrides (and its layers' lines) before merging.
     #[serde(default)]
     pub reset: bool,
 }
@@ -214,6 +257,12 @@ impl Command for ViewGraphicsSet {
         let mut g = graphics_of(p, target)?;
         let mut cg = g.category(category);
         cg.overrides = patched(&cg.overrides, self.overrides.as_ref(), self.reset)?;
+        if self.reset {
+            cg.layers = cc_core::LayerLines::default();
+        }
+        if let Some(patch) = &self.layers {
+            cg.layers = patched_layers(category, &cg.layers, patch)?;
+        }
         if let Some(v) = self.visible {
             cg.visible = v;
         }

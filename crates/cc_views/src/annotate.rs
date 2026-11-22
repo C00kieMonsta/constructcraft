@@ -211,6 +211,7 @@ fn grid_line(
         weight: style.pen,
         pattern: style.line_pattern,
         halftone: false,
+        layer: None,
     });
     let pen = styled.then_some(Pen { color: style.color, weight: style.pen, ..Pen::default() });
     d.line_pen(start, end, LineStyle::Center, line_pen, id);

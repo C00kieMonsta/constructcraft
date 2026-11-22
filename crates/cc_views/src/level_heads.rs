@@ -64,6 +64,7 @@ pub fn draw(d: &mut Drawing2D, project: &Project, view: &View, frame: &Frame) {
         weight: lines.weight,
         pattern: lines.pattern,
         halftone,
+        layer: None,
     });
     // Texts take the lines' color, faint with them.
     let ink = match (lines.color, halftone) {
@@ -239,7 +240,8 @@ mod tests {
         let mut view = south();
         let lines = LineGraphics { color: Some([200, 0, 0]), weight: Some(0.5), ..Default::default() };
         let overrides = GraphicOverride { projection_lines: lines, ..Default::default() };
-        view.graphics.set_category(Category::Level, CategoryGraphics { visible: true, overrides });
+        view.graphics
+            .set_category(Category::Level, CategoryGraphics { visible: true, overrides, ..Default::default() });
         let d = drawn(&project, &view);
         let red_lines = d
             .prims

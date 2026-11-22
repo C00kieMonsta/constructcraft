@@ -1809,6 +1809,7 @@ vg-transparency = Przezroczystość
 vg-projection-lines = Linie rzutu
 vg-surface-fill = Wypełnienie powierzchni
 vg-cut-lines = Linie przekroju
+vg-layers-hint = Podkategorie: linie przekroju jej warstw według funkcji
 vg-cut-fill = Wypełnienie przekroju
 vg-halftone = Półton
 vg-model-categories = Kategorie modelu

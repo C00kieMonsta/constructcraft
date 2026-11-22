@@ -10,7 +10,7 @@ use cc_core::{ElementId, ElementKind, Project, ViewId};
 /// The pen of a line style.
 pub fn pen(style: LineStyleRef, styles: &LineStyles) -> Pen {
     let (weight, color, pattern) = style.pen(styles);
-    Pen { color: Some(color), weight: Some(weight), pattern: Some(pattern), halftone: false }
+    Pen { color: Some(color), weight: Some(weight), pattern: Some(pattern), halftone: false, layer: None }
 }
 
 /// Draw one detail line.

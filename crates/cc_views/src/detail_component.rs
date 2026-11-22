@@ -92,7 +92,13 @@ pub fn draw_pieces(
                 crate::region::draw_filled(d, &region, fill, &Default::default(), patterns, scale, id);
             }
         }
-        let pen = Some(Pen { color: Some(s.color), weight: Some(s.weight), pattern: Some(s.pattern), halftone: false });
+        let pen = Some(Pen {
+            color: Some(s.color),
+            weight: Some(s.weight),
+            pattern: Some(s.pattern),
+            halftone: false,
+            layer: None,
+        });
         let n = pts.len();
         let segments = if s.closed && n > 2 { n } else { n.saturating_sub(1) };
         for k in 0..segments {
