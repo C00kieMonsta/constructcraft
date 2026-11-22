@@ -824,7 +824,7 @@ fn structure_tab(ui: &mut Ui, state: &mut AppState) {
 fn mep_tab(ui: &mut Ui, state: &mut AppState) {
     use UiCommand::*;
     group(ui, t!("group-plumbing"), |ui| {
-        command_buttons(ui, state, &[place(Category::Pipe), place(Category::Valve), PlaceFixture]);
+        command_buttons(ui, state, &[place(Category::Pipe), place(Category::Valve), PlaceFixture, PipeCatalog]);
     });
     group(ui, t!("group-electrical"), |ui| {
         command_buttons(ui, state, &[place(Category::Conduit), place(Category::CableTray), PlaceDevice]);
@@ -1020,7 +1020,11 @@ fn view_tab(ui: &mut Ui, state: &mut AppState) {
 fn manage_tab(ui: &mut Ui, state: &mut AppState) {
     use UiCommand::*;
     group(ui, t!("group-project"), |ui| {
-        command_buttons(ui, state, &[ProjectInfo, SiteLocation, Units, Levels, Materials, FillPatterns, Profiles])
+        command_buttons(
+            ui,
+            state,
+            &[ProjectInfo, SiteLocation, Units, Levels, Materials, FillPatterns, Profiles, PipeCatalog],
+        )
     });
     group(ui, t!("group-graphics"), |ui| command_buttons(ui, state, &[ViewTemplates, ViewFilters]));
     group(ui, t!("group-phasing"), |ui| command_button(ui, state, Phases));
@@ -1357,12 +1361,25 @@ pub fn options_bar(ui: &mut Ui, state: &mut AppState) {
             // Walls: a project without a curtain type gets one from the list.
             let offer_curtain = category == Category::Wall && !crate::curtain_ui::has_curtain_type(state);
             let mut new_curtain = false;
+            let mut open_catalog = false;
             egui::ComboBox::from_id_salt("tool_type")
                 .selected_text(state.project().type_name(type_id).to_string())
                 .width(200.0)
                 .show_ui(ui, |ui| {
-                    for (id, name) in types {
-                        ui.selectable_value(&mut selected, id, name);
+                    if category == Category::Pipe {
+                        // Pipes: the sizes of each series under its name, then the free types.
+                        for (series, list) in crate::pipe_catalog_dialog::grouped_types(state.project(), types) {
+                            ui.label(theme::muted(series.unwrap_or_else(|| t!("pipe-catalog-free-types"))));
+                            for (id, name) in list {
+                                ui.selectable_value(&mut selected, id, name);
+                            }
+                        }
+                        ui.separator();
+                        open_catalog = ui.selectable_label(false, t!("pipe-catalog-load-more")).clicked();
+                    } else {
+                        for (id, name) in types {
+                            ui.selectable_value(&mut selected, id, name);
+                        }
                     }
                     if offer_curtain {
                         ui.separator();
@@ -1371,6 +1388,9 @@ pub fn options_bar(ui: &mut Ui, state: &mut AppState) {
                 });
             if new_curtain && let Some(id) = crate::curtain_ui::new_curtain_type(state) {
                 selected = id;
+            }
+            if open_catalog {
+                crate::pipe_catalog_dialog::open(state);
             }
             if selected != type_id {
                 state.tool = state.tool.with_type(selected);

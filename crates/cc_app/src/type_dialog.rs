@@ -202,6 +202,119 @@ fn size_row(
     finish(state, &r);
 }
 
+/// A small length as shown in a read-only row (millimeters, inches in imperial projects).
+fn small(v: f64) -> String {
+    cc_views::format::size(v, cc_views::format::MetricSize::Mm(1))
+}
+
+/// A pipe type: its series and size (or *Free*), the size's outside and
+/// inside diameters, wall and pressure class read-only; a free type keeps
+/// its diameter and an inside diameter of its own. *Load from catalog…*
+/// opens the Pipe Catalog over these properties.
+fn pipe_rows(ui: &mut Ui, state: &mut AppState, ty: &ElementType) {
+    let TypeData::Pipe { diameter, series, size, inside, .. } = &ty.data else { return };
+    let tid = ty.id;
+    let project = state.project();
+    let all: Vec<(cc_core::PipeSeriesId, String)> =
+        project.pipe_series.values().map(|s| (s.id, s.name.clone())).collect();
+    let row_of = project.pipe_row(&ty.data).map(|(s, r)| (s.clone(), r.clone()));
+    section(ui, "type-pipe-series", t!("section-pipe-series"), |ui| {
+        let current = series.and_then(|id| all.iter().find(|(s, _)| *s == id)).map(|(_, n)| n.clone());
+        let mut choice = *series;
+        let mut open_catalog = false;
+        row(ui, &t!("col-pipe-series"), |ui| {
+            egui::ComboBox::from_id_salt(("pipe-series", tid.0))
+                .selected_text(current.unwrap_or_else(|| t!("pipe-series-free")))
+                .width(260.0)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut choice, None, t!("pipe-series-free"));
+                    for (id, name) in &all {
+                        ui.selectable_value(&mut choice, Some(*id), name);
+                    }
+                    ui.separator();
+                    open_catalog = ui.selectable_label(false, t!("pipe-catalog-load-more")).clicked();
+                });
+        });
+        if open_catalog {
+            crate::pipe_catalog_dialog::open(state);
+        }
+        if choice != *series {
+            // Another series: the size nearest the type's diameter.
+            let near = choice.and_then(|id| state.project().pipe_series.get(&id)).and_then(|s| {
+                s.pipes.iter().min_by(|a, b| (a.de - diameter).abs().total_cmp(&(b.de - diameter).abs())).cloned()
+            });
+            update(state, tid, "pipe-series", |t| {
+                if let TypeData::Pipe { series, size, diameter, inside, .. } = &mut t.data {
+                    *series = choice;
+                    match &near {
+                        Some(r) => {
+                            size.clone_from(&r.size);
+                            *diameter = r.de;
+                            *inside = None;
+                        }
+                        None => size.clear(),
+                    }
+                }
+            });
+            state.session.doc.break_merge();
+            return;
+        }
+        if let Some((s, r)) = &row_of {
+            let mut picked = size.clone();
+            row(ui, &t!("col-pipe-size"), |ui| {
+                egui::ComboBox::from_id_salt(("pipe-size", tid.0)).selected_text(picked.clone()).width(260.0).show_ui(
+                    ui,
+                    |ui| {
+                        for p in &s.pipes {
+                            ui.selectable_value(&mut picked, p.size.clone(), &p.size);
+                        }
+                    },
+                );
+            });
+            if picked != *size {
+                update(state, tid, "pipe-size", |t| {
+                    if let TypeData::Pipe { size, .. } = &mut t.data {
+                        *size = picked;
+                    }
+                });
+                state.session.doc.break_merge();
+            }
+            readonly_row(ui, &t!("col-diameter"), small(r.de));
+            readonly_row(ui, &t!("prop-pipe-wall"), small(r.e));
+            readonly_row(ui, &t!("col-inside-diameter"), small(r.di));
+            if !s.pressure.is_empty() {
+                readonly_row(ui, &t!("prop-pipe-pressure"), s.pressure.clone());
+            }
+            if !s.standard.is_empty() {
+                readonly_row(ui, &t!("prop-pipe-standard"), s.standard.clone());
+            }
+        }
+    });
+    if row_of.is_some() {
+        return;
+    }
+    section(ui, "type-dimensions", t!("section-dimensions"), |ui| {
+        size_row(ui, state, &t!("col-diameter"), tid, "pd", *diameter, |d, v| {
+            if let TypeData::Pipe { diameter, .. } = d {
+                *diameter = v.clamp(0.005, 2.0);
+            }
+        });
+        // The inside diameter, when known (else sizing estimates it from the outside one).
+        let mut v = inside.unwrap_or(*diameter * 0.88);
+        let r = row(ui, &t!("col-inside-diameter"), |ui| {
+            ui.add(crate::properties::size_drag(&mut v).range(0.001..=(*diameter).max(0.001)))
+        });
+        if r.changed() {
+            update(state, tid, "pi", |t| {
+                if let TypeData::Pipe { inside, diameter, .. } = &mut t.data {
+                    *inside = Some(v.clamp(0.001, *diameter));
+                }
+            });
+        }
+        finish(state, &r);
+    });
+}
+
 /// Component name and kind, the editor button and this type's parameter values.
 fn component_parameters(ui: &mut Ui, state: &mut AppState, ty: &ElementType) {
     let TypeData::Component { component, def } = &ty.data else { return };
@@ -936,10 +1049,11 @@ fn structure_parameters(ui: &mut Ui, state: &mut AppState, ty: &ElementType) {
                 }
             });
         }
-        TypeData::Pipe { diameter, .. } | TypeData::Conduit { diameter, .. } => {
+        TypeData::Pipe { .. } => pipe_rows(ui, state, ty),
+        TypeData::Conduit { diameter, .. } => {
             crate::table::section(ui, "type-dimensions", t!("section-dimensions"), |ui| {
                 size_row(ui, state, &t!("col-diameter"), tid, "pd", diameter, |d, v| {
-                    if let TypeData::Pipe { diameter, .. } | TypeData::Conduit { diameter, .. } = d {
+                    if let TypeData::Conduit { diameter, .. } = d {
                         *diameter = v.clamp(0.005, 2.0);
                     }
                 });

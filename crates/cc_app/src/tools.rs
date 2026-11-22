@@ -1999,7 +1999,11 @@ fn segment_tool(
                     end_offset,
                     slope: state.mep.slope,
                 };
-                crate::actions::run_command(state, command)
+                let out = crate::actions::run_command(state, command);
+                if let Some(id) = out.as_ref().and_then(|o| o["id"].as_u64()) {
+                    crate::pipe_catalog_dialog::report_fittings(state, ElementId(id));
+                }
+                out
             }
             Run::Conduit => {
                 let command = cc_engine::commands::mep::ConduitCreate {

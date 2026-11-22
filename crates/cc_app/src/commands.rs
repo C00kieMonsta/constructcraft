@@ -264,6 +264,8 @@ pub enum UiCommand {
     Materials,
     FillPatterns,
     Profiles,
+    /// The Pipe Catalog: pipe series, their sizes and fittings, and types made from them.
+    PipeCatalog,
     MacroRecord,
     MacroRun,
     /// Open or close the macro editor.
@@ -493,6 +495,7 @@ impl UiCommand {
             Materials,
             FillPatterns,
             Profiles,
+            PipeCatalog,
             MacroRecord,
             MacroRun,
             MacroEditor,
@@ -692,6 +695,7 @@ impl UiCommand {
             Materials => Icon::Materials,
             FillPatterns => Icon::FillPatterns,
             Profiles => Icon::Profiles,
+            PipeCatalog => Icon::PipeCatalog,
             MacroRecord => Icon::MacroRecord,
             MacroRun => Icon::MacroRun,
             MacroEditor => Icon::MacroEdit,
@@ -928,6 +932,7 @@ impl UiCommand {
             Materials => t!("dlg-materials"),
             FillPatterns => t!("dlg-fill-patterns"),
             Profiles => t!("cmd-profiles"),
+            PipeCatalog => t!("cmd-pipe-catalog"),
             MacroRecord if state.session.is_recording() => t!("action-macro-stop"),
             MacroRecord => t!("action-macro-record"),
             MacroRun => t!("action-macro-run"),
@@ -1168,6 +1173,7 @@ impl UiCommand {
             Materials => t!("cmd-desc-materials"),
             FillPatterns => t!("cmd-desc-fill-patterns"),
             Profiles => t!("cmd-profiles-desc"),
+            PipeCatalog => t!("cmd-pipe-catalog-desc"),
             MacroRecord => t!("hint-macro-record"),
             MacroRun => t!("hint-macro-run"),
             MacroEditor => t!("hint-macro-editor"),
@@ -1459,6 +1465,7 @@ impl UiCommand {
             Materials => "material_set",
             FillPatterns => "fill_patterns_list",
             Profiles => "profiles_list",
+            PipeCatalog => "pipe_series_list",
             _ => return None,
         })
     }
@@ -2295,6 +2302,7 @@ pub fn run(state: &mut AppState, ctx: &egui::Context, command: UiCommand) {
         Materials => state.dialogs.materials = true,
         FillPatterns => crate::fill_patterns_dialog::open(state),
         Profiles => crate::profiles_dialog::open(state),
+        PipeCatalog => crate::pipe_catalog_dialog::open(state),
         MacroRecord => actions::toggle_macro_recording(state),
         MacroRun => actions::run_macro(state),
         MacroEditor => crate::macro_ui::toggle(state),

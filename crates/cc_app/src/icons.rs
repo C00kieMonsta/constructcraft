@@ -55,6 +55,7 @@ pub enum Icon {
     Materials,
     FillPatterns,
     Profiles,
+    PipeCatalog,
     MacroRecord,
     MacroRun,
     MacroEdit,
@@ -218,7 +219,7 @@ pub enum Icon {
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 201] = [
+    pub const ALL: [Icon; 202] = [
         Icon::New,
         Icon::Open,
         Icon::Save,
@@ -261,6 +262,7 @@ impl Icon {
         Icon::Materials,
         Icon::FillPatterns,
         Icon::Profiles,
+        Icon::PipeCatalog,
         Icon::MacroRecord,
         Icon::MacroRun,
         Icon::MacroEdit,
@@ -467,6 +469,7 @@ impl Icon {
             Icon::Materials => include_str!("../../../assets/icons/ui/materials.svg"),
             Icon::FillPatterns => include_str!("../../../assets/icons/ui/fill-patterns.svg"),
             Icon::Profiles => include_str!("../../../assets/icons/ui/profiles.svg"),
+            Icon::PipeCatalog => include_str!("../../../assets/icons/ui/pipe_catalog.svg"),
             Icon::MacroRecord => include_str!("../../../assets/icons/ui/macro-record.svg"),
             Icon::MacroRun => include_str!("../../../assets/icons/ui/macro-run.svg"),
             Icon::MacroEdit => include_str!("../../../assets/icons/ui/macro-edit.svg"),
