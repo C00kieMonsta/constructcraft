@@ -28,6 +28,8 @@ browser-duplicate = Дублювати
 browser-duplicate-detailing = Дублювати з деталізацією
 browser-delete = Видалити
 browser-place-on-sheet = Розмістити на активному аркуші
+browser-move-to-sheet = Перемістити на активний аркуш
+browser-move-to-sheet-hint = Знімає вид з аркуша { $sheet } і розміщує його на активному аркуші.
 
 # Назви вкладок
 tab-floor-plan = План поверху: { $name }
@@ -390,7 +392,7 @@ msg-opening-past-wall-end = Отвір вийшов би за кінець ст�
 msg-sketch-invalid = Контур має містити щонайменше три точки й охоплювати ненульову площу.
 msg-section-hint = Клацніть дві точки на плані, щоб визначити лінію розрізу.
 msg-no-wall-loop = На поточному рівні не знайдено замкненого контуру зі стін.
-msg-view-already-placed = Цей вид уже розміщено на аркуші.
+msg-view-already-placed = Цей вид уже на аркуші { $sheet }.
 msg-level-in-use = На рівні є елементи, тому його не можна видалити.
 msg-new-project = Створено новий проєкт.
 msg-project-closed = Проєкт закрито.

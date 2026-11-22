@@ -623,8 +623,20 @@ pub(crate) fn sheet(p: &Project, r: &Ref) -> Result<ViewId> {
     }
 }
 
+/// "A102 - Name": how a sheet is named in messages.
+fn sheet_label(p: &Project, sheet: ViewId) -> String {
+    match p.view(sheet) {
+        Some(View { name, kind: ViewKind::Sheet { number, .. }, .. }) if !number.is_empty() => {
+            format!("{number} - {name}")
+        }
+        Some(v) => v.name.clone(),
+        None => String::new(),
+    }
+}
+
 /// Place a view on a sheet at `center` (paper millimeters; default left of
-/// center). A view can be on only one sheet; sheets cannot be placed.
+/// center). A view can be on only one sheet; sheets cannot be placed. With
+/// `move_from_sheet`, a view already on another sheet is moved here.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SheetPlaceView {
@@ -633,6 +645,10 @@ pub struct SheetPlaceView {
     /// Center of the viewport on the sheet, paper millimeters.
     #[serde(default)]
     pub center: Option<Point>,
+    /// Move the view here when it is already on another sheet (one undo
+    /// step), instead of refusing.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub move_from_sheet: bool,
 }
 
 impl Command for SheetPlaceView {
@@ -645,12 +661,18 @@ impl Command for SheetPlaceView {
         if !p.view(view).is_some_and(|v| v.placeable()) {
             return Err(EngineError::invalid("this view cannot be placed on a sheet"));
         }
-        if sheet_of(p, view).is_some() {
-            return Err(EngineError::rejected(t!("msg-view-already-placed")));
+        let from = sheet_of(p, view);
+        if let Some(from) = from
+            && (from == sheet_id || !self.move_from_sheet)
+        {
+            return Err(EngineError::rejected(t!("msg-view-already-placed", "sheet" => sheet_label(p, from))));
         }
         let center = self.center.map(point).transpose()?;
         let paper = p.view(sheet_id).and_then(|v| v.paper_mm()).unwrap_or(glam::DVec2::new(420.0, 297.0));
         edit(s, t!("tx-place-view"), |e| {
+            if let Some(ViewKind::Sheet { viewports, .. }) = from.and_then(|f| e.view_mut(f)).map(|v| &mut v.kind) {
+                viewports.retain(|vp| vp.view != view);
+            }
             if let Some(ViewKind::Sheet { viewports, .. }) = e.view_mut(sheet_id).map(|v| &mut v.kind) {
                 let center = center.unwrap_or(paper * glam::DVec2::new(0.4, 0.55));
                 viewports.push(Viewport { view, center });

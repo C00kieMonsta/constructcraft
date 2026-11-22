@@ -28,6 +28,8 @@ browser-duplicate = Duplizieren
 browser-duplicate-detailing = Mit Detaillierung duplizieren
 browser-delete = Löschen
 browser-place-on-sheet = Auf aktiven Plan setzen
+browser-move-to-sheet = Auf aktiven Plan verschieben
+browser-move-to-sheet-hint = Nimmt die Ansicht von Plan { $sheet } und setzt sie auf den aktiven Plan.
 
 # Registerkartentitel
 tab-floor-plan = Grundriss: { $name }
@@ -390,7 +392,7 @@ msg-opening-past-wall-end = Die Öffnung würde über das Wandende hinausragen
 msg-sketch-invalid = Die Begrenzung braucht mindestens 3 Punkte und eine Fläche ungleich null.
 msg-section-hint = Klicken Sie zwei Punkte in einem Grundriss, um die Schnittlinie festzulegen.
 msg-no-wall-loop = Auf dieser Ebene wurde kein geschlossener Wandzug gefunden.
-msg-view-already-placed = Diese Ansicht ist bereits auf einem Plan platziert.
+msg-view-already-placed = Diese Ansicht ist bereits auf Plan { $sheet }.
 msg-level-in-use = Die Ebene enthält Bauteile und kann nicht gelöscht werden.
 msg-new-project = Neues Projekt erstellt.
 msg-project-closed = Projekt geschlossen.

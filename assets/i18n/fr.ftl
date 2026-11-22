@@ -28,6 +28,8 @@ browser-duplicate = Dupliquer
 browser-duplicate-detailing = Dupliquer avec le détail
 browser-delete = Supprimer
 browser-place-on-sheet = Placer sur la feuille active
+browser-move-to-sheet = Déplacer vers la feuille active
+browser-move-to-sheet-hint = Retire la vue de la feuille { $sheet } et la place sur la feuille active.
 
 # Titres des onglets
 tab-floor-plan = Plan d'étage : { $name }
@@ -390,7 +392,7 @@ msg-opening-past-wall-end = L'ouverture dépasserait l'extrémité du mur
 msg-sketch-invalid = Le contour nécessite au moins 3 points et une aire non nulle.
 msg-section-hint = Cliquez deux points dans un plan pour définir la ligne de coupe.
 msg-no-wall-loop = Aucune boucle fermée de murs n'a été trouvée sur ce niveau.
-msg-view-already-placed = Cette vue est déjà placée sur une feuille.
+msg-view-already-placed = Cette vue est déjà sur la feuille { $sheet }.
 msg-level-in-use = Le niveau contient des éléments et ne peut pas être supprimé.
 msg-new-project = Nouveau projet créé.
 msg-project-closed = Projet fermé.

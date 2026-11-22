@@ -28,6 +28,8 @@ browser-duplicate = 複製
 browser-duplicate-detailing = 帶詳圖複製
 browser-delete = 刪除
 browser-place-on-sheet = 放置於目前工作表
+browser-move-to-sheet = 移至目前工作表
+browser-move-to-sheet-hint = 將視圖從工作表 { $sheet } 移除，並放到目前工作表上。
 
 # 分頁標題
 tab-floor-plan = 平面圖：{ $name }
@@ -390,7 +392,7 @@ msg-opening-past-wall-end = 開口會超出牆的端點
 msg-sketch-invalid = 輪廓至少需要 3 個點，且面積不得為零。
 msg-section-hint = 請在平面圖上點選兩個點，以定義剖面線。
 msg-no-wall-loop = 在此樓層找不到封閉的牆面輪廓。
-msg-view-already-placed = 此視圖已放置在圖紙上。
+msg-view-already-placed = 此視圖已在工作表 { $sheet } 上。
 msg-level-in-use = 此樓層含有元素，無法刪除。
 msg-new-project = 已建立新專案。
 msg-project-closed = 專案已關閉。

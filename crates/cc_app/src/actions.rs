@@ -155,15 +155,21 @@ pub fn sheet_of(project: &Project, view: ViewId) -> Option<ViewId> {
     views::sheet_of(project, view)
 }
 
-pub fn place_on_sheet(state: &mut AppState, sheet: ViewId, view: ViewId) {
-    run(state, views::SheetPlaceView { sheet: Ref::Id(sheet.0), view: Ref::Id(view.0), center: None });
+/// Place `view` on `sheet`; with `move_from_sheet`, take it off the sheet it
+/// is on first (one undo step).
+pub fn place_on_sheet(state: &mut AppState, sheet: ViewId, view: ViewId, move_from_sheet: bool) {
+    run(state, views::SheetPlaceView { sheet: Ref::Id(sheet.0), view: Ref::Id(view.0), center: None, move_from_sheet });
 }
 
 /// Place `view` on `sheet` centered at `center` (paper millimeters) and
 /// select the new viewport; errors (already on a sheet…) go to the status bar.
 pub fn place_on_sheet_at(state: &mut AppState, sheet: ViewId, view: ViewId, center: glam::DVec2) {
-    let command =
-        views::SheetPlaceView { sheet: Ref::Id(sheet.0), view: Ref::Id(view.0), center: Some([center.x, center.y]) };
+    let command = views::SheetPlaceView {
+        sheet: Ref::Id(sheet.0),
+        view: Ref::Id(view.0),
+        center: Some([center.x, center.y]),
+        move_from_sheet: false,
+    };
     if run(state, command).is_some() {
         let index = match state.project().view(sheet).map(|v| &v.kind) {
             Some(ViewKind::Sheet { viewports, .. }) => viewports.iter().position(|vp| vp.view == view),

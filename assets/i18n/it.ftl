@@ -28,6 +28,8 @@ browser-duplicate = Duplica
 browser-duplicate-detailing = Duplica con dettagli
 browser-delete = Elimina
 browser-place-on-sheet = Inserisci nella tavola attiva
+browser-move-to-sheet = Sposta nella tavola attiva
+browser-move-to-sheet-hint = Toglie la vista dalla tavola { $sheet } e la colloca nella tavola attiva.
 
 # Titoli delle schede
 tab-floor-plan = Pianta: { $name }
@@ -390,7 +392,7 @@ msg-opening-past-wall-end = L'apertura supererebbe l'estremità del muro
 msg-sketch-invalid = Il contorno richiede almeno 3 punti e un'area non nulla.
 msg-section-hint = Fai clic su due punti in una pianta per definire la linea di sezione.
 msg-no-wall-loop = Non è stato trovato alcun anello chiuso di muri su questo livello.
-msg-view-already-placed = Questa vista è già inserita in una tavola.
+msg-view-already-placed = Questa vista è già sulla tavola { $sheet }.
 msg-level-in-use = Il livello contiene elementi e non può essere eliminato.
 msg-new-project = Nuovo progetto creato.
 msg-project-closed = Progetto chiuso.

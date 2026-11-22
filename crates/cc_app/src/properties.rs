@@ -3521,7 +3521,7 @@ fn sheet_views(ui: &mut Ui, state: &mut AppState, sheet: ViewId, viewports: &[cc
             }
             for (vid, title) in candidates {
                 if ui.button(title).clicked() {
-                    actions::place_on_sheet(state, sheet, vid);
+                    actions::place_on_sheet(state, sheet, vid, false);
                     ui.close();
                 }
             }

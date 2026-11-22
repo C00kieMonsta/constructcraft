@@ -1858,6 +1858,37 @@ fn panel_diagrams_follow_their_board() {
     assert_eq!(run(&mut s, "view_get", json!({"view": id(&diagram)}))["params"]["panel"], json!(panel));
 }
 
+/// A 3D view goes on a sheet and is drawn there (#451); one already on
+/// another sheet is refused with that sheet named, or moved in one undo step.
+#[test]
+fn three_d_views_go_on_sheets_and_move_between_them() {
+    let mut s = Session::default();
+    run(&mut s, "wall_create", json!({"start": [0.0, 0.0], "end": [6.0, 0.0]}));
+    let view = id(&run(&mut s, "view_create", json!({"kind": "three_d", "name": "Axo"})));
+    let first = id(&run(&mut s, "view_create", json!({"kind": "sheet", "name": "First"})));
+    let second = id(&run(&mut s, "view_create", json!({"kind": "sheet", "name": "Second"})));
+    let on = |s: &mut Session, sheet: u64| -> bool {
+        let composed = s.sheet(cc_core::ViewId(sheet)).unwrap();
+        let drawn = composed.viewports.iter().any(|vp| vp.view.0 == view && vp.half.min_element() > 0.0);
+        let titled =
+            composed.drawing.prims.iter().any(|p| matches!(p, cc_views::Prim::Text { text, .. } if text == "Axo"));
+        drawn && titled
+    };
+    run(&mut s, "sheet_place_view", json!({"sheet": first, "view": view}));
+    assert!(on(&mut s, first));
+    let number = run(&mut s, "view_get", json!({"view": first}))["params"]["number"].as_str().unwrap().to_string();
+    let err = s.execute("sheet_place_view", json!({"sheet": second, "view": view})).unwrap_err();
+    assert_eq!(err.code, ErrorCode::Rejected);
+    assert!(err.message.contains(&format!("{number} - First")), "{}", err.message);
+    // Moving onto the sheet it is on is still refused.
+    let again = json!({"sheet": first, "view": view, "move_from_sheet": true});
+    assert_eq!(fails(&mut s, "sheet_place_view", again), ErrorCode::Rejected);
+    run(&mut s, "sheet_place_view", json!({"sheet": second, "view": view, "move_from_sheet": true}));
+    assert!(on(&mut s, second) && !on(&mut s, first));
+    run(&mut s, "undo", json!({}));
+    assert!(on(&mut s, first) && !on(&mut s, second));
+}
+
 /// Schedules go on sheets: drawn as a ruled table at their printed size,
 /// titled in their first row (no viewport title or scale), following the
 /// model; exported with the sheet.

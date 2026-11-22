@@ -28,6 +28,8 @@ browser-duplicate = ສຳເນົາຊ້ຳ
 browser-duplicate-detailing = ສຳເນົາຊ້ຳພ້ອມລາຍລະອຽດ
 browser-delete = ລຶບ
 browser-place-on-sheet = ວາງລົງເທິງແຜ່ນງານທີ່ໃຊ້ງານຢູ່
+browser-move-to-sheet = ຍ້າຍໄປແຜ່ນງານທີ່ໃຊ້ງານຢູ່
+browser-move-to-sheet-hint = ເອົາມຸມມອງອອກຈາກແຜ່ນງານ { $sheet } ແລະ ວາງລົງເທິງແຜ່ນງານທີ່ໃຊ້ງານຢູ່.
 
 # Tab titles
 tab-floor-plan = ແຜນຜັງພື້ນ: { $name }
@@ -381,7 +383,7 @@ msg-opening-past-wall-end = ຊ່ອງເປີດຈະເກີນທ້າ�
 msg-sketch-invalid = ຮູບຮ່າງຂອບເຂດຕ້ອງມີຢ່າງໜ້ອຍ 3 ຈຸດ ແລະ ມີເນື້ອທີ່ຫຼາຍກວ່າສູນ.
 msg-section-hint = ຄລິກສອງຈຸດໃນແຜນຜັງເພື່ອກຳນົດເສັ້ນຕັດ.
 msg-no-wall-loop = ບໍ່ພົບແນວຝາທີ່ປິດລ້ອມກັນໃນຊັ້ນນີ້.
-msg-view-already-placed = ມຸມມອງນີ້ຖືກວາງເທິງແຜ່ນງານອື່ນແລ້ວ.
+msg-view-already-placed = ມຸມມອງນີ້ຢູ່ໃນແຜ່ນງານ { $sheet } ແລ້ວ.
 msg-level-in-use = ຊັ້ນລະດັບນີ້ມີອົງປະກອບຢູ່ ຈຶ່ງບໍ່ສາມາດລຶບໄດ້.
 msg-new-project = ສ້າງໂຄງການໃໝ່ແລ້ວ.
 msg-project-closed = ປິດໂຄງການແລ້ວ.
