@@ -545,11 +545,22 @@ impl Project {
             crate::RefTarget::Element(id) => ids.contains(&id),
             crate::RefTarget::Level(id) => level_ids.contains(&id),
         };
+        let plans: std::collections::BTreeSet<_> = self.views.values().filter(|v| v.is_plan()).map(|v| v.id).collect();
         for e in self.elements.values_mut() {
             let ElementKind::Dimension(d) = &mut e.kind else { continue };
             for r in d.all_refs_mut() {
                 if r.is_some_and(|r| !exists(r.target) || !r.is_finite()) {
                     *r = None;
+                    repairs += 1;
+                }
+            }
+            // A lock that cannot hold goes; one its dimension no longer shows takes the value shown (#447).
+            if let Some(value) = d.locked {
+                if !(d.can_lock() && plans.contains(&d.view) && value.is_finite() && value > 0.0) {
+                    d.locked = None;
+                    repairs += 1;
+                } else if d.breaks_lock() {
+                    d.locked = Some(d.value());
                     repairs += 1;
                 }
             }

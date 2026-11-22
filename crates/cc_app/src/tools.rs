@@ -3175,6 +3175,7 @@ fn dimension_tool(
         offset,
         kind,
         refs: Default::default(),
+        locked: None,
     };
     match mode {
         DimensionMode::Aligned | DimensionMode::Linear | DimensionMode::Ordinate => {

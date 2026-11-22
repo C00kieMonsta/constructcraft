@@ -86,7 +86,7 @@ impl Command for DimensionCreate {
             "diameter" => DimensionKind::Diameter,
             other => return Err(EngineError::invalid(format!("unknown dimension kind '{other}'"))),
         };
-        let dim = Dimension { view: view_id, a, b, offset, kind, refs: Default::default() };
+        let dim = Dimension { view: view_id, a, b, offset, kind, refs: Default::default(), locked: None };
         if dim.value().is_nan() || dim.value() <= 1e-6 {
             return Err(EngineError::invalid(t!("msg-dimension-zero")));
         }
@@ -303,6 +303,60 @@ impl Command for DimensionSetValue {
         let value = if angular { self.value.to_radians() } else { self.value };
         crate::dimensions::set_value(s, id, value)?;
         Ok(created(s, id))
+    }
+}
+
+/// Lock or unlock dimensions (#447). A locked dimension keeps its value:
+/// moving the element at one of its ends moves the element at the other
+/// along it, in the same undo step (and so on along a chain of locked
+/// dimensions); an edit that would still change it, such as moving both
+/// ends apart or one end of a dimension whose other element is pinned, is
+/// refused. Only linear and aligned dimensions in plans whose two ends
+/// follow elements can be locked; `dimension_set_value` gives a locked
+/// dimension its new value. One undo step.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DimensionLock {
+    /// Dimension element ids.
+    pub ids: Vec<u64>,
+    /// Lock (`true`, the default) or unlock (`false`).
+    #[serde(default = "yes")]
+    pub locked: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Command for DimensionLock {
+    const NAME: &'static str = "dimension_lock";
+    const KIND: CommandKind = CommandKind::Edit;
+    fn run(self, s: &mut Session) -> Result<Value> {
+        let p = s.project();
+        let ids = refs::elements(p, &self.ids)?;
+        if ids.is_empty() {
+            return Err(EngineError::invalid("no dimensions given"));
+        }
+        for id in &ids {
+            let Some(ElementKind::Dimension(d)) = p.element(*id).map(|e| &e.kind) else {
+                return Err(EngineError::invalid(format!("element {} is not a dimension", id.0)));
+            };
+            let plan = p.view(d.view).is_some_and(|v| v.is_plan());
+            if self.locked && !(d.can_lock() && plan) {
+                return Err(EngineError::rejected(t!("msg-dim-cannot-lock")));
+            }
+        }
+        let locked = self.locked;
+        let name = if locked { t!("tx-dim-lock") } else { t!("tx-dim-unlock") };
+        edit(s, name, |e| {
+            for id in &ids {
+                if let Some(ElementKind::Dimension(d)) = e.element_mut(*id).map(|x| &mut x.kind) {
+                    d.locked = locked.then(|| d.value());
+                }
+            }
+            Ok(())
+        })?;
+        Ok(serde_json::json!({ "ids": super::ids_json(&ids), "locked": locked }))
     }
 }
 

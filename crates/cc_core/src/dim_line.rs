@@ -101,7 +101,7 @@ pub fn chain(view: ViewId, points: &[DVec2], dir: DVec2, offset: f64, aligned: b
             }
             let along = (b - a).try_normalize().is_some_and(|u| u.perp_dot(dir).abs() <= PARALLEL_SIN);
             let kind = if aligned && along { DimensionKind::Aligned } else { DimensionKind::Linear { dir } };
-            let dim = Dimension { view, a, b, offset: 0.0, kind, refs: Default::default() };
+            let dim = Dimension { view, a, b, offset: 0.0, kind, refs: Default::default(), locked: None };
             let offset = offset_through(&dim, on_line)?;
             Some(Dimension { offset, ..dim })
         })
@@ -128,6 +128,7 @@ pub fn ordinate(view: ViewId, points: &[DVec2], dir: DVec2, offset: f64) -> Opti
                 offset,
                 kind: DimensionKind::Ordinate { dir },
                 refs: Default::default(),
+                locked: None,
             })
         })
         .collect()
@@ -138,7 +139,7 @@ mod tests {
     use super::*;
 
     fn dim(a: (f64, f64), b: (f64, f64), offset: f64, kind: DimensionKind) -> Dimension {
-        Dimension { view: ViewId(1), a: a.into(), b: b.into(), offset, kind, refs: Default::default() }
+        Dimension { view: ViewId(1), a: a.into(), b: b.into(), offset, kind, refs: Default::default(), locked: None }
     }
 
     /// The constant `c` of the line `x · n = c` for the direction `dir`.

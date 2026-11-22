@@ -26,6 +26,7 @@ mod design_options;
 mod detail;
 mod detail_components;
 mod detail_lines;
+mod dimension_lock;
 mod dimension_types;
 mod drafting;
 mod dxf_hidden_lines;

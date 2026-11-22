@@ -189,6 +189,11 @@ pub struct EditCtx<'a> {
 }
 
 impl<'a> EditCtx<'a> {
+    /// Whether this edit has changed element `id` so far (added, removed or changed).
+    pub(crate) fn has_changed(&self, id: ElementId) -> bool {
+        self.tx.elements.get(&id).is_some_and(|c| c.0.as_ref() != self.project.elements.get(&id))
+    }
+
     pub fn project(&self) -> &Project {
         self.project
     }
@@ -1180,6 +1185,8 @@ impl<'a> EditCtx<'a> {
         self.sync_attachments();
         self.sync_wall_splines();
         self.sync_wall_profiles();
+        // Locked dimensions move what they lock before the dimensions follow.
+        self.hold_locked_dimensions();
         self.sync_dimensions();
         self.sync_phases();
         self.sync_options();
