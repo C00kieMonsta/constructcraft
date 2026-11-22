@@ -607,6 +607,97 @@ pub(crate) fn join_pick(state: &mut AppState, hovered: Option<ElementId>, unjoin
     }
 }
 
+/// Whether `id` is a roof (the only elements Join Roof picks).
+pub fn is_roof(state: &AppState, id: ElementId) -> bool {
+    matches!(state.project().element(id).map(|e| &e.kind), Some(ElementKind::Roof(_)))
+}
+
+/// The selected roofs joined to another (what Unjoin Roof acts on).
+pub fn joined_roofs(state: &AppState) -> Vec<ElementId> {
+    let joined = |id: &ElementId| matches!(state.project().element(*id).map(|e| &e.kind), Some(ElementKind::Roof(r)) if r.join_to.is_some());
+    state.selection.iter().copied().filter(joined).collect()
+}
+
+/// The prompt of Join Roof: the wing first, then the roof it meets.
+pub fn roof_join_hint(state: &AppState) -> &'static str {
+    if state.interaction.targets.is_empty() { "hint-roof-join-first" } else { "hint-roof-join-second" }
+}
+
+/// Join Roof: one roof selected is taken as the wing, and the tool goes
+/// straight to the roof it meets.
+pub fn start_roof_join(state: &mut AppState) {
+    let roofs: Vec<ElementId> = state.selection.iter().copied().filter(|id| is_roof(state, *id)).collect();
+    state.set_tool(Tool::JoinRoof);
+    if let [wing] = roofs[..] {
+        state.interaction.targets = vec![wing];
+    }
+    state.message = crate::i18n::tr(roof_join_hint(state));
+}
+
+/// A click of Join Roof on `hovered` (a roof, or nothing): the first pick
+/// is the wing, the second the roof it meets, and they are joined; the tool
+/// then waits for the next wing.
+pub(crate) fn roof_join_pick(state: &mut AppState, hovered: Option<ElementId>) {
+    let Some(id) = hovered.filter(|id| is_roof(state, *id)) else {
+        state.message = crate::i18n::tr(roof_join_hint(state));
+        return;
+    };
+    match state.interaction.targets.first().copied() {
+        None => state.interaction.targets = vec![id],
+        Some(wing) if wing == id => {}
+        Some(wing) => {
+            let join = cc_engine::commands::roof_join::RoofJoin { roof: wing.0, to: id.0 };
+            if crate::actions::run_command(state, join).is_some() {
+                state.interaction.targets.clear();
+                state.message = t!("msg-roof-joined");
+            }
+            return;
+        }
+    }
+    state.message = crate::i18n::tr(roof_join_hint(state));
+}
+
+/// Esc in Join Roof steps back from the second pick to the first; returns
+/// whether it did (otherwise Esc leaves the tool).
+pub fn roof_join_escape(state: &mut AppState) -> bool {
+    if state.tool != Tool::JoinRoof || state.interaction.targets.is_empty() {
+        return false;
+    }
+    state.interaction.targets.clear();
+    state.message = crate::i18n::tr(roof_join_hint(state));
+    true
+}
+
+/// The Join Roof tool in a 2D view: the roof under the pointer is
+/// highlighted (with the wing picked), and clicks pick roofs.
+pub fn roof_join_tool(resp: &Response, painter: &Painter, state: &mut AppState, xf: &Xf, drawing: &Drawing2D) {
+    let Some(raw) = resp.hover_pos().map(|p| xf.to_world(p)) else { return };
+    let hovered = drawing.hit_test(raw, 6.0 / xf.scale).filter(|id| is_roof(state, *id));
+    let mut lit: BTreeSet<ElementId> = state.interaction.targets.first().copied().into_iter().collect();
+    lit.extend(hovered);
+    paint_ghost(painter, xf, drawing, &lit, &PlanTransform::IDENTITY);
+    if resp.clicked() {
+        roof_join_pick(state, hovered);
+    }
+}
+
+/// Unjoin Roof: the selected roofs are unjoined from the roofs they were
+/// joined to, in one undo step.
+pub fn unjoin_roofs(state: &mut AppState) {
+    let roofs = joined_roofs(state);
+    if roofs.is_empty() {
+        return;
+    }
+    let depth = state.session.doc.undo_depth();
+    for roof in roofs {
+        let unjoin = cc_engine::commands::roof_join::RoofUnjoin { roof: roof.0 };
+        if crate::actions::run_command(state, unjoin).is_none() {
+            break;
+        }
+    }
+    state.session.doc.squash_since(depth, t!("tx-roof-unjoin"));
+}
+
 /// Trim/extend to corner or to a reference, split, offset and align.
 fn pick_tool(resp: &Response, painter: &Painter, state: &mut AppState, xf: &Xf, drawing: &Drawing2D, tool: &Tool) {
     let Some(raw) = resp.hover_pos().map(|p| xf.to_world(p)) else { return };

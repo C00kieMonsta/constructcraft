@@ -563,6 +563,13 @@ impl crate::EditCtx<'_> {
                     p.host = *n;
                 }
             }
+            // Copied roofs join the copies of the roofs they joined, else the roof they joined.
+            for id in &created[first..] {
+                let Some(ElementKind::Roof(r)) = self.element_mut(*id).map(|e| &mut e.kind) else { continue };
+                if let Some(n) = r.join_to.and_then(|to| remap.get(&to)) {
+                    r.join_to = Some(*n);
+                }
+            }
             // Copied piles belong to the copies of their caps; copied alone, they are free.
             for id in &created[first..] {
                 let Some(ElementKind::Pile(p)) = self.element_mut(*id).map(|e| &mut e.kind) else { continue };

@@ -236,6 +236,8 @@ registry![
         create::CeilingCreate,
         create::RoofCreate,
         create::RoofEdgeSet,
+        roof_join::RoofJoin,
+        roof_join::RoofUnjoin,
         create::RoofOpeningRemove,
         create::RoomCreate,
         create::GridCreate,
