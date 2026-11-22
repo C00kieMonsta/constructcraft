@@ -1075,6 +1075,41 @@ fn duplicated_type_keeps_the_typed_name() {
     assert!(harness.state().dialogs.type_editor.is_none());
 }
 
+/// A text type's size is set in Type Properties (#450): duplicate the
+/// 2.5 mm type, name the copy and give it 7 mm, for titles.
+#[test]
+fn a_duplicated_text_type_takes_its_own_size() {
+    let mut state = sample_state();
+    let text = state.project().default_type(cc_core::Category::Text).unwrap();
+    let size = |s: &AppState, id: cc_core::ElementTypeId| match s.project().element_type(id).map(|t| &t.data) {
+        Some(cc_core::TypeData::Text { size, .. }) => *size,
+        other => panic!("not a text type: {other:?}"),
+    };
+    assert!((size(&state, text) - 2.5).abs() < 1e-9);
+    state.dialogs.type_editor = Some(text);
+    let mut harness = type_dialog_harness(state);
+    harness.get_by_label(&t!("type-duplicate")).click();
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.query_all_by_role(Role::TextInput).find(|n| n.is_focused()).unwrap().type_text("Title 7 mm");
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    // The copy's text size, in paper millimeters.
+    harness.query_all_by_role(Role::SpinButton).find(|n| n.value().as_deref() == Some("2.5 mm")).unwrap().focus();
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.query_all_by_role(Role::SpinButton).find(|n| n.is_focused()).unwrap().type_text("7");
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    harness.get_by_label(&t!("action-ok")).click();
+    harness.run();
+    let s = harness.state();
+    let copy = s.project().types_of(cc_core::Category::Text).find(|t| t.name == "Title 7 mm").map(|t| t.id);
+    let copy = copy.expect("the duplicated type");
+    assert!((size(s, copy) - 7.0).abs() < 1e-9, "{}", size(s, copy));
+    assert!((size(s, text) - 2.5).abs() < 1e-9, "the original keeps its size");
+}
+
 /// A wall type's layers table gives each layer a base offset and a height
 /// (issue #306): typing a base offset sets that layer's own extent, and the
 /// layers given no height read "To top".

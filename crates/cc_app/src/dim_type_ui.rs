@@ -1,5 +1,5 @@
-//! The Type Properties rows of a dimension type: the marks, witness and
-//! dimension lines and pens (Graphics) and the text (Text).
+//! The Type Properties rows of a dimension type (the marks, witness and
+//! dimension lines and pens, and the text) and of a text type (its size).
 
 use crate::properties::{paper_drag, weight_drag};
 use crate::state::AppState;
@@ -113,6 +113,43 @@ pub fn type_sections(ui: &mut Ui, state: &mut AppState, ty: &ElementType) {
         crate::engine_edit::element_type(state, ty.id, Some(key), |t| {
             if let TypeData::Dimension { text_size, style } = &mut t.data {
                 (*text_size, *style) = (size, s);
+            }
+        });
+    }
+    if edits.done {
+        state.session.doc.break_merge();
+    }
+}
+
+/// The text type's section (#450): the size of its text on paper and the
+/// symbol new leaders get; nothing for other types. A larger text (a title
+/// of 5, 7 or 10 mm) is a duplicated type with another size.
+pub fn text_type_sections(ui: &mut Ui, state: &mut AppState, ty: &ElementType) {
+    let TypeData::Text { size, symbol } = &ty.data else { return };
+    let (mut size, mut symbol) = (*size, *symbol);
+    let mut edits = Edits::default();
+    section(ui, "type-text", t!("section-text"), |ui| {
+        let r =
+            row(ui, &t!("prop-text-size"), |ui| ui.add(paper_drag(&mut size).speed(0.1).range(0.5..=MAX_LENGTH_MM)));
+        edits.add(&r);
+        let r = row(ui, &t!("label-leader"), |ui| {
+            let before = symbol;
+            let mut r = ui.push_id("text-type-leader", |ui| {
+                crate::text_tool::symbol_combo(ui, "text-type-leader", &mut symbol);
+            });
+            if symbol != before {
+                r.response.mark_changed();
+                edits.done = true;
+            }
+            r.response
+        });
+        edits.add(&r);
+    });
+    if edits.changed {
+        let key = crate::properties::key((ty.id, "text-type"));
+        crate::engine_edit::element_type(state, ty.id, Some(key), |t| {
+            if let TypeData::Text { size: s, symbol: y } = &mut t.data {
+                (*s, *y) = (size, symbol);
             }
         });
     }
