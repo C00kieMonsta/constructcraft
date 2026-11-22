@@ -93,6 +93,8 @@ impl Entity {
 pub struct StepFile {
     /// First schema of `FILE_SCHEMA` (e.g. `IFC4`, `IFC2X3`).
     pub schema: String,
+    /// The program that wrote the file (`FILE_NAME`'s originating system).
+    pub originating_system: String,
     pub entities: BTreeMap<u32, Entity>,
 }
 
@@ -164,6 +166,8 @@ pub fn parse(text: &str) -> Result<StepFile, ParseError> {
             if name == "FILE_SCHEMA" {
                 let first = args.first().map(|a| a.as_list()).and_then(|l| l.first()).and_then(Param::as_str);
                 file.schema = first.unwrap_or_default().to_ascii_uppercase();
+            } else if name == "FILE_NAME" {
+                file.originating_system = args.get(5).and_then(Param::as_str).unwrap_or_default().to_string();
             }
         }
         p.skip_ws();
@@ -501,6 +505,7 @@ END-ISO-10303-21;
     fn parses_instances_and_values() {
         let f = parse(SAMPLE).unwrap();
         assert_eq!(f.schema, "IFC2X3");
+        assert_eq!(f.originating_system, "os");
         assert_eq!(f.entities.len(), 4);
         let p = f.get(1).unwrap();
         assert_eq!(p.name, "IFCCARTESIANPOINT");

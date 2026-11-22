@@ -836,6 +836,8 @@ struct Importer<'a> {
     p: Project,
     report: ImportReport,
     project_id: u32,
+    /// Whether this program wrote the file, so its numeric tags are marks.
+    own_file: bool,
     /// Meters per file length unit.
     scale: f64,
     /// SI values of the file's area and volume units.
@@ -966,6 +968,18 @@ fn slab_like(outline: &[DVec2], thickness: f64) -> bool {
 /// How many times wider than thick a base slab is to be a raft.
 const SLAB_ASPECT: f64 = 3.0;
 
+/// Whether this program wrote the file (under its current or former name).
+fn written_here(f: &StepFile) -> bool {
+    let system = f.originating_system.trim_start();
+    system.starts_with("ConstructCraft") || system.starts_with("ConstructCAD")
+}
+
+/// Whether a tag is a plain number, as other programs write their element ids.
+fn is_element_id(tag: &str) -> bool {
+    let tag = tag.trim();
+    !tag.is_empty() && tag.chars().all(|c| c.is_ascii_digit())
+}
+
 /// Type names from other tools often end in an instance number ("Wall:Generic 200mm:123456").
 fn clean_name(name: &str) -> String {
     let name = name.trim();
@@ -983,6 +997,7 @@ impl<'a> Importer<'a> {
             p: base,
             report: ImportReport { schema: f.schema.clone(), ..Default::default() },
             project_id,
+            own_file: written_here(f),
             scale: 1.0,
             area: 1.0,
             volume: 1.0,
@@ -1146,7 +1161,7 @@ impl<'a> Importer<'a> {
             self.cap_types.push((type_id, pile_type));
         }
         let foundation = Foundation::new(FoundationShape::Pad { position, rotation_deg }, z1 - elevation);
-        self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Foundation(foundation));
+        self.add_element(id, e, level, type_id, self.mark(e), ElementKind::Foundation(foundation));
         true
     }
 
@@ -1215,7 +1230,7 @@ impl<'a> Importer<'a> {
         });
         for (start, end, bulge) in pieces {
             let strip = Foundation::new(FoundationShape::Strip { start, end, bulge }, top - elevation);
-            self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Foundation(strip));
+            self.add_element(id, e, level, type_id, self.mark(e), ElementKind::Foundation(strip));
         }
         true
     }
@@ -1263,7 +1278,7 @@ impl<'a> Importer<'a> {
         );
         let rotation_deg = x.y.atan2(x.x).to_degrees();
         let foundation = Foundation::new(FoundationShape::Pad { position: center, rotation_deg }, z1 - elevation);
-        self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Foundation(foundation));
+        self.add_element(id, e, level, type_id, self.mark(e), ElementKind::Foundation(foundation));
         true
     }
 
@@ -1421,7 +1436,7 @@ impl<'a> Importer<'a> {
             pile_cap: Some(cap),
         });
         let foundation = Foundation::new(FoundationShape::Pad { position, rotation_deg }, z1 - elevation);
-        let element = self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Foundation(foundation));
+        let element = self.add_element(id, e, level, type_id, self.mark(e), ElementKind::Foundation(foundation));
         // The piles are the cap's now, where its layout puts them.
         let Some(cap_element) = self.p.element(element).cloned() else { return true };
         for (index, type_id, want) in self.p.cap_piles(&cap_element) {
@@ -1508,7 +1523,7 @@ impl<'a> Importer<'a> {
         });
         let pile =
             Pile { position: center, rotation_deg, cut_off: z1 - elevation, toe: z0 - elevation, embedment, cap: None };
-        let element = self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Pile(pile));
+        let element = self.add_element(id, e, level, type_id, self.mark(e), ElementKind::Pile(pile));
         if let Some((guid, index)) = cap {
             self.cap_piles.push((element, guid, index));
         }
@@ -1637,7 +1652,8 @@ impl<'a> Importer<'a> {
         self.p.info.address.clear();
         let address = self.f.of_type("IFCBUILDING").find_map(|(_, b)| self.f.deref(b.arg(11)));
         if let Some(lines) = address.map(|a| a.arg(4).as_list()) {
-            let lines: Vec<&str> = lines.iter().filter_map(Param::as_str).collect();
+            let lines: Vec<&str> =
+                lines.iter().filter_map(Param::as_str).map(str::trim).filter(|l| !l.is_empty()).collect();
             self.p.info.address = lines.join(", ");
         }
         self.p.info.site = self.read_site();
@@ -2383,6 +2399,13 @@ impl<'a> Importer<'a> {
         e.arg(7).as_str().unwrap_or_default().to_string()
     }
 
+    /// The mark a product's tag gives: none when another program wrote its
+    /// element id there (#369, #436).
+    fn mark(&self, e: &Entity) -> String {
+        let tag = Self::tag(e);
+        if !self.own_file && is_element_id(&tag) { String::new() } else { tag }
+    }
+
     /// Body solids and axis of a product placed at `world`.
     fn body(&self, e: &Entity, world: DAffine3) -> Body {
         let f = self.f;
@@ -2630,7 +2653,7 @@ impl<'a> Importer<'a> {
         );
         let wall =
             Wall { base_offset: z0 - elevation, height: z1 - z0, structural: structural.unwrap_or(false), ..wall };
-        let element = self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Wall(wall));
+        let element = self.add_element(id, e, level, type_id, self.mark(e), ElementKind::Wall(wall));
         self.walls.entry(id).or_default().push(element);
         true
     }
@@ -2713,7 +2736,7 @@ impl<'a> Importer<'a> {
             curtain: edits,
             ..Default::default()
         };
-        self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Wall(wall));
+        self.add_element(id, e, level, type_id, self.mark(e), ElementKind::Wall(wall));
         self.curtain_walls.insert(id);
         true
     }
@@ -2958,7 +2981,7 @@ impl<'a> Importer<'a> {
         };
         let hosted = Hosted { host, offset, sill_height: sill, flip_facing: false, flip_hand };
         let kind = if category == Category::Door { ElementKind::Door(hosted) } else { ElementKind::Window(hosted) };
-        self.add_element(id, e, host_element.level, type_id, Self::tag(e), kind);
+        self.add_element(id, e, host_element.level, type_id, self.mark(e), kind);
         true
     }
 
@@ -3106,7 +3129,7 @@ impl<'a> Importer<'a> {
         let mut floor = Floor::new(boundary, z1 - elevation);
         floor.openings = openings;
         floor.sketch = sketch;
-        self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Floor(floor));
+        self.add_element(id, e, level, type_id, self.mark(e), ElementKind::Floor(floor));
         true
     }
 
@@ -3149,7 +3172,7 @@ impl<'a> Importer<'a> {
         // The circles and arcs of its profile, so a round raft keeps its true area and volume.
         let mut foundation = Foundation::new(FoundationShape::Slab { boundary }, z1 - elevation);
         foundation.sketch = sketch;
-        self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Foundation(foundation));
+        self.add_element(id, e, level, type_id, self.mark(e), ElementKind::Foundation(foundation));
         true
     }
 
@@ -3179,7 +3202,7 @@ impl<'a> Importer<'a> {
             None => (boundary, None),
         };
         let ceiling = Ceiling { boundary, height_offset: z0 - elevation, cuts: Vec::new(), sketch };
-        self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Ceiling(ceiling));
+        self.add_element(id, e, level, type_id, self.mark(e), ElementKind::Ceiling(ceiling));
         true
     }
 
@@ -3365,7 +3388,7 @@ impl<'a> Importer<'a> {
         }
         let mut roof = Roof::new(footprint, z0 - elevation, 0.0, shape);
         roof.holes = holes;
-        self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Roof(roof));
+        self.add_element(id, e, level, type_id, self.mark(e), ElementKind::Roof(roof));
         true
     }
 
@@ -3473,7 +3496,7 @@ impl<'a> Importer<'a> {
             },
             || TypeData::Topography { material: material.clone(), contour_interval: interval, major_every: major },
         );
-        self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Topography(topo));
+        self.add_element(id, e, level, type_id, self.mark(e), ElementKind::Topography(topo));
         if let Some(&(terrain, _)) = self.products.last() {
             self.import_pads(id, terrain, level);
         }
@@ -3689,7 +3712,7 @@ impl<'a> Importer<'a> {
             top: WallTop::Unconnected,
             structural: true,
         };
-        self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Column(column));
+        self.add_element(id, e, level, type_id, self.mark(e), ElementKind::Column(column));
         true
     }
 
@@ -3954,7 +3977,7 @@ impl<'a> Importer<'a> {
         // The bar mark: the tag, else the name. A purely numeric tag of
         // another program is its element id, not a mark (#369).
         let tag = Self::tag(e);
-        let foreign_id = !ours && !tag.trim().is_empty() && tag.trim().chars().all(|c| c.is_ascii_digit());
+        let foreign_id = !ours && !self.own_file && is_element_id(&tag);
         let mark = if foreign_id {
             None
         } else {
@@ -4354,7 +4377,7 @@ impl<'a> Importer<'a> {
             properties,
             ..Default::default()
         };
-        self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Component(c));
+        self.add_element(id, e, level, type_id, self.mark(e), ElementKind::Component(c));
         true
     }
 
@@ -4571,7 +4594,7 @@ impl<'a> Importer<'a> {
         );
         let mut beam = Beam::new(start, end, z1 - elevation);
         beam.bulge = bulge;
-        self.add_element(id, e, level, type_id, Self::tag(e), ElementKind::Beam(beam));
+        self.add_element(id, e, level, type_id, self.mark(e), ElementKind::Beam(beam));
         true
     }
 }

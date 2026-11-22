@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- IFC import gave walls, slabs, columns, beams and every other element the other program's numeric element id as their mark, as it did for bars before #369 (#436). A purely numeric `Tag` in a file another program wrote is no longer a mark; other tags, and every mark in a file ConstructCraft wrote, come in as before. Empty lines of the building's address are no longer joined into the project address as bare separators.
 - A schedule whose first column is totaled showed the element count in that column of its totals row and group footers, and the column's total nowhere (#434). The total now stays in its column; the count still fills the first cell when that column is not totaled.
 
 ## [0.13.0] - 2026-11-19
