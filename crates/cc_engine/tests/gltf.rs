@@ -326,3 +326,38 @@ fn textures_colors_and_opacity_come_in() {
     // Twice across 2 m, once up 4 m.
     assert!(close(texture.width, 1.0) && close(texture.height, 4.0), "{} {}", texture.width, texture.height);
 }
+
+#[test]
+fn gltf_component_load_sets_kind_and_ifc_properties() {
+    let (bin, json) = scene();
+    let path = scratch("omar.glb");
+    std::fs::write(&path, glb(&json, &bin)).unwrap();
+    let mut s = Session::default();
+    let out = run(
+        &mut s,
+        "gltf_component_load",
+        json!({
+            "path": path,
+            "name": "OMAR 000.697.68",
+            "kind": "furniture",
+            "ifc_class": "IFCFURNITURE",
+            "properties": {
+                "Pset_IkeaProduct": {
+                    "ArticleNumber": "000.697.68",
+                    "CatalogWidth": 0.46,
+                    "ProductUrl": "https://www.ikea.com/us/en/p/omar-shelf-unit-galvanized-00069768/"
+                }
+            }
+        }),
+    );
+    assert_eq!(out["component"], json!("OMAR 000.697.68"));
+    let ty_id = ElementTypeId(out["types"][0].as_u64().unwrap());
+    let ty = s.project().element_type(ty_id).unwrap();
+    let TypeData::Component { def, .. } = &ty.data else { panic!("expected component type") };
+    assert_eq!(def.kind, cc_core::ComponentKind::Furniture);
+    let ifc = def.ifc.as_ref().expect("expected IFC metadata");
+    assert_eq!(ifc.entity, "IFCFURNITURE");
+    assert_eq!(ifc.properties.len(), 1);
+    assert_eq!(ifc.properties[0].name, "Pset_IkeaProduct");
+    assert_eq!(ifc.properties[0].properties.len(), 3);
+}
