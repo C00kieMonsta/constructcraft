@@ -1810,6 +1810,7 @@ vg-transparency = Прозорість
 vg-projection-lines = Лінії проєкції
 vg-surface-fill = Заливка поверхні
 vg-cut-lines = Лінії розрізу
+vg-layers-hint = Підкатегорії: лінії розрізу її шарів за призначенням
 vg-cut-fill = Заливка розрізу
 vg-halftone = Півтон
 vg-model-categories = Категорії моделі

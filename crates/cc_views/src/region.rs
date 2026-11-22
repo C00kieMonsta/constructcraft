@@ -65,7 +65,13 @@ pub fn draw_filled(
         if matches!(pattern, Pattern::Solid | Pattern::None) {
             continue;
         }
-        let pen = Some(Pen { color: Some(color), weight: Some(PATTERN_WEIGHT_MM), pattern: None, halftone: false });
+        let pen = Some(Pen {
+            color: Some(color),
+            weight: Some(PATTERN_WEIGHT_MM),
+            pattern: None,
+            halftone: false,
+            layer: None,
+        });
         for (a, b) in crate::hatch::hatch_with_holes_in(patterns, pattern, &r.outline, &r.openings, spacing) {
             d.prims.push(Prim::Line { a, b, style: LineStyle::Hatch, element: id, pen });
         }

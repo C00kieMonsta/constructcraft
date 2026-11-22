@@ -33,6 +33,9 @@ pub struct Pen {
     pub pattern: Option<cc_core::LinePattern>,
     /// Mixed with white.
     pub halftone: bool,
+    /// The function of the layer the line belongs to (a cut wall's layer
+    /// lines in plans), so view graphics give it its subcategory's lines (#452).
+    pub layer: Option<cc_core::LayerFunction>,
 }
 
 /// A line's pen resolved: width in paper millimeters, color and dash lengths

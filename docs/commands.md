@@ -3537,7 +3537,7 @@ No parameters.
 
 ### `view_graphics_get`
 
-*query* — The visibility/graphics of a view (or of a view template): every category's visibility and overrides, the applied filters in order, the element overrides and hidden elements, the view's template and what it controls, and what is temporarily hidden or isolated. Overrides are objects like `{"cut_lines": {"color": [255, 0, 0], "weight": 0.5, "pattern": "Dash"}, "projection_lines": {..}, "cut_fill": {"color": [..], "pattern": "Solid"}, "surface_fill": {..}, "halftone": true, "transparency": 0.5}` (absent attributes are not overridden).
+*query* — The visibility/graphics of a view (or of a view template): every category's visibility and overrides, the applied filters in order, the element overrides and hidden elements, the view's template and what it controls, and what is temporarily hidden or isolated. Overrides are objects like `{"cut_lines": {"color": [255, 0, 0], "weight": 0.5, "pattern": "Dash"}, "projection_lines": {..}, "cut_fill": {"color": [..], "pattern": "Solid"}, "surface_fill": {..}, "halftone": true, "transparency": 0.5}` (absent attributes are not overridden). Walls also give `layers`, the cut lines of their layers by function (see `view_graphics_set`).
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -3546,13 +3546,14 @@ No parameters.
 
 ### `view_graphics_set`
 
-*edit* — Show or hide a category in a view (or view template) and change its graphic overrides: `overrides` is merged into the current ones (`null` resets one attribute; see `view_graphics_get`), `reset` clears them first. Refused when the view's template controls its categories.
+*edit* — Show or hide a category in a view (or view template) and change its graphic overrides: `overrides` is merged into the current ones (`null` resets one attribute; see `view_graphics_get`), `reset` clears them first; `layers` does the same for the cut lines of a wall's layers by their function, its subcategories. Refused when the view's template controls its categories.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
 | `category` | string | required | Category (`wall`, `door`, `room`, `dimension`…). |
+| `layers` | JSON | optional | The cut lines of the category's layers by function (its subcategories; walls only), merged like `overrides`: `{"structure": {"weight": 0.7}, "finish": {"color": [128, 128, 128], "weight": 0.18}}`, with `substrate`, `insulation` and `membrane` too; a layer line takes them over the category's lines, under the element's own, filters and phase. |
 | `overrides` | JSON | optional | Overrides to merge. |
-| `reset` | boolean | optional | Clear the category's overrides before merging. |
+| `reset` | boolean | optional | Clear the category's overrides (and its layers' lines) before merging. |
 | `template` | id or name | optional | Or a view template id or name. |
 | `view` | id or name | optional | View id or name. |
 | `visible` | boolean | optional | Show (`true`) or hide (`false`) the category. |

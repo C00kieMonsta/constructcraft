@@ -1809,6 +1809,7 @@ vg-transparency = Trasparenza
 vg-projection-lines = Linee di proiezione
 vg-surface-fill = Riempimento superficie
 vg-cut-lines = Linee di taglio
+vg-layers-hint = Sottocategorie: le linee di taglio dei suoi strati per funzione
 vg-cut-fill = Riempimento di taglio
 vg-halftone = Mezzitoni
 vg-model-categories = Categorie di modello

@@ -455,6 +455,7 @@ fn set_category(state: &mut AppState, target: Target, c: Category, g: CategoryGr
         category: cc_engine::category_name(c),
         visible: Some(g.visible),
         overrides: Some(overrides_json(&g.overrides)),
+        layers: cc_core::has_layer_lines(c).then(|| serde_json::to_value(g.layers).unwrap_or_default()),
         reset: true,
     };
     run(state, merge, command);
@@ -587,13 +588,44 @@ fn categories_table(
             let on = g.visible;
             r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, on, &label));
             let mut changed = r.changed();
-            ui.label(name);
+            // A category with layers opens to its subcategories: the cut lines of each layer function (#452).
+            let layered = cc_core::has_layer_lines(*c);
+            let open_id = egui::Id::new(("vg-layers-open", target, *c));
+            let mut open = layered && ui.data(|d| d.get_temp::<bool>(open_id)).unwrap_or(false);
+            if layered {
+                ui.horizontal(|ui| {
+                    let arrow = if open { "▾" } else { "▸" };
+                    let hint = t!("vg-layers-hint");
+                    if ui.add(egui::Button::new(arrow).small().frame(false)).on_hover_text(hint).clicked() {
+                        open = !open;
+                        ui.data_mut(|d| d.insert_temp(open_id, open));
+                    }
+                    ui.label(name.as_str());
+                });
+            } else {
+                ui.label(name.as_str());
+            }
             changed |= override_cells(ui, &mut g.overrides, enabled, &choices);
-            if ui.add_enabled(enabled && !g.overrides.is_empty(), egui::Button::new(t!("vg-reset")).small()).clicked() {
+            let empty = g.overrides.is_empty() && g.layers.is_empty();
+            if ui.add_enabled(enabled && !empty, egui::Button::new(t!("vg-reset")).small()).clicked() {
                 g.overrides = GraphicOverride::default();
+                g.layers = cc_core::LayerLines::default();
                 changed = true;
             }
             ui.end_row();
+            if open {
+                for f in cc_core::LayerFunction::ALL {
+                    ui.label("");
+                    ui.label(RichText::new(format!("    {}", tr(f.key()))).color(PALETTE.text_muted));
+                    ui.label("");
+                    ui.label("");
+                    let label = format!("{} — {}: {}", name, tr(f.key()), t!("vg-cut-lines"));
+                    ui.push_id(("vg-layer", *c, f.key()), |ui| {
+                        changed |= line_cell(ui, &label, g.layers.get_mut(f), enabled);
+                    });
+                    ui.end_row();
+                }
+            }
             if changed {
                 set_category(state, target, *c, g, Some(key(("vg", target, *c))));
             }

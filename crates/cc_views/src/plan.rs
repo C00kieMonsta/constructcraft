@@ -1,7 +1,9 @@
 use crate::{Drawing2D, LineStyle};
 use cc_core::tag::TagSymbol;
 use cc_core::view_mark::{MarkArrow, MarkStyle};
-use cc_core::{DetailLevel, ElementId, ElementKind, LevelId, Project, TypeData, ViewId, ViewKind, VisualStyle};
+use cc_core::{
+    DetailLevel, ElementId, ElementKind, LayerFunction, LevelId, Project, TypeData, ViewId, ViewKind, VisualStyle,
+};
 use cc_geom::{Column, MeshPlan, ModelGeometry, PlanCover, WallGeom, polygon};
 use glam::{DVec2, DVec3};
 use std::collections::BTreeMap;
@@ -25,6 +27,39 @@ fn column_state(c: &Column, cut_z: f64) -> ColumnCut {
     } else {
         ColumnCut::None
     }
+}
+
+/// The functions of a wall's layers, in the order of [`WallGeom::layers`]
+/// (empty when its type's layers do not match them).
+fn layer_functions(project: &Project, g: &WallGeom) -> Vec<LayerFunction> {
+    let ty = project.element(g.element).and_then(|e| project.element_type(e.type_id));
+    let functions: Vec<LayerFunction> = ty.map(|t| t.layers().iter().map(|l| l.function).collect()).unwrap_or_default();
+    if functions.len() == g.layers.len() { functions } else { Vec::new() }
+}
+
+/// The subcategory of the line between layers `k` and `k + 1` (#452): the
+/// core's when either is structure, else that of the one nearer the core
+/// (nearer the middle of the wall when it has none).
+fn boundary_function(functions: &[LayerFunction], k: usize) -> Option<LayerFunction> {
+    let (a, b) = (*functions.get(k)?, *functions.get(k + 1)?);
+    if a == b || a == LayerFunction::Structure {
+        return Some(a);
+    }
+    if b == LayerFunction::Structure {
+        return Some(b);
+    }
+    let core: Vec<usize> = (0..functions.len()).filter(|i| functions[*i] == LayerFunction::Structure).collect();
+    let last = functions.len().saturating_sub(1);
+    let distance = |i: usize| match core.iter().map(|c| c.abs_diff(i)).min() {
+        Some(d) => 2 * d,
+        None => (2 * i).abs_diff(last),
+    };
+    Some(if distance(k + 1) < distance(k) { b } else { a })
+}
+
+/// A pen that only says which layer function a line belongs to.
+fn layer_pen(function: Option<LayerFunction>) -> Option<crate::Pen> {
+    function.map(|f| crate::Pen { layer: Some(f), ..Default::default() })
 }
 
 fn style_of(state: ColumnCut) -> Option<LineStyle> {
@@ -843,6 +878,7 @@ fn draw_wall(d: &mut Drawing2D, project: &Project, g: &WallGeom, cut_z: f64, spa
     }
     let id = Some(g.element);
     let h = g.half;
+    let functions = layer_functions(project, g);
     // A wall with an elevation profile is cut only where the plane passes through it.
     let columns = g.cut_columns(cut_z);
     let states: Vec<ColumnCut> = columns.iter().map(|c| column_state(c, cut_z)).collect();
@@ -865,10 +901,11 @@ fn draw_wall(d: &mut Drawing2D, project: &Project, g: &WallGeom, cut_z: f64, spa
                 }
             }
             // Interior layer boundaries; the outer faces are drawn below.
-            for &(_, v, _) in layers.iter().take(layers.len().saturating_sub(1)) {
+            for (k, &(_, v, _)) in layers.iter().take(layers.len().saturating_sub(1)).enumerate() {
                 let (u0, u1) = g.layer_span(c, i, count, v);
+                let pen = layer_pen(boundary_function(&functions, k));
                 for (a, b) in g.boundary_segments(v, u0, u1) {
-                    d.polyline(&g.path(a, b, v), false, LineStyle::Thin, id);
+                    d.polyline_pen(&g.path(a, b, v), false, LineStyle::Thin, pen, id);
                 }
             }
         }
@@ -879,8 +916,11 @@ fn draw_wall(d: &mut Drawing2D, project: &Project, g: &WallGeom, cut_z: f64, spa
             for (side, (u0, u1)) in [(-1.0, face(-h, c.right)), (1.0, face(h, c.left))] {
                 // A cut wall's face is open where a niche is cut too.
                 let cut_at = if state == ColumnCut::Cut { cut_z } else { f64::NAN };
+                // A cut layered wall's face is its outer layer's.
+                let outer = if side > 0.0 { functions.first() } else { functions.last() };
+                let pen = layer_pen(outer.copied().filter(|_| !layers.is_empty()));
                 for (a, b) in g.face_segments_at(side, u0, u1, cut_at) {
-                    d.polyline(&g.path(a, b, side * h), false, style, id);
+                    d.polyline_pen(&g.path(a, b, side * h), false, style, pen, id);
                 }
             }
         }
@@ -916,6 +956,7 @@ fn draw_wall(d: &mut Drawing2D, project: &Project, g: &WallGeom, cut_z: f64, spa
 fn draw_banded_wall(d: &mut Drawing2D, project: &Project, g: &WallGeom, cut_z: f64, spacing: f64, detail: DetailLevel) {
     let id = Some(g.element);
     let h = g.half;
+    let functions = layer_functions(project, g);
     let bands = g.bands();
     let last = bands.len().saturating_sub(1);
     let columns = g.cut_columns(cut_z);
@@ -972,8 +1013,9 @@ fn draw_banded_wall(d: &mut Drawing2D, project: &Project, g: &WallGeom, cut_z: f
             for k in band.layers.0..band.layers.1 {
                 let Some(&(_, v, _)) = g.layers.get(k) else { continue };
                 let (u0, u1) = g.layer_span(c, i, count, v);
+                let pen = layer_pen(boundary_function(&functions, k));
                 for (a, b) in g.boundary_segments(v, u0, u1) {
-                    d.polyline(&g.path(a, b, v), false, LineStyle::Thin, id);
+                    d.polyline_pen(&g.path(a, b, v), false, LineStyle::Thin, pen, id);
                 }
             }
         }
@@ -987,8 +1029,11 @@ fn draw_banded_wall(d: &mut Drawing2D, project: &Project, g: &WallGeom, cut_z: f
             let Some(style) = style else { continue };
             let v = band.v_lo;
             let (u0, u1) = span(v, a == ColumnCut::Cut || b == ColumnCut::Cut);
+            // Between two cut layered bands: the line between their layers.
+            let both = a == ColumnCut::Cut && b == ColumnCut::Cut && layered;
+            let pen = layer_pen(boundary_function(&functions, band.layers.1).filter(|_| both));
             for (p, q) in g.boundary_segments(v, u0, u1) {
-                d.polyline(&g.path(p, q, v), false, style, id);
+                d.polyline_pen(&g.path(p, q, v), false, style, pen, id);
             }
         }
         // The wall's faces, opened where other walls meet them in a T and where a cut niche is.
@@ -997,8 +1042,11 @@ fn draw_banded_wall(d: &mut Drawing2D, project: &Project, g: &WallGeom, cut_z: f
             let cut = at(j) == ColumnCut::Cut;
             let (u0, u1) = span(side * h, cut);
             let cut_at = if cut { cut_z } else { f64::NAN };
+            // A cut layered face is its outer layer's.
+            let outer = if side > 0.0 { functions.first() } else { functions.last() };
+            let pen = layer_pen(outer.copied().filter(|_| cut && layered));
             for (a, b) in g.face_segments_at(side, u0, u1, cut_at) {
-                d.polyline(&g.path(a, b, side * h), false, style, id);
+                d.polyline_pen(&g.path(a, b, side * h), false, style, pen, id);
             }
         }
         // Across the wall where a band's state changes from this column to the next.

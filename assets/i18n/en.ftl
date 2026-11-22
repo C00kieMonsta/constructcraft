@@ -1809,6 +1809,7 @@ vg-transparency = Transparency
 vg-projection-lines = Projection Lines
 vg-surface-fill = Surface Fill
 vg-cut-lines = Cut Lines
+vg-layers-hint = Subcategories: the cut lines of its layers by function
 vg-cut-fill = Cut Fill
 vg-halftone = Halftone
 vg-model-categories = Model Categories

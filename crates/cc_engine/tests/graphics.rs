@@ -574,3 +574,70 @@ fn an_elevation_draws_grids_that_dimensions_follow_and_the_view_hides() {
     let in_plan = s.drawing(plan).unwrap();
     assert!(in_plan.prims.iter().any(|p| p.element() == Some(ElementId(first))));
 }
+
+/// The lines of a wall's cut layers carry their function, and the view's
+/// wall subcategories give them their own lines: under the element's
+/// override, over the category's (#452).
+#[test]
+fn wall_layer_subcategories_draw_their_own_cut_lines() {
+    let mut s = Session::default();
+    let plan = id(&run(&mut s, "views_list", json!({"category": "floor_plan"}))[0]);
+    // A wall type with a finish on each side of a structure core.
+    let layered = |t: &&cc_core::ElementType| {
+        let has = |f| t.layers().iter().any(|l| l.function == f);
+        has(cc_core::LayerFunction::Structure) && has(cc_core::LayerFunction::Finish)
+    };
+    let ty = s.project().types.values().find(layered).map(|t| t.id.0).expect("a layered wall type");
+    let wall = id(&run(&mut s, "wall_create", json!({"start": [0.0, 0.0], "end": [5.0, 0.0], "type": ty})));
+    let functions = |s: &mut Session| -> BTreeSet<String> {
+        drawing(s, plan)
+            .prims
+            .iter()
+            .filter_map(|p| match p {
+                Prim::Line { element: Some(e), pen: Some(pen), .. } if e.0 == wall => {
+                    pen.layer.map(|f| format!("{f:?}"))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    assert!(functions(&mut s).contains("Structure") && functions(&mut s).contains("Finish"), "tagged layer lines");
+
+    let layers = json!({"structure": {"weight": 0.7, "color": [200, 0, 0]}, "finish": {"weight": 0.18}});
+    run(&mut s, "view_graphics_set", json!({"view": plan, "category": "wall", "layers": layers}));
+    let pens = |s: &mut Session, f: &str| -> BTreeSet<String> {
+        drawing(s, plan)
+            .prims
+            .iter()
+            .filter_map(|p| match p {
+                Prim::Line { element: Some(e), pen: Some(pen), .. }
+                    if e.0 == wall && pen.layer.is_some_and(|l| format!("{l:?}") == f) =>
+                {
+                    Some(format!("{:?} {:?}", pen.weight, pen.color))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(pens(&mut s, "Structure"), BTreeSet::from(["Some(0.7) Some([200, 0, 0])".to_string()]));
+    assert_eq!(pens(&mut s, "Finish"), BTreeSet::from(["Some(0.18) None".to_string()]));
+    let g = run(&mut s, "view_graphics_get", json!({"view": plan}));
+    let walls = g["categories"].as_array().unwrap().iter().find(|c| c["category"] == "wall").unwrap().clone();
+    assert_eq!(walls["layers"]["structure"]["weight"], json!(0.7));
+
+    // The element's own cut color wins over the layer's, which keeps its weight.
+    let blue = json!({"cut_lines": {"color": [0, 0, 255]}, "projection_lines": {"color": [0, 0, 255]}});
+    run(&mut s, "element_override_set", json!({"view": plan, "ids": [wall], "overrides": blue}));
+    assert_eq!(pens(&mut s, "Structure"), BTreeSet::from(["Some(0.7) Some([0, 0, 255])".to_string()]));
+    run(&mut s, "element_override_set", json!({"view": plan, "ids": [wall], "reset": true}));
+
+    // Only walls have them, by the five functions; reset clears them.
+    let bad = json!({"view": plan, "category": "wall", "layers": {"core": {"weight": 0.5}}});
+    assert_eq!(fails(&mut s, "view_graphics_set", bad), ErrorCode::InvalidArguments);
+    let doors = json!({"view": plan, "category": "door", "layers": {"finish": {"weight": 0.5}}});
+    assert_eq!(fails(&mut s, "view_graphics_set", doors), ErrorCode::InvalidArguments);
+    let heavy = json!({"view": plan, "category": "wall", "layers": {"finish": {"weight": 20.0}}});
+    assert_eq!(fails(&mut s, "view_graphics_set", heavy), ErrorCode::InvalidArguments);
+    run(&mut s, "view_graphics_set", json!({"view": plan, "category": "wall", "reset": true}));
+    assert_eq!(pens(&mut s, "Structure"), BTreeSet::from(["None None".to_string()]));
+}
