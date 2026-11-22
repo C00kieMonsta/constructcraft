@@ -1855,6 +1855,53 @@ fn a_view_picked_on_a_sheet_shows_its_properties() {
     assert!(harness.query_by_label(&t!("section-graphics")).is_some(), "and the view's own graphics");
 }
 
+/// A dimension between two columns shows *Locked* in its properties (#447):
+/// checking it locks the dimension, so moving one column moves the other.
+#[test]
+fn the_locked_row_locks_a_dimension() {
+    let mut state = sample_state();
+    let plan = state
+        .project()
+        .views
+        .values()
+        .find(|v| matches!(v.kind, cc_core::ViewKind::FloorPlan { .. }))
+        .map(|v| v.id)
+        .unwrap();
+    let mut column = |x: f64| {
+        let out = state.session.execute("column_create", serde_json::json!({"position": [x, 60.0]})).unwrap();
+        out["id"].as_u64().unwrap()
+    };
+    let (a, b) = (column(60.0), column(64.0));
+    let dim = state
+        .session
+        .execute(
+            "dimension_create",
+            serde_json::json!({"view": plan.0, "a": [60.1, 60.0], "b": [63.9, 60.0], "kind": "linear"}),
+        )
+        .unwrap();
+    let dim = dim["id"].as_u64().unwrap();
+    state.active_view = Some(plan);
+    state.selection = std::collections::BTreeSet::from([cc_core::ElementId(dim)]);
+    let mut harness = themed_harness(state, egui::vec2(360.0, 1400.0), egui::Theme::Light, |ui, state| {
+        crate::properties::show(ui, state);
+    });
+    harness.run();
+    harness.get_by_label(&t!("prop-dim-locked")).click();
+    harness.run();
+    let state = harness.state_mut();
+    let locked = match state.project().element(cc_core::ElementId(dim)).map(|e| &e.kind) {
+        Some(cc_core::ElementKind::Dimension(d)) => d.locked,
+        _ => None,
+    };
+    assert!(locked.is_some_and(|v| (v - 3.8).abs() < 1e-9), "{locked:?}");
+    state.session.execute("elements_move", serde_json::json!({"ids": [a], "delta": [1.0, 0.0]})).unwrap();
+    let x = match state.project().element(cc_core::ElementId(b)).map(|e| &e.kind) {
+        Some(cc_core::ElementKind::Column(c)) => c.position.x,
+        _ => f64::NAN,
+    };
+    assert!((x - 65.0).abs() < 1e-9, "{x}");
+}
+
 /// The sheet's rows run `sheet_set`: Portrait turns the paper, Today sets
 /// the issue date, each one undo step.
 #[test]

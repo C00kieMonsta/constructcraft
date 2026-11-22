@@ -262,6 +262,7 @@ pub fn component_view(
             offset: 0.0,
             kind: DimensionKind::Linear { dir },
             refs: Default::default(),
+            locked: None,
         };
         let Some(layout) = crate::dimension_layout(&dim, scale, &style) else { continue };
         crate::draw_marks(&mut out.drawing, &layout, &style, scale, None);
@@ -307,6 +308,7 @@ pub fn component_view(
                 offset: 0.0,
                 kind: DimensionKind::Linear { dir },
                 refs: Default::default(),
+                locked: None,
             };
             let Some(layout) = crate::dimension_layout(&dim, scale, &style) else { continue };
             crate::draw_marks(&mut out.drawing, &layout, &style, scale, None);

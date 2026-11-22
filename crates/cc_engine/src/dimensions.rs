@@ -245,6 +245,10 @@ pub fn set_value(s: &mut Session, id: ElementId, value: f64) -> Result<()> {
                         _ => translate.push(*el),
                     }
                 }
+                // A locked dimension keeps its new value (set first, so the moves keep it).
+                if let Some(ElementKind::Dimension(d)) = e.element_mut(id).map(|x| &mut x.kind) {
+                    d.locked = d.locked.map(|_| value);
+                }
                 e.transform_elements(&translate, &PlanTransform::translate(shift));
                 if let Some(ElementKind::Dimension(d)) = e.element_mut(id).map(|x| &mut x.kind) {
                     if at_b {

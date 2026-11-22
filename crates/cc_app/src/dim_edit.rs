@@ -91,6 +91,9 @@ pub fn canvas(
     // A click on the text of the selected dimension.
     let [id] = state.selection.iter().copied().collect::<Vec<_>>()[..] else { return false };
     let Some((center, size, angle)) = text_box(state, id, view, xf, px_per_mm, painter) else { return false };
+    if lock_toggle(ui, resp, painter, state, id, (center, size, angle)) {
+        return true;
+    }
     let local = egui::emath::Rot2::from_angle(angle).inverse() * (pos - center);
     if local.x.abs() > size.x / 2.0 + 4.0 || local.y.abs() > size.y / 2.0 + 4.0 {
         return false;
@@ -108,6 +111,62 @@ pub fn canvas(
     if resp.clicked() {
         open(state, view, Target::Dimension(id), center);
         return true;
+    }
+    false
+}
+
+/// Lock or unlock a dimension with `dimension_lock`; errors go to the status bar.
+pub fn set_locked(state: &mut AppState, id: ElementId, locked: bool) {
+    let command = cc_engine::commands::annotate::DimensionLock { ids: vec![id.0], locked };
+    crate::actions::run_command(state, command);
+}
+
+/// The padlock beside the text of a selected dimension that can be locked
+/// (#447): closed when locked; a click locks or unlocks it. Returns true
+/// when the click was used.
+fn lock_toggle(
+    ui: &Ui,
+    resp: &Response,
+    painter: &Painter,
+    state: &mut AppState,
+    id: ElementId,
+    (center, size, angle): (Pos2, egui::Vec2, f32),
+) -> bool {
+    let Some(d) = dimension(state, id) else { return false };
+    let plan = state.project().view(d.view).is_some_and(|v| v.is_plan());
+    if !(plan && d.can_lock()) && d.locked.is_none() {
+        return false;
+    }
+    let locked = d.locked.is_some();
+    // Past the end of the text, along it.
+    let rot = egui::emath::Rot2::from_angle(angle);
+    let at = center + rot * egui::vec2(size.x / 2.0 + 12.0, 0.0);
+    let rect = egui::Rect::from_center_size(at, egui::vec2(14.0, 14.0));
+    let hovered = resp.hover_pos().is_some_and(|p| rect.expand(2.0).contains(p));
+    let color = if hovered || locked { crate::theme::PALETTE.accent } else { crate::theme::PALETTE.text_muted };
+    let stroke = egui::Stroke::new(1.5, color);
+    // The body and the shackle, open (lifted to one side) when unlocked.
+    let body = egui::Rect::from_min_max(egui::pos2(rect.left() + 2.0, rect.center().y - 1.0), rect.right_bottom());
+    painter.rect(body, 1.5, color.gamma_multiply(if locked { 0.9 } else { 0.15 }), stroke, egui::StrokeKind::Inside);
+    let (left, right) = (body.left() + 2.5, body.right() - 2.5);
+    let lift = if locked { 0.0 } else { 3.0 };
+    let top = rect.top() + 1.0 - lift;
+    let shackle = vec![
+        egui::pos2(left, body.top()),
+        egui::pos2(left, top + 3.0),
+        egui::pos2((left + right) / 2.0, top),
+        egui::pos2(right, top + 3.0),
+        egui::pos2(right, body.top() - lift),
+    ];
+    painter.add(egui::Shape::line(shackle, stroke));
+    if hovered {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        egui::Tooltip::always_open(ui.ctx().clone(), ui.layer_id(), egui::Id::new(("dim-lock", id.0)), rect)
+            .show(|ui| ui.label(crate::t!("hint-dim-lock")));
+        if resp.clicked() {
+            set_locked(state, id, !locked);
+            return true;
+        }
     }
     false
 }
@@ -241,6 +300,7 @@ mod tests {
             offset: 1.0,
             kind: Default::default(),
             refs: Default::default(),
+            locked: None,
         };
         let id = state.create_element("dim".into(), level, ty, ElementKind::Dimension(Box::new(dim)));
         state.sync();
@@ -287,6 +347,7 @@ mod tests {
             offset: 1.0,
             kind: DimensionKind::Linear { dir: DVec2::X },
             refs: Default::default(),
+            locked: None,
         };
         let id = state.create_element("dim".into(), level, ty, ElementKind::Dimension(Box::new(dim)));
         state.sync();
@@ -338,6 +399,7 @@ mod tests {
             offset: 1.0,
             kind: DimensionKind::Linear { dir: DVec2::X },
             refs: Default::default(),
+            locked: None,
         };
         let refs = cc_engine::dimensions::associate(state.project(), &drawing, &dim).refs;
         assert!(refs[0].is_none() && refs[1].is_some_and(|r| r.element() == Some(cid)));
@@ -388,6 +450,7 @@ mod tests {
             offset: 1.0,
             kind: DimensionKind::Angular { vertex, rays: Default::default() },
             refs: Default::default(),
+            locked: None,
         };
         let dim = cc_engine::dimensions::associate(state.project(), &drawing, &dim);
         assert!(dim.refs.iter().all(Option::is_some), "{:?}", dim.refs);
@@ -421,6 +484,7 @@ mod tests {
             offset: 0.5,
             kind: DimensionKind::Linear { dir: DVec2::Y },
             refs: Default::default(),
+            locked: None,
         };
         let dim = cc_engine::dimensions::associate(state.project(), &drawing, &dim);
         let targets: Vec<_> = dim.refs.iter().map(|r| r.map(|r| r.target)).collect();
