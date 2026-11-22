@@ -27,6 +27,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - A plugin's limits are checked by the engine for every command it runs, including those run by a graph or a macro it starts, rather than only for the commands its Lua code calls.
 - The example plugin `quick_rooms` uses API 2 (version 0.2.0): ribbon buttons with icons, a default height and door side in its settings, English and Portuguese texts, `ui` hints, plugin data and tests.
 
+### Fixed
+
+- A schedule whose first column is totaled showed the element count in that column of its totals row and group footers, and the column's total nowhere (#434). The total now stays in its column; the count still fills the first cell when that column is not totaled.
+
 ## [0.13.0] - 2026-11-19
 
 ### Added
