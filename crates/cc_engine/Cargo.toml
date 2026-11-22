@@ -19,6 +19,7 @@ cc_ifc.workspace = true
 cc_cad.workspace = true
 cc_skp.workspace = true
 glam.workspace = true
+png.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true

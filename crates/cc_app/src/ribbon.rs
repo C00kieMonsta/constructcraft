@@ -686,10 +686,12 @@ fn command_buttons(ui: &mut Ui, state: &mut AppState, list: &[UiCommand]) {
 }
 
 fn file_tab(ui: &mut Ui, state: &mut AppState) {
-    use UiCommand::{CloseProject, ExportDxf, ExportIfc, ExportImage, ExportPdf, ExportSvg, New, Open, Save, SaveAs};
+    use UiCommand::{
+        CloseProject, ExportDxf, ExportGltf, ExportIfc, ExportImage, ExportPdf, ExportSvg, New, Open, Save, SaveAs,
+    };
     group(ui, t!("group-project"), |ui| command_buttons(ui, state, &[New, Open, Save, SaveAs, CloseProject]));
     group(ui, t!("group-export"), |ui| {
-        command_buttons(ui, state, &[ExportIfc, ExportPdf, ExportSvg, ExportImage, ExportDxf]);
+        command_buttons(ui, state, &[ExportIfc, ExportGltf, ExportPdf, ExportSvg, ExportImage, ExportDxf]);
         plugin_file_entries(ui, state, true);
     });
     group(ui, t!("group-settings"), |ui| command_button(ui, state, UiCommand::Preferences));
@@ -699,15 +701,15 @@ fn file_tab(ui: &mut Ui, state: &mut AppState) {
 /// Files brought into the project or written from it, and components to load.
 fn insert_tab(ui: &mut Ui, state: &mut AppState) {
     use UiCommand::{
-        ComponentLibrary, ExportDxf, ExportIfc, ImportCad, ImportGltf, ImportIfc, ImportImage, ImportObj, ImportSkp,
-        LoadComponent,
+        ComponentLibrary, ExportDxf, ExportGltf, ExportIfc, ImportCad, ImportGltf, ImportIfc, ImportImage, ImportObj,
+        ImportSkp, LoadComponent,
     };
     group(ui, t!("group-import"), |ui| {
         command_buttons(ui, state, &[ImportIfc, ImportCad, ImportSkp, ImportObj, ImportGltf, ImportImage]);
         plugin_file_entries(ui, state, false);
     });
     group(ui, t!("group-export"), |ui| {
-        command_buttons(ui, state, &[ExportIfc, ExportDxf]);
+        command_buttons(ui, state, &[ExportIfc, ExportGltf, ExportDxf]);
         plugin_file_entries(ui, state, true);
     });
     group(ui, t!("group-library"), |ui| command_buttons(ui, state, &[LoadComponent, ComponentLibrary]));
