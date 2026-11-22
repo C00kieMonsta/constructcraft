@@ -101,6 +101,8 @@ The engine's file commands (`project_open`, `project_save`, `ifc_import`, `ifc_e
 | Backspace | While drawing a chain of walls, beams, pipes, conduits, cable trays or lightning conductors: take back the last segment and go on from its start (Ctrl+Z too; Ctrl+Y puts it back); a railing's last point |
 | Space | Rotate or flip the selection or the element being placed; with walls selected, flip them (swap their exterior and interior sides); while drawing a wall, flip the side of the walls drawn next |
 
+**Create Similar** (CS, also *Modify → Clipboard*) starts the tool that draws the selected element, with its type: a wall's wall tool, a door's door tool, a floor's sketch, a dimension's tool in its mode (aligned, linear, angular…), a detail line's tool in its line style. Several elements selected work when they are all of one type; the selection is cleared.
+
 Two-letter keys work while a view has the focus and no text field is being edited. The README lists them all. Each tooltip shows its own shortcut as well.
 
 ## Navigating views

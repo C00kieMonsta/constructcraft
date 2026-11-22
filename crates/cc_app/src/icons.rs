@@ -138,6 +138,7 @@ pub enum Icon {
     Cut,
     Paste,
     MatchType,
+    CreateSimilar,
     DimLinear,
     RefPlane,
     Connector,
@@ -219,7 +220,7 @@ pub enum Icon {
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 202] = [
+    pub const ALL: [Icon; 203] = [
         Icon::New,
         Icon::Open,
         Icon::Save,
@@ -345,6 +346,7 @@ impl Icon {
         Icon::Cut,
         Icon::Paste,
         Icon::MatchType,
+        Icon::CreateSimilar,
         Icon::DimLinear,
         Icon::RefPlane,
         Icon::Connector,
@@ -552,6 +554,7 @@ impl Icon {
             Icon::Cut => include_str!("../../../assets/icons/ui/cut.svg"),
             Icon::Paste => include_str!("../../../assets/icons/ui/paste.svg"),
             Icon::MatchType => include_str!("../../../assets/icons/ui/match-type.svg"),
+            Icon::CreateSimilar => include_str!("../../../assets/icons/ui/create-similar.svg"),
             Icon::DimLinear => include_str!("../../../assets/icons/ui/dim-linear.svg"),
             Icon::RefPlane => include_str!("../../../assets/icons/ui/ref-plane.svg"),
             Icon::Connector => include_str!("../../../assets/icons/ui/connector.svg"),

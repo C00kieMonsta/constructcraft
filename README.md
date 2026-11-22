@@ -171,6 +171,7 @@ If you do not have Revit, independent third-party tools can convert `.rvt` files
 | VG | Visibility/Graphics | EH | Hide in view |
 | HH / HI | Temporarily hide / isolate elements | HC / IC | Temporarily hide / isolate categories |
 | HR | Reset temporary hide/isolate | DE | Demolish (in the view's phase) |
+| CS | Create similar (the selected element's tool and type) | | |
 
 2D navigation: the mouse wheel zooms and the middle button pans. 3D navigation: left drag orbits, Shift+left drag selects with a window or crossing box (swapped by a preference), right or middle drag pans and the wheel zooms.
 

@@ -358,6 +358,40 @@ impl Tool {
         }
     }
 
+    /// The tool that draws another element like `e` (*Create Similar*,
+    /// #405): its category's tool with its type (a foundation slab's
+    /// sketch, a dimension's kind). `None` for elements that are not drawn
+    /// with a tool.
+    pub fn similar(project: &Project, e: &cc_core::Element) -> Option<Tool> {
+        use cc_core::{DimensionKind, ElementKind, FoundationKind, TypeData};
+        let category = e.category();
+        let type_id = e.type_id;
+        project.element_type(type_id)?;
+        let tool = match (&e.kind, category) {
+            (ElementKind::Foundation(_), _) => match project.element_type(type_id).map(|t| &t.data) {
+                Some(TypeData::Foundation { kind: FoundationKind::Slab, .. }) => {
+                    Tool::Sketch { category: Category::Foundation, type_id }
+                }
+                Some(TypeData::Foundation { .. }) => Tool::Footing { type_id },
+                _ => return None,
+            },
+            (ElementKind::Dimension(d), _) => {
+                let mode = match d.kind {
+                    DimensionKind::Aligned => DimensionMode::Aligned,
+                    DimensionKind::Linear { .. } => DimensionMode::Linear,
+                    DimensionKind::Ordinate { .. } => DimensionMode::Ordinate,
+                    DimensionKind::Angular { .. } => DimensionMode::Angular,
+                    DimensionKind::Radial => DimensionMode::Radial,
+                    DimensionKind::Diameter => DimensionMode::Diameter,
+                };
+                Tool::Dimension { type_id, mode }
+            }
+            _ => Tool::for_category(project, category)?.with_type(type_id),
+        };
+        // A tool of another category is no match.
+        tool.category().is_none_or(|c| c == category).then_some(tool)
+    }
+
     /// Tool for creating elements of `category` with its default type
     /// (foundations: a pad footing with the first pad type).
     pub fn for_category(project: &Project, category: Category) -> Option<Tool> {
