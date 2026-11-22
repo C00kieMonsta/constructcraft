@@ -295,3 +295,66 @@ fn the_bars_along_a_ring_of_strips_lap_at_its_joints() {
     let sets = created(&run(&mut s, "strip_rebar_create", args));
     assert!(s.geometry().rebar[&sets[0]].bars.iter().all(|bar| close(bar.length(), 6.0 - 0.10)));
 }
+
+/// A haunched ring of two half-circle strips and a haunched straight strip,
+/// with their bars, come back from their own IFC as native strips of the
+/// same type and volume, the bars on them (#435): the arcs are written as
+/// their section revolved, the straight strip as its section extruded level.
+#[test]
+fn haunched_strips_round_trip_through_ifc_with_their_bars() {
+    let mut s = Session::default();
+    haunch(&mut s);
+    // A name of its own, as a project's ring footing has (the template's strip type differs in size).
+    let name = strip_type(&s);
+    run(&mut s, "type_set", json!({"type": name, "name": "Ring footing 160"}));
+    let a = id(&run(&mut s, "strip_footing_create", json!({"start": [3, 0], "end": [-3, 0], "bulge": 1.0})));
+    let b = id(&run(&mut s, "strip_footing_create", json!({"start": [-3, 0], "end": [3, 0], "bulge": 1.0})));
+    let straight = id(&run(&mut s, "strip_footing_create", json!({"start": [10, 0], "end": [16, 0]})));
+    let args = json!({"strips": [a.0, b.0, straight.0], "cover": 0.05, "max_length": 0});
+    let sets = created(&run(&mut s, "strip_rebar_create", args));
+    assert!(!sets.is_empty());
+    let geom = s.geometry().clone();
+    let volume = |g: &cc_geom::ModelGeometry, ids: &[ElementId]| ids.iter().map(|i| g.volume(*i)).sum::<f64>();
+    let (ring, line) = (volume(&geom, &[a, b]), volume(&geom, &[straight]));
+    assert!((ring - AREA * 2.0 * PI * 3.0).abs() < 1e-9 && (line - AREA * 6.0).abs() < 1e-9);
+
+    let path = std::env::temp_dir().join(format!("ccad-haunched-strips-{}.ifc", std::process::id()));
+    run(&mut s, "ifc_export", json!({"path": path}));
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(text.matches("=IFCREVOLVEDAREASOLID(").count(), 2, "the arcs revolved");
+    assert!(!text.contains("IFCFACETEDBREP"), "no strip written as a shell");
+    let mut back = Session::default();
+    run(&mut back, "ifc_import", json!({"path": path}));
+    let _ = std::fs::remove_file(&path);
+    let back_geom = back.geometry().clone();
+    let p = back.project();
+    let strips: Vec<&cc_core::Element> =
+        p.elements.values().filter(|e| matches!(e.kind, ElementKind::Foundation(_))).collect();
+    assert_eq!(strips.len(), 3, "native strips, no components");
+    let types: std::collections::BTreeSet<_> = strips.iter().map(|e| e.type_id).collect();
+    assert_eq!(types.len(), 1, "one strip type");
+    let named = p.types.values().filter(|t| t.name.starts_with("Ring footing 160")).collect::<Vec<_>>();
+    assert!(named.len() == 1 && named[0].id == strips[0].type_id, "the same type, no copy");
+    let haunched = |t| {
+        matches!(p.element_type(t).map(|t| &t.data),
+            Some(cc_core::TypeData::Foundation { width, thickness, haunch: Some(h), .. })
+                if close(*width, 1.6) && close(*thickness, 0.4) && close(h.beam_height, 0.5) && close(h.beam_width, 0.4)
+                    && close(h.edge_thickness, 0.2))
+    };
+    assert!(haunched(strips[0].type_id));
+    let geom = back_geom;
+    let uid = |id: ElementId| s.project().element(id).unwrap().uid;
+    let of = |u| strips.iter().find(|e| e.uid == u).map(|e| e.id).expect("the strip by its GlobalId");
+    assert!((volume(&geom, &[of(uid(a)), of(uid(b))]) - ring).abs() < 1e-6);
+    assert!((volume(&geom, &[of(uid(straight))]) - line).abs() < 1e-6);
+    // Every bar set comes back as a set on its strip.
+    let hosts: Vec<_> = sets.iter().map(|set| s.project().element(*set).unwrap().uid).collect();
+    for set in hosts {
+        let back_set = p.elements.values().find(|e| e.uid == set).expect("the bar set");
+        let host = match &back_set.kind {
+            ElementKind::Rebar(r) => r.host,
+            other => panic!("came back as {other:?}"),
+        };
+        assert!(strips.iter().any(|e| e.id == host), "hosted on a strip");
+    }
+}
