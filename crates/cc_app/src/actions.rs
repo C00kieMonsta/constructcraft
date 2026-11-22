@@ -530,6 +530,32 @@ pub fn export_ifc(state: &mut AppState) {
     }
 }
 
+/// The 3D view a glTF export writes: the active view when it is one, else
+/// the project's first; `None` when it has no 3D view.
+pub fn gltf_view(state: &AppState) -> Option<ViewId> {
+    let project = state.project();
+    let is_3d = |id: ViewId| project.view(id).is_some_and(|v| v.kind.takes_render());
+    state
+        .active_view
+        .filter(|id| is_3d(*id))
+        .or_else(|| project.views.values().find(|v| v.kind.takes_render()).map(|v| v.id))
+}
+
+pub fn export_gltf(state: &mut AppState) {
+    let Some(view) = gltf_view(state) else { return };
+    let name = format!("{}.glb", state.project().info.name);
+    let dialog = rfd::FileDialog::new().add_filter(t!("file-filter-gltf"), &["glb"]).set_file_name(name);
+    let Some(mut path) = dialog.save_file() else { return };
+    if path.extension().is_none() {
+        path.set_extension("glb");
+    }
+    let view = Some(cc_engine::Ref::Id(view.0));
+    match state.session.run(io::GltfExport { path: path.clone(), view }) {
+        Ok(_) => state.message = t!("msg-exported", "path" => path.display()),
+        Err(e) => state.dialogs.error = Some(t!("msg-export-failed", "error" => e.message)),
+    }
+}
+
 /// Vector formats a sheet can be exported to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SheetFormat {

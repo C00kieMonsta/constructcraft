@@ -191,6 +191,7 @@ registry![
         io::ObjImport,
         io::GltfImport,
         io::IfcExport,
+        io::GltfExport,
         io::SheetExport,
         io::ViewExport,
         render::ViewRender,

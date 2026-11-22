@@ -64,6 +64,67 @@ impl Command for IfcExport {
     }
 }
 
+/// Export what a 3D view shows as a binary glTF 2.0 file (.glb), for
+/// visualization programs such as real-time renderers: one node per level,
+/// under it one node per element named `<type> [<id>]` (its id, unique id,
+/// category, type, mark and level in `extras`), one mesh primitive per
+/// material, materials named after the project's with their color, finish,
+/// transparency and texture, and texture coordinates on every face (in
+/// meters where the material has no texture). Exporting again gives the same
+/// names, so a program that reimports the file can keep the materials it
+/// replaced. The view's phase, design options, detail level and hidden
+/// elements apply; conceptual masses are left out. In meters, Y up. Returns
+/// the path, the elements, materials and textures written and the triangles.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GltfExport {
+    /// Path of the .glb file to write.
+    pub path: PathBuf,
+    /// 3D view id or name (default: the first 3D view).
+    #[serde(default)]
+    pub view: Option<Ref>,
+}
+
+impl Command for GltfExport {
+    const NAME: &'static str = "gltf_export";
+    const KIND: CommandKind = CommandKind::File;
+    const CHECKS_PATHS: bool = true;
+    fn run(self, s: &mut Session) -> Result<Value> {
+        s.require_write("path", &self.path)?;
+        let ext = self.path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+        if ext != "glb" {
+            return Err(EngineError::invalid(t!("err-gltf-export-format")));
+        }
+        let id = match &self.view {
+            Some(r) => refs::view(s.project(), r)?,
+            None => s
+                .project()
+                .views
+                .values()
+                .find(|v| v.kind.takes_render())
+                .map(|v| v.id)
+                .ok_or_else(|| EngineError::invalid(t!("err-gltf-export-view")))?,
+        };
+        if !s.project().view(id).is_some_and(|v| v.kind.takes_render()) {
+            return Err(EngineError::invalid(t!("err-gltf-export-view")));
+        }
+        s.view_geometry(id);
+        let project = s.project();
+        let geom = s.geom_for(id);
+        let view = project.view(id).ok_or_else(|| EngineError::not_found("view"))?;
+        let out = guard(|| crate::gltf_export::export(project, geom, view))?.map_err(EngineError::invalid)?;
+        write(&self.path, &out.bytes)?;
+        Ok(json!({
+            "path": self.path,
+            "view": view.name,
+            "elements": out.elements,
+            "materials": out.materials,
+            "textures": out.textures,
+            "triangles": out.triangles,
+        }))
+    }
+}
+
 /// Export a sheet as vector PDF or SVG, or as DXF in paper millimeters (by
 /// `format`, else by the file extension).
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]

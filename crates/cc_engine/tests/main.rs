@@ -34,6 +34,7 @@ mod extension;
 mod fill_patterns;
 mod french_doors;
 mod gltf;
+mod gltf_export;
 mod graph;
 mod graphics;
 mod image;
