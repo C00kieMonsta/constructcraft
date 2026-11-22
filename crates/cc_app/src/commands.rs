@@ -224,6 +224,8 @@ pub enum UiCommand {
     Cut,
     ClipboardCopy,
     MatchType,
+    /// Start the tool that draws an element like the selected one (#405).
+    CreateSimilar,
     FloorPlan,
     CeilingPlan,
     New3D,
@@ -458,6 +460,7 @@ impl UiCommand {
             Cut,
             ClipboardCopy,
             MatchType,
+            CreateSimilar,
             FloorPlan,
             CeilingPlan,
             New3D,
@@ -664,6 +667,7 @@ impl UiCommand {
             Paste => Icon::Paste,
             Cut => Icon::Cut,
             MatchType => Icon::MatchType,
+            CreateSimilar => Icon::CreateSimilar,
             FloorPlan => Icon::FloorPlan,
             CeilingPlan => Icon::CeilingPlan,
             Section => Icon::Section,
@@ -895,6 +899,7 @@ impl UiCommand {
             Cut => t!("action-cut"),
             ClipboardCopy => t!("action-copy"),
             MatchType => t!("tool-match-type"),
+            CreateSimilar => t!("action-create-similar"),
             FloorPlan => t!("view-new-floor-plan"),
             CeilingPlan => t!("view-new-ceiling-plan"),
             New3D => t!("view-new-3d"),
@@ -1136,6 +1141,7 @@ impl UiCommand {
             Cut => t!("cmd-desc-cut"),
             ClipboardCopy => t!("cmd-desc-copy"),
             MatchType => t!("cmd-desc-match-type"),
+            CreateSimilar => t!("cmd-desc-create-similar"),
             FloorPlan => t!("cmd-desc-floor-plan"),
             CeilingPlan => t!("cmd-desc-ceiling-plan"),
             New3D => t!("cmd-desc-new-3d"),
@@ -1281,6 +1287,7 @@ impl UiCommand {
             Cut => "Ctrl+X",
             ClipboardCopy => "Ctrl+C",
             MatchType => "MA",
+            CreateSimilar => "CS",
             Section => "CT",
             ZoomFit => "ZE",
             VisibilityGraphics => "VG",
@@ -1644,6 +1651,7 @@ impl UiCommand {
             Ungroup if !state.selection.iter().any(|id| project.group_of(*id).is_some()) => Some(t!("why-no-group")),
             Explode if crate::cad_ui::selected_import(state).is_none() => Some(t!("why-select-cad")),
             Paste if state.clipboard.is_empty() => Some(t!("why-clipboard-empty")),
+            CreateSimilar if similar_tool(state).is_none() => Some(t!("why-create-similar")),
             FloorPlan | CeilingPlan if project.levels.is_empty() => Some(t!("why-no-levels")),
             Elevations if project.views_of(ViewCategory::Elevation).next().is_none() => Some(t!("why-no-elevations")),
             ZoomFit | Measure if state.active_view.is_none() => Some(t!("why-no-view")),
@@ -2232,6 +2240,7 @@ pub fn run(state: &mut AppState, ctx: &egui::Context, command: UiCommand) {
             crate::clipboard::copy(ctx, state);
         }
         MatchType => crate::clipboard::start_match_type(state),
+        CreateSimilar => create_similar(state),
         FloorPlan | CeilingPlan => {
             let level = state.active_level().or_else(|| state.project().levels.first().map(|l| l.id));
             if let Some(level) = level {
@@ -2316,6 +2325,33 @@ pub fn run(state: &mut AppState, ctx: &egui::Context, command: UiCommand) {
     }
 }
 
+/// The tool *Create Similar* starts (#405): that of the selected element,
+/// or of the selected elements when they are all of one type.
+fn similar_tool(state: &AppState) -> Option<Tool> {
+    let project = state.project();
+    let mut elements = state.selection.iter().filter_map(|id| project.element(*id));
+    let first = elements.next()?;
+    if elements.any(|e| e.type_id != first.type_id || e.category() != first.category()) {
+        return None;
+    }
+    Tool::similar(project, first)
+}
+
+/// Start the tool that draws an element like the selected one, with its
+/// type (a detail line's style too); the selection is cleared.
+fn create_similar(state: &mut AppState) {
+    let Some(tool) = similar_tool(state) else { return };
+    let style = state.selection.iter().find_map(|id| match state.project().element(*id).map(|e| &e.kind) {
+        Some(cc_core::ElementKind::DetailLine(l)) => Some(l.style),
+        _ => None,
+    });
+    if let Some(style) = style {
+        state.detail.style = style;
+    }
+    state.selection.clear();
+    state.set_tool(tool);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2366,6 +2402,83 @@ mod tests {
         state.show_home = true;
         assert_eq!(UiCommand::Save.unavailable(&state), Some(t!("why-no-project")));
         assert_eq!(UiCommand::Open.unavailable(&state), None);
+    }
+
+    /// *Create Similar* (CS, #405) starts the tool of the selected
+    /// element's category with its type, and clears the selection; it needs
+    /// one element, or elements of one type, that a tool draws.
+    #[test]
+    fn create_similar_starts_the_selected_elements_tool() {
+        let mut state = AppState::new(cc_core::Document::new(crate::home::sample_project("casa_simples").unwrap()));
+        state.project_open = true;
+        state.show_home = false;
+        let ctx = egui::Context::default();
+        assert_eq!(UiCommand::from_keys("CS"), Some(UiCommand::CreateSimilar));
+        assert_eq!(UiCommand::CreateSimilar.unavailable(&state), Some(t!("why-create-similar")));
+        let project = state.project();
+        let first_of = |c: Category| project.elements.values().find(|e| e.category() == c).map(|e| (e.id, e.type_id));
+        let (wall, wall_type) = first_of(Category::Wall).unwrap();
+        let (door, door_type) = first_of(Category::Door).unwrap();
+        let (floor, floor_type) = first_of(Category::Floor).unwrap();
+        let other_wall =
+            project.elements.values().find(|e| e.category() == Category::Wall && e.type_id != wall_type).map(|e| e.id);
+        for (id, want) in [
+            (wall, Tool::Wall { type_id: wall_type }),
+            (door, Tool::Hosted { category: Category::Door, type_id: door_type }),
+            (floor, Tool::Sketch { category: Category::Floor, type_id: floor_type }),
+        ] {
+            state.set_tool(Tool::Select);
+            state.selection = [id].into_iter().collect();
+            assert_eq!(UiCommand::CreateSimilar.unavailable(&state), None);
+            run(&mut state, &ctx, UiCommand::CreateSimilar);
+            assert_eq!(state.tool, want);
+            assert!(state.selection.is_empty());
+        }
+        // Elements of two types, or of two categories, have no one tool.
+        state.set_tool(Tool::Select);
+        state.selection = [wall, door].into_iter().collect();
+        assert_eq!(UiCommand::CreateSimilar.unavailable(&state), Some(t!("why-create-similar")));
+        if let Some(other) = other_wall {
+            state.selection = [wall, other].into_iter().collect();
+            assert!(UiCommand::CreateSimilar.unavailable(&state).is_some());
+        }
+    }
+
+    /// A dimension's kind and a foundation's are kept: a linear dimension
+    /// starts the dimension tool in linear mode, a foundation slab the
+    /// slab's sketch, a pad the footing tool.
+    #[test]
+    fn create_similar_keeps_how_the_element_was_drawn() {
+        let mut state = AppState::new(cc_core::Document::new(crate::home::sample_project("casa_simples").unwrap()));
+        let plan = state.project().views.values().find(|v| v.is_plan()).map(|v| v.id).unwrap();
+        let mut make = |name: &str, args: serde_json::Value| {
+            let out = state.session.execute(name, args).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            cc_core::ElementId(out["id"].as_u64().unwrap())
+        };
+        let dim = make(
+            "dimension_create",
+            serde_json::json!({"view": plan.0, "a": [100.0, 100.0], "b": [103.0, 100.0], "kind": "linear"}),
+        );
+        let pad = make("footing_create", serde_json::json!({"position": [120.0, 100.0]}));
+        let slab = make(
+            "foundation_slab_create",
+            serde_json::json!({"boundary": [[130.0, 100.0], [135.0, 100.0], [135.0, 104.0], [130.0, 104.0]]}),
+        );
+        let ty = |state: &AppState, id: cc_core::ElementId| state.project().element(id).unwrap().type_id;
+        for (id, check) in [
+            (
+                dim,
+                &(|t: &Tool| matches!(t, Tool::Dimension { mode: DimensionMode::Linear, .. }))
+                    as &dyn Fn(&Tool) -> bool,
+            ),
+            (pad, &|t: &Tool| matches!(t, Tool::Footing { .. })),
+            (slab, &|t: &Tool| matches!(t, Tool::Sketch { category: Category::Foundation, .. })),
+        ] {
+            state.selection = [id].into_iter().collect();
+            let tool = similar_tool(&state).expect("a tool");
+            assert!(check(&tool), "{tool:?}");
+            assert_eq!(tool.type_id(), Some(ty(&state, id)));
+        }
     }
 
     /// In a 3D view the transform tools, align and join stay available; the

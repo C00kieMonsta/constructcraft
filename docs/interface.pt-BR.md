@@ -101,6 +101,8 @@ Os comandos de arquivo do motor (`project_open`, `project_save`, `ifc_import`, `
 | Backspace | Ao desenhar uma sequência de paredes, vigas, tubos, eletrodutos, eletrocalhas ou condutores de SPDA: desfaz o último segmento e continua do início dele (Ctrl+Z também; Ctrl+Y o refaz); o último ponto de um guarda-corpo |
 | Espaço | Girar ou inverter a seleção ou o elemento sendo posicionado; com paredes selecionadas, invertê-las (trocar os lados externo e interno); desenhando uma parede, inverter o lado das próximas paredes |
 
+**Criar semelhante** (CS, também em *Modificar → Área de transferência*) inicia a ferramenta que desenha o elemento selecionado, com o seu tipo: a ferramenta de parede de uma parede, a de porta de uma porta, o esboço de um piso, a de cota no seu modo (alinhada, linear, angular…), a de linha de detalhe no seu estilo de linha. Vários elementos selecionados funcionam quando são todos de um mesmo tipo; a seleção é limpa.
+
 As teclas de duas letras funcionam com o foco numa vista e nenhum campo de texto em edição. O README lista todas elas, e cada dica mostra também o seu atalho.
 
 ## Navegando nas vistas

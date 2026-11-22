@@ -932,7 +932,7 @@ fn modify_tab(ui: &mut Ui, state: &mut AppState) {
     group(ui, t!("group-phasing"), |ui| command_button(ui, state, Demolish));
 }
 
-/// Paste (a menu of where to paste), then cut, copy and match type.
+/// Paste (a menu of where to paste), then cut, copy, match type and create similar.
 fn clipboard_group(ui: &mut Ui, state: &mut AppState) {
     let r = command_menu(ui, state, UiCommand::Paste);
     egui::Popup::menu(&r).show(|ui| {
@@ -947,7 +947,7 @@ fn clipboard_group(ui: &mut Ui, state: &mut AppState) {
             crate::clipboard::paste_aligned(state, true);
         }
     });
-    stacks(ui, state, &[&[UiCommand::Cut, UiCommand::ClipboardCopy, UiCommand::MatchType]]);
+    stacks(ui, state, &[&[UiCommand::Cut, UiCommand::ClipboardCopy, UiCommand::MatchType, UiCommand::CreateSimilar]]);
 }
 
 fn view_tab(ui: &mut Ui, state: &mut AppState) {
