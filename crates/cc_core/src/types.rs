@@ -680,6 +680,12 @@ impl TypeData {
         TypeData::Rebar { diameter, material, grade: String::new(), mass_per_meter: None }
     }
 
+    /// A type of reinforcing bars of `diameter` in `material` and steel
+    /// `grade` (`CA-50`), with the mass per meter of a round bar.
+    pub fn graded_rebar(diameter: f64, material: String, grade: &str) -> TypeData {
+        TypeData::Rebar { diameter, material, grade: grade.to_string(), mass_per_meter: None }
+    }
+
     /// A free pipe type (no series) of outside `diameter` in `material`.
     pub fn pipe(diameter: f64, material: String) -> TypeData {
         TypeData::Pipe { diameter, material, series: None, size: String::new(), inside: None }

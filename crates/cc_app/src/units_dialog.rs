@@ -241,4 +241,8 @@ fn body(ui: &mut Ui, state: &mut AppState) {
         ui.label(t!("units-style"));
         unit_combo(ui, state, "style", u.style, &NumberStyle::ALL, |s| style_name(s, comma), |u, v| u.style = v);
     });
+    let mut point = u.diameter_point;
+    if ui.checkbox(&mut point, t!("units-diameter-point")).changed() {
+        set(state, "diameter-point", |u| u.diameter_point = point);
+    }
 }

@@ -373,8 +373,8 @@ impl Project {
             ),
             beam(beam_i, (i_width, i_height), SectionShape::I { web: i_web, flange: i_flange }, "tpl-mat-steel"),
         ]);
-        for (key, diameter) in s.rebars {
-            types.push((n(key), TypeData::rebar(diameter, n("tpl-mat-steel"))));
+        for (key, diameter, grade) in s.rebars {
+            types.push((n(key), TypeData::graded_rebar(diameter, n("tpl-mat-steel"), grade)));
         }
         let kinds = [FoundationKind::Pad, FoundationKind::Strip, FoundationKind::Slab];
         for ((key, width, length, thickness), kind) in s.footings.into_iter().zip(kinds) {
@@ -499,6 +499,12 @@ impl Project {
         p.add_template_niche(&names, &n);
         // The concrete wall types (issue #366), last for the same reason.
         p.add_template_concrete_walls(&s.concrete_walls, &n);
+        // One more bar type (issue #437), last for the same reason.
+        let (key, diameter, grade) = s.extra_rebar;
+        let id = ElementTypeId(p.alloc_id());
+        let data = TypeData::graded_rebar(diameter, n("tpl-mat-steel"), grade);
+        p.types
+            .insert(id, ElementType { id, name: n(key), data, info: Default::default(), uid: crate::Uid::generate() });
         p
     }
 
@@ -711,9 +717,9 @@ impl Project {
                 crate::material::template_properties(&mut m, crate::material::MaterialClass::Metal);
                 self.materials.push(m);
             }
-            for (key, diameter) in s.rebars {
+            for (key, diameter, grade) in s.rebars.into_iter().chain([s.extra_rebar]) {
                 let id = ElementTypeId(self.alloc_id());
-                let data = TypeData::rebar(diameter, steel.clone());
+                let data = TypeData::graded_rebar(diameter, steel.clone(), grade);
                 self.types.insert(
                     id,
                     ElementType { id, name: n(key), data, info: Default::default(), uid: crate::Uid::generate() },
@@ -1659,6 +1665,7 @@ pub fn template_default(key: &str) -> &'static str {
         "tpl-type-footing-strip" => "Viga baldrame 20 x 40 cm",
         "tpl-type-footing-slab" => "Radier 30 cm",
         "tpl-type-rebar-5" => "Barra Ø 5,0 mm",
+        "tpl-type-rebar-6" => "Barra Ø 6,3 mm",
         "tpl-type-rebar-8" => "Barra Ø 8,0 mm",
         "tpl-type-rebar-10" => "Barra Ø 10,0 mm",
         "tpl-type-rebar-12" => "Barra Ø 12,5 mm",
@@ -1769,6 +1776,7 @@ pub fn template_default(key: &str) -> &'static str {
         "tpl-imp-type-rebar-4" => "Barra #4",
         "tpl-imp-type-rebar-5" => "Barra #5",
         "tpl-imp-type-rebar-6" => "Barra #6",
+        "tpl-imp-type-rebar-7" => "Barra #7",
         "tpl-imp-type-rebar-8" => "Barra #8",
         "tpl-imp-type-footing-pad" => "Sapata 3'-0\" x 3'-0\" x 12\"",
         "tpl-imp-type-footing-strip" => "Viga baldrame 8\" x 16\"",

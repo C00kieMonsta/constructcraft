@@ -140,6 +140,26 @@ fn bars_take_the_project_type_of_their_size() {
     assert_eq!(p.types_of(Category::Rebar).count(), before + 1);
 }
 
+/// A Ø6.3 CA-50 bar, the usual stirrup size, takes the template's Ø 6,3 mm
+/// type, which carries the grade (#437).
+#[test]
+fn stirrup_bars_take_the_template_type() {
+    let tank = TANK
+        .replace("'Rebar Bar:20 CA-50'", "'Barra do vergalhao:6.3 CA-50'")
+        .replace("'9001','CA-50',20.,314.2", "'9001','CA-50',6.3,31.2")
+        .replace("IFCSWEPTDISKSOLID(#134,10.,", "IFCSWEPTDISKSOLID(#134,3.15,")
+        .replace(".MAIN.,20.,314.2,", ".MAIN.,6.3,31.2,");
+    assert!(!tank.contains("20 CA-50"), "the Ø20 bar is now Ø6.3");
+    let base = Project::from_template();
+    let before = base.types_of(Category::Rebar).count();
+    let (p, _) = import(&tank, base).unwrap();
+    let (name, diameter, grade) = rebar_data(&p, bar_at(&p, 4.0));
+    assert_eq!(name, "Barra Ø 6,3 mm");
+    assert!((diameter - 0.0063).abs() < 1e-9);
+    assert_eq!(grade, "CA-50");
+    assert_eq!(p.types_of(Category::Rebar).count(), before);
+}
+
 /// A type of the size but of another grade does not take the bars.
 #[test]
 fn bars_keep_their_grade() {
