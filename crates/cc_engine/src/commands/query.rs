@@ -436,6 +436,10 @@ pub(crate) fn element_json(s: &mut Session, id: ElementId) -> Option<Value> {
     if geom.solids_of(id).next().is_some() {
         derived.insert("volume".into(), json!(geom.volume(id)));
     }
+    // A pipe: its length less the laying lengths of its catalog fittings.
+    if let (ElementKind::Pipe(_), Some(cut)) = (&e.kind, geom.pipe_cut_length(id)) {
+        derived.insert("cut_length".into(), json!(cut));
+    }
     // A layered wall's layers: material, thickness, net volume and their lowest and highest
     // points above the wall's base (each layer's own extent, see `cc_core::layer_extent`).
     if let Some(w) = geom.walls.get(&id).filter(|w| w.curtain.is_none() && !w.layers.is_empty()) {

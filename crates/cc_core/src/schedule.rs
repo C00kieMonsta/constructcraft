@@ -111,6 +111,12 @@ pub enum ScheduleField {
     BoltCount,
     /// Bolt diameter of a connection.
     BoltDiameter,
+    /// Inside diameter of a pipe (its series row's, else its type's own).
+    InsideDiameter,
+    /// The pipe series of a pipe's type.
+    Series,
+    /// The size of a pipe in its series (`"25 mm"`, `"1/2\""`).
+    Size,
     /// How many elements the row stands for (1, or the group's when rows are not itemized).
     Count,
 }
@@ -188,6 +194,9 @@ impl ScheduleField {
             ScheduleField::CutVolume => "col-cut-volume",
             ScheduleField::FillVolume => "col-fill-volume",
             ScheduleField::CableLength => "col-cable-length",
+            ScheduleField::InsideDiameter => "col-inside-diameter",
+            ScheduleField::Series => "col-pipe-series",
+            ScheduleField::Size => "col-pipe-size",
             ScheduleField::ConnectionKind => "col-connection-kind",
             ScheduleField::PlateMass => "col-plate-mass",
             ScheduleField::BoltCount => "col-bolt-count",
@@ -274,7 +283,17 @@ impl ScheduleField {
             }
             Category::Topography => &[F::Area, F::Volume, F::Material, F::CutVolume, F::FillVolume],
             Category::Pad => &[F::Elevation, F::Area, F::CutVolume, F::FillVolume],
-            Category::Pipe => &[F::Diameter, F::Length, F::System, F::Slope, F::Material],
+            Category::Pipe => &[
+                F::Diameter,
+                F::InsideDiameter,
+                F::Series,
+                F::Size,
+                F::Length,
+                F::CutLength,
+                F::System,
+                F::Slope,
+                F::Material,
+            ],
             Category::Conduit => &[F::Diameter, F::Length, F::System, F::Material],
             Category::CableTray => &[F::Width, F::Height, F::Length, F::System, F::Material],
             Category::Valve => &[F::Host, F::Diameter, F::System, F::Material],

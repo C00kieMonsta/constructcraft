@@ -13,6 +13,7 @@ mod curved_elements;
 mod curved_profiles;
 mod foreign_bars;
 mod foreign_tags;
+mod pipe_fittings;
 mod rebar;
 mod roof_joins;
 mod round_trip;

@@ -17,6 +17,7 @@ pub mod csg;
 pub mod curtain;
 mod cut;
 pub mod faces;
+pub mod fitting_catalog;
 pub mod level_mark;
 pub mod lightning;
 pub mod mass;

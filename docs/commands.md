@@ -1871,7 +1871,7 @@ No parameters.
 
 ### `mep_fittings`
 
-*query* — The fittings where pipes and conduits meet, counted by category, kind, angle (elbows), diameters and system: the fittings takeoff.
+*query* — The fittings where pipes and conduits meet, counted by category, kind, angle (elbows), diameters and system: the fittings takeoff. Pipe fittings whose runs are all of one pipe series are matched to its catalog: they add their `name`, the series `code`, `size` and `size2`, a `status` (`matched`, `composite`: a main fitting plus reducers, or `missing`: the series sells no such fitting), `missing` with the `reason` (and its `reason_code`: angle, size or sizes), and, for composites, the `pieces` (name, kind, size, size2).
 
 | Parameter | Type | | Description |
 |---|---|---|---|

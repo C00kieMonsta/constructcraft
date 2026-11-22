@@ -2079,21 +2079,87 @@ impl<'a> Exporter<'a> {
         let n = Value::Null;
         let mut written = Vec::new();
         let mut typed: BTreeMap<(&'static str, &'static str), Vec<Id>> = BTreeMap::new();
+        let project = self.project;
+        // Catalog fittings: one type per series row (its name and kind).
+        let mut rows: BTreeMap<(cc_core::PipeSeriesId, usize), (String, &'static str, Vec<Id>)> = BTreeMap::new();
         for (i, f) in geom.mep.fittings.iter().enumerate() {
             let Some(storey) = self.storey_placement(f.level) else { continue };
             let level_z = self.project.level_elevation(f.level);
+            if let Some(m) = f.catalog.as_ref().filter(|m| !m.pieces.is_empty())
+                && let Some(series) = project.pipe_series.get(&m.series)
+            {
+                for (k, piece) in m.pieces.iter().enumerate() {
+                    let Some(row) = series.fittings.get(piece.row) else { continue };
+                    let items: Vec<Id> = piece
+                        .bodies
+                        .iter()
+                        .filter_map(|b| {
+                            let dir = (b.b - b.a).try_normalize()?;
+                            let depth = b.a.distance(b.b);
+                            let frame = Frame { origin: b.a - piece.at, x: dir.any_orthonormal_vector(), z: dir };
+                            let position = self.placement3(frame);
+                            let profile = self.w.add(
+                                "IFCCIRCLEPROFILEDEF",
+                                args![Value::Enum("AREA"), Value::Null, Value::Null, b.radius],
+                            );
+                            (b.radius > 0.0 && depth > 1e-9).then(|| {
+                                self.w.add("IFCEXTRUDEDAREASOLID", args![profile, position, self.dir_z, depth])
+                            })
+                        })
+                        .collect();
+                    if items.is_empty() {
+                        continue;
+                    }
+                    let color = f.system.and_then(|s| self.project.system(s)).map_or([128, 128, 128], |s| s.color());
+                    let style_name =
+                        f.system.and_then(|s| self.project.system(s)).map_or("Generic", |s| s.name.as_str());
+                    let style = self.style(&format!("system {style_name}"), color, 0.0);
+                    for &item in &items {
+                        self.styled(item, style);
+                    }
+                    let shape = self.shape(items, None);
+                    let at = piece.at;
+                    let placement =
+                        self.local_placement(Some(storey), Frame::at(DVec3::new(at.x, at.y, at.z - level_z)));
+                    let name = cc_geom::fitting_catalog::fitting_name(
+                        cc_geom::fitting_catalog::english_word(row.kind),
+                        row,
+                        series,
+                    );
+                    let kind = pipe_fitting_type(row.kind);
+                    let gid = self.guid(&format!("fitting-{i}-{}-{k}", f.node));
+                    let product = self.w.add(
+                        "IFCPIPEFITTING",
+                        args![
+                            gid,
+                            n.clone(),
+                            name.as_str(),
+                            n.clone(),
+                            n.clone(),
+                            placement,
+                            shape,
+                            n.clone(),
+                            Value::Enum(kind)
+                        ],
+                    );
+                    rows.entry((m.series, piece.row)).or_insert_with(|| (name, kind, Vec::new())).2.push(product);
+                    self.contained.entry(f.level).or_default().push(product);
+                    written.push((f.system, product));
+                }
+                continue;
+            }
             let pipe = f.category == cc_core::Category::Pipe;
             let conductor = f.category == cc_core::Category::LightningConductor;
             let (entity, kind, name) = match (pipe, f.kind) {
                 // Lightning conductors meet in clamps: connectors, junctions where they branch.
-                (_, K::Tee | K::Cross) if conductor => ("IFCCABLEFITTING", "JUNCTION", "Junction"),
+                (_, K::Tee | K::Wye | K::Cross) if conductor => ("IFCCABLEFITTING", "JUNCTION", "Junction"),
                 _ if conductor => ("IFCCABLEFITTING", "CONNECTOR", "Connector"),
                 (true, K::Elbow { .. }) => ("IFCPIPEFITTING", "BEND", "Elbow"),
-                (true, K::Tee | K::Cross) => ("IFCPIPEFITTING", "JUNCTION", "Junction"),
+                (true, K::Tee | K::Wye | K::Cross) => ("IFCPIPEFITTING", "JUNCTION", "Junction"),
                 (true, K::Coupling) => ("IFCPIPEFITTING", "CONNECTOR", "Coupling"),
                 (true, K::Reducer) => ("IFCPIPEFITTING", "TRANSITION", "Reducer"),
                 (false, K::Elbow { .. }) => ("IFCCABLECARRIERFITTING", "BEND", "Bend"),
-                (false, K::Tee) => ("IFCCABLECARRIERFITTING", "TEE", "Tee"),
+                (false, K::Tee | K::Wye) => ("IFCCABLECARRIERFITTING", "TEE", "Tee"),
                 (false, K::Cross) => ("IFCCABLECARRIERFITTING", "CROSS", "Cross"),
                 (false, K::Reducer) => ("IFCCABLECARRIERFITTING", "REDUCER", "Reducer"),
                 (false, K::Coupling) => ("IFCCABLECARRIERFITTING", "NOTDEFINED", "Coupling"),
@@ -2166,6 +2232,26 @@ impl<'a> Exporter<'a> {
                 ],
             );
             let gid = self.guid(&format!("fitting-deftype-{entity}-{kind}"));
+            self.w.add("IFCRELDEFINESBYTYPE", args![gid, n.clone(), n.clone(), n.clone(), objects, ty]);
+        }
+        for ((series, row), (name, kind, objects)) in rows {
+            let gid = self.guid(&format!("fitting-row-type-{}-{row}", series.0));
+            let ty = self.w.add(
+                "IFCPIPEFITTINGTYPE",
+                args![
+                    gid,
+                    n.clone(),
+                    name.as_str(),
+                    n.clone(),
+                    n.clone(),
+                    n.clone(),
+                    n.clone(),
+                    n.clone(),
+                    n.clone(),
+                    Value::Enum(kind)
+                ],
+            );
+            let gid = self.guid(&format!("fitting-row-deftype-{}-{row}", series.0));
             self.w.add("IFCRELDEFINESBYTYPE", args![gid, n.clone(), n.clone(), n.clone(), objects, ty]);
         }
         written
@@ -2457,6 +2543,37 @@ impl<'a> Exporter<'a> {
                 ("IFCWINDOWTYPE", args![Value::Enum("WINDOW"), Value::Enum("SINGLE_PANEL"), Value::Null, Value::Null])
             }
         };
+        // A size of a pipe series carries the series and the size ([`PIPE_SERIES_PSET`]); a
+        // type object holds its property sets itself.
+        let project = self.project;
+        if let Some((series, row)) = project.pipe_row(&ty.data) {
+            let label = |s: &str| Value::Typed("IFCLABEL", Box::new(s.into()));
+            let length = |v: f64| Value::Typed("IFCPOSITIVELENGTHMEASURE", Box::new(Value::Real(v)));
+            let mut props = vec![("Code", label(&series.code)), ("Size", label(&row.size))];
+            if !series.standard.is_empty() {
+                props.push(("Standard", label(&series.standard)));
+            }
+            props.extend([
+                ("OutsideDiameter", length(row.de)),
+                ("InsideDiameter", length(row.di)),
+                ("WallThickness", length(row.e)),
+            ]);
+            if !series.pressure.is_empty() {
+                props.push(("Pressure", label(&series.pressure)));
+            }
+            let props: Vec<Id> = props
+                .into_iter()
+                .map(|(name, value)| self.w.add("IFCPROPERTYSINGLEVALUE", args![name, n.clone(), value, n.clone()]))
+                .collect();
+            let gid = self.guid(&format!("pset-pipe-series-{type_id}"));
+            let set = self.w.add("IFCPROPERTYSET", args![gid, n.clone(), PIPE_SERIES_PSET, n.clone(), props]);
+            if let Some(slot) = base.get_mut(5) {
+                match slot {
+                    Value::List(sets) => sets.push(Value::Ref(set)),
+                    other => *other = Value::List(vec![Value::Ref(set)]),
+                }
+            }
+        }
         let id = self.w.add(entity, base.into_iter().chain(extra).collect());
         self.types.insert(type_id, id);
         let info = &ty.info;
@@ -3828,6 +3945,22 @@ pub const PILE_CAP_PSET: &str = "ConstructCAD_PileCap";
 /// `Section` and `Embedment` as text, and for a pile of a cap the cap's
 /// GlobalId (`Cap`) and the pile's place in its layout (`CapIndex`).
 pub const PILE_PSET: &str = "ConstructCAD_Pile";
+
+/// Property set of a pipe segment type that is a size of a pipe series:
+/// the series' `Code`, the `Size`, `Standard`, `OutsideDiameter`,
+/// `InsideDiameter`, `WallThickness` and `Pressure`.
+pub const PIPE_SERIES_PSET: &str = "ConstructCAD_PipeSeries";
+
+/// The `IfcPipeFittingTypeEnum` of a catalog fitting kind.
+fn pipe_fitting_type(kind: cc_core::FittingRowKind) -> &'static str {
+    use cc_core::FittingRowKind as K;
+    match kind {
+        K::Elbow => "BEND",
+        K::Tee | K::Wye | K::Cross => "JUNCTION",
+        K::Coupling => "CONNECTOR",
+        K::Reducer => "TRANSITION",
+    }
+}
 
 /// The `IfcPileTypeEnum`, `IfcPileConstructionEnum` and, for a user-defined
 /// type, the object type of a pile kind: bored piles are bored and cast in

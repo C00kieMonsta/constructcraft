@@ -54,6 +54,7 @@ mod pad;
 mod phases;
 mod pile_rebar;
 mod piles;
+mod pipe_fittings;
 mod pipes;
 mod plugin_data;
 mod plugin_scope;
