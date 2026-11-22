@@ -25,6 +25,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - A plugin's limits are checked by the engine for every command it runs, including those run by a graph or a macro it starts, rather than only for the commands its Lua code calls.
 - The example plugin `quick_rooms` uses API 2 (version 0.2.0): ribbon buttons with icons, a default height and door side in its settings, English and Portuguese texts, `ui` hints, plugin data and tests.
 
+### Fixed
+
+- IFC import gave walls, slabs, columns, beams and every other element the other program's numeric element id as their mark, as it did for bars before #369 (#436). A purely numeric `Tag` in a file another program wrote is no longer a mark; other tags, and every mark in a file ConstructCraft wrote, come in as before. Empty lines of the building's address are no longer joined into the project address as bare separators.
+
 ## [0.13.0] - 2026-11-19
 
 ### Added

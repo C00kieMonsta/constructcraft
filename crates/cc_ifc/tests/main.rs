@@ -12,6 +12,7 @@ mod connections;
 mod curved_elements;
 mod curved_profiles;
 mod foreign_bars;
+mod foreign_tags;
 mod rebar;
 mod round_trip;
 mod spline_walls;
