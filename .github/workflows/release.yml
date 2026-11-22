@@ -172,6 +172,27 @@ jobs:
             echo "::error::CHANGELOG.md has no section for $version"
             exit 1
           fi
+      # The installers again under names without the version, so that
+      # releases/latest/download/<name> always gives the newest (the README links them).
+      - name: Fixed-name copies
+        run: |
+          cd dist
+          for f in *.msi *.dmg *.AppImage *.deb; do
+            if [ ! -e "$f" ]; then
+              echo "::error::no file matches $f"
+              exit 1
+            fi
+            case "$f" in
+              *.deb) fixed="constructcraft_${f##*_}" ;;
+              *) fixed="${f/-$GITHUB_REF_NAME/}" ;;
+            esac
+            if [ "$fixed" = "$f" ]; then
+              echo "::error::$f has no version to leave out"
+              exit 1
+            fi
+            cp -- "$f" "$fixed"
+          done
+          ls -l
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS.txt
       - name: Create release

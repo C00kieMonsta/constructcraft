@@ -4,16 +4,36 @@
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 [![Rust 2024](https://img.shields.io/badge/rust-2024_edition-orange.svg?logo=rust)](https://www.rust-lang.org/)
 [![IFC4](https://img.shields.io/badge/IFC-IFC4_export_%C2%B7_IFC2X3%2FIFC4_import-0a7bbb.svg)](https://technical.buildingsmart.org/standards/ifc/)
-[![Platforms](https://img.shields.io/badge/platforms-Windows_%C2%B7_macOS_%C2%B7_Linux-lightgrey.svg)](#running)
+[![Platforms](https://img.shields.io/badge/platforms-Windows_%C2%B7_macOS_%C2%B7_Linux-lightgrey.svg)](#download)
 [![DCO](https://img.shields.io/badge/DCO-signed--off-brightgreen.svg)](CONTRIBUTING.md)
 [![Discord](https://img.shields.io/badge/Discord-join-5865F2.svg?logo=discord&logoColor=white)](https://discord.gg/y8ySJZjpK)
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa.svg?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/francisreboucas)
 
 Free and open source **Building Information Modeling (BIM)** software, written in Rust and independent of any commercial vendor.
 
-[Português (Brasil)](README.pt-BR.md) · [Discord](https://discord.gg/y8ySJZjpK) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [Security](SECURITY.md)
+**[Download](#download)** · [Português (Brasil)](README.pt-BR.md) · [Discord](https://discord.gg/y8ySJZjpK) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [Security](SECURITY.md)
 
 A single parametric model is the source of truth. Floor plans, ceiling plans, sections, elevations, 3D views, legends, schedules and sheets are *queries* over that model and update automatically after every change.
+
+## Download
+
+Free, with no account. Each link downloads the newest release:
+
+| System | Download | Install |
+|---|---|---|
+| **Windows** (x64) | [**Installer (.msi)**](https://github.com/francisreboucas/constructcraft/releases/latest/download/constructcraft-x86_64.msi) | Run it. It installs under Program Files with a Start menu shortcut, opens `.ccad` files, and optionally adds `ccad` to the PATH. Newer versions upgrade it in place. |
+| **macOS**, Apple silicon | [**Disk image (.dmg)**](https://github.com/francisreboucas/constructcraft/releases/latest/download/constructcraft-aarch64-apple-darwin.dmg) | Drag *ConstructCraft* to *Applications*. |
+| **macOS**, Intel | [**Disk image (.dmg)**](https://github.com/francisreboucas/constructcraft/releases/latest/download/constructcraft-x86_64-apple-darwin.dmg) | Drag *ConstructCraft* to *Applications*. |
+| **Linux**, x86_64 | [**AppImage**](https://github.com/francisreboucas/constructcraft/releases/latest/download/constructcraft-x86_64.AppImage) · [Debian/Ubuntu (.deb)](https://github.com/francisreboucas/constructcraft/releases/latest/download/constructcraft_amd64.deb) | AppImage: `chmod +x` it and run it. `.deb`: `sudo apt install ./constructcraft_amd64.deb`. |
+| **Linux**, arm64 | [**AppImage**](https://github.com/francisreboucas/constructcraft/releases/latest/download/constructcraft-aarch64.AppImage) · [Debian/Ubuntu (.deb)](https://github.com/francisreboucas/constructcraft/releases/latest/download/constructcraft_arm64.deb) | AppImage: `chmod +x` it and run it. `.deb`: `sudo apt install ./constructcraft_arm64.deb`. |
+
+Which Mac? In the Apple menu, *About This Mac* shows a *Chip* line with *Apple M…* on Apple silicon and a *Processor* line naming Intel on Intel Macs. The [download page](https://constructcraft.net/#download) picks the file for your system.
+
+Both Linux packages register the desktop entry and icon; the `.deb` also registers the `.ccad` file type and puts `ccad` in `/usr/bin`. The Linux builds need glibc 2.35 or later (Ubuntu 22.04, Debian 12 and newer) and a Vulkan or OpenGL driver.
+
+The [latest release](https://github.com/francisreboucas/constructcraft/releases/latest) page has every file, also the portable Windows `.zip`, the `.tar.gz` archives (the macOS one also has `ccad`) and a `SHA256SUMS.txt` to check them against. [Older releases](https://github.com/francisreboucas/constructcraft/releases) stay there too.
+
+**First launch.** The builds are not code-signed yet. On Windows, SmartScreen may warn about an unknown publisher: choose *More info → Run anyway*. On macOS, Gatekeeper blocks the first launch: right-click (Control-click) the app and choose *Open*, or, on macOS 15 and later, open it once and then click *Open Anyway* in *System Settings → Privacy & Security*.
 
 ## Familiar by design
 
@@ -47,18 +67,6 @@ The showcase house, built by [`examples/showcase.ccmacro`](examples/showcase.ccm
 | Construction phases (existing, demolished, new) and view filters coloring walls by thickness | Section with cut hatching, levels and the roof |
 | [![Sheet](docs/screenshots/en/sheet.png)](docs/screenshots/en/sheet.png) | [![Room schedule](docs/screenshots/en/schedule.png)](docs/screenshots/en/schedule.png) |
 | A3 sheet with the plan, a section and the 3D view | Room schedule with totals |
-
-## Installing
-
-Each [release](https://github.com/francisreboucas/constructcraft/releases) has installers, plain archives and a `SHA256SUMS.txt` to check them against:
-
-| System | Installer | Archive |
-|---|---|---|
-| Windows (x64) | `constructcraft-vX.Y.Z-x86_64.msi`: installs under Program Files with a Start menu shortcut, opens `.ccad` files, and optionally adds `ccad` to the PATH. Newer versions upgrade it in place. | `…-x86_64-pc-windows-msvc.zip` |
-| Linux (x86_64, arm64) | `constructcraft_X.Y.Z_amd64.deb` or `…_arm64.deb` (Debian, Ubuntu: `sudo apt install ./constructcraft_X.Y.Z_amd64.deb`) or `constructcraft-vX.Y.Z-x86_64.AppImage` or `…-aarch64.AppImage` (`chmod +x` it and run it). Both register the desktop entry and icon; the `.deb` also the `.ccad` file type and `ccad` in `/usr/bin`. | `…-x86_64-unknown-linux-gnu.tar.gz`, `…-aarch64-unknown-linux-gnu.tar.gz` |
-| macOS | `constructcraft-vX.Y.Z-aarch64-apple-darwin.dmg` (Apple silicon) or `…-x86_64-apple-darwin.dmg` (Intel): drag *ConstructCraft* to *Applications*. | `…-apple-darwin.tar.gz` (also has `ccad`) |
-
-The builds are not code-signed yet. On Windows, SmartScreen may warn about an unknown publisher: choose *More info → Run anyway*. On macOS, Gatekeeper blocks the first launch: right-click (Control-click) the app and choose *Open*, or, on macOS 15 and later, open it once and then click *Open Anyway* in *System Settings → Privacy & Security*. The Linux builds need glibc 2.35 or later (Ubuntu 22.04, Debian 12 and newer) and a Vulkan or OpenGL driver.
 
 ## Running
 
