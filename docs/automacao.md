@@ -290,6 +290,15 @@ Ainda não há, e os comandos recusam: portas, janelas e nichos em parede em spl
 {"command": "element_set", "args": {"id": 14, "params": {"spline": {"control": [[0, 0], [2, 2], [5, 2], [7, 0]]}}}}
 ```
 
+### União de telhados
+
+Uma ala transversal ou um avanço é unido ao telhado que encontra com `roof_join` (`roof`, a ala; `to`, o telhado principal): a ponta da ala avança sobre o telhado principal, ou é cortada, até encontrar a superfície dele, formando águas-furtadas (rincões), e o telhado principal é cortado debaixo dela. A ala encontra o telhado principal pelas arestas que estão sobre ele, ou através de um vão para o qual a sua aresta mais próxima está voltada (não mais longe do que a ala é larga ou comprida); quando as arestas ao lado dessa ponta são beirais inclinados (uma ala de duas águas com a cumeeira correndo para o telhado principal, ou uma ala de quatro águas, que ganha uma empena ali), a ponta avança, senão é só cortada. Uma ala mais baixa que o telhado principal o encontra mais acima na água; uma mais alta avança em nível até o telhado principal subir até os seus beirais. Cadeias (um avanço sobre uma ala sobre um telhado principal) e várias alas sobre um telhado funcionam. A união permanece quando qualquer dos telhados muda, e é recusada quando os telhados não se encontram, para um telhado unido a si mesmo ou quando fecharia um ciclo. Paredes presas a qualquer dos telhados acompanham os dois; áreas, telhas, estrutura, tabelas e IFC contam cada parte uma vez. `element_get` traz `derived.join` (`to`, `active`, `issue` quando a união não faz nada, os rincões em `valleys` e o seu comprimento em `valley_length`, e `cut_by`, as alas que cortam um telhado principal), e `roof_check` aponta uma união que não faz nada. `roof_unjoin` volta a construir os dois como desenhados; apagar o telhado principal libera as suas alas.
+
+```text
+{"command": "roof_join", "args": {"roof": 21, "to": 12}}
+{"command": "roof_unjoin", "args": {"roof": 21}}
+```
+
 ### Eletrocalhas e registros
 
 `cable_tray_create` desenha um trecho de eletrocalha como `conduit_create` (com `circuits`, `offset`, `end_offset`); um projeto sem tipo de eletrocalha ganha um (200 × 100 mm, leito), e `cable_tray_type_create` cria outros (`width`, `height`, `style`: `ladder`, `solid_bottom` ou `perforated`). Eletrocalhas só se ligam a outras eletrocalhas, e as curvas e tês entre elas aparecem em `mep_fittings`. `valve_place` coloca um registro num tubo, num `point` perto dele ou a uma `distance` ao longo dele, de um `type` ou de uma função `kind` (`gate`, `ball`, `check`, `globe`; um tipo dessa função é criado quando não há); `valve_type_create` cria tipos de várias funções (`kinds`) de uma vez. O registro tem o diâmetro e o sistema do seu tubo, é um nó da rede e acompanha o tubo; `element_get` mostra `derived.point`, `kind` e `diameter`, e `element_set` o desloca ao longo do tubo (`params.at`).

@@ -88,6 +88,7 @@ fn tool_icon(tool: &Tool) -> Icon {
         Tool::JoinGeometry { unjoin: false } => Icon::JoinGeometry,
         Tool::JoinGeometry { unjoin: true } => Icon::UnjoinGeometry,
         Tool::AttachTop => Icon::AttachTop,
+        Tool::JoinRoof => Icon::RoofJoin,
         Tool::Paste => Icon::Paste,
         Tool::Dimension { mode, .. } => dimension_icon(*mode),
         Tool::MatchType => Icon::MatchType,
@@ -917,7 +918,11 @@ fn modify_tab(ui: &mut Ui, state: &mut AppState) {
     });
     group(ui, t!("group-measure"), |ui| command_button(ui, state, Measure));
     group(ui, t!("group-geometry"), |ui| {
-        command_buttons(ui, state, &[JoinGeometry, UnjoinGeometry, AttachTop, DetachTop, FlipWalls, Paint, RemovePaint])
+        command_buttons(
+            ui,
+            state,
+            &[JoinGeometry, UnjoinGeometry, JoinRoof, UnjoinRoof, AttachTop, DetachTop, FlipWalls, Paint, RemovePaint],
+        )
     });
     group(ui, t!("group-sketch"), |ui| {
         command_buttons(ui, state, &[EditBoundary, EditProfile, EditWallProfile, ResetWallProfile])
@@ -1608,6 +1613,9 @@ pub fn options_bar(ui: &mut Ui, state: &mut AppState) {
             }
             Tool::AttachTop => {
                 ui.label(theme::muted(t!("hint-attach-top")));
+            }
+            Tool::JoinRoof => {
+                ui.label(theme::muted(crate::i18n::tr(crate::modify::roof_join_hint(state))));
             }
             Tool::Paste => {
                 ui.label(theme::muted(t!("hint-paste")));

@@ -674,6 +674,13 @@ impl Project {
                 }
             }
         }
+        // Roof joins need another roof and no loop (the highest id on one lets go).
+        for id in self.broken_roof_joins() {
+            if let Some(ElementKind::Roof(r)) = self.elements.get_mut(&id).map(|e| &mut e.kind) {
+                r.join_to = None;
+                repairs += 1;
+            }
+        }
         // Arc walls, arc beams and arc strip footings: a bulge that is not a number makes
         // them straight, one past a nearly full circle is clamped, a negligible
         // one is dropped.
@@ -1578,6 +1585,70 @@ mod tests {
         let Some(ElementKind::Roof(r)) = p.element(id).map(|e| &e.kind) else { panic!("the roof stays") };
         assert_eq!(r.edge_slopes, vec![None, Some(0.8)]);
         assert_eq!(r.edge_overhangs, vec![Some(0.3), None, Some(0.0)]);
+        assert_eq!(p.repair(), 0);
+    }
+
+    /// Crafted roof joins: to a missing element, to itself, to a wall, and
+    /// three roofs joined round a loop (the highest id lets go); a chain
+    /// and a roof joined to a free one stay.
+    #[test]
+    fn roof_joins_are_repaired() {
+        let mut p = Project::from_template();
+        let level = p.levels[0].id;
+        let roof_t = p.default_type(Category::Roof).unwrap();
+        let wall_t = p.default_type(Category::Wall).unwrap();
+        let add = |p: &mut Project, kind: ElementKind, type_id| {
+            let id = ElementId(p.alloc_id());
+            let e = Element {
+                id,
+                level,
+                type_id,
+                mark: String::new(),
+                comments: String::new(),
+                kind,
+                uid: Default::default(),
+                phase_created: Default::default(),
+                phase_demolished: None,
+                design_option: None,
+                paints: Vec::new(),
+                plugin_data: Default::default(),
+            };
+            p.elements.insert(id, e);
+            id
+        };
+        let square = vec![DVec2::ZERO, DVec2::X, DVec2::ONE, DVec2::Y];
+        let roof = |to: Option<ElementId>| {
+            let mut r = crate::Roof::new(square.clone(), 3.0, 0.0, crate::RoofShape::Hip { slope: 0.5 });
+            r.join_to = to;
+            ElementKind::Roof(r)
+        };
+        let wall = add(&mut p, ElementKind::Wall(crate::Wall::default()), wall_t);
+        let free = add(&mut p, roof(None), roof_t);
+        let joined = add(&mut p, roof(Some(free)), roof_t);
+        let chained = add(&mut p, roof(Some(joined)), roof_t);
+        let dangling = add(&mut p, roof(Some(ElementId(9_999_999))), roof_t);
+        let itself = add(&mut p, roof(None), roof_t);
+        if let Some(ElementKind::Roof(r)) = p.elements.get_mut(&itself).map(|e| &mut e.kind) {
+            r.join_to = Some(itself);
+        }
+        let on_wall = add(&mut p, roof(Some(wall)), roof_t);
+        // a → b → c → a.
+        let (a, b, c) = (ElementId(p.alloc_id()), ElementId(p.alloc_id()), ElementId(p.alloc_id()));
+        for (id, to) in [(a, b), (b, c), (c, a)] {
+            let added = add(&mut p, roof(Some(to)), roof_t);
+            let mut e = p.elements.remove(&added).unwrap();
+            e.id = id;
+            p.elements.insert(id, e);
+        }
+        assert!(p.roof_join_loops(a, c) && !p.roof_join_loops(chained, free));
+        assert_eq!(p.broken_roof_joins(), vec![dangling, itself, on_wall, c]);
+        assert_eq!(p.repair(), 4);
+        let to = |p: &Project, id| p.roof_join_target(id);
+        assert_eq!((to(&p, joined), to(&p, chained)), (Some(free), Some(joined)));
+        assert_eq!((to(&p, dangling), to(&p, itself), to(&p, on_wall)), (None, None, None));
+        assert_eq!((to(&p, a), to(&p, b), to(&p, c)), (Some(b), Some(c), None));
+        assert_eq!(p.roof_join_chain(chained), vec![joined, free]);
+        assert_eq!(p.roof_join_group(free), [free, joined, chained].into_iter().collect());
         assert_eq!(p.repair(), 0);
     }
 

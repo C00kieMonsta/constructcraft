@@ -37,7 +37,7 @@ impl Eave {
 }
 
 /// Keep the part of `poly` where `p · w <= c`.
-fn clip_half_plane(poly: &[DVec2], w: DVec2, c: f64) -> Vec<DVec2> {
+pub(crate) fn clip_half_plane(poly: &[DVec2], w: DVec2, c: f64) -> Vec<DVec2> {
     let mut out = Vec::new();
     let n = poly.len();
     for i in 0..n {
@@ -81,6 +81,12 @@ pub fn ccw_edge_slopes(r: &cc_core::Roof) -> Vec<Option<f64>> {
     (0..n).map(|j| r.edge_slope((2 * n - 2 - j) % n)).collect()
 }
 
+/// A roof's own edge overhangs in the order of its counter-clockwise
+/// outline, as [`ccw_edge_slopes`].
+pub fn ccw_edge_overhangs(r: &cc_core::Roof) -> Vec<Option<f64>> {
+    (0..r.footprint.len()).map(|j| r.edge_overhang(ccw_source(r, j))).collect()
+}
+
 /// The footprint edge (index into `Roof::footprint`) that edge `j` of its
 /// counter-clockwise copy comes from.
 fn ccw_source(r: &cc_core::Roof, j: usize) -> usize {
@@ -99,36 +105,139 @@ pub struct RoofOutline {
     pub own: Vec<Option<f64>>,
     /// Per edge: its overhang.
     pub overhangs: Vec<f64>,
+    /// Corners where an eave of no length starts late (see
+    /// [`crate::skeleton::CornerSeed`]), for the skeleton.
+    pub seeds: Vec<crate::skeleton::CornerSeed>,
+}
+
+/// Where two edge lines through a corner meet once moved out by `d1` and
+/// `d2` along their outward normals `n1` and `n2` (`v · n1 = d1`,
+/// `v · n2 = d2`), from the corner; `None` when they are parallel.
+fn meet(n1: DVec2, d1: f64, n2: DVec2, d2: f64) -> Option<DVec2> {
+    let det = n1.perp_dot(n2);
+    (det.abs() > 1e-9).then(|| DVec2::new(d1 * n2.y - d2 * n1.y, n1.x * d2 - n2.x * d1) / det)
+}
+
+/// The corners of a pitched roof's counter-clockwise footprint `pts`
+/// where a notch cut into a sloped eave runs right up to the corner: a
+/// convex corner between two gables lying on the line of a sloped eave
+/// (the rule of the skeleton's own corner seeds). Per corner, the edge of
+/// that eave: of those that fit, the lowest at its wall line (the most
+/// overhang `d`), then the least steep along the corner's bisector.
+fn notch_corners(r: &cc_core::Roof, pts: &[DVec2], own: &[Option<f64>], d: &[f64]) -> Vec<Option<usize>> {
+    let n = pts.len();
+    let (slope, ridge) = match r.shape {
+        cc_core::RoofShape::Gable { slope, ridge_deg } => (slope, Some(DVec2::from_angle(ridge_deg.to_radians()))),
+        cc_core::RoofShape::Hip { slope } => (slope, None),
+        _ => return vec![None; n],
+    };
+    let slopes = edge_slopes(pts, slope, ridge, own);
+    let (lo, hi) = pts
+        .iter()
+        .fold((DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+    let tol = (hi - lo).length() * 1e-9;
+    let dir = |j: usize| (pts[(j + 1) % n] - pts[j]).normalize_or_zero();
+    (0..n)
+        .map(|i| {
+            let (a, b) = ((i + n - 1) % n, i);
+            let gables = slopes.get(a).is_some_and(|s| *s <= 0.0) && slopes.get(b).is_some_and(|s| *s <= 0.0);
+            let (da, db) = (dir(a), dir(b));
+            let inward = (da.perp() + db.perp()).normalize_or_zero();
+            if !gables || da.perp_dot(db) <= 1e-9 || inward == DVec2::ZERO {
+                return None;
+            }
+            let cur = pts[i];
+            let key = |j: usize| {
+                let s = slopes.get(j).copied().unwrap_or(0.0);
+                (-d.get(j).copied().unwrap_or(0.0), inward.dot(dir(j).perp()) * s)
+            };
+            (0..n)
+                .filter(|&j| {
+                    let dj = dir(j);
+                    slopes.get(j).is_some_and(|s| *s > 0.0)
+                        && dj != DVec2::ZERO
+                        && (cur - pts[j]).dot(dj.perp()).abs() <= tol
+                        && da.perp_dot(dj) > 1e-9
+                        && dj.perp_dot(db) > 1e-9
+                        && inward.dot(dj.perp()) > 0.0
+                })
+                .min_by(|&x, &y| {
+                    let (kx, ky) = (key(x), key(y));
+                    kx.0.total_cmp(&ky.0).then(kx.1.total_cmp(&ky.1))
+                })
+        })
+        .collect()
 }
 
 /// The outline of a roof's slab in plan: its footprint grown by the
 /// overhang of each edge (mitered corners, as [`polygon::offset`], which
-/// gives it exactly when no edge has an overhang of its own).
+/// gives it exactly when no edge has an overhang of its own and no corner
+/// is cut).
+///
+/// A corner where a notch cut into a sloped eave runs right up to it (a
+/// convex corner between two gables on the eave's line) is grown as if an
+/// eave of no length were there, moved out by that eave's overhang: the
+/// outline is cut along the eave's moved line, with two points on it where
+/// the moved gable lines cross it, and the piece between is a piece of
+/// that eave. Where those points come out the other way round (the eave
+/// reaches further out than the gables' miter), that piece has no length
+/// left: the corner keeps its miter, and the eave's plane starts there
+/// late, once its wavefront gets there (a [`crate::skeleton::CornerSeed`]).
 pub fn outline(r: &cc_core::Roof) -> RoofOutline {
     let n = r.footprint.len();
-    if !r.has_edge_overhangs() || n < 3 {
+    if n < 3 {
         let points = polygon::ccw(&polygon::offset(&r.footprint, r.overhang));
         let m = points.len();
-        return RoofOutline { own: ccw_edge_slopes(r), overhangs: vec![r.overhang; m], points };
+        return RoofOutline { own: ccw_edge_slopes(r), overhangs: vec![r.overhang; m], points, seeds: Vec::new() };
     }
     let pts = polygon::ccw(&r.footprint);
     let d: Vec<f64> = (0..n).map(|j| r.overhang_of(ccw_source(r, j)).max(0.0)).collect();
     let own: Vec<Option<f64>> = (0..n).map(|j| r.edge_slope(ccw_source(r, j))).collect();
-    let mut out = RoofOutline { points: Vec::new(), own: Vec::new(), overhangs: Vec::new() };
+    let cuts = notch_corners(r, &pts, &own, &d);
+    if !r.has_edge_overhangs() && cuts.iter().all(Option::is_none) {
+        let points = polygon::ccw(&polygon::offset(&r.footprint, r.overhang));
+        let m = points.len();
+        return RoofOutline { own: ccw_edge_slopes(r), overhangs: vec![r.overhang; m], points, seeds: Vec::new() };
+    }
+    let (lo, hi) = pts
+        .iter()
+        .fold((DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+    let tol = (hi - lo).length() * 1e-9;
+    let mut out = RoofOutline { points: Vec::new(), own: Vec::new(), overhangs: Vec::new(), seeds: Vec::new() };
     for i in 0..n {
         let (prev, cur, next) = (pts[(i + n - 1) % n], pts[i], pts[(i + 1) % n]);
         let (d1, d2) = (d[(i + n - 1) % n], d[i]);
         // Outward normals of a counter-clockwise outline point to the right of each edge.
         let n1 = -(cur - prev).normalize_or_zero().perp();
         let n2 = -(next - cur).normalize_or_zero().perp();
-        let det = n1.perp_dot(n2);
-        if det.abs() > 1e-9 {
-            // Where the two moved edge lines meet (v · n1 = d1, v · n2 = d2),
-            // pulled in at sharp corners as `polygon::offset` does.
-            let v = DVec2::new(d1 * n2.y - d2 * n1.y, n1.x * d2 - n2.x * d1) / det;
+        // The eave a notch runs up to this corner along, and where the moved
+        // gable lines cross its moved line.
+        let cut = cuts.get(i).copied().flatten().and_then(|e| {
+            let dir = (pts[(e + 1) % n] - pts[e]).normalize_or_zero();
+            let (ne, de) = (-dir.perp(), d.get(e).copied().unwrap_or(0.0));
+            Some((e, dir, ne, de, meet(n1, d1, ne, de)?, meet(ne, de, n2, d2)?))
+        });
+        if let Some(v) = meet(n1, d1, n2, d2) {
+            // Where the two moved edge lines meet, pulled in at sharp corners
+            // as `polygon::offset` does.
             let limit = 5.0 * d1.max(d2);
             let v = if v.length() > limit && limit > 0.0 { v * (limit / v.length()) } else { v };
-            out.points.push(cur + v);
+            match cut {
+                Some((e, dir, _, _, a, b)) if (b - a).dot(dir) > tol => {
+                    // A piece of the eave between the two gables.
+                    out.points.push(cur + a);
+                    out.own.push(own.get(e).copied().flatten());
+                    out.overhangs.push(d.get(e).copied().unwrap_or(0.0));
+                    out.points.push(cur + b);
+                }
+                // No length: the corner on the eave's line.
+                Some((_, dir, _, _, a, b)) if (b - a).dot(dir) >= -tol => out.points.push(cur + (a + b) * 0.5),
+                Some((_, dir, ne, de, _, _)) => {
+                    out.points.push(cur + v);
+                    out.seeds.push(crate::skeleton::CornerSeed { corner: cur + v, eave: cur + ne * de, dir });
+                }
+                None => out.points.push(cur + v),
+            }
         } else if n1.dot(n2) > 0.0 && (d1 - d2).abs() > 1e-12 {
             // Straight on with another overhang: a step, square to the edge.
             out.points.push(cur + n1 * d1);
@@ -284,6 +393,184 @@ pub fn add_pitched_roof(solid: &mut Solid, footprint: &[DVec2], eaves: &[Eave], 
     }
 }
 
+/// How a roof's slab is built: its outline, openings and planes, from the
+/// roof, its level's elevation and its type's thickness (see [`body`]).
+#[derive(Debug, Clone)]
+pub enum RoofBody {
+    /// A slab of `thickness` over the outline less its openings, its
+    /// underside at `base` (flat roofs, and pitched ones with no sloped edge
+    /// or whose skeleton failed round openings).
+    Prism { outline: Vec<DVec2>, holes: Vec<Vec<DVec2>>, base: f64, thickness: f64 },
+    /// A shed roof's plane, its underside `base + slope * (p · dir - low)`,
+    /// `thickness` measured vertically.
+    Shed { outline: Vec<DVec2>, holes: Vec<Vec<DVec2>>, base: f64, slope: f64, dir: DVec2, low: f64, thickness: f64 },
+    /// A pitched roof from its skeleton (see [`add_skeleton_roof`]).
+    Skeleton { sk: crate::skeleton::Skeleton, base: f64, thickness: f64 },
+    /// A pitched roof from the lowest planes of its outline, should the
+    /// skeleton fail (see [`add_pitched_roof`]).
+    Planes { outline: Vec<DVec2>, eaves: Vec<Eave>, base: f64, thickness: f64 },
+}
+
+/// How roof `r` on a level at `level_z`, its type `thk` thick, is built:
+/// the outline grown by each edge's overhang ([`outline`]), openings shrunk
+/// by the overhang and shafts' cuts, and its planes.
+pub fn body(r: &cc_core::Roof, level_z: f64, thk: f64) -> RoofBody {
+    use cc_core::RoofShape;
+    // The footprint grown by each edge's overhang.
+    let outline = outline(r);
+    let fp = outline.points.clone();
+    // Openings shrink by the overhang (the eaves reach over them), clockwise.
+    let holes: Vec<Vec<DVec2>> = r
+        .holes
+        .iter()
+        .map(|h| {
+            let mut h = polygon::offset(h, -r.overhang);
+            h.reverse();
+            h
+        })
+        .filter(|h| h.len() >= 3 && polygon::signed_area(h) < 0.0)
+        // Shafts cut their own outline: no eaves reach over them.
+        .chain(r.cuts.iter().map(|c| {
+            let mut c = polygon::ccw(c);
+            c.reverse();
+            c
+        }))
+        .collect();
+    let base = level_z + r.base_offset;
+    match r.shape {
+        RoofShape::Flat => RoofBody::Prism { outline: fp, holes, base, thickness: thk },
+        RoofShape::Shed { slope, direction_deg } => {
+            let a = direction_deg.to_radians();
+            let dir = DVec2::new(a.cos(), a.sin());
+            // The plane starts at the low eave of the roof's own overhang.
+            let low = shed_low(r, dir);
+            let thickness = thk * (1.0 + slope * slope).sqrt();
+            RoofBody::Shed { outline: fp, holes, base, slope, dir, low, thickness }
+        }
+        RoofShape::Gable { slope, .. } | RoofShape::Hip { slope } => {
+            let ridge = match r.shape {
+                RoofShape::Gable { ridge_deg, .. } => Some(DVec2::from_angle(ridge_deg.to_radians())),
+                _ => None,
+            };
+            let vertical_thk = thk * (1.0 + slope * slope).sqrt();
+            let mut loops = vec![fp.clone()];
+            loops.extend(holes.iter().cloned());
+            let own = &outline.own;
+            let weights = eave_weights(&loops, slope, ridge, own);
+            let sloped = weights.iter().flatten().any(|w| *w > 0.0);
+            // Eaves with an overhang of their own lie higher or lower on
+            // their planes: they start late, from the lowest eave.
+            let slopes = edge_slopes(&fp, slope, ridge, own);
+            let (starts, low) = eave_starts(&slopes, &outline.overhangs, r.overhang, loops.len() > 1);
+            let base = base + low;
+            // Openings keep their eaves at the roof's base.
+            let mut all_starts = vec![starts.clone()];
+            all_starts.extend(holes.iter().map(|h| vec![-low; h.len()]));
+            match crate::skeleton::skeleton_with_seeds(&loops, &weights, &all_starts, &outline.seeds) {
+                Ok(sk) if sloped => RoofBody::Skeleton { sk, base, thickness: vertical_thk },
+                // Should the skeleton fail, the lowest planes of the outline.
+                Err(_) if sloped && holes.is_empty() => {
+                    let mut eaves = sloped_eaves(&fp, &slopes);
+                    raise_eaves(&mut eaves, &fp, &slopes, &starts);
+                    RoofBody::Planes { outline: fp, eaves, base, thickness: vertical_thk }
+                }
+                _ => RoofBody::Prism { outline: fp, holes, base, thickness: thk },
+            }
+        }
+    }
+}
+
+impl RoofBody {
+    /// Add the roof's closed slab to `solid`.
+    pub fn add_to(&self, solid: &mut Solid) {
+        match self {
+            RoofBody::Prism { outline, holes, base, thickness } => {
+                let (base, thk) = (*base, *thickness);
+                solid.add_prism_with_holes(outline, holes, |_| base, |_| base + thk);
+            }
+            RoofBody::Shed { outline, holes, base, slope, dir, low, thickness } => {
+                let (base, slope, d, min, vertical_thk) = (*base, *slope, *dir, *low, *thickness);
+                let bottom = move |p: DVec2| base + slope * (p.dot(d) - min);
+                solid.add_prism_with_holes(outline, holes, bottom, move |p| bottom(p) + vertical_thk);
+            }
+            RoofBody::Skeleton { sk, base, thickness } => add_skeleton_roof(solid, sk, *base, *thickness),
+            RoofBody::Planes { outline, eaves, base, thickness } => {
+                add_pitched_roof(solid, outline, eaves, *base, *thickness);
+            }
+        }
+    }
+
+    /// The ridges, hips and valleys in plan, of pitched roofs.
+    pub fn lines(&self) -> Option<Vec<(DVec2, DVec2)>> {
+        match self {
+            RoofBody::Skeleton { sk, .. } => Some(sk.lines.clone()),
+            RoofBody::Planes { outline, eaves, .. } => Some(ridge_lines(outline, &roof_regions(outline, eaves))),
+            RoofBody::Prism { .. } | RoofBody::Shed { .. } => None,
+        }
+    }
+
+    /// The slab's thickness, measured vertically.
+    pub fn thickness(&self) -> f64 {
+        match self {
+            RoofBody::Prism { thickness, .. }
+            | RoofBody::Shed { thickness, .. }
+            | RoofBody::Skeleton { thickness, .. }
+            | RoofBody::Planes { thickness, .. } => *thickness,
+        }
+    }
+
+    /// The slab's underside as pieces of planes (see
+    /// [`crate::roof_join::Piece`]): each face of the skeleton (a face round
+    /// openings as one ring, the openings joined to its outline, or in
+    /// triangles), each flat top, each region of the fallback's planes, or
+    /// the outline less its openings.
+    pub fn pieces(&self) -> Vec<crate::roof_join::Piece> {
+        use crate::roof_join::Piece;
+        let ring = |outer: &[DVec2], holes: &[Vec<DVec2>]| -> Vec<Vec<DVec2>> {
+            let outer = polygon::ccw(outer);
+            if holes.is_empty() {
+                return vec![outer];
+            }
+            match polygon::keyhole(&outer, holes) {
+                Some(r) => vec![r],
+                None => polygon::triangulate_with_holes(&outer, holes).into_iter().map(|t| polygon::ccw(&t)).collect(),
+            }
+        };
+        let flat =
+            |c: f64, rings: Vec<Vec<DVec2>>| rings.into_iter().map(move |plan| Piece { plan, c, g: DVec2::ZERO });
+        match self {
+            RoofBody::Prism { outline, holes, base, .. } => flat(*base, ring(outline, holes)).collect(),
+            RoofBody::Shed { outline, holes, base, slope, dir, low, .. } => ring(outline, holes)
+                .into_iter()
+                .map(|plan| Piece { plan, c: base - slope * low, g: *dir * *slope })
+                .collect(),
+            RoofBody::Skeleton { sk, base, .. } => {
+                let mut out = Vec::new();
+                for (i, (plane, pts)) in sk.faces.iter().enumerate() {
+                    let holes: Vec<Vec<DVec2>> =
+                        sk.face_holes.iter().filter(|(f, _)| *f == i).map(|(_, h)| h.clone()).collect();
+                    // The plane's height is affine in plan: through the origin and along each axis.
+                    let h0 = sk.face_height(*plane, DVec2::ZERO);
+                    let g = DVec2::new(sk.face_height(*plane, DVec2::X) - h0, sk.face_height(*plane, DVec2::Y) - h0);
+                    out.extend(ring(pts, &holes).into_iter().map(|plan| Piece { plan, c: base + h0, g }));
+                }
+                for (height, pts) in &sk.flats {
+                    out.extend(flat(base + height, ring(pts, &[])));
+                }
+                out
+            }
+            RoofBody::Planes { outline, eaves, base, .. } => roof_regions(outline, eaves)
+                .into_iter()
+                .filter_map(|(i, plan)| {
+                    let e = eaves.get(i)?;
+                    let g = e.normal * e.slope;
+                    Some(Piece { plan: polygon::ccw(&plan), c: base - e.a.dot(g), g })
+                })
+                .collect(),
+        }
+    }
+}
+
 /// Plan area covered by a roof: its outline grown by the overhangs, less
 /// its openings shrunk by the roof's.
 pub fn plan_area(r: &cc_core::Roof) -> f64 {
@@ -328,8 +615,16 @@ pub fn add_skeleton_roof(solid: &mut Solid, sk: &crate::skeleton::Skeleton, base
             solid.faces.push(Face::new(under, un));
         }
     };
-    for (plane, pts) in &sk.faces {
-        surface(pts, &|p| sk.face_height(*plane, p));
+    for (i, (plane, pts)) in sk.faces.iter().enumerate() {
+        let holes: Vec<Vec<DVec2>> = sk.face_holes.iter().filter(|(f, _)| *f == i).map(|(_, h)| h.clone()).collect();
+        if holes.is_empty() {
+            surface(pts, &|p| sk.face_height(*plane, p));
+        } else {
+            // A plane all the way round an opening, in triangles (a face has one outline).
+            for t in polygon::triangulate_with_holes(pts, &holes) {
+                surface(&t, &|p| sk.face_height(*plane, p));
+            }
+        }
     }
     for (height, pts) in &sk.flats {
         surface(pts, &|_| *height);
@@ -436,6 +731,30 @@ mod tests {
         assert!((true_area - 60.0 * 1.25).abs() < 1e-9);
     }
 
+    /// Issue #380: the slab of a gable roof with a notch cut into its north
+    /// eave right up to a corner tops out at the ridge, and one whose north
+    /// plane runs round an opening leaves the opening out: the volumes are
+    /// the plan area times the (vertical) thickness.
+    #[test]
+    fn notched_and_holed_gable_roofs_are_closed_slabs() {
+        let pts = |c: &[(f64, f64)]| c.iter().map(|&(x, y)| DVec2::new(x, y)).collect::<Vec<_>>();
+        let notched = pts(&[(0.0, 0.0), (13.716, 0.0), (13.716, 7.01), (11.125, 4.419), (8.534, 7.01), (0.0, 7.01)]);
+        let own = [None, Some(0.0), Some(0.0), Some(0.0), None, Some(0.0)];
+        let weights = eave_weights(std::slice::from_ref(&notched), 0.42, Some(DVec2::X), &own);
+        let sk = crate::skeleton::skeleton(std::slice::from_ref(&notched), &weights).unwrap();
+        let mut s = Solid::new(ElementId(1), Category::Roof, [0; 3]);
+        add_skeleton_roof(&mut s, &sk, 3.0, 0.2);
+        assert!((s.volume() - polygon::area(&notched) * 0.2).abs() < 1e-6, "{}", s.volume());
+        let (_, hi) = s.bounds().unwrap();
+        assert!((hi.z - (3.0 + 3.505 * 0.42 + 0.2)).abs() < 1e-9, "the ridge is the top: {}", hi.z);
+        // An opening with gable sides (steeper than 45° to the ridge) and a sloped top.
+        let outer = rect(13.716, 7.01);
+        let hole = pts(&[(9.5, 6.5), (12.5, 6.5), (11.0, 4.4)]);
+        let s = skeleton_solid(&[outer.clone(), hole.clone()], 0.42, Some(DVec2::X), 0.2);
+        let area = polygon::area(&outer) - polygon::area(&hole);
+        assert!((s.volume() - area * 0.2).abs() < 1e-6, "{} vs {}", s.volume(), area * 0.2);
+    }
+
     #[test]
     fn hip_roof_solid_is_closed() {
         let fp = rect(8.0, 8.0);
@@ -523,5 +842,126 @@ mod tests {
                 assert!((low + sk.face_height(*plane, *p) - want).abs() < 1e-9, "{p}");
             }
         }
+    }
+
+    /// The notched roof of issue #380 (13.716 × 7.01, a V notch cut into
+    /// its north eave right up to the north-east corner, the notch's sides
+    /// and the ends gables): a gable roof along X at 42 % with `overhang`,
+    /// and `edges` the overhang of each footprint edge.
+    fn notched_roof(overhang: f64, edges: &[Option<f64>]) -> cc_core::Roof {
+        let fp = vec![
+            DVec2::new(0.0, 0.0),
+            DVec2::new(13.716, 0.0),
+            DVec2::new(13.716, 7.01),
+            DVec2::new(11.125, 4.419),
+            DVec2::new(8.534, 7.01),
+            DVec2::new(0.0, 7.01),
+        ];
+        let shape = cc_core::RoofShape::Gable { slope: 0.42, ridge_deg: 0.0 };
+        let mut r = cc_core::Roof::new(fp, 0.0, overhang, shape);
+        r.edge_slopes = vec![None, Some(0.0), Some(0.0), Some(0.0), None, Some(0.0)];
+        r.edge_overhangs = edges.to_vec();
+        r
+    }
+
+    /// A roof's slab as the model builds it (0.2 thick, vertically): the
+    /// skeleton, the solid and the lowest eave's height.
+    fn slab(r: &cc_core::Roof) -> (crate::skeleton::Skeleton, Solid, f64) {
+        slab_seeded(r, true)
+    }
+
+    /// [`slab`], with or without the outline's corner seeds.
+    fn slab_seeded(r: &cc_core::Roof, seeded: bool) -> (crate::skeleton::Skeleton, Solid, f64) {
+        let o = outline(r);
+        let (slope, ridge) = (0.42, Some(DVec2::X));
+        let weights = eave_weights(std::slice::from_ref(&o.points), slope, ridge, &o.own);
+        let slopes = edge_slopes(&o.points, slope, ridge, &o.own);
+        let (starts, low) = eave_starts(&slopes, &o.overhangs, r.overhang, false);
+        let seeds = if seeded { o.seeds.clone() } else { Vec::new() };
+        let sk =
+            crate::skeleton::skeleton_with_seeds(std::slice::from_ref(&o.points), &weights, &[starts], &seeds).unwrap();
+        let mut s = Solid::new(ElementId(1), Category::Roof, [0; 3]);
+        add_skeleton_roof(&mut s, &sk, low, 0.2);
+        (sk, s, low)
+    }
+
+    /// One ridge at y = 3.505 from `x0` to `x1`; the slab's top over the
+    /// ridge, which lies `3.505 + reach` in from the lowest eave tip (`reach`
+    /// the most overhang of an eave); its volume the plan area times its
+    /// thickness.
+    fn full_slab(r: &cc_core::Roof, x0: f64, x1: f64, reach: f64) {
+        let (sk, s, low) = slab(r);
+        assert_eq!(sk.lines.len(), 1, "one ridge: {:?}", sk.lines);
+        let (a, b) = sk.lines[0];
+        assert!((a.y - 3.505).abs() < 1e-9 && (b.y - 3.505).abs() < 1e-9, "{:?}", sk.lines);
+        assert!((a.x.min(b.x) - x0).abs() < 1e-9 && (a.x.max(b.x) - x1).abs() < 1e-9, "{:?}", sk.lines);
+        let vertical = 0.2;
+        let (lo, hi) = s.bounds().unwrap();
+        assert!((lo.z - low).abs() < 1e-9, "{} {low}", lo.z);
+        assert!((hi.z - lo.z - ((3.505 + reach) * 0.42 + vertical)).abs() < 1e-9, "the ridge is the top: {lo} {hi}");
+        assert!((s.volume() - plan_area(r) * vertical).abs() < 1e-6, "{} vs {}", s.volume(), plan_area(r) * vertical);
+    }
+
+    /// Issue #380 with an overhang: the corner where the notch meets the
+    /// east gable is cut along the north eave's moved line, as if a piece
+    /// of eave of no length were there; the ridge runs the whole length,
+    /// out over both gables' overhangs.
+    #[test]
+    fn a_notch_up_to_a_corner_is_cut_along_the_eave() {
+        let r = notched_roof(0.5, &[]);
+        let o = outline(&r);
+        let h = std::f64::consts::SQRT_2;
+        let want = [
+            (-0.5, -0.5),
+            (14.216, -0.5),
+            (14.216, 7.51),
+            (13.716 + 0.5 - 0.5 * h, 7.51),
+            (11.125, 4.419 + 0.5 * h),
+            (8.534 + 0.5 * h - 0.5, 7.51),
+            (-0.5, 7.51),
+        ];
+        assert_eq!(o.points.len(), want.len(), "{:?}", o.points);
+        for (p, w) in o.points.iter().zip(want) {
+            assert!(p.distance(DVec2::new(w.0, w.1)) < 1e-9, "{:?}", o.points);
+        }
+        // The piece between the two cut points is a piece of the north eave.
+        assert_eq!(o.own, vec![None, Some(0.0), None, Some(0.0), Some(0.0), None, Some(0.0)]);
+        assert!(o.seeds.is_empty());
+        full_slab(&r, -0.5, 14.216, 0.5);
+
+        // Overhangs per edge: the north eave 0.762, the end gables 0.3.
+        let r = notched_roof(0.5, &[None, Some(0.3), None, None, Some(0.762), Some(0.3)]);
+        let o = outline(&r);
+        let (a, b) = (o.points[2], o.points[3]);
+        assert!(a.distance(DVec2::new(14.016, 7.772)) < 1e-9, "{a}");
+        assert!(b.distance(DVec2::new(13.716 + 0.762 - 0.5 * h, 7.772)) < 1e-9, "{b}");
+        full_slab(&r, -0.3, 14.016, 0.762);
+
+        // Ending 1 cm short of the corner, a piece of eave left there: the
+        // same roof, with no corner to cut.
+        let mut r = notched_roof(0.5, &[]);
+        r.footprint.insert(3, DVec2::new(13.706, 7.01));
+        r.edge_slopes = vec![None, Some(0.0), None, Some(0.0), Some(0.0), None, Some(0.0)];
+        assert_eq!(outline(&r).points, polygon::ccw(&polygon::offset(&r.footprint, 0.5)));
+        full_slab(&r, -0.5, 14.216, 0.5);
+    }
+
+    /// Where the eave reaches further out than the gables' miter, the piece
+    /// between the cut points has no length left: the corner keeps its
+    /// miter and the eave's plane starts there once its wavefront arrives.
+    #[test]
+    fn a_notch_corner_inside_the_eave_starts_its_plane_late() {
+        let r = notched_roof(0.5, &[None, Some(0.3), Some(0.3), Some(0.3), Some(0.762), Some(0.3)]);
+        let o = outline(&r);
+        let tip = DVec2::new(14.016, 7.01 + 0.3 + 0.3 * std::f64::consts::SQRT_2);
+        assert_eq!(o.points.len(), 6, "{:?}", o.points);
+        assert!(o.points[2].distance(tip) < 1e-9, "{:?}", o.points);
+        assert_eq!(o.seeds.len(), 1, "{:?}", o.seeds);
+        assert!(o.seeds[0].corner.distance(tip) < 1e-9 && (o.seeds[0].eave.y - 7.772).abs() < 1e-9);
+        full_slab(&r, -0.3, 14.016, 0.762);
+        // Without the seed the corner is left to the south plane: above the ridge.
+        let (_, s, low) = slab_seeded(&r, false);
+        let (_, hi) = s.bounds().unwrap();
+        assert!(hi.z - low > (3.505 + 0.762) * 0.42 + 0.2 + 0.1, "{}", hi.z);
     }
 }

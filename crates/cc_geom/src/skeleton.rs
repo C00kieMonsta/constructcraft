@@ -13,7 +13,13 @@
 //!
 //! Time is height above the eaves. Between events the wavefront moves
 //! linearly, so each edge sweeps quads of its own roof plane; these are
-//! merged into one polygon per plane. Vertex paths are the hips and
+//! merged into one polygon per plane (with the openings a plane runs all
+//! the way round). Eaves on one line rising alike are one plane: their
+//! wavefront edges join where they meet (around a notch or an opening),
+//! with no line between them. A convex corner between two gables that lies
+//! on the line of a sloped eave, past a notch cut into that eave right up
+//! to the corner, starts a wavefront edge of that eave's plane, as a piece
+//! of the eave of no length would. Vertex paths are the hips and
 //! valleys, and loops that collapse leave the ridges. The simulation looks
 //! for the next event among all vertices and edges at each step
 //! (quadratic per event, cubic overall: footprints have tens of edges),
@@ -67,8 +73,13 @@ pub struct Skeleton {
     /// The planes, one per input edge (loops in order, edge `i` from point `i` to `i + 1`).
     pub planes: Vec<Plane>,
     /// The part of each sloped plane over the footprint: `(plane, polygon)`,
-    /// counter-clockwise in plan.
+    /// counter-clockwise in plan. Eaves in one plane share one index (the
+    /// first of them).
     pub faces: Vec<(usize, Vec<DVec2>)>,
+    /// Openings in those parts, where a plane runs all the way round other
+    /// faces or a hole of the footprint: `(face, polygon)`, `face` an index
+    /// into `faces`, the polygon clockwise.
+    pub face_holes: Vec<(usize, Vec<DVec2>)>,
     /// Ridges, hips and valleys in plan.
     pub lines: Vec<(DVec2, DVec2)>,
     /// Where sloped planes end at a gable: segments along gable eaves with
@@ -95,6 +106,9 @@ struct Vertex {
     pos: DVec2,
     /// Plane of the edge from this vertex to the next.
     out: usize,
+    /// The edge from this vertex starts at a point and grows: not a
+    /// vanished edge while it has no length yet (see [`Sim::seed_corners`]).
+    grow: bool,
 }
 
 /// A run of a vertex path being collected into one straight line.
@@ -117,7 +131,21 @@ struct Sim {
     /// Directed boundary segments of the quads swept by each plane.
     swept: Vec<Vec<(DVec2, DVec2)>>,
     runs: std::collections::BTreeMap<usize, Run>,
+    /// Vertices (by id) that stand still until a time (see [`CornerSeed`]).
+    holds: std::collections::BTreeMap<usize, f64>,
     out: Skeleton,
+}
+
+/// A corner of the outer loop where a sloped plane starts late, as an eave
+/// of no length that comes into being once that plane's wavefront reaches
+/// the corner: a convex corner between two gables lying inside the eave's
+/// line (see [`skeleton_with_seeds`]). `corner` is the corner's point, and
+/// the eave the sloped edge whose line passes through `eave` along `dir`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CornerSeed {
+    pub corner: DVec2,
+    pub eave: DVec2,
+    pub dir: DVec2,
 }
 
 /// Velocity of a vertex between edges of planes `a` (incoming) and `b` (outgoing).
@@ -130,6 +158,18 @@ fn velocity(a: &Plane, b: &Plane) -> DVec2 {
     }
     // n_a · v = w_a and n_b · v = w_b.
     DVec2::new(a.weight * nb.y - b.weight * na.y, na.x * b.weight - nb.x * a.weight) / det
+}
+
+/// Whether two sloped planes are one: their eaves on one line, facing the
+/// same way, rising alike and starting at one height (`tol` the merge
+/// distance over a footprint of `size`).
+fn coplanar(a: &Plane, b: &Plane, tol: f64, size: f64) -> bool {
+    a.weight > 0.0
+        && (a.weight - b.weight).abs() <= 1e-9 * a.weight.max(b.weight)
+        && a.dir.dot(b.dir) > 0.0
+        && a.dir.perp_dot(b.dir).abs() * size <= tol
+        && (b.origin - a.origin).dot(a.dir.perp()).abs() <= tol
+        && (a.start - b.start).abs() <= tol
 }
 
 impl Sim {
@@ -146,6 +186,16 @@ impl Sim {
             p.weight = 0.0;
         }
         p
+    }
+
+    /// Whether vertex `id` still stands still (see [`CornerSeed`]).
+    fn held(&self, id: usize) -> bool {
+        self.holds.get(&id).is_some_and(|&t| t > self.time + self.tol * 1e-3)
+    }
+
+    /// Whether plane `i` has started moving.
+    fn has_started(&self, i: usize) -> bool {
+        self.planes.get(i).is_none_or(|p| self.started(p))
     }
 
     /// Whether a plane moves at the current time.
@@ -186,7 +236,15 @@ impl Sim {
             .iter()
             .enumerate()
             .map(|(l, lp)| {
-                (0..lp.len()).map(|k| velocity(&self.plane(self.in_plane(l, k)), &self.plane(lp[k].out))).collect()
+                (0..lp.len())
+                    .map(|k| {
+                        if self.held(lp[k].id) {
+                            DVec2::ZERO
+                        } else {
+                            velocity(&self.plane(self.in_plane(l, k)), &self.plane(lp[k].out))
+                        }
+                    })
+                    .collect()
             })
             .collect()
     }
@@ -195,6 +253,86 @@ impl Sim {
         let a = self.plane(self.in_plane(l, k)).dir;
         let b = self.plane(self.loops[l][k].out).dir;
         a.perp_dot(b) < -1e-9
+    }
+
+    /// Whether the edge from vertex `k` to the next grows: its ends move apart.
+    fn growing(&self, l: usize, k: usize) -> bool {
+        let lp = &self.loops[l];
+        let n = lp.len();
+        let (v, next) = (lp[k], lp[(k + 1) % n]);
+        let edge = self.plane(v.out);
+        let at_start = velocity(&self.plane(self.in_plane(l, k)), &edge);
+        let at_end = velocity(&edge, &self.plane(next.out));
+        (at_end - at_start).dot(edge.dir) > 1e-12
+    }
+
+    /// Where a notch cut into a sloped eave runs right up to a corner of
+    /// the footprint, the corner (convex, between two gables) lies on the
+    /// eave's line and no eave of its own starts there: left alone it stays
+    /// put and only planes from elsewhere reach it, and the eave's plane,
+    /// which ends at the notch, cannot carry on past it. Such a corner
+    /// starts an edge of the eave's plane instead, as a piece of the eave
+    /// of no length would (and as a short one does): of the sloped planes
+    /// whose eave lines pass through the corner and run into it, the lowest
+    /// along its bisector (the earliest to start first). An eave that starts
+    /// late leaves its seed standing still until it does. The `seeds` given
+    /// also start their eave's plane at corners inside its line, standing
+    /// still until its wavefront gets there. `canon` maps each plane to the
+    /// first plane it is one with.
+    fn seed_corners(&mut self, canon: &[usize], seeds: &[CornerSeed]) {
+        // The planes as they will move, whether they have started yet or not.
+        let raw = |i: usize| self.planes.get(i).copied();
+        for l in 0..self.loops.len() {
+            let mut k = 0;
+            while k < self.loops[l].len() {
+                let (Some(a), Some(b)) = (raw(self.in_plane(l, k)), raw(self.loops[l][k].out)) else {
+                    k += 1;
+                    continue;
+                };
+                let v = self.loops[l][k];
+                let inward = (a.dir.perp() + b.dir.perp()).normalize_or_zero();
+                if a.weight > 0.0 || b.weight > 0.0 || a.dir.perp_dot(b.dir) <= 1e-9 || inward == DVec2::ZERO {
+                    k += 1;
+                    continue;
+                }
+                let rise = |p: &Plane| inward.dot(p.dir.perp()) / p.weight;
+                // Inside the eave's line by `gap` (on it within the tolerance).
+                let gap = |p: &Plane| (v.pos - p.origin).dot(p.dir.perp());
+                let fits = |p: &Plane| {
+                    p.weight > 0.0 && a.dir.perp_dot(p.dir) > 1e-9 && p.dir.perp_dot(b.dir) > 1e-9 && rise(p) > 0.0
+                };
+                let seeded = |p: &Plane| {
+                    l == 0
+                        && seeds.iter().any(|s| {
+                            s.corner.distance(v.pos) <= self.tol
+                                && s.dir.dot(p.dir) > 1.0 - 1e-9
+                                && (s.eave - p.origin).dot(p.dir.perp()).abs() <= self.tol
+                        })
+                };
+                let eave = self
+                    .planes
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| fits(p) && (gap(p).abs() <= self.tol || (gap(p) > 0.0 && seeded(p))))
+                    .min_by(|(_, p), (_, q)| p.start.total_cmp(&q.start).then(rise(p).total_cmp(&rise(q))))
+                    .map(|(j, p)| (j, p.start + gap(p).max(0.0) / p.weight));
+                let Some((eave, from)) = eave else {
+                    k += 1;
+                    continue;
+                };
+                let out = canon.get(eave).copied().unwrap_or(eave);
+                let id = self.next_id;
+                self.loops[l][k] = Vertex { out, grow: true, ..v };
+                self.loops[l].insert(k + 1, Vertex { id, pos: v.pos, out: v.out, grow: false });
+                self.next_id += 1;
+                // Off the eave's line: both ends wait for its wavefront.
+                if from > self.time + self.tol {
+                    self.holds.insert(v.id, from);
+                    self.holds.insert(id, from);
+                }
+                k += 2;
+            }
+        }
     }
 
     fn flush_run(&mut self, id: usize) {
@@ -229,9 +367,13 @@ impl Sim {
                 best = Some(dt);
             }
         };
-        // Start events: a plane still on the wavefront begins to move.
+        // Start events: a plane still on the wavefront begins to move, or a
+        // vertex held at a corner.
         for lp in &self.loops {
             for v in lp {
+                if let Some(&t) = self.holds.get(&v.id) {
+                    consider(t - self.time);
+                }
                 if let Some(p) = self.planes.get(v.out)
                     && p.weight > 0.0
                 {
@@ -330,6 +472,17 @@ impl Sim {
                 v.pos += vel[l][k] * dt;
             }
         }
+        // Edges that started at a point and have grown are like any other.
+        let tol = self.tol;
+        for lp in &mut self.loops {
+            let n = lp.len();
+            for k in 0..n {
+                let next = lp[(k + 1) % n].pos;
+                if lp[k].grow && lp[k].pos.distance(next) > tol {
+                    lp[k].grow = false;
+                }
+            }
+        }
         self.time = t1;
     }
 
@@ -370,9 +523,13 @@ impl Sim {
                     continue;
                 }
                 // A vanished edge: its ends merge (the vertex keeps the next edge's plane).
-                if let Some(k) =
-                    (0..n).find(|&k| self.loops[l][k].pos.distance(self.loops[l][(k + 1) % n].pos) <= self.tol)
-                {
+                if let Some(k) = (0..n).find(|&k| {
+                    self.loops[l][k].pos.distance(self.loops[l][(k + 1) % n].pos) <= self.tol
+                        && !(self.loops[l][k].grow
+                            && (self.growing(l, k)
+                                || !self.has_started(self.loops[l][k].out)
+                                || self.held(self.loops[l][k].id)))
+                }) {
                     let j = (k + 1) % n;
                     let next = self.loops[l][j];
                     let mid = (self.loops[l][k].pos + next.pos) * 0.5;
@@ -380,8 +537,16 @@ impl Sim {
                     self.flush_run(next.id);
                     let id = self.next_id;
                     self.next_id += 1;
-                    self.loops[l][k] = Vertex { id, pos: mid, out: next.out };
+                    self.loops[l][k] = Vertex { id, pos: mid, out: next.out, grow: false };
                     self.loops[l].remove(j);
+                    acted = true;
+                    continue;
+                }
+                // Two pieces of one plane meet (past a notch or round an
+                // opening): they are one edge, with no hip or valley between.
+                if let Some(k) = (0..n).find(|&k| self.in_plane(l, k) == self.loops[l][k].out) {
+                    let v = self.loops[l].remove(k);
+                    self.flush_run(v.id);
                     acted = true;
                     continue;
                 }
@@ -451,8 +616,8 @@ impl Sim {
         let r = self.loops[l][k];
         let plane_e = self.loops[m][e].out;
         self.flush_run(r.id);
-        let first = Vertex { id: self.next_id, pos: r.pos, out: plane_e };
-        let second = Vertex { id: self.next_id + 1, pos: r.pos, out: r.out };
+        let first = Vertex { id: self.next_id, pos: r.pos, out: plane_e, grow: false };
+        let second = Vertex { id: self.next_id + 1, pos: r.pos, out: r.out, grow: false };
         self.next_id += 2;
         if l == m {
             let lp = self.loops.remove(l);
@@ -533,8 +698,11 @@ impl Sim {
             }
             let mut rest: Vec<(DVec2, DVec2)> =
                 pieces.into_iter().zip(keep).filter(|(_, k)| *k).map(|(s, _)| s).collect();
-            // Chain them into loops.
+            // Chain them into loops: outlines counter-clockwise, and
+            // clockwise the openings where the plane runs all the way round.
             let mut guard = rest.len() + 1;
+            let first = self.out.faces.len();
+            let mut openings = Vec::new();
             while let Some((start, mut at)) = rest.pop() {
                 let mut ring = vec![start];
                 while at.distance(start) > tol && guard > 0 {
@@ -544,8 +712,24 @@ impl Sim {
                     ring.push(a);
                     at = b;
                 }
-                if ring.len() >= 3 && polygon::signed_area(&ring) > tol * tol {
+                let area = polygon::signed_area(&ring);
+                if ring.len() >= 3 && area > tol * tol {
                     self.out.faces.push((plane, ring));
+                } else if ring.len() >= 3 && area < -tol * tol {
+                    openings.push(ring);
+                }
+            }
+            // Each opening belongs to the smallest outline of the plane around it.
+            for ring in openings {
+                let probe = (ring[0] + ring[1]) * 0.5;
+                let around = (first..self.out.faces.len())
+                    .filter(|&i| self.out.faces.get(i).is_some_and(|(_, f)| polygon::contains(f, probe)))
+                    .min_by(|&i, &j| {
+                        let area = |i: usize| self.out.faces.get(i).map_or(0.0, |(_, f)| polygon::area(f));
+                        area(i).total_cmp(&area(j))
+                    });
+                if let Some(face) = around {
+                    self.out.face_holes.push((face, ring));
                 }
             }
         }
@@ -567,6 +751,20 @@ pub fn skeleton_with_starts(
     loops: &[Vec<DVec2>],
     weights: &[Vec<f64>],
     starts: &[Vec<f64>],
+) -> Result<Skeleton, SkeletonError> {
+    skeleton_with_seeds(loops, weights, starts, &[])
+}
+
+/// [`skeleton_with_starts`] with corners of the outer loop where a sloped
+/// plane comes into being late ([`CornerSeed`]): where an eave of no length
+/// would be, had the outline been grown from a footprint with one there
+/// (roofs with an overhang, see [`crate::roofs::outline`]). A seed that is
+/// not such a corner is ignored.
+pub fn skeleton_with_seeds(
+    loops: &[Vec<DVec2>],
+    weights: &[Vec<f64>],
+    starts: &[Vec<f64>],
+    seeds: &[CornerSeed],
 ) -> Result<Skeleton, SkeletonError> {
     let mut planes = Vec::new();
     let mut wave = Vec::new();
@@ -597,7 +795,7 @@ pub fn skeleton_with_starts(
             lo = lo.min(a);
             hi = hi.max(a);
             planes.push(Plane { origin: a, dir, length: a.distance(b), weight: w.max(0.0), start });
-            lp.push(Vertex { id: next_id, pos: a, out: planes.len() - 1 });
+            lp.push(Vertex { id: next_id, pos: a, out: planes.len() - 1, grow: false });
             next_id += 1;
         }
         wave.push(lp);
@@ -606,22 +804,36 @@ pub fn skeleton_with_starts(
     if !(size.is_finite() && size > 1e-9) {
         return Err(SkeletonError::Invalid);
     }
+    let tol = size * 1e-9;
+    // Eaves on one line rising alike are one plane, the first of them: they
+    // sweep one face, and their edges join where they meet.
+    let mut canon: Vec<usize> = Vec::with_capacity(planes.len());
+    for (i, p) in planes.iter().enumerate() {
+        let first = planes.iter().take(i).position(|q| coplanar(q, p, tol, size));
+        let to = first.and_then(|j| canon.get(j).copied()).unwrap_or(i);
+        canon.push(to);
+    }
+    for v in wave.iter_mut().flatten() {
+        v.out = canon.get(v.out).copied().unwrap_or(v.out);
+    }
     let n_planes = planes.len();
     let mut sim = Sim {
         out: Skeleton { planes: planes.clone(), ..Default::default() },
         planes,
         loops: wave,
         next_id,
-        tol: size * 1e-9,
+        tol,
         size,
         time: 0.0,
         swept: vec![Vec::new(); n_planes],
         runs: Default::default(),
+        holds: Default::default(),
     };
+    sim.seed_corners(&canon, seeds);
     // Late starts are events too.
     let mut started = vec![false; n_planes];
     let late = sim.planes.iter().filter(|p| p.start > 0.0).count();
-    let budget = 8 * n_planes + 2 * late + 64;
+    let budget = 8 * n_planes + 2 * late + 2 * sim.holds.len() + 64;
     for _ in 0..budget {
         // Topology changes at the current time.
         let mut settle = 4 * n_planes + 16;
@@ -664,8 +876,13 @@ mod tests {
         vec![DVec2::ZERO, DVec2::new(w, 0.0), DVec2::new(w, d), DVec2::new(0.0, d)]
     }
 
+    fn points(c: &[(f64, f64)]) -> Vec<DVec2> {
+        c.iter().map(|&(x, y)| DVec2::new(x, y)).collect()
+    }
+
     fn faces_area(s: &Skeleton) -> f64 {
         s.faces.iter().map(|(_, f)| polygon::area(f)).sum::<f64>()
+            - s.face_holes.iter().map(|(_, h)| polygon::area(h)).sum::<f64>()
             + s.flats.iter().map(|(_, f)| polygon::area(f)).sum::<f64>()
     }
 
@@ -885,6 +1102,74 @@ mod tests {
                 skeleton(std::slice::from_ref(pts), &[weights]).unwrap_or_else(|e| panic!("gabled shape {i}: {e:?}"));
             check_area(&s, area);
         }
+    }
+
+    /// The single ridge of a 13.716 x 7.01 gable roof along X, midway.
+    fn full_ridge(s: &Skeleton) {
+        assert_eq!(s.lines.len(), 1, "one ridge: {:?}", s.lines);
+        let (a, b) = s.lines[0];
+        let along = (a.y - 3.505).abs() < 1e-9 && (b.y - 3.505).abs() < 1e-9;
+        assert!(along && (a.x - b.x).abs() > 13.716 - 1e-9, "the whole length: {:?}", s.lines);
+    }
+
+    /// Issue #380: a V notch cut into the north eave of a gable roof right
+    /// up to its north-east corner (the ends and the notch's sides gables).
+    /// The north plane carries on past the notch to the corner, the ridge
+    /// runs the whole length, nothing rises above it (no plane reaching
+    /// past the ridge to the north edge), and the north plane is one face.
+    #[test]
+    fn a_notch_up_to_a_corner_keeps_the_ridge() {
+        let w = 1.0 / 0.42;
+        let ridge = 3.505 * 0.42;
+        let fp = points(&[(0.0, 0.0), (13.716, 0.0), (13.716, 7.01), (11.125, 4.419), (8.534, 7.01), (0.0, 7.01)]);
+        let s = skeleton(std::slice::from_ref(&fp), &[vec![w, 0.0, 0.0, 0.0, w, 0.0]]).unwrap();
+        check_consistent(&s, polygon::area(&fp));
+        full_ridge(&s);
+        assert!((max_height(&s) - ridge).abs() < 1e-9, "{}", max_height(&s));
+        assert!(s.gables.iter().all(|g| g.1.max(g.3) < ridge + 1e-9), "a gable above the ridge: {:?}", s.gables);
+        assert_eq!(s.faces.len(), 2, "{:?}", s.faces);
+        let (_, north) = s.faces.iter().find(|(p, _)| *p == 4).unwrap();
+        assert!(north.iter().any(|p| p.distance(DVec2::new(13.716, 7.01)) < 1e-9), "{north:?}");
+        assert!((s.face_height(4, DVec2::new(13.716, 7.01))).abs() < 1e-9);
+        assert!((polygon::area(north) - (polygon::area(&fp) - 13.716 * 3.505)).abs() < 1e-6);
+
+        // Ending 1 cm short of the corner, a piece of eave left there: the
+        // same roof, the piece and the eave one plane (one face, no line
+        // from the notch's inner point down to the ridge).
+        let fp = points(&[
+            (0.0, 0.0),
+            (13.716, 0.0),
+            (13.716, 7.01),
+            (13.706, 7.01),
+            (11.125, 4.419),
+            (8.534, 7.01),
+            (0.0, 7.01),
+        ]);
+        let s = skeleton(std::slice::from_ref(&fp), &[vec![w, 0.0, w, 0.0, 0.0, w, 0.0]]).unwrap();
+        check_consistent(&s, polygon::area(&fp));
+        full_ridge(&s);
+        assert!((max_height(&s) - ridge).abs() < 1e-9, "{}", max_height(&s));
+        assert_eq!(s.faces.len(), 2, "{:?}", s.faces);
+        assert!(s.faces.iter().any(|(p, _)| *p == 2) && s.face_holes.is_empty());
+    }
+
+    /// A plane running all the way round an opening (its sides gables, its
+    /// top a sloped eave): one face with the opening in it, and no line
+    /// where its two sides meet again below the opening.
+    #[test]
+    fn a_plane_round_an_opening_is_one_face() {
+        let w = 1.0 / 0.42;
+        let outer = rect(13.716, 7.01);
+        let hole = points(&[(9.5, 6.5), (12.5, 6.5), (11.0, 4.4)]);
+        let s = skeleton(&[outer.clone(), hole.clone()], &[vec![w, 0.0, w, 0.0], vec![w, 0.0, 0.0]]).unwrap();
+        check_consistent(&s, polygon::area(&outer) - polygon::area(&hole));
+        let below = |&(a, b): &(DVec2, DVec2)| (a.x - 11.0).abs() < 1e-6 && (b.x - 11.0).abs() < 1e-6;
+        assert!(!s.lines.iter().any(below), "{:?}", s.lines);
+        // The ridge, and where the opening's top plane meets the north plane.
+        assert_eq!(s.lines.len(), 2, "{:?}", s.lines);
+        let north: Vec<usize> = (0..s.faces.len()).filter(|&i| s.faces[i].0 == 2).collect();
+        assert_eq!(north.len(), 1, "{:?}", s.faces);
+        assert_eq!(s.face_holes.iter().filter(|(f, _)| *f == north[0]).count(), 1, "{:?}", s.face_holes);
     }
 
     #[test]

@@ -65,6 +65,8 @@ mod render;
 mod render_settings;
 mod ring_footings;
 mod roof_edge_overhangs;
+mod roof_join;
+mod roof_notch;
 mod schedule_def;
 mod section_marks;
 mod shaft;
