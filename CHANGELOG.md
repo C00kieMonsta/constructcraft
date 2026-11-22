@@ -32,6 +32,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Haunched strip footings survive their own IFC export (#435). A strip footing with a beam (an inverted T) whose ends are square was written as a faceted body and came back as a generic component, with a second type and its bars left without a host. It is now written as its section revolved about the arc's axis (an arc strip) or extruded level along it (a straight one), so importing the file gives native strips of the same type and volume, with their bar sets on them. Strips that slope or whose ends are cut at an angle by joins are still written as faceted bodies.
+
 - IFC import gave walls, slabs, columns, beams and every other element the other program's numeric element id as their mark, as it did for bars before #369 (#436). A purely numeric `Tag` in a file another program wrote is no longer a mark; other tags, and every mark in a file ConstructCraft wrote, come in as before. Empty lines of the building's address are no longer joined into the project address as bare separators.
 - A schedule whose first column is totaled showed the element count in that column of its totals row and group footers, and the column's total nowhere (#434). The total now stays in its column; the count still fills the first cell when that column is not totaled.
 

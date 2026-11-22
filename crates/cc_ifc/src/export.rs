@@ -1277,13 +1277,18 @@ impl<'a> Exporter<'a> {
                     let frame = Frame::at(DVec3::new(0.0, 0.0, g.z_range.0 - level_z));
                     let position = self.placement3(frame);
                     let depth = g.z_range.1 - g.z_range.0;
-                    // A haunched strip: its section swept along it, as a closed shell.
-                    let shell = g.body().map(|body| {
-                        let mut s = cc_geom::Solid::new(e.id, e.category(), [0; 3]);
-                        body.add_to(&mut s);
-                        self.faceted_brep(&s.faces, level_z)
-                    });
-                    let brep = shell.is_some();
+                    // A haunched strip: its section revolved or extruded when its ends are
+                    // square (#435), else swept along it as a closed shell.
+                    let swept = g.body().and_then(|body| self.strip_sweep(body, level_z));
+                    let shell = match swept {
+                        Some(item) => Some(item),
+                        None => g.body().map(|body| {
+                            let mut s = cc_geom::Solid::new(e.id, e.category(), [0; 3]);
+                            body.add_to(&mut s);
+                            self.faceted_brep(&s.faces, level_z)
+                        }),
+                    };
+                    let brep = shell.is_some() && swept.is_none();
                     // A slab drawn with arcs or circles: its curves (#368).
                     let curves = match &e.kind {
                         ElementKind::Foundation(f) => match &f.shape {
@@ -3376,6 +3381,56 @@ impl<'a> Exporter<'a> {
     /// A closed profile of two arcs and two lines through `pts` (in the
     /// placement's coordinates): an arc through the first three points, a
     /// line to the fourth, an arc through the last three and a line back.
+    /// A haunched strip footing's body as its section swept exactly, so
+    /// importers read it back as a strip (#435): along an arc, the section
+    /// revolved about the arc's vertical axis (an `IfcRevolvedAreaSolid`);
+    /// straight, the section extruded level along the strip. `None` when the
+    /// strip slopes, its ends are cut at an angle by joins, or the section has
+    /// holes; those stay closed shells.
+    fn strip_sweep(&mut self, g: &cc_geom::BeamGeom, level_z: f64) -> Option<Id> {
+        let section = &g.section;
+        if !g.is_square() || g.slope.abs() > 1e-12 || !section.holes.is_empty() || section.outer.len() < 3 {
+            return None;
+        }
+        let (u0, u1) = (g.start_ext.0, g.end_ext.0);
+        let z0 = g.z_range.0 - level_z;
+        if !(u1 - u0 > 1e-6 && z0.is_finite()) {
+            return None;
+        }
+        let area = Value::Enum("AREA");
+        match &g.arc {
+            Some(a) => {
+                // In the plane of the axis and the radius at the first end (counter-clockwise
+                // in plan): x out from the axis, y up; the revolution turns about local y.
+                let sign = a.sign();
+                let (t0, t1) = (a.angle_at(u0), a.angle_at(u1));
+                let (start, sweep) = (t0.min(t1), (t1 - t0).abs());
+                let radial = DVec2::from_angle(start);
+                let pts: Vec<DVec2> = section.outer.iter().map(|p| DVec2::new(a.radius - sign * p.x, p.y)).collect();
+                if pts.iter().any(|p| !(p.x > 1e-6 && p.is_finite())) || sweep.is_nan() || sweep <= 1e-6 {
+                    return None;
+                }
+                let curve = self.polyline(&pts);
+                let profile = self.w.add("IFCARBITRARYCLOSEDPROFILEDEF", args![area, Value::Null, curve]);
+                let x = DVec3::new(radial.x, radial.y, 0.0);
+                let frame = Frame { origin: DVec3::new(a.center.x, a.center.y, z0), x, z: x.cross(DVec3::Z) };
+                let position = self.placement3(frame);
+                let location = self.origin3;
+                let up = self.w.add("IFCDIRECTION", args![reals(&[0.0, 1.0, 0.0])]);
+                let axis = self.w.add("IFCAXIS1PLACEMENT", args![location, up]);
+                Some(self.w.add("IFCREVOLVEDAREASOLID", args![profile, position, axis, sweep]))
+            }
+            None => {
+                // Square to the strip: x across it (to its left), y up, extruded along it.
+                let start = g.world(u0, 0.0);
+                let dir = DVec3::new(g.dir.x, g.dir.y, 0.0);
+                let frame = Frame { origin: DVec3::new(start.x, start.y, z0), x: DVec3::Z.cross(dir), z: dir };
+                let position = self.placement3(frame);
+                Some(self.extrude_polygon(&section.outer, position, self.dir_z, u1 - u0))
+            }
+        }
+    }
+
     fn arc_band_profile(&mut self, pts: [DVec2; 6]) -> Id {
         let coords: Vec<Value> = pts.iter().map(|q| reals(&[q.x, q.y])).collect();
         let list = self.w.add("IFCCARTESIANPOINTLIST2D", args![coords]);
