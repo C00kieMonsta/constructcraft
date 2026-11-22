@@ -34,7 +34,7 @@ cargo run -p cc_ifc --example export_ifc -- examples/casa_simples.ccad out.ifc
 python scripts/validate_ifc.py out.ifc
 ```
 
-CI (`.github/workflows/ci.yml`) runs fmt, clippy + tests (`cargo nextest run --profile ci`, then the doctests with `cargo test --doc`) on Linux (x86_64 and arm64)/Windows/macOS, the IFC validation job (exports `examples/casa_simples.ccad`, `crates/cc_ifc/tests/fixtures/features.ccad`, `structure.ccad`, `mep.ccad`, `arcs.ccad`, `roofs.ccad`, `phases.ccad`, `topography.ccad`, `curtains.ccad`, `profiles.ccad`, `connections.ccad`, `wall_profiles.ccad`, `spline_walls.ccad` and `attached_walls.ccad`), and a DCO check on PRs: commits must be signed off (`git commit -s`).
+CI (`.github/workflows/ci.yml`) runs fmt, clippy + tests (`cargo nextest run --profile ci`, then the doctests with `cargo test --doc`) on Linux (x86_64 and arm64)/Windows/macOS, the IFC validation job (exports `examples/casa_simples.ccad`, `crates/cc_ifc/tests/fixtures/features.ccad`, `structure.ccad`, `mep.ccad`, `arcs.ccad`, `roofs.ccad`, `roof_joins.ccad`, `phases.ccad`, `topography.ccad`, `curtains.ccad`, `profiles.ccad`, `connections.ccad`, `wall_profiles.ccad`, `spline_walls.ccad` and `attached_walls.ccad`), and a DCO check on PRs: commits must be signed off (`git commit -s`).
 
 ## Architecture
 
@@ -61,11 +61,11 @@ The detailed notes (types, functions, invariants, commands and app entry points 
 - [`docs/architecture/core.md`](docs/architecture/core.md) — cc_core, Components, cc_engine, Measurement systems, Visual programming graphs, cc_plugins, Plugin development, cc_cli.
 - [`docs/architecture/geometry.md`](docs/architecture/geometry.md) — cc_geom, cc_render, Joined pieces.
 - [`docs/architecture/walls.md`](docs/architecture/walls.md) — Curtain walls, Wall profiles, Spline walls, Niches, Wall flip. 
-- [`docs/architecture/elements.md`](docs/architecture/elements.md) — Sketches, Roof coverings and framing, Conceptual masses, Terrain, Building pads, Shafts, Swept profiles.
+- [`docs/architecture/elements.md`](docs/architecture/elements.md) — Sketches, Roof coverings and framing, Roof joins, Conceptual masses, Terrain, Building pads, Shafts, Swept profiles.
 - [`docs/architecture/structure.md`](docs/architecture/structure.md) — Piles and pile caps, Structural profiles, Structure by material, Steel buildings, Member hosts and trusses, Bracing, Wall framing, Connections.
 - [`docs/architecture/reinforcement.md`](docs/architecture/reinforcement.md) — Bar marks and bending schedule, Wall reinforcement, Slab reinforcement, Strip footings with a beam and curved rafts, Pile caps and piles.
 - [`docs/architecture/mep.md`](docs/architecture/mep.md) — MEP, Pipe series.
-- [`docs/architecture/interop.md`](docs/architecture/interop.md) — cc_ifc, Imported CAD drawings, cc_skp.
+- [`docs/architecture/interop.md`](docs/architecture/interop.md) — cc_ifc, Imported CAD drawings, cc_skp, glTF export.
 - [`docs/architecture/views.md`](docs/architecture/views.md) — cc_views, Schedule definitions, Phases, Design options, Detail levels, Visual styles, View graphics, Drafting views, Callouts and detail views, Browser organization.
 - [`docs/architecture/annotation.md`](docs/architecture/annotation.md) — Dimensions, Tags, Level marks, Level heads, Detail lines, Line styles and regions, Fill patterns, Detail components, Title blocks.
 - [`docs/architecture/site-sun-render.md`](docs/architecture/site-sun-render.md) — Site location, Sun studies, Rendering.

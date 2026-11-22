@@ -88,6 +88,7 @@ fn tool_icon(tool: &Tool) -> Icon {
         Tool::JoinGeometry { unjoin: false } => Icon::JoinGeometry,
         Tool::JoinGeometry { unjoin: true } => Icon::UnjoinGeometry,
         Tool::AttachTop => Icon::AttachTop,
+        Tool::JoinRoof => Icon::RoofJoin,
         Tool::Paste => Icon::Paste,
         Tool::Dimension { mode, .. } => dimension_icon(*mode),
         Tool::MatchType => Icon::MatchType,
@@ -686,10 +687,12 @@ fn command_buttons(ui: &mut Ui, state: &mut AppState, list: &[UiCommand]) {
 }
 
 fn file_tab(ui: &mut Ui, state: &mut AppState) {
-    use UiCommand::{CloseProject, ExportDxf, ExportIfc, ExportImage, ExportPdf, ExportSvg, New, Open, Save, SaveAs};
+    use UiCommand::{
+        CloseProject, ExportDxf, ExportGltf, ExportIfc, ExportImage, ExportPdf, ExportSvg, New, Open, Save, SaveAs,
+    };
     group(ui, t!("group-project"), |ui| command_buttons(ui, state, &[New, Open, Save, SaveAs, CloseProject]));
     group(ui, t!("group-export"), |ui| {
-        command_buttons(ui, state, &[ExportIfc, ExportPdf, ExportSvg, ExportImage, ExportDxf]);
+        command_buttons(ui, state, &[ExportIfc, ExportGltf, ExportPdf, ExportSvg, ExportImage, ExportDxf]);
         plugin_file_entries(ui, state, true);
     });
     group(ui, t!("group-settings"), |ui| command_button(ui, state, UiCommand::Preferences));
@@ -699,15 +702,15 @@ fn file_tab(ui: &mut Ui, state: &mut AppState) {
 /// Files brought into the project or written from it, and components to load.
 fn insert_tab(ui: &mut Ui, state: &mut AppState) {
     use UiCommand::{
-        ComponentLibrary, ExportDxf, ExportIfc, ImportCad, ImportGltf, ImportIfc, ImportImage, ImportObj, ImportSkp,
-        LoadComponent,
+        ComponentLibrary, ExportDxf, ExportGltf, ExportIfc, ImportCad, ImportGltf, ImportIfc, ImportImage, ImportObj,
+        ImportSkp, LoadComponent,
     };
     group(ui, t!("group-import"), |ui| {
         command_buttons(ui, state, &[ImportIfc, ImportCad, ImportSkp, ImportObj, ImportGltf, ImportImage]);
         plugin_file_entries(ui, state, false);
     });
     group(ui, t!("group-export"), |ui| {
-        command_buttons(ui, state, &[ExportIfc, ExportDxf]);
+        command_buttons(ui, state, &[ExportIfc, ExportGltf, ExportDxf]);
         plugin_file_entries(ui, state, true);
     });
     group(ui, t!("group-library"), |ui| command_buttons(ui, state, &[LoadComponent, ComponentLibrary]));
@@ -915,7 +918,11 @@ fn modify_tab(ui: &mut Ui, state: &mut AppState) {
     });
     group(ui, t!("group-measure"), |ui| command_button(ui, state, Measure));
     group(ui, t!("group-geometry"), |ui| {
-        command_buttons(ui, state, &[JoinGeometry, UnjoinGeometry, AttachTop, DetachTop, FlipWalls, Paint, RemovePaint])
+        command_buttons(
+            ui,
+            state,
+            &[JoinGeometry, UnjoinGeometry, JoinRoof, UnjoinRoof, AttachTop, DetachTop, FlipWalls, Paint, RemovePaint],
+        )
     });
     group(ui, t!("group-sketch"), |ui| {
         command_buttons(ui, state, &[EditBoundary, EditProfile, EditWallProfile, ResetWallProfile])
@@ -1606,6 +1613,9 @@ pub fn options_bar(ui: &mut Ui, state: &mut AppState) {
             }
             Tool::AttachTop => {
                 ui.label(theme::muted(t!("hint-attach-top")));
+            }
+            Tool::JoinRoof => {
+                ui.label(theme::muted(crate::i18n::tr(crate::modify::roof_join_hint(state))));
             }
             Tool::Paste => {
                 ui.label(theme::muted(t!("hint-paste")));

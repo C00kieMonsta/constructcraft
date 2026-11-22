@@ -531,7 +531,13 @@ pub(crate) fn element_json(s: &mut Session, id: ElementId) -> Option<Value> {
         derived.insert("ridges".into(), json!(lines.iter().map(|(a, b)| [[a.x, a.y], [b.x, b.y]]).collect::<Vec<_>>()));
     }
     if let ElementKind::Roof(r) = &e.kind {
-        derived.insert("plan_area".into(), json!(cc_geom::roofs::plan_area(r)));
+        // A join counts the part each roof keeps.
+        let join = geom.roof_joins.get(&id);
+        let plan_area = join.filter(|j| j.active()).map_or_else(|| cc_geom::roofs::plan_area(r), |j| j.plan_area);
+        derived.insert("plan_area".into(), json!(plan_area));
+        if let Some(j) = join {
+            derived.insert("join".into(), super::roof_join::join_json(j));
+        }
         if let (Some(cc_core::TypeData::Roof { covering, framing, .. }), Some(g)) =
             (&roof_type, geom.roof_framing.get(&id))
         {

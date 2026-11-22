@@ -19,6 +19,7 @@ mod error;
 pub mod extension;
 pub mod files;
 pub mod gltf;
+pub mod gltf_export;
 pub mod graph;
 pub mod i18n;
 pub mod import_material;

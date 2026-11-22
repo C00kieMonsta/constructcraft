@@ -16,7 +16,8 @@ use serde_json::{Value, json};
 /// the roof's slopes, the area covered, the number of tiles and their
 /// weight, and its framing (purlins, rafters, battens and truss members:
 /// lengths, the number of trusses and the volume). The covering and framing are set on the roof's type
-/// (`type_set` with `covering` and `framing`).
+/// (`type_set` with `covering` and `framing`). A roof joined to another
+/// (`roof_join`) that does not meet it is an issue; `join` gives its join.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RoofCheck {
@@ -78,6 +79,18 @@ impl Command for RoofCheck {
         let id = e.id;
         s.geometry();
         let g = s.geom().roof_framing.get(&id).cloned().unwrap_or_default();
-        Ok(roof_json(covering, system, &g))
+        let mut out = roof_json(covering, system, &g);
+        // A join that is not built: the roofs stay as drawn.
+        if let Some(j) = s.geom().roof_joins.get(&id)
+            && let (Some(to), Some(state)) = (j.to, j.state)
+            && state != cc_geom::roof_join::JoinState::Joined
+        {
+            if let Some(issues) = out.get_mut("issues").and_then(Value::as_array_mut) {
+                issues.push(json!(t!("msg-roof-join-inactive", "to" => to.0)));
+            }
+            out["ok"] = json!(false);
+        }
+        out["join"] = s.geom().roof_joins.get(&id).map_or(Value::Null, super::roof_join::join_json);
+        Ok(out)
     }
 }

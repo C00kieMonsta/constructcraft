@@ -34,6 +34,7 @@ pub mod ramp;
 pub mod rebar;
 pub mod region;
 pub mod roof_framing;
+pub mod roof_join;
 pub mod roofs;
 mod rooms;
 pub mod section;

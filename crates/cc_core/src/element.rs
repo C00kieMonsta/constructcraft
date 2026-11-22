@@ -788,6 +788,13 @@ pub struct Roof {
     /// when the outline is edited without them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sketch: Option<crate::sketch::Sketch>,
+    /// The roof this one is joined to (a cross wing or bay against a main
+    /// roof): its end runs on into that roof, or is cut, until it meets its
+    /// surface, and that roof is cut away under it (see `cc_geom::roof_join`).
+    /// Cleared when that roof goes, is not a roof, or would close a loop of
+    /// joins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join_to: Option<ElementId>,
 }
 
 impl Roof {
@@ -803,6 +810,7 @@ impl Roof {
             edge_slopes: Vec::new(),
             edge_overhangs: Vec::new(),
             sketch: None,
+            join_to: None,
         }
     }
 

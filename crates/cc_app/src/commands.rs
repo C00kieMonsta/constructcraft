@@ -51,6 +51,7 @@ pub enum UiCommand {
     /// Insert a glTF model (.glb, .gltf) into the open project.
     ImportGltf,
     ExportIfc,
+    ExportGltf,
     ExportPdf,
     ExportSvg,
     ExportImage,
@@ -203,6 +204,10 @@ pub enum UiCommand {
     Measure,
     JoinGeometry,
     UnjoinGeometry,
+    /// Pick a roof (a wing or bay), then the roof it meets.
+    JoinRoof,
+    /// Unjoin the selected roofs from the roofs they were joined to.
+    UnjoinRoof,
     AttachTop,
     DetachTop,
     /// Paint faces with a material in a 3D view.
@@ -329,6 +334,7 @@ impl UiCommand {
             ImportObj,
             ImportGltf,
             ExportIfc,
+            ExportGltf,
             ExportPdf,
             ExportSvg,
             ExportImage,
@@ -434,6 +440,8 @@ impl UiCommand {
             Measure,
             JoinGeometry,
             UnjoinGeometry,
+            JoinRoof,
+            UnjoinRoof,
             AttachTop,
             DetachTop,
             Paint,
@@ -517,7 +525,7 @@ impl UiCommand {
             Save => Icon::Save,
             SaveAs => Icon::SaveAs,
             CloseProject => Icon::CloseProject,
-            ExportIfc => Icon::Export,
+            ExportIfc | ExportGltf => Icon::Export,
             ExportPdf | ExportSvg | Sheet => Icon::Sheet,
             ExportImage => Icon::Image,
             ExportDxf => Icon::CadImport,
@@ -644,6 +652,7 @@ impl UiCommand {
             Ungroup => Icon::Ungroup,
             Explode => Icon::Explode,
             UnjoinGeometry => Icon::UnjoinGeometry,
+            JoinRoof | UnjoinRoof => Icon::RoofJoin,
             AttachTop | DetachTop => Icon::AttachTop,
             Paint | RemovePaint => Icon::Paint,
             Pin => Icon::Pin,
@@ -718,7 +727,7 @@ impl UiCommand {
                 Some(Badge::Import)
             }
             ExportPdf | ExportSvg | ExportImage | ExportDxf | AnalyticalExport => Some(Badge::Export),
-            Delete | DetachTop | RemovePaint | ResetWallProfile => Some(Badge::Remove),
+            Delete | DetachTop | UnjoinRoof | RemovePaint | ResetWallProfile => Some(Badge::Remove),
             _ => None,
         }
     }
@@ -740,6 +749,7 @@ impl UiCommand {
             ImportObj => t!("action-import-obj"),
             ImportGltf => t!("action-import-gltf"),
             ExportIfc => t!("action-export-ifc"),
+            ExportGltf => t!("action-export-gltf"),
             ExportPdf => t!("action-export-pdf"),
             ExportSvg => t!("action-export-svg"),
             ExportImage => t!("action-export-image"),
@@ -868,6 +878,8 @@ impl UiCommand {
             Ungroup => t!("action-ungroup"),
             Explode => t!("action-explode"),
             UnjoinGeometry => t!("tool-unjoin-geometry"),
+            JoinRoof => t!("tool-join-roof"),
+            UnjoinRoof => t!("tool-unjoin-roof"),
             AttachTop => t!("tool-attach-top"),
             DetachTop => t!("tool-detach-top"),
             Paint => t!("tool-paint"),
@@ -961,6 +973,7 @@ impl UiCommand {
             ImportObj => t!("cmd-desc-import-obj"),
             ImportGltf => t!("cmd-desc-import-gltf"),
             ExportIfc => t!("cmd-desc-export-ifc"),
+            ExportGltf => t!("cmd-desc-export-gltf"),
             ExportPdf => t!("cmd-desc-export-pdf"),
             ExportSvg => t!("cmd-desc-export-svg"),
             ExportImage => t!("cmd-desc-export-image"),
@@ -1105,6 +1118,8 @@ impl UiCommand {
             Ungroup => t!("cmd-desc-ungroup"),
             Explode => t!("cmd-desc-explode"),
             UnjoinGeometry => t!("cmd-desc-unjoin-geometry"),
+            JoinRoof => t!("cmd-desc-join-roof"),
+            UnjoinRoof => t!("cmd-desc-unjoin-roof"),
             AttachTop => t!("cmd-desc-attach-top"),
             DetachTop => t!("cmd-desc-detach-top"),
             Paint => t!("cmd-desc-paint"),
@@ -1293,6 +1308,7 @@ impl UiCommand {
             ImportObj => "obj_import",
             ImportGltf => "gltf_import",
             ExportIfc => "ifc_export",
+            ExportGltf => "gltf_export",
             ExportPdf | ExportSvg => "sheet_export",
             ExportImage | ExportDxf => "view_export",
             Undo => "undo",
@@ -1410,6 +1426,8 @@ impl UiCommand {
             Ungroup => "group_ungroup",
             Explode => "cad_explode",
             UnjoinGeometry => "geometry_unjoin",
+            JoinRoof => "roof_join",
+            UnjoinRoof => "roof_unjoin",
             AttachTop | DetachTop => "wall_attach",
             Paint => "paint",
             RemovePaint => "paint_remove",
@@ -1470,6 +1488,7 @@ impl UiCommand {
         match self {
             AttachTop | FlipWalls if walls().next().is_none() => Some(t!("why-select-walls")),
             DetachTop if !walls().any(|w| w.attach_top.is_some()) => Some(t!("why-select-attached-walls")),
+            UnjoinRoof if crate::modify::joined_roofs(state).is_empty() => Some(t!("why-select-joined-roofs")),
             Undo if state.sketch.as_ref().is_some_and(|s| !s.can_undo()) => Some(t!("why-nothing-undo")),
             Redo if state.sketch.as_ref().is_some_and(|s| !s.can_redo()) => Some(t!("why-nothing-redo")),
             Undo | Redo if state.sketch.is_some() => None,
@@ -1523,6 +1542,7 @@ impl UiCommand {
             ExportPdf | ExportSvg if actions::active_sheet(state).is_none() => Some(t!("hint-export-sheet")),
             ExportImage if actions::image_view(state).is_none() => Some(t!("hint-export-image")),
             ExportDxf if actions::image_view(state).is_none() => Some(t!("hint-export-dxf")),
+            ExportGltf if actions::gltf_view(state).is_none() => Some(t!("hint-export-gltf")),
             ImportCad | ImportImage | DetailLine | FilledRegion | MaskingRegion | DetailComponent
                 if crate::cad_ui::cad_view(state).is_none() =>
             {
@@ -1740,6 +1760,7 @@ impl UiCommand {
             Measure => *tool == Tool::Measure,
             JoinGeometry => *tool == Tool::JoinGeometry { unjoin: false },
             UnjoinGeometry => *tool == Tool::JoinGeometry { unjoin: true },
+            JoinRoof => *tool == Tool::JoinRoof,
             AttachTop => *tool == Tool::AttachTop,
             Paint => *tool == Tool::Paint { remove: false },
             RemovePaint => *tool == Tool::Paint { remove: true },
@@ -1955,6 +1976,7 @@ pub fn run(state: &mut AppState, ctx: &egui::Context, command: UiCommand) {
         ImportObj => crate::obj_ui::import_obj(state),
         ImportGltf => crate::obj_ui::import_gltf(state),
         ExportIfc => actions::export_ifc(state),
+        ExportGltf => actions::export_gltf(state),
         ExportPdf => actions::export_sheet(state, actions::SheetFormat::Pdf),
         ExportSvg => actions::export_sheet(state, actions::SheetFormat::Svg),
         ExportImage => actions::export_image(state),
@@ -2184,6 +2206,8 @@ pub fn run(state: &mut AppState, ctx: &egui::Context, command: UiCommand) {
             state.set_tool(Tool::JoinGeometry { unjoin: command == UnjoinGeometry });
             state.message = t!("hint-join-pick");
         }
+        JoinRoof => crate::modify::start_roof_join(state),
+        UnjoinRoof => crate::modify::unjoin_roofs(state),
         AttachTop => crate::modify::start_attach(state),
         DetachTop => crate::modify::detach_tops(state),
         FlipWalls => crate::modify::flip_walls(state),
