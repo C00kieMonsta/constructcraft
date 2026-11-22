@@ -182,7 +182,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 e.project().dim_ref_at(grid, p)
             };
             let refs = [on_grid(e, a), on_grid(e, b)];
-            let dim = Dimension { view: ground_plan, a, b, offset, kind: Default::default(), refs };
+            let dim = Dimension { view: ground_plan, a, b, offset, kind: Default::default(), refs, locked: None };
             add(e, dim_t, "", ElementKind::Dimension(Box::new(dim)));
         }
 

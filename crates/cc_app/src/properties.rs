@@ -97,6 +97,26 @@ fn dimension_value_row(ui: &mut Ui, state: &mut AppState, id: ElementId, d: &cc_
     }
 }
 
+/// A dimension that can be locked (#447): *Locked* keeps its value when an
+/// element at one end moves (see `dimension_lock`).
+fn dimension_lock_row(ui: &mut Ui, state: &mut AppState, id: ElementId, d: &cc_core::Dimension) {
+    let plan = state.project().view(d.view).is_some_and(|v| v.is_plan());
+    if !(plan && d.can_lock()) && d.locked.is_none() {
+        return;
+    }
+    let mut on = d.locked.is_some();
+    let label = t!("prop-dim-locked");
+    let r = row(ui, &label, |ui| {
+        let r = crate::table::checkbox(ui, &mut on);
+        r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, on, &label));
+        r
+    })
+    .on_hover_text(t!("hint-dim-lock"));
+    if r.changed() {
+        crate::dim_edit::set_locked(state, id, on);
+    }
+}
+
 fn text_row(ui: &mut Ui, label: &str, value: String) -> (Response, String) {
     let mut text = value;
     let r = row(ui, label, |ui| {
@@ -1070,6 +1090,7 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
                         d.offset = v;
                     }
                 });
+                dimension_lock_row(ui, state, id, d);
             });
         }
         ElementKind::Floor(f) => {

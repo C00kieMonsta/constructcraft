@@ -973,6 +973,9 @@ impl LeaderSymbol {
     }
 }
 
+/// How far a locked dimension may drift from its value (meters).
+pub const LOCK_TOLERANCE: f64 = 1e-6;
+
 /// A dimension in one view, in that view's drawing coordinates. What `a`,
 /// `b` and `offset` mean depends on the [`DimensionKind`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -988,6 +991,12 @@ pub struct Dimension {
     /// Elements the ends `a` and `b` follow (associative dimension).
     #[serde(default)]
     pub refs: [Option<crate::DimRef>; 2],
+    /// A locked dimension keeps this value (meters): when an edit moves the
+    /// element at one end, the element at the other end moves with it, and
+    /// an edit that would change the value otherwise is refused (#447).
+    /// Only a dimension that [`Dimension::can_lock`] in a plan is locked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locked: Option<f64>,
 }
 
 /// How a dimension measures.
@@ -1039,6 +1048,18 @@ impl Dimension {
             _ => &mut [],
         };
         self.refs.iter_mut().chain(rays.iter_mut())
+    }
+
+    /// Whether the dimension can be locked: a linear or aligned one whose
+    /// two ends follow elements (not levels).
+    pub fn can_lock(&self) -> bool {
+        matches!(self.kind, DimensionKind::Aligned | DimensionKind::Linear { .. })
+            && self.refs.iter().all(|r| r.and_then(|r| r.element()).is_some())
+    }
+
+    /// Whether the dimension is locked and no longer shows its locked value.
+    pub fn breaks_lock(&self) -> bool {
+        self.locked.is_some_and(|v| (self.value() - v).abs() > LOCK_TOLERANCE)
     }
 
     /// Whether any end or ray follows an element.

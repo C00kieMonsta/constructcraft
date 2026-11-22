@@ -392,6 +392,7 @@ registry![
         annotate::DimensionChainCreate,
         annotate::DimensionOrdinateCreate,
         annotate::DimensionSetValue,
+        annotate::DimensionLock,
         annotate::TextCreate,
         detail::DetailLineCreate,
         detail_component::DetailComponentCreate,

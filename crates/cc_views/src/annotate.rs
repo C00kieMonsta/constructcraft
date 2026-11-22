@@ -591,6 +591,7 @@ mod tests {
             offset,
             kind,
             refs: Default::default(),
+            locked: None,
         }
     }
 

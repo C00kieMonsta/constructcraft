@@ -304,7 +304,58 @@ fn from_local(position: DVec2, rotation_deg: f64, x: f64, y: f64) -> DVec2 {
     position + DVec2::from_angle(rotation_deg.to_radians()).rotate(DVec2::new(x, y))
 }
 
+/// How many rounds of moves locked dimensions may cause in one edit (a
+/// chain of locked dimensions moves one element per round).
+const MAX_LOCK_ROUNDS: usize = 64;
+
 impl crate::EditCtx<'_> {
+    /// Keep locked dimensions at their values (#447): where this edit moved
+    /// the element at one end of a locked dimension in a plan and not the
+    /// element at the other, that one is moved along the dimension by what
+    /// it lacks, in the same transaction; it may move others in turn. A lock
+    /// whose two ends moved, or whose other element is pinned, is left
+    /// broken, and the engine refuses the edit (see [`crate::Dimension::breaks_lock`]).
+    pub(crate) fn hold_locked_dimensions(&mut self) {
+        for _ in 0..MAX_LOCK_ROUNDS {
+            let project = self.project();
+            let moved = |id: ElementId| self.has_changed(id);
+            let mut moves: Vec<(ElementId, DVec2)> = Vec::new();
+            for e in project.elements.values() {
+                let ElementKind::Dimension(d) = &e.kind else { continue };
+                let (Some(value), true) = (d.locked, d.can_lock()) else { continue };
+                let Some(view) = project.view(d.view).filter(|v| v.is_plan()) else { continue };
+                let [Some(ra), Some(rb)] = d.refs else { continue };
+                let (Some(ea), Some(eb)) = (ra.element(), rb.element()) else { continue };
+                let (Some(pa), Some(pb)) =
+                    (project.resolve_in_view(&ra, view, d.a), project.resolve_in_view(&rb, view, d.b))
+                else {
+                    continue;
+                };
+                let Some(dir) = d.direction() else { continue };
+                // The dimension keeps its sense: the value is measured from `a` towards `b`.
+                let sign = if (d.b - d.a).dot(dir) < 0.0 { -1.0 } else { 1.0 };
+                let error = (pb - pa).dot(dir) - sign * value;
+                if error.abs() <= crate::element::LOCK_TOLERANCE * 0.1 || !error.is_finite() {
+                    continue;
+                }
+                let (target, shift) = match (moved(ea), moved(eb)) {
+                    (true, false) => (eb, -dir * error),
+                    (false, true) => (ea, dir * error),
+                    _ => continue,
+                };
+                if !project.is_pinned(target) && !moves.iter().any(|(id, _)| *id == target) {
+                    moves.push((target, shift));
+                }
+            }
+            if moves.is_empty() {
+                return;
+            }
+            for (id, shift) in moves {
+                self.transform_elements(&[id], &crate::PlanTransform::translate(shift));
+            }
+        }
+    }
+
     /// Move the referenced ends of every dimension to their targets'
     /// current points (and an angle's vertex to the intersection of its
     /// lines); references to deleted targets are dropped (the end stays
@@ -398,6 +449,7 @@ mod tests {
             offset: 1.0,
             kind: DimensionKind::Linear { dir: DVec2::X },
             refs: [Some(r), None],
+            locked: None,
         };
         let id = doc.edit("dim", |e| {
             let el = crate::Element {
@@ -496,7 +548,15 @@ mod tests {
         let view = p.views.values().find(|v| v.is_plan()).map(|v| v.id).unwrap();
         let level = p.levels[0].id;
         let ty = p.default_type(crate::Category::Dimension).unwrap();
-        let dim = Dimension { view, a, b, offset: 0.5, kind: DimensionKind::Angular { vertex: corner, rays }, refs };
+        let dim = Dimension {
+            view,
+            a,
+            b,
+            offset: 0.5,
+            kind: DimensionKind::Angular { vertex: corner, rays },
+            refs,
+            locked: None,
+        };
         let id = doc.edit("dim", |e| {
             e.add_element(crate::Element {
                 id: crate::ElementId(0),
@@ -555,6 +615,7 @@ mod tests {
             offset: 1.0,
             kind: DimensionKind::Linear { dir: DVec2::Y },
             refs,
+            locked: None,
         };
         let id = doc.edit("dim", |e| {
             e.add_element(crate::Element {
@@ -615,6 +676,7 @@ mod tests {
                 offset: 1.0,
                 kind: DimensionKind::Aligned,
                 refs: [Some(r), None],
+                locked: None,
             };
             let id = doc.edit("dim", |e| {
                 let id = crate::ElementId(e.alloc_id());
