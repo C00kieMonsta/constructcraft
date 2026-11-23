@@ -87,6 +87,7 @@ mod sun;
 mod sweep_curves;
 mod tags;
 mod textures_paint;
+mod tie_hooks;
 mod title_block_migration;
 mod title_blocks;
 mod topography;
