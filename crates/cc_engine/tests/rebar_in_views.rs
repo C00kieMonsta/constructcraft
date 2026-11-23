@@ -82,3 +82,145 @@ fn plans_and_sections_draw_the_bars_within_their_range() {
         ElementKind::Rebar(r) if matches!(r.layout, RebarLayout::Longitudinal { .. })
     ));
 }
+
+/// The layout of reinforcement set `set`.
+fn layout(s: &Session, set: u64) -> RebarLayout {
+    match &s.project().element(ElementId(set)).map(|e| &e.kind) {
+        Some(ElementKind::Rebar(r)) => r.layout.clone(),
+        other => panic!("no rebar {set}: {other:?}"),
+    }
+}
+
+/// The dots of set `set` in a drawing, as their centers and radii.
+fn dots(d: &Drawing2D, set: u64) -> Vec<(glam::DVec2, f64)> {
+    d.prims
+        .iter()
+        .filter_map(|p| match p {
+            Prim::Fill { pts, element: Some(e), .. } if e.0 == set && !pts.is_empty() => {
+                let c = pts.iter().copied().sum::<glam::DVec2>() / pts.len() as f64;
+                Some((c, pts.iter().map(|q| q.distance(c)).fold(0.0, f64::max)))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn dots_are_as_wide_as_the_bar_and_at_least_visible_on_paper() {
+    let mut s = Session::default();
+    let (bars, _) = column(&mut s);
+    let diameter = s.geometry().rebar[&ElementId(bars)].diameter;
+    let plan = s.project().views.values().find(|v| v.is_plan()).map(|v| v.id.0).unwrap();
+    run(&mut s, "view_set", json!({"view": plan, "rebar": true}));
+    for scale in [5, 100] {
+        run(&mut s, "view_set", json!({"view": plan, "scale": scale}));
+        let want = (diameter / 2.0).max(cc_views::rebar_view::MIN_DOT * scale as f64 / 1000.0);
+        let found = dots(&s.drawing(cc_core::ViewId(plan)).unwrap(), bars);
+        assert_eq!(found.len(), 4);
+        assert!(found.iter().all(|(_, r)| (r - want).abs() < 1e-9), "1:{scale}: {found:?} vs {want}");
+    }
+}
+
+#[test]
+fn elevations_draw_every_bar_and_plans_stop_at_the_level_below() {
+    let mut s = Session::default();
+    let (bars, stirrups) = column(&mut s);
+    let loops = s.geometry().rebar[&ElementId(stirrups)].bars.len();
+    // An elevation has no cut: every bar as lines, no dots (the legs of a stirrup seen
+    // end-on are its corners).
+    let elevation = s
+        .project()
+        .views
+        .values()
+        .find(|v| matches!(v.kind, cc_core::ViewKind::Elevation { .. }))
+        .map(|v| v.id.0)
+        .unwrap();
+    run(&mut s, "view_set", json!({"view": elevation, "rebar": true}));
+    let d = s.drawing(cc_core::ViewId(elevation)).unwrap();
+    assert_eq!(of_set(&d, bars), (0, 4));
+    let (dots, lines) = of_set(&d, stirrups);
+    assert!(dots == 0 && lines >= loops, "{dots} {lines} {loops}");
+    // A level high above: its plan looks down to the level below it, above the column.
+    let top =
+        s.geometry().rebar[&ElementId(bars)].bars.iter().flat_map(|b| b.points.iter().map(|p| p.z)).fold(0.0, f64::max);
+    let high = run(&mut s, "level_create", json!({"name": "High", "elevation": top + 20.0}));
+    run(&mut s, "level_create", json!({"name": "Middle", "elevation": top + 10.0}));
+    let plan = id(&run(&mut s, "view_create", json!({"kind": "floor_plan", "level": high["id"]})));
+    run(&mut s, "view_set", json!({"view": plan, "rebar": true, "params": {"cut_height": 1.0}}));
+    let d = s.drawing(cc_core::ViewId(plan)).unwrap();
+    assert_eq!((of_set(&d, bars), of_set(&d, stirrups)), ((0, 0), (0, 0)));
+}
+
+#[test]
+fn ring_bars_cut_by_a_radial_section_are_dots() {
+    let mut s = Session::default();
+    // A half cylinder of radius 2.2 m, 3 m high, its middle at (0, 2.2).
+    let wall =
+        id(&run(&mut s, "wall_create", json!({"start": [2.2, 0], "end": [-2.2, 0], "bulge": 1.0, "height": 3.0})));
+    let out = run(&mut s, "wall_rebar_create", json!({"walls": [wall], "max_length": 0}));
+    let sets: Vec<u64> = out["created"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap()).collect();
+    let geom = s.geometry().clone();
+    let rings: Vec<u64> =
+        sets.iter().copied().filter(|x| matches!(layout(&s, *x), RebarLayout::WallHorizontal { .. })).collect();
+    assert!(!rings.is_empty());
+    let section =
+        id(&run(&mut s, "view_create", json!({"kind": "section", "start": [0, 3.0], "end": [0, 1.4], "depth": 0.05})));
+    run(&mut s, "view_set", json!({"view": section, "rebar": true}));
+    let d = s.drawing(cc_core::ViewId(section)).unwrap();
+    for ring in rings {
+        let count = geom.rebar[&ElementId(ring)].bars.len();
+        // Each ring bar crosses the section once, square to it: a dot each (the bit of
+        // the ring curving away behind the cut, within the 5 cm depth, is a short line).
+        assert_eq!(of_set(&d, ring).0, count, "set {ring}");
+    }
+}
+
+#[test]
+fn a_starter_bar_with_a_foot_below_the_cut_is_a_dot_and_its_foot() {
+    let mut s = Session::default();
+    // A wall lower than the plan's cut, its vertical bars bent at the foot.
+    let wall = id(&run(&mut s, "wall_create", json!({"start": [0, 0], "end": [2, 0], "height": 1.0})));
+    let args = json!({"walls": [wall], "faces": "exterior", "vertical": {"bottom": {"across": 0.3}}, "max_length": 0});
+    let out = run(&mut s, "wall_rebar_create", args);
+    let geom = s.geometry().clone();
+    let vertical = out["created"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_u64().unwrap())
+        .find(|x| matches!(layout(&s, *x), RebarLayout::WallVertical { .. }))
+        .unwrap();
+    let count = geom.rebar[&ElementId(vertical)].bars.len();
+    let plan = s.project().views.values().find(|v| v.is_plan()).map(|v| v.id.0).unwrap();
+    run(&mut s, "view_set", json!({"view": plan, "rebar": true}));
+    let d = s.drawing(cc_core::ViewId(plan)).unwrap();
+    // Not cut (the wall ends below the cut), seen end-on: a dot each, and the foot a line.
+    assert_eq!(of_set(&d, vertical), (count, count));
+}
+
+#[test]
+fn bar_tags_in_ceiling_plans_still_draw_their_sets() {
+    let mut s = Session::default();
+    let (bars, stirrups) = column(&mut s);
+    let loops = s.geometry().rebar[&ElementId(stirrups)].bars.len();
+    let level = s.project().levels.first().map(|l| l.id.0).unwrap();
+    let ceiling = id(&run(&mut s, "view_create", json!({"kind": "ceiling_plan", "level": level})));
+    run(&mut s, "bar_tag_create", json!({"view": ceiling, "set": stirrups, "position": [1, 1]}));
+    run(&mut s, "bar_tag_create", json!({"view": ceiling, "set": bars, "position": [1, 2]}));
+    let d = s.drawing(cc_core::ViewId(ceiling)).unwrap();
+    // The whole set seen from above, as before: the stirrups' outlines (four sides each),
+    // the vertical bars as dots.
+    assert_eq!(of_set(&d, stirrups), (0, 4 * loops));
+    assert_eq!(of_set(&d, bars), (4, 0));
+    // Where the bars stand.
+    let geom = s.geometry().clone();
+    for bar in &geom.rebar[&ElementId(bars)].bars {
+        let at = bar.points[0].truncate();
+        assert!(dots(&d, bars).iter().any(|(c, _)| c.distance(at) < 1e-6), "{at}");
+    }
+    // Ceiling plans take no `rebar` of their own.
+    assert_eq!(
+        s.execute("view_set", json!({"view": ceiling, "rebar": true})).unwrap_err().code,
+        ErrorCode::InvalidArguments
+    );
+}

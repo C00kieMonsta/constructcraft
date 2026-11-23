@@ -331,7 +331,7 @@ pub struct ViewSet {
     /// Show the reinforcement: in a floor plan, elevation or section, every bar within the
     /// view's range drawn over the model (bars the cut plane crosses as dots as wide as the
     /// bar, the rest as thin lines, up to the plan's level below or the section's depth); in a
-    /// 3D view, the bars over a faint model (its `rebar` parameter).
+    /// 3D view, its own reinforcement switch (its `rebar` parameter).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rebar: Option<bool>,
 }
