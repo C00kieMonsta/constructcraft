@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Cross-ties showed as straight bars in bending schedules (#438). The ties of a column (`rebar_create` `ties`) and of a wall (`wall_rebar_create` `ties`) counted their two hooks in their length but were read as one straight leg as long as the whole bar, so a 20 cm tie of 5 mm bar was written `straight 32`. A tie now carries its hooks as a stirrup does: its shape is the bar between the bars it holds with a hook leg at each end, bent by the hook's angle, both to one side in a column (a C) and to opposite sides in a wall (an S). The bending schedule writes it `tie 20 hook 135° 5 hook 180° 5` and sketches it with its hooks, bar marks tell C and S ties and different hooks apart, and lengths and weights are unchanged.
+
 ## [0.14.0] - 2026-11-22
 
 ### Added
