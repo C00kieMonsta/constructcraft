@@ -537,6 +537,7 @@ prop-cut-height = Höhe der Schnittebene
 prop-depth = Versatz Tiefenbegrenzung
 prop-flip-section = Richtung umkehren
 prop-split-line = Unterbrochene Linie
+prop-show-rebar = Bewehrung anzeigen
 prop-segment-start = Segment am Anfang
 prop-segment-end = Segment am Ende
 tip-flip-section = Dreht die Blickrichtung des Schnitts um (Leertaste bei ausgewählter Markierung)

@@ -63,6 +63,7 @@ mod profiles;
 mod project_templates;
 mod rebar_3d_view;
 mod rebar_copy;
+mod rebar_in_views;
 mod regions;
 mod render;
 mod render_settings;
