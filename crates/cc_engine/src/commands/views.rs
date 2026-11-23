@@ -328,6 +328,12 @@ pub struct ViewSet {
     /// project's first of the kind (see `view_mark_type_create`).
     #[serde(default, deserialize_with = "refs::nullable", skip_serializing_if = "Option::is_none")]
     pub mark_type: Option<Option<Ref>>,
+    /// Show the reinforcement: in a floor plan, elevation or section, every bar within the
+    /// view's range drawn over the model (bars the cut plane crosses as dots as wide as the
+    /// bar, the rest as thin lines, up to the plan's level below or the section's depth); in a
+    /// 3D view, the bars over a faint model (its `rebar` parameter).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rebar: Option<bool>,
 }
 
 /// The render settings `patch` makes of `current` (the defaults when none):
@@ -448,6 +454,9 @@ impl Command for ViewSet {
             Some(patch) => Some(apply_shading(&view.shading, patch)?),
             None => None,
         };
+        if self.rebar.is_some() && !view.kind.takes_rebar() && !matches!(view.kind, ViewKind::ThreeD { .. }) {
+            return Err(EngineError::invalid("reinforcement shows in floor plans, elevations, sections and 3D views"));
+        }
         let tag_types =
             self.tag_types.as_ref().map(|patch| super::tags::apply_view_tag_types(p, &view, patch)).transpose()?;
         let mark_type = self
@@ -523,6 +532,12 @@ impl Command for ViewSet {
             }
             if let Some(mark_type) = mark_type {
                 v.mark_type = mark_type;
+            }
+            if let Some(on) = self.rebar {
+                match &mut v.kind {
+                    ViewKind::ThreeD { rebar, .. } => *rebar = on,
+                    _ => v.rebar = on,
+                }
             }
             Ok(())
         })?;

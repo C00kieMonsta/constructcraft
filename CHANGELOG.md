@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Reinforcement in floor plans, elevations and sections. These views drew no bars, except those of a set with a bar tag, so a reinforcement section needed a 3D view of the bars laid over a section of the concrete. With *Show Reinforcement* in a view's properties (`view_set` `rebar`, also in `view_get`), every bar within the view's range is drawn over the model: where the cut plane crosses a bar, a dot as wide as the bar (the ring bars of a footing in its section, a column's bars in a plan, the legs of its stirrups in a section); the parts of bars between the cut and the view's depth as thin lines (a plan down to the level below, a section up to its depth and within its line's ends), and a bar seen end-on there as a dot; nothing in front of the cut. In a 3D view `rebar` is the view's own reinforcement switch. Files without it draw as before.
+
+### Fixed
+
+- A bar tag in a section drew every bar of the set it tags, also those beyond the section's depth and its line's ends (the bars of a whole arc wall beside a section of it). The set's bars are now drawn within the view's range, as *Show Reinforcement* draws them, cut bars as dots.
+
 ## [0.14.0] - 2026-11-22
 
 ### Added

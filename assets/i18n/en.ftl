@@ -537,6 +537,7 @@ prop-cut-height = Cut Plane Height
 prop-depth = Far Clip Offset
 prop-flip-section = Flip Direction
 prop-split-line = Split line
+prop-show-rebar = Show Reinforcement
 prop-segment-start = Segment at start
 prop-segment-end = Segment at end
 tip-flip-section = Turns the section to look the other way (Space with the mark selected)

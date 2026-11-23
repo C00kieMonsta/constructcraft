@@ -493,6 +493,12 @@ Every reinforcing bar has a mark naming its shape (the same diameter, grade, leg
 {"command": "bar_length_check", "args": {"max_length": 12}}
 ```
 
+A floor plan, elevation or section draws the reinforcement over the model with `view_set` `rebar`: the bars its cut plane crosses as dots as wide as the bar, and the rest of the bars within its range as thin lines (a plan down to the level below, a section up to its depth and within its line). Bar tags draw the set they tag within the same range:
+
+```text
+{"command": "view_set", "args": {"view": 46, "rebar": true}}
+```
+
 ### Tags
 
 Plans tag doors, windows, rooms, columns, beams, pad footings and pile caps by themselves. A tag type (`tag_type_create`, `target` and a partial `style`) says what a tag writes and how it looks: up to 8 `lines` of text with `{Field}` placeholders (a schedule field by name, such as `{Width}`, `{Height}` or `{Comments}`, or `{Mark}`, `{TypeName}`, `{Name}`, `{Number}`, `{Area}`, `{Section}`, `{Level}`) and a size in paper millimeters, a `symbol` (`Circle`, `Hexagon`, `Rectangle`, `RoundedRectangle`, `Ellipse`, `Diamond`, `Triangle`, `Underline`, `None`, or `{"Component": id}` of a detail component drawn at paper size, its texts' fields filled in), its `width` and `height` (0 fits the text), pens, `leader` and `orientation`; `type_set` changes it. The template has one tag type per target, of the default style (the tags plans always drew); a project with no tag type of a target (an older file) draws its tags in that style too. Each plan picks a tag type per target (`view_set` `tag_types`) and adjusts the tag of each element with `tag_set` (`offset` or `delta`, `rotation`, `type`, `hidden`, `leader`, `reset`; `null` clears a field); `tag_get` shows the adjustments, the type and the texts.

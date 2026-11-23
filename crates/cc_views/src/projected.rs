@@ -45,7 +45,7 @@ impl Frame {
     }
 
     /// Clip planes as (point, normal) keeping the positive side.
-    fn planes(&self) -> Vec<(DVec3, DVec3)> {
+    pub(crate) fn planes(&self) -> Vec<(DVec3, DVec3)> {
         let mut planes = Vec::new();
         if let Some(n) = self.near {
             planes.push((self.origin + self.forward * n, self.forward));
@@ -61,7 +61,7 @@ impl Frame {
     }
 }
 
-fn clip_segment(a: DVec3, b: DVec3, point: DVec3, normal: DVec3) -> Option<(DVec3, DVec3)> {
+pub(crate) fn clip_segment(a: DVec3, b: DVec3, point: DVec3, normal: DVec3) -> Option<(DVec3, DVec3)> {
     let (da, db) = ((a - point).dot(normal), (b - point).dot(normal));
     match (da >= 0.0, db >= 0.0) {
         (true, true) => Some((a, b)),

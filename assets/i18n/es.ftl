@@ -537,6 +537,7 @@ prop-cut-height = Altura del plano de corte
 prop-depth = Desfase del plano lejano
 prop-flip-section = Invertir dirección
 prop-split-line = Línea dividida
+prop-show-rebar = Mostrar armadura
 prop-segment-start = Tramo al inicio
 prop-segment-end = Tramo al final
 tip-flip-section = Invierte hacia dónde mira el corte (Espacio con la marca seleccionada)

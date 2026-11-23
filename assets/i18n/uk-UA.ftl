@@ -537,6 +537,7 @@ prop-cut-height = Висота площини зрізу
 prop-depth = Відстань до дальньої площини відсікання
 prop-flip-section = Змінити напрямок розрізу
 prop-split-line = Розірвана лінія
+prop-show-rebar = Показати арматуру
 prop-segment-start = Відрізок на початку
 prop-segment-end = Відрізок у кінці
 tip-flip-section = Змінює напрямок погляду розрізу (Пробіл, коли позначку вибрано)

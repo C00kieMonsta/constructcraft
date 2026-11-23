@@ -537,6 +537,7 @@ prop-cut-height = Altezza del piano di taglio
 prop-depth = Offset del piano di ritaglio posteriore
 prop-flip-section = Inverti direzione
 prop-split-line = Linea interrotta
+prop-show-rebar = Mostra armatura
 prop-segment-start = Tratto all’inizio
 prop-segment-end = Tratto alla fine
 tip-flip-section = Inverte la direzione di vista della sezione (Spazio con il simbolo selezionato)

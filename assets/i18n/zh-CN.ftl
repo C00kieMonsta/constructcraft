@@ -537,6 +537,7 @@ prop-cut-height = 剖切面高度
 prop-depth = 远剪裁偏移
 prop-flip-section = 翻转方向
 prop-split-line = 分段线
+prop-show-rebar = 显示钢筋
 prop-segment-start = 起点段
 prop-segment-end = 终点段
 tip-flip-section = 反转剖面的观看方向（选中符号后按空格键）
