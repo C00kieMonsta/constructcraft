@@ -32,7 +32,7 @@ fn spacing(project: &Project, set: ElementId) -> Option<Spacing> {
     let ElementKind::Rebar(r) = &project.element(set)?.kind else { return None };
     match &r.layout {
         RebarLayout::Stirrups { spacing, .. }
-        | RebarLayout::Ties { spacing }
+        | RebarLayout::Ties { spacing, .. }
         | RebarLayout::WallVertical { spacing, .. }
         | RebarLayout::SlabStraight { spacing, .. }
         | RebarLayout::SlabRing { spacing, .. }

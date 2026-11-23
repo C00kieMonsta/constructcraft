@@ -184,8 +184,13 @@ fn patched(
             }
         }
         cc_core::ElementKind::Pile(pile) => super::piles::check(pile)?,
-        // Only a column's vertical bars are staggered.
+        // Only a column's vertical bars are staggered; ties limited to faces the column has.
         cc_core::ElementKind::Rebar(r) => {
+            if let cc_core::RebarLayout::Ties { faces, .. } = &r.layout
+                && !faces.is_empty()
+            {
+                super::rebar::check_tie_faces(p, r.host, faces)?;
+            }
             if let Some(splice) = r.splice
                 && !splice.stagger.is_none()
             {
