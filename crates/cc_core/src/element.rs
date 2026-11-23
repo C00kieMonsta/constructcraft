@@ -1705,8 +1705,9 @@ impl FaceBars {
 }
 
 impl RebarLayout {
-    /// At most this many faces of a column's section listed for its ties.
-    pub const MAX_TIE_FACES: usize = 64;
+    /// Highest number of faces of a column's section listed for its ties
+    /// ([`crate::FaceBars::MAX_FACES`], the most faces bars are given by).
+    pub const MAX_TIE_FACES: usize = crate::FaceBars::MAX_FACES;
 
     /// Whether the bars run along the host (and so may be spliced).
     pub fn runs_along(&self) -> bool {
@@ -1805,7 +1806,7 @@ impl RebarLayout {
         match self {
             RebarLayout::Longitudinal { count, .. } => (1..=200).contains(count),
             RebarLayout::Stirrups { spacing, hooks } => spaced(*spacing) && hooks.is_none_or(|h| h.is_valid()),
-            RebarLayout::Ties { spacing, faces } => spaced(*spacing) && faces.len() <= Self::MAX_TIE_FACES,
+            RebarLayout::Ties { spacing, .. } => spaced(*spacing),
             RebarLayout::Sides { count, spacing } => {
                 *count <= 200 && spacing.is_finite() && (*count > 0 || spaced(*spacing))
             }

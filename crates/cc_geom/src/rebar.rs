@@ -1050,6 +1050,53 @@ pub fn column_faces(project: &Project, data: &TypeData, inset: f64) -> Vec<Secti
     shape.faces(inset)
 }
 
+/// The names of a column type's faces, in [`column_faces`]' order: an
+/// annular sector's `outer_arc`, `end_side` (the radial side its sweep ends
+/// at, counter-clockwise), `inner_arc` and `start_side` (a sector with no
+/// hole: `outer_arc`, `end_side`, `start_side`); a round section's `round`;
+/// otherwise a straight side square to the section's axes by where it
+/// faces, `x_max`, `y_max`, `x_min` or `y_min`, and any other face
+/// `face_N` (N from 1). Names a section repeats are numbered too.
+pub fn column_face_names(project: &Project, data: &TypeData) -> Vec<String> {
+    let faces = column_faces(project, data, 0.0);
+    if project.type_sector(data).is_some() {
+        let names: &[&str] = match faces.len() {
+            4 => &["outer_arc", "end_side", "inner_arc", "start_side"],
+            3 => &["outer_arc", "end_side", "start_side"],
+            _ => &[],
+        };
+        if names.len() == faces.len() {
+            return names.iter().map(|n| n.to_string()).collect();
+        }
+    }
+    if faces.len() == 1 && faces[0].is_curved() {
+        return vec!["round".to_string()];
+    }
+    let named: Vec<Option<&str>> = faces
+        .iter()
+        .map(|f| {
+            let (Some(a), Some(b)) = (f.points.first(), f.points.last()) else { return None };
+            if f.is_curved() || f.points.len() != 2 {
+                return None;
+            }
+            // Outward of a counter-clockwise outline: to the right of the side.
+            let out = (*b - *a).perp().normalize_or_zero() * -1.0;
+            [(DVec2::X, "x_max"), (DVec2::Y, "y_max"), (DVec2::NEG_X, "x_min"), (DVec2::NEG_Y, "y_min")]
+                .into_iter()
+                .find(|(dir, _)| out.dot(*dir) > 1.0 - 1e-9)
+                .map(|(_, name)| name)
+        })
+        .collect();
+    named
+        .iter()
+        .enumerate()
+        .map(|(i, n)| match n {
+            Some(n) if named.iter().filter(|m| *m == &Some(*n)).count() == 1 => n.to_string(),
+            _ => format!("face_{}", i + 1),
+        })
+        .collect()
+}
+
 /// Whether `outline` is its own bounding box: four corners, nothing else.
 fn is_box(outline: &[DVec2]) -> bool {
     let lo = outline.iter().fold(DVec2::INFINITY, |m, p| m.min(*p));

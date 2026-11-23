@@ -396,9 +396,12 @@ pub(crate) fn element_json(s: &mut Session, id: ElementId) -> Option<Value> {
     if matches!(e.kind, ElementKind::Column(_))
         && let Some(ty) = p.element_type(e.type_id)
     {
+        let names = cc_geom::rebar::column_face_names(p, &ty.data);
         let faces: Vec<Value> = cc_geom::rebar::column_faces(p, &ty.data, 0.0)
             .iter()
-            .map(|f| json!({"curved": f.is_curved(), "length": f.length()}))
+            .zip(names)
+            .enumerate()
+            .map(|(i, (f, name))| json!({"index": i, "name": name, "curved": f.is_curved(), "length": f.length()}))
             .collect();
         if !faces.is_empty() {
             derived.insert("faces".into(), json!(faces));

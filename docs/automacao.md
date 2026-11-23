@@ -401,10 +401,10 @@ Um pilar que continua uma parede cilíndrica tem um perfil `annular_sector`; `re
 {"command": "rebar_create", "args": {"host": 42, "layout": "ties", "spacing": 0.30}}
 ```
 
-Os grampos vão de cada barra entre os cantos até a barra oposta. `tie_faces` os limita às barras de algumas faces, pelo índice em `derived.faces`: num setor anular, `[0, 2]` liga só as barras dos arcos externo e interno entre si, deixando de fora o grampo longo entre as barras do meio das duas faces radiais, que o estribo já segura:
+Os grampos vão de cada barra entre os cantos até a barra oposta. `tie_faces` os limita às barras de algumas faces, pelo nome ou índice em `derived.faces` (no setor anular, `outer_arc`, `end_side`, `inner_arc` e `start_side`): num setor anular, `["outer_arc", "inner_arc"]` liga só as barras dos arcos externo e interno entre si, deixando de fora o grampo longo entre as barras do meio das duas faces radiais, que o estribo já segura:
 
 ```text
-{"command": "rebar_create", "args": {"host": 42, "layout": "ties", "spacing": 0.30, "tie_faces": [0, 2]}}
+{"command": "rebar_create", "args": {"host": 42, "layout": "ties", "spacing": 0.30, "tie_faces": ["outer_arc", "inner_arc"]}}
 ```
 
 As barras verticais de um pilar cortadas em lances (`max_length`, ou `lifts` em alturas dadas) são todas emendadas nas mesmas alturas; `stagger` emenda uma barra sim, outra não, em volta da seção, mais acima: `half_lap` (meio traspasse) ou um deslocamento em metros, no máximo `(max_length - lap) / 2`. Cada barra continua indo da base ao topo, então o primeiro pedaço de uma barra defasada é mais comprido pelo deslocamento e o último mais curto (uma emenda que fique a menos de um traspasse do topo é retirada); com `max_length` os lances são encurtados quando o primeiro pedaço mais comprido não caberia na barra comercial. Os pedaços defasados têm posições próprias. `element_set` a altera (`{"splice": {"stagger": "half_lap"}}`, `{"offset": 0.3}` ou `"none"`):

@@ -715,6 +715,23 @@ impl Project {
                 repairs += 1;
             }
         }
+        // Ties limited to faces: each face once, in order, none past the most a section
+        // has (a section's own count is geometry: `element_set` and `element_get` see it).
+        for e in self.elements.values_mut() {
+            if let ElementKind::Rebar(r) = &mut e.kind
+                && let crate::RebarLayout::Ties { faces, .. } = &mut r.layout
+                && !faces.is_empty()
+            {
+                let mut clean: Vec<u32> =
+                    faces.iter().copied().filter(|f| (*f as usize) < crate::RebarLayout::MAX_TIE_FACES).collect();
+                clean.sort_unstable();
+                clean.dedup();
+                if clean != *faces {
+                    *faces = clean;
+                    repairs += 1;
+                }
+            }
+        }
         // Bars by face out of range: spread around the section again.
         for e in self.elements.values_mut() {
             if let ElementKind::Rebar(r) = &mut e.kind

@@ -214,9 +214,13 @@ fn cross_ties_can_be_limited_to_some_faces() {
     let column = sector_column(&mut s, [0.0, 0.0]);
     let bars = json!({"host": column.0, "layout": "perimeter", "faces": [7, 3, 7, 3], "cover": 0.03});
     run(&mut s, "rebar_create", bars);
-    // Only the bars of the two arcs (faces 0 and 2): the tie across between the middle
-    // bars of the radial faces is left out, the five radial ones stay.
-    let args = json!({"host": column.0, "layout": "ties", "spacing": 0.3, "tie_faces": [2, 0, 2]});
+    // The faces are named: the sector's outer arc, its end side, inner arc and start side.
+    let faces = run(&mut s, "element_get", json!({"id": column.0}))["derived"]["faces"].clone();
+    let names: Vec<&str> = faces.as_array().unwrap().iter().map(|f| f["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["outer_arc", "end_side", "inner_arc", "start_side"]);
+    // Only the bars of the two arcs (by name or index): the tie across between the middle
+    // bars of the radial faces is left out, the five ties between the arcs stay.
+    let args = json!({"host": column.0, "layout": "ties", "spacing": 0.3, "tie_faces": ["inner_arc", 0, "inner_arc"]});
     let arcs = id(&run(&mut s, "rebar_create", args));
     let all = id(&run(&mut s, "rebar_create", json!({"host": column.0, "layout": "ties", "spacing": 0.3})));
     let geom = s.geom().clone();
@@ -238,6 +242,43 @@ fn cross_ties_can_be_limited_to_some_faces() {
     assert_eq!(fails(&mut s, "rebar_create", ties(json!([]))), ErrorCode::InvalidArguments);
     let stirrups = json!({"host": column.0, "layout": "stirrups", "tie_faces": [0]});
     assert_eq!(fails(&mut s, "rebar_create", stirrups), ErrorCode::InvalidArguments);
+    assert_eq!(fails(&mut s, "rebar_create", ties(json!(["top"]))), ErrorCode::InvalidArguments);
+    // `element_set` checks the faces too, and an empty list ties every face again.
+    let set = |faces: Value| json!({"id": arcs.0, "params": {"layout": {"Ties": {"spacing": 0.3, "faces": faces}}}});
+    assert_eq!(fails(&mut s, "element_set", set(json!([0, 7]))), ErrorCode::InvalidArguments);
+    run(&mut s, "element_set", set(json!([])));
+    assert_eq!(per_level(&s.geom().rebar[&arcs]), 6);
+}
+
+#[test]
+fn rectangular_faces_are_named_by_where_they_face() {
+    let mut s = Session::default();
+    let column = id(&run(&mut s, "column_create", json!({"position": [0, 0]})));
+    let faces = run(&mut s, "element_get", json!({"id": column.0}))["derived"]["faces"].clone();
+    let mut names: Vec<String> =
+        faces.as_array().unwrap().iter().map(|f| f["name"].as_str().unwrap().to_string()).collect();
+    names.sort();
+    assert_eq!(names, ["x_max", "x_min", "y_max", "y_min"]);
+}
+
+#[test]
+fn repair_cleans_the_faces_of_ties() {
+    // A crafted file: faces repeated, out of order and past the most a section has.
+    let mut s = Session::default();
+    let column = sector_column(&mut s, [0.0, 0.0]);
+    run(&mut s, "rebar_create", json!({"host": column.0, "layout": "perimeter", "faces": [7, 3, 7, 3]}));
+    let ties = id(&run(&mut s, "rebar_create", json!({"host": column.0, "layout": "ties", "spacing": 0.3})));
+    let mut project = s.project().clone();
+    if let Some(e) = project.elements.get_mut(&ties)
+        && let ElementKind::Rebar(r) = &mut e.kind
+    {
+        r.layout = cc_core::RebarLayout::Ties { spacing: 0.3, faces: vec![2, 0, 2, 1000] };
+    }
+    let (repaired, count) = cc_core::from_ron_with_repairs(&cc_core::to_ron(&project).unwrap()).unwrap();
+    assert!(count > 0);
+    let ElementKind::Rebar(r) = &repaired.element(ties).unwrap().kind else { panic!("rebar") };
+    // The set is kept (not dropped for its list), its faces cleaned.
+    assert_eq!(r.layout, cc_core::RebarLayout::Ties { spacing: 0.3, faces: vec![0, 2] });
 }
 
 #[test]

@@ -120,28 +120,60 @@ fn face_bars(p: &Project, host: ElementId, counts: Option<&[u32]>, spacing: Opti
     }
 }
 
+/// A face of a column's section: its index or its name in the column's
+/// `derived.faces`.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum FaceRef {
+    Index(u32),
+    Name(String),
+}
+
 /// The faces of a column whose bars `tie_faces` asks to tie: indices into
 /// its section's faces, each once, in order (none: every face).
-fn tie_faces(p: &Project, host: ElementId, list: Option<&[u32]>) -> Result<Vec<u32>> {
+fn tie_faces(p: &Project, host: ElementId, list: Option<&[FaceRef]>) -> Result<Vec<u32>> {
     let Some(list) = list else { return Ok(Vec::new()) };
     let data = p.element(host).and_then(|e| p.element_type(e.type_id)).map(|t| &t.data);
+    let names = data.map(|d| cc_geom::rebar::column_face_names(p, d)).unwrap_or_default();
+    let faces = list
+        .iter()
+        .map(|f| match f {
+            FaceRef::Index(i) => Ok(*i),
+            FaceRef::Name(n) => names.iter().position(|m| m == n).map(|i| i as u32).ok_or_else(|| {
+                EngineError::invalid(format!("the section has no face '{n}': its faces are {}", names.join(", ")))
+            }),
+        })
+        .collect::<Result<Vec<u32>>>()?;
+    check_tie_faces(p, host, &faces)?;
+    let mut faces = faces;
+    faces.sort_unstable();
+    faces.dedup();
+    Ok(faces)
+}
+
+/// Check the faces a column's ties are limited to (`RebarLayout::Ties`'
+/// `faces`): a column with a section, at least one face, each within its
+/// section's faces (`rebar_create` and `element_set` alike).
+pub(crate) fn check_tie_faces(p: &Project, host: ElementId, faces: &[u32]) -> Result<()> {
+    let data = p
+        .element(host)
+        .filter(|e| matches!(e.kind, cc_core::ElementKind::Column(_)))
+        .and_then(|e| p.element_type(e.type_id))
+        .map(|t| &t.data);
     let count = data.map_or(0, |d| cc_geom::rebar::column_faces(p, d, 0.0).len());
     if count == 0 {
-        return Err(EngineError::invalid("`tie_faces` goes in columns with a section"));
+        return Err(EngineError::invalid("tie faces go in columns with a section"));
     }
-    if list.is_empty() {
+    if faces.is_empty() {
         return Err(EngineError::invalid("give `tie_faces` at least one face, or leave it out for every face"));
     }
-    if let Some(bad) = list.iter().find(|f| **f as usize >= count) {
+    if let Some(bad) = faces.iter().find(|f| **f as usize >= count) {
         return Err(EngineError::invalid(format!(
             "the section has {count} faces, 0 to {}: no face {bad} (see `derived.faces` of the column)",
             count - 1
         )));
     }
-    let mut faces = list.to_vec();
-    faces.sort_unstable();
-    faces.dedup();
-    Ok(faces)
+    Ok(())
 }
 
 /// The hooks of new stirrups: bent by `hook` degrees (default 135; 0 for
@@ -270,7 +302,8 @@ pub(crate) fn splice(
 /// `face_spacing`; on a curved face they stand at even angles. Its
 /// `stirrups` follow the section's outline, and `ties` adds cross-ties every
 /// `spacing`: a hooked bar from each bar between the corners to the bar
-/// opposite, or only from the bars on the faces listed in `tie_faces`. With `max_length` a column's vertical bars are cut in lifts
+/// opposite, or only from the bars on the faces listed in `tie_faces`.
+/// With `max_length` a column's vertical bars are cut in lifts
 /// that lap by `lap`, all at the same heights unless `stagger` moves the
 /// splices of every other bar around the section up (half a lap, or an
 /// offset). `same_type` gives the set to every column (or beam) of the
@@ -369,11 +402,14 @@ pub struct RebarCreate {
     /// face, meters.
     #[serde(default)]
     pub face_spacing: Option<f64>,
-    /// Columns, `ties`: tie only the bars on these faces of the section, by their index in
-    /// the column's `derived.faces` (0 for the first), e.g. the two arcs of an annular sector
-    /// `[0, 2]` (default: every face). Each tie still runs to the bar opposite.
+    /// Columns, `ties`: tie only the bars on these faces of the section, by their name or
+    /// index in the column's `derived.faces` (an annular sector's `outer_arc`, `end_side`,
+    /// `inner_arc` and `start_side`, 0 to 3; a rectangle's `x_max`, `y_max`, `x_min`, `y_min`),
+    /// e.g. the two arcs of an annular sector `["outer_arc", "inner_arc"]`. Default: every
+    /// face, as before (so a sector's radial sides are tied too). Each tie still runs to the
+    /// bar opposite.
     #[serde(default)]
-    pub tie_faces: Option<Vec<u32>>,
+    pub tie_faces: Option<Vec<FaceRef>>,
     /// Also give the set to every other column (or beam) of the host's type (default false).
     #[serde(default)]
     pub same_type: Option<bool>,
