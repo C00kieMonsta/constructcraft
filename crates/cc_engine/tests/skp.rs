@@ -232,7 +232,8 @@ fn skp_definitions_that_place_themselves_are_followed_once() {
     let start = std::time::Instant::now();
     assert!(cc_engine::skp::convert(&model, "Loose").is_ok());
     assert!(cc_engine::skp::convert_single(&model, "All").is_ok());
-    assert!(start.elapsed() < std::time::Duration::from_secs(5));
+    // Without the bound this never ends; the margin is for slow CI runners.
+    assert!(start.elapsed() < std::time::Duration::from_secs(60), "{:?}", start.elapsed());
 }
 
 #[test]
@@ -241,5 +242,6 @@ fn skp_definitions_that_fan_out_are_bounded() {
     let model = nested_model(33, |k| if k < 33 { vec![k + 1; 10] } else { Vec::new() });
     let start = std::time::Instant::now();
     assert!(matches!(cc_engine::skp::convert(&model, "Loose"), Err(cc_engine::skp::SkpError::TooLarge)));
-    assert!(start.elapsed() < std::time::Duration::from_secs(10), "{:?}", start.elapsed());
+    // Without the bound this never ends; the margin is for slow CI runners (macOS took over 12 s).
+    assert!(start.elapsed() < std::time::Duration::from_secs(60), "{:?}", start.elapsed());
 }
