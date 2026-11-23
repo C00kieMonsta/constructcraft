@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- 3D views of the reinforcement placed on sheets, or exported, showed only the bars: the 3D view shows them over the model drawn faint, but its 2D form left the model out, so the bars of a footing stood alone on a sheet. They are now drawn over the model's hidden-line view faded, and a bar seen end-on (the vertical bars of a column seen from above) is a dot as wide as the bar instead of nothing.
+
 ## [0.14.0] - 2026-11-22
 
 ### Added

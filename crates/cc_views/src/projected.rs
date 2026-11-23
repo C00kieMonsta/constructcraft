@@ -945,14 +945,23 @@ pub fn analytical(project: &Project, geom: &ModelGeometry, camera: &CameraState)
     d
 }
 
-/// The reinforcing bars seen along the camera, tagged with their sets.
+/// The reinforcing bars seen along the camera, tagged with their sets; a
+/// bar seen end-on is a dot as wide as the bar.
 pub fn rebar(geom: &ModelGeometry, camera: &CameraState) -> Drawing2D {
     let frame = camera_frame(camera);
     let mut d = Drawing2D::default();
     for set in geom.rebar.values() {
         for bar in &set.bars {
             let pts: Vec<DVec2> = bar.points.iter().map(|p| frame.project(*p)).collect();
-            d.polyline(&pts, bar.closed, crate::LineStyle::Projection, Some(set.element));
+            let run: f64 = pts.windows(2).map(|w| w[0].distance(w[1])).sum();
+            match pts.first() {
+                Some(&at) if run < 1e-6 => {
+                    let r = set.diameter / 2.0;
+                    let dot = (0..16).map(|i| at + DVec2::from_angle(i as f64 / 16.0 * std::f64::consts::TAU) * r);
+                    d.fill(dot.collect(), [20, 20, 20, 255], Some(set.element));
+                }
+                _ => d.polyline(&pts, bar.closed, crate::LineStyle::Projection, Some(set.element)),
+            }
         }
     }
     d

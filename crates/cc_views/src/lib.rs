@@ -161,7 +161,10 @@ pub fn generate_temporary(
             d
         }
         ViewKind::ThreeD { camera, analytical: true, .. } => projected::analytical(project, geom, camera),
-        ViewKind::ThreeD { camera, rebar: true, .. } => projected::rebar(geom, camera),
+        // The reinforcement over the model drawn faint, as the 3D view shows it.
+        ViewKind::ThreeD { camera, rebar: true, .. } => {
+            over_faint_model(axonometric(project, geom, camera, look), projected::rebar(geom, camera))
+        }
         ViewKind::ThreeD { camera, .. } => axonometric(project, geom, camera, look),
         ViewKind::Legend { types } => legend(project, types, view.scale),
         // No model geometry: only what the view owns, added below.
@@ -290,6 +293,13 @@ pub fn hosts_cad(kind: &ViewKind) -> bool {
 
 /// Draw everything so far faint: lines in the faint pen (dashes kept),
 /// fills mixed two thirds with white.
+/// `over` drawn on top of `model` faded ([`fade`]).
+fn over_faint_model(mut model: Drawing2D, over: Drawing2D) -> Drawing2D {
+    fade(&mut model);
+    model.prims.extend(over.prims);
+    model
+}
+
 fn fade(d: &mut Drawing2D) {
     for prim in &mut d.prims {
         match prim {
