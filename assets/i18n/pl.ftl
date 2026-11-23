@@ -537,6 +537,7 @@ prop-cut-height = Wysokość płaszczyzny cięcia
 prop-depth = Odsunięcie dalekiej płaszczyzny
 prop-flip-section = Odwróć kierunek
 prop-split-line = Linia przerwana
+prop-show-rebar = Pokaż zbrojenie
 prop-segment-start = Odcinek na początku
 prop-segment-end = Odcinek na końcu
 tip-flip-section = Odwraca kierunek patrzenia przekroju (Spacja przy zaznaczonym symbolu)

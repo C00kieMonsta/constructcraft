@@ -528,6 +528,7 @@ prop-cut-height = ຄວາມສູງໜ້າຕັດ
 prop-depth = ໄລຍະຕັດມຸມເລິກ
 prop-flip-section = ພິກທິດທາງ
 prop-split-line = ເສັ້ນແບ່ງ
+prop-show-rebar = ສະແດງເຫຼັກເສີມ
 prop-segment-start = ຊ່ວງຕົ້ນ
 prop-segment-end = ຊ່ວງທ້າຍ
 tip-flip-section = ປີ້ນທິດທາງທີ່ຮູບຕັດເບິ່ງ (Space ເມື່ອເລືອກເຄື່ອງໝາຍ)

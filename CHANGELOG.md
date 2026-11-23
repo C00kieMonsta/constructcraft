@@ -6,8 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Reinforcement in floor plans, elevations and sections. These views drew no bars, except those of a set with a bar tag, so a reinforcement section needed a 3D view of the bars laid over a section of the concrete. With *Show Reinforcement* in a view's properties (`view_set` `rebar`, also in `view_get`), every bar within the view's range is drawn over the model: where the cut plane crosses a bar, a dot as wide as the bar (the ring bars of a footing in its section, a column's bars in a plan, the legs of its stirrups in a section); the parts of bars between the cut and the view's depth as thin lines (a plan down to the level below, a section up to its depth and within its line's ends), and a bar seen end-on there as a dot; nothing in front of the cut. In a 3D view `rebar` is the view's own reinforcement switch. Files without it draw as before.
+
 ### Fixed
 
+- A bar tag in a section drew every bar of the set it tags, also those beyond the section's depth and its line's ends (the bars of a whole arc wall beside a section of it). The set's bars are now drawn within the view's range, as *Show Reinforcement* draws them, cut bars as dots.
+- 3D views of the reinforcement placed on sheets, or exported, showed only the bars: the 3D view shows them over the model drawn faint, but its 2D form left the model out, so the bars of a footing stood alone on a sheet. They are now drawn over the model's hidden-line view faded, and a bar seen end-on (the vertical bars of a column seen from above, the leg of a starter bar above its foot) is a dot as wide as the bar, at least 0.35 mm on paper, instead of nothing, as plans and sections draw it.
 - Cross-ties showed as straight bars in bending schedules (#438). The ties of a column (`rebar_create` `ties`) and of a wall (`wall_rebar_create` `ties`) counted their two hooks in their length but were read as one straight leg as long as the whole bar, so a 20 cm tie of 5 mm bar was written `straight 32`. A tie now carries its hooks as a stirrup does: its shape is the bar between the bars it holds with a hook leg at each end, bent by the hook's angle, both to one side in a column (a C) and to opposite sides in a wall (an S). The bending schedule writes it `tie 20 hook 135° 5 hook 180° 5` and sketches it with its hooks, bar marks tell C and S ties and different hooks apart, and lengths and weights are unchanged. Since a tie's shape changes, a project whose bar marks were frozen (`bar_marks_update`) gives its ties a new mark the next time marks are updated, and the old mark, matching no bar any more, stays listed until `bar_marks_update` `drop_unused`; marks already issued on drawings should be checked.
 
 ## [0.14.0] - 2026-11-22

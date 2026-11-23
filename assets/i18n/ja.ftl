@@ -537,6 +537,7 @@ prop-cut-height = 切断面高さ
 prop-depth = 遠方クリップオフセット
 prop-flip-section = 向きを反転
 prop-split-line = 分割線
+prop-show-rebar = 鉄筋を表示
 prop-segment-start = 始点側の線分
 prop-segment-end = 終点側の線分
 tip-flip-section = 断面の見る向きを反転（記号を選択して Space）

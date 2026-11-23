@@ -33,6 +33,7 @@ pub mod notes;
 mod plan;
 mod projected;
 pub mod raster;
+pub mod rebar_view;
 pub mod region;
 mod schedule;
 mod shadow;
@@ -118,6 +119,8 @@ pub fn generate_temporary(
                 let under = plan::style_underlay(geom, cut_z, ceiling, look, &project.fill_patterns);
                 d.prims.splice(0..0, under);
             }
+            // The bars over the cut concrete, under the plan's marks and tags.
+            rebar_view::draw_all(&mut d, project, geom, view);
             if let Some(discipline) = services {
                 // The architecture stays in the background of a services plan.
                 fade(&mut d);
@@ -145,6 +148,7 @@ pub fn generate_temporary(
         }
         ViewKind::Elevation { direction } => {
             let mut d = elevation(project, geom, *direction, look);
+            rebar_view::draw_all(&mut d, project, geom, view);
             if let Some(frame) = projected::view_frame(view) {
                 level_heads::draw(&mut d, project, view, &frame);
                 annotate::projected_grids(&mut d, project, &frame, view.scale, &view.tags);
@@ -154,6 +158,7 @@ pub fn generate_temporary(
         ViewKind::Section { start, end, depth, .. } => {
             let mut d = section(project, geom, (*start, *end), *depth, view.scale, look);
             joins::merge(project, &mut d);
+            rebar_view::draw_all(&mut d, project, geom, view);
             if let Some(frame) = projected::view_frame(view) {
                 level_heads::draw(&mut d, project, view, &frame);
                 annotate::projected_grids(&mut d, project, &frame, view.scale, &view.tags);
@@ -161,7 +166,10 @@ pub fn generate_temporary(
             d
         }
         ViewKind::ThreeD { camera, analytical: true, .. } => projected::analytical(project, geom, camera),
-        ViewKind::ThreeD { camera, rebar: true, .. } => projected::rebar(geom, camera),
+        // The reinforcement over the model drawn faint, as the 3D view shows it.
+        ViewKind::ThreeD { camera, rebar: true, .. } => {
+            over_faint_model(axonometric(project, geom, camera, look), projected::rebar(geom, camera, view.scale))
+        }
         ViewKind::ThreeD { camera, .. } => axonometric(project, geom, camera, look),
         ViewKind::Legend { types } => legend(project, types, view.scale),
         // No model geometry: only what the view owns, added below.
@@ -307,6 +315,13 @@ fn fade(d: &mut Drawing2D) {
             _ => {}
         }
     }
+}
+
+/// `over` drawn on top of `model` faded ([`fade`]).
+fn over_faint_model(mut model: Drawing2D, over: Drawing2D) -> Drawing2D {
+    fade(&mut model);
+    model.prims.extend(over.prims);
+    model
 }
 
 #[cfg(test)]

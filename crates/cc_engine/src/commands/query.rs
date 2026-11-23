@@ -623,6 +623,7 @@ pub(crate) fn view_json(s: &Session, id: ViewId) -> Option<Value> {
         "tag_types": super::tags::view_tag_types_json(s.project(), v),
         "mark_type": super::view_marks::view_mark_type_json(s.project(), v),
         "level_heads": super::level_heads::view_level_heads_json(s.project(), v),
+        "rebar": v.shows_rebar(),
     }))
 }
 
