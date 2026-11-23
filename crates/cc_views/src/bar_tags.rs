@@ -1,25 +1,25 @@
 //! Bar tags in plans, elevations and sections (see `cc_core::bar_tag`):
 //! the text `2x 25 N1 Ø12.5 c/12 C=500` derived from the tagged set, with an
-//! optional leader, and the set's bars drawn as thin lines in that view (no
-//! view draws reinforcement otherwise, so a tag always points at its bars;
-//! bars seen end-on are dots). Sizes are paper millimeters at the view scale.
+//! optional leader, and the set's bars drawn in that view as
+//! [`crate::rebar_view`] draws them, within the view's range (cut bars and
+//! bars seen end-on are dots), so a tag always points at its bars; a view
+//! that shows all the reinforcement has drawn them already. Sizes are paper
+//! millimeters at the view scale.
 
 use crate::{Anchor, Drawing2D, LineStyle, format};
 use cc_core::bar_tag::{BarTag, DEFAULT_TEXT_SIZE};
 use cc_core::{ElementId, ElementKind, Project, RebarLayout, TypeData, View};
 use cc_geom::ModelGeometry;
 use cc_geom::bar_marks::BarMarks;
-use glam::{DVec2, DVec3};
+use glam::DVec2;
 use std::collections::BTreeSet;
 
 /// Average character width, as a fraction of the text size (as text notes).
 const CHAR_WIDTH: f64 = 0.6;
 /// Nearly invisible fill that makes the text clickable.
 const PICK_AREA: [u8; 4] = [255, 255, 255, 1];
-/// Fill of leader dots and bars seen end-on.
-const DOT_FILL: [u8; 4] = [20, 20, 20, 255];
-/// Most points drawn for one set's bars.
-const MAX_POINTS: usize = 200_000;
+/// Fill of leader dots.
+const DOT_FILL: [u8; 4] = crate::rebar_view::DOT_FILL;
 
 /// The spacing of a set's bars: one, or several (zones of different spacings).
 enum Spacing {
@@ -102,16 +102,6 @@ pub fn text(project: &Project, geom: &ModelGeometry, marks: &BarMarks, tag: &Bar
     Some(out.join(" "))
 }
 
-/// How the view maps the model: plans from above, elevations and sections
-/// through their projection.
-fn mapping(view: &View) -> Option<Box<dyn Fn(DVec3) -> DVec2>> {
-    if view.is_plan() {
-        return Some(Box::new(|p: DVec3| p.truncate()));
-    }
-    let projection = view.projection()?;
-    Some(Box::new(move |p: DVec3| projection.project(p.truncate(), p.z)))
-}
-
 /// Whether `view` takes bar tags: plans, elevations and sections.
 pub fn takes_tags(view: &View) -> bool {
     view.is_plan() || view.projection().is_some()
@@ -130,33 +120,17 @@ pub fn bar_tags(d: &mut Drawing2D, project: &Project, geom: &ModelGeometry, view
     if tags.is_empty() {
         return;
     }
-    let Some(map) = mapping(view) else { return };
+    // The view's range; a view that shows the reinforcement drew the bars already.
+    let range = if view.shows_rebar() { None } else { crate::rebar_view::BarRange::of(project, view) };
     let marks = cc_geom::bar_marks::resolve(project, &geom.rebar);
     let k = view.scale.max(1) as f64 / 1000.0;
     let mut drawn = BTreeSet::new();
     for (id, type_id, tag) in tags {
         // The set's bars, once per view.
         if drawn.insert(tag.set)
-            && let Some(set) = geom.rebar.get(&tag.set)
+            && let (Some(set), Some(range)) = (geom.rebar.get(&tag.set), range.as_ref())
         {
-            let mut budget = MAX_POINTS;
-            for bar in &set.bars {
-                let pts: Vec<DVec2> = bar.points.iter().map(|p| map(*p)).collect();
-                if pts.len() > budget {
-                    break;
-                }
-                budget -= pts.len();
-                let run: f64 = pts.windows(2).map(|w| w[0].distance(w[1])).sum();
-                if run < 1e-6 {
-                    // Seen end-on: a dot.
-                    let Some(&at) = pts.first() else { continue };
-                    let r = (set.diameter / 2.0).max(0.35 * k);
-                    let dot = (0..16).map(|i| at + DVec2::from_angle(i as f64 / 16.0 * std::f64::consts::TAU) * r);
-                    d.fill(dot.collect(), DOT_FILL, Some(tag.set));
-                } else {
-                    d.polyline(&pts, bar.closed, LineStyle::Thin, Some(tag.set));
-                }
-            }
+            crate::rebar_view::draw_set(d, set, range, k, tag.set);
         }
         let Some(line) = text(project, geom, &marks, tag) else { continue };
         let size = match project.element_type(type_id).map(|t| &t.data) {

@@ -3322,6 +3322,13 @@ fn view_sections(ui: &mut Ui, state: &mut AppState, id: ViewId) {
                     crate::engine_edit::view(state, id, None, |v| v.detail = detail);
                 }
             }
+            // Plans, elevations and sections can draw the reinforcement over the model.
+            if view.kind.takes_rebar() {
+                let mut on = view.rebar;
+                if row(ui, &t!("prop-show-rebar"), |ui| crate::table::checkbox(ui, &mut on)).changed() {
+                    crate::engine_edit::view(state, id, None, |v| v.rebar = on);
+                }
+            }
             if model_view {
                 // And in a visual style.
                 let current = view.style();

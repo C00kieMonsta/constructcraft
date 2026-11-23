@@ -497,6 +497,12 @@ Cada barra de armadura tem uma posição que identifica sua forma (mesmo diâmet
 {"command": "bar_length_check", "args": {"max_length": 12}}
 ```
 
+Uma planta, elevação ou corte desenha a armadura sobre o modelo com `view_set` `rebar`: as barras que o plano de corte atravessa como pontos da largura da barra, e o resto das barras dentro da sua faixa como linhas finas (a planta até o nível abaixo, o corte até a sua profundidade e dentro da sua linha). As tags de armadura desenham o conjunto que etiquetam dentro da mesma faixa:
+
+```text
+{"command": "view_set", "args": {"view": 46, "rebar": true}}
+```
+
 ### Etiquetas
 
 As plantas etiquetam sozinhas portas, janelas, ambientes, pilares, vigas, sapatas e blocos sobre estacas. Um tipo de etiqueta (`tag_type_create`, `target` e um `style` parcial) diz o que a etiqueta escreve e como ela é: até 8 linhas (`lines`) de texto com campos `{Campo}` (um campo de tabela pelo nome, como `{Width}`, `{Height}` ou `{Comments}`, ou `{Mark}`, `{TypeName}`, `{Name}`, `{Number}`, `{Area}`, `{Section}`, `{Level}`) e um tamanho em milímetros de papel, um símbolo (`symbol`: `Circle`, `Hexagon`, `Rectangle`, `RoundedRectangle`, `Ellipse`, `Diamond`, `Triangle`, `Underline`, `None`, ou `{"Component": id}` de um componente de detalhe desenhado no tamanho do papel, com os campos dos seus textos preenchidos), sua largura e altura (`width`, `height`; 0 ajusta ao texto), penas, `leader` e `orientation`; `type_set` o altera. O modelo traz um tipo de etiqueta por alvo, no estilo padrão (as etiquetas que as plantas sempre desenharam); um projeto sem tipo de etiqueta para um alvo (um arquivo antigo) desenha as etiquetas nesse mesmo estilo. Cada planta escolhe um tipo de etiqueta por alvo (`view_set` `tag_types`) e ajusta a etiqueta de cada elemento com `tag_set` (`offset` ou `delta`, `rotation`, `type`, `hidden`, `leader`, `reset`; `null` limpa um campo); `tag_get` mostra os ajustes, o tipo e os textos.

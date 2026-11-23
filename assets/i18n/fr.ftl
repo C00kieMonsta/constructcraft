@@ -537,6 +537,7 @@ prop-cut-height = Hauteur du plan de coupe
 prop-depth = Décalage du plan de découpe arrière
 prop-flip-section = Inverser la direction
 prop-split-line = Ligne interrompue
+prop-show-rebar = Afficher les armatures
 prop-segment-start = Segment au début
 prop-segment-end = Segment à la fin
 tip-flip-section = Retourne la coupe pour regarder de l’autre côté (Espace avec le repère sélectionné)

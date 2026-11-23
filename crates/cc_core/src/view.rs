@@ -454,6 +454,12 @@ pub struct View {
     /// defaults on the others.
     #[serde(default, skip_serializing_if = "ShadingSettings::is_default")]
     pub shading: ShadingSettings,
+    /// Floor plans, elevations and sections: draw every reinforcing bar
+    /// within the view's range over the model (see
+    /// [`ViewKind::takes_rebar`]). 3D views show reinforcement with
+    /// [`ViewKind::ThreeD`]'s `rebar` instead.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub rebar: bool,
 }
 
 /// How a view shades faces and casts shadows in the styles that show more
@@ -745,6 +751,12 @@ impl ViewKind {
         )
     }
 
+    /// Whether views of this kind can show the reinforcement ([`View::rebar`]):
+    /// floor plans, elevations and sections.
+    pub fn takes_rebar(&self) -> bool {
+        matches!(self, ViewKind::FloorPlan { .. } | ViewKind::Elevation { .. } | ViewKind::Section { .. })
+    }
+
     /// Whether views of this kind can have render settings ([`View::render`]):
     /// 3D views only.
     pub fn takes_render(&self) -> bool {
@@ -847,6 +859,16 @@ impl View {
             sun: None,
             render: None,
             shading: ShadingSettings::default(),
+            rebar: false,
+        }
+    }
+
+    /// Whether the view draws the reinforcement: a 3D view of it, or a
+    /// plan, elevation or section with [`View::rebar`] on.
+    pub fn shows_rebar(&self) -> bool {
+        match self.kind {
+            ViewKind::ThreeD { rebar, .. } => rebar,
+            _ => self.rebar && self.kind.takes_rebar(),
         }
     }
 
