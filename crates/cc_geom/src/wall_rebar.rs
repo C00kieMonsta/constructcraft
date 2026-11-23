@@ -218,12 +218,9 @@ pub(crate) fn wall_bars(g: &WallGeom, r: &Rebar, d: f64, sets: &WallSets) -> Vec
                     }
                     let points = vec![g.world(u, v0).extend(z), g.world(u, v1).extend(z)];
                     bars.push(Bar {
-                        points,
-                        closed: false,
                         true_length: Some((v0 - v1).abs() + hooks),
-                        hooks: None,
-                        helix: None,
                         end_hooks: Some(ends),
+                        ..Bar::new(points, false)
                     });
                 }
             }
