@@ -13,7 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - A bar tag in a section drew every bar of the set it tags, also those beyond the section's depth and its line's ends (the bars of a whole arc wall beside a section of it). The set's bars are now drawn within the view's range, as *Show Reinforcement* draws them, cut bars as dots.
-- 3D views of the reinforcement placed on sheets, or exported, showed only the bars: the 3D view shows them over the model drawn faint, but its 2D form left the model out, so the bars of a footing stood alone on a sheet. They are now drawn over the model's hidden-line view faded, and a bar seen end-on (the vertical bars of a column seen from above) is a dot as wide as the bar instead of nothing.
+- 3D views of the reinforcement placed on sheets, or exported, showed only the bars: the 3D view shows them over the model drawn faint, but its 2D form left the model out, so the bars of a footing stood alone on a sheet. They are now drawn over the model's hidden-line view faded, and a bar seen end-on (the vertical bars of a column seen from above, the leg of a starter bar above its foot) is a dot as wide as the bar, at least 0.35 mm on paper, instead of nothing, as plans and sections draw it.
 
 ## [0.14.0] - 2026-11-22
 
