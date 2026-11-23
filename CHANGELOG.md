@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Cross-ties on chosen faces of a column (#439). `rebar_create` `ties` takes `tie_faces`, the faces of the section whose bars between the corners are tied, by their name or index in the column's `derived.faces`, which now names each face (an annular sector's `outer_arc`, `end_side`, `inner_arc` and `start_side`; a rectangle's `x_max`, `y_max`, `x_min` and `y_min`; `round`; `face_N` otherwise). In an annular sector column `["outer_arc", "inner_arc"]` ties the bars of the outer and inner arcs to each other and leaves out the tie between the middle bars of the two radial faces, almost as long as the section is wide, which the stirrup already holds. Without it every face is tied, as before, so existing columns and files are unchanged: the default stays and the faces are chosen. `element_set` checks a set's faces against its column, and opening a file sorts, dedupes and bounds the list.
 
+### Fixed
+
+- Cross-ties showed as straight bars in bending schedules (#438). The ties of a column (`rebar_create` `ties`) and of a wall (`wall_rebar_create` `ties`) counted their two hooks in their length but were read as one straight leg as long as the whole bar, so a 20 cm tie of 5 mm bar was written `straight 32`. A tie now carries its hooks as a stirrup does: its shape is the bar between the bars it holds with a hook leg at each end, bent by the hook's angle, both to one side in a column (a C) and to opposite sides in a wall (an S). The bending schedule writes it `tie 20 hook 135° 5 hook 180° 5` and sketches it with its hooks, bar marks tell C and S ties and different hooks apart, and lengths and weights are unchanged. Since a tie's shape changes, a project whose bar marks were frozen (`bar_marks_update`) gives its ties a new mark the next time marks are updated, and the old mark, matching no bar any more, stays listed until `bar_marks_update` `drop_unused`; marks already issued on drawings should be checked.
+
 ## [0.14.0] - 2026-11-22
 
 ### Added
