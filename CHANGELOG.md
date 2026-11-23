@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-11-23
+
 ### Added
 
 - Cross-ties on chosen faces of a column (#439). `rebar_create` `ties` takes `tie_faces`, the faces of the section whose bars between the corners are tied, by their name or index in the column's `derived.faces`, which now names each face (an annular sector's `outer_arc`, `end_side`, `inner_arc` and `start_side`; a rectangle's `x_max`, `y_max`, `x_min` and `y_min`; `round`; `face_N` otherwise). In an annular sector column `["outer_arc", "inner_arc"]` ties the bars of the outer and inner arcs to each other and leaves out the tie between the middle bars of the two radial faces, almost as long as the section is wide, which the stirrup already holds. Without it every face is tied, as before, so existing columns and files are unchanged: the default stays and the faces are chosen. `element_set` checks a set's faces against its column, and opening a file sorts, dedupes and bounds the list.
@@ -646,7 +648,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Closing the last open view tab crashed the application.
 - Per-wall volumes in schedules were wrong for walls joined at corners; they are now computed exactly.
 
-[Unreleased]: https://github.com/francisreboucas/constructcraft/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/francisreboucas/constructcraft/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/francisreboucas/constructcraft/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/francisreboucas/constructcraft/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/francisreboucas/constructcraft/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/francisreboucas/constructcraft/compare/v0.11.1...v0.12.0
