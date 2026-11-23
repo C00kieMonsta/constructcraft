@@ -209,6 +209,38 @@ fn cross_ties_link_the_bars_between_the_corners() {
 }
 
 #[test]
+fn cross_ties_can_be_limited_to_some_faces() {
+    let mut s = Session::default();
+    let column = sector_column(&mut s, [0.0, 0.0]);
+    let bars = json!({"host": column.0, "layout": "perimeter", "faces": [7, 3, 7, 3], "cover": 0.03});
+    run(&mut s, "rebar_create", bars);
+    // Only the bars of the two arcs (faces 0 and 2): the tie across between the middle
+    // bars of the radial faces is left out, the five radial ones stay.
+    let args = json!({"host": column.0, "layout": "ties", "spacing": 0.3, "tie_faces": [2, 0, 2]});
+    let arcs = id(&run(&mut s, "rebar_create", args));
+    let all = id(&run(&mut s, "rebar_create", json!({"host": column.0, "layout": "ties", "spacing": 0.3})));
+    let geom = s.geom().clone();
+    let per_level = |set: &cc_geom::rebar::RebarGeom| {
+        let z0 = set.bars[0].points[0].z;
+        set.bars.iter().filter(|b| close(b.points[0].z, z0)).count()
+    };
+    assert_eq!((per_level(&geom.rebar[&arcs]), per_level(&geom.rebar[&all])), (5, 6));
+    let longest = |set: &cc_geom::rebar::RebarGeom| {
+        set.bars.iter().map(|b| b.points[0].distance(b.points[1])).fold(0.0, f64::max)
+    };
+    assert!(longest(&geom.rebar[&arcs]) < 0.3 && longest(&geom.rebar[&all]) > 0.5);
+    // Kept with the set, each face once and in order.
+    let ElementKind::Rebar(r) = &s.project().element(arcs).unwrap().kind else { panic!("rebar") };
+    assert_eq!(r.layout, cc_core::RebarLayout::Ties { spacing: 0.3, faces: vec![0, 2] });
+    // Faces the section has, with ties only.
+    let ties = |faces: Value| json!({"host": column.0, "layout": "ties", "tie_faces": faces});
+    assert_eq!(fails(&mut s, "rebar_create", ties(json!([4]))), ErrorCode::InvalidArguments);
+    assert_eq!(fails(&mut s, "rebar_create", ties(json!([]))), ErrorCode::InvalidArguments);
+    let stirrups = json!({"host": column.0, "layout": "stirrups", "tie_faces": [0]});
+    assert_eq!(fails(&mut s, "rebar_create", stirrups), ErrorCode::InvalidArguments);
+}
+
+#[test]
 fn a_polygon_section_has_a_face_per_side() {
     let mut s = Session::default();
     // An L of 60 x 60 cm with legs 20 cm thick.

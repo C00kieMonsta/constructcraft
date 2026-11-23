@@ -1224,9 +1224,15 @@ fn column_bars(
                 })
                 .collect()
         }
-        RebarLayout::Ties { spacing } => {
+        RebarLayout::Ties { spacing, ref faces } => {
             let Some((set, dm)) = main else { return Vec::new() };
             let bars = shape.bars(set, dm, ds);
+            // The faces whose bars are tied: all, or those listed.
+            let sides = shape.faces(set.cover + ds + dm / 2.0);
+            let tied = |at: DVec2| {
+                faces.is_empty()
+                    || faces::nearest_face(&sides, at).is_some_and(|i| faces.iter().any(|f| *f as usize == i))
+            };
             // The lines the main bars stand on, to find the bar opposite.
             let lines = match shape.round || (shape.boxed && set.faces.is_empty()) {
                 true => faces::outline_faces(&bars.iter().filter(|b| b.corner).map(|b| b.at).collect::<Vec<_>>(), 0.0),
@@ -1234,7 +1240,7 @@ fn column_bars(
             };
             let near = (3.0 * dm).max(0.03);
             let mut ties: Vec<(DVec2, DVec2)> = Vec::new();
-            for bar in bars.iter().filter(|b| !b.corner) {
+            for bar in bars.iter().filter(|b| !b.corner && tied(b.at)) {
                 let Some(hit) = faces::across(&lines, bar.at, bar.inward, near) else { continue };
                 // Onto the bar that stands there, when one does.
                 let to = bars

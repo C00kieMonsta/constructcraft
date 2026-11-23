@@ -403,6 +403,12 @@ A column that continues a cylindrical wall has an `annular_sector` profile; `reb
 {"command": "rebar_create", "args": {"host": 42, "layout": "ties", "spacing": 0.30}}
 ```
 
+Cross-ties run from every bar between the corners to the bar opposite. `tie_faces` limits them to the bars of some faces, by their index in `derived.faces`: in an annular sector `[0, 2]` ties only the bars of the outer and inner arcs to each other, leaving out the long tie between the middle bars of the two radial faces, which the stirrup already holds:
+
+```text
+{"command": "rebar_create", "args": {"host": 42, "layout": "ties", "spacing": 0.30, "tie_faces": [0, 2]}}
+```
+
 A column's vertical bars cut in lifts (`max_length`, or `lifts` at given heights) are all spliced at the same heights; `stagger` splices every other bar around the section higher: `half_lap` (half the lap length) or an offset in meters, at most `(max_length - lap) / 2`. Each bar still runs from the base to the top, so a staggered bar's first piece is longer by the offset and its last one shorter (a splice moved to less than a lap below the top is left out); with `max_length` the lifts are shortened where the longer first piece would not fit the stock. The staggered pieces have their own bar marks. `element_set` changes it (`{"splice": {"stagger": "half_lap"}}`, `{"offset": 0.3}` or `"none"`):
 
 ```text

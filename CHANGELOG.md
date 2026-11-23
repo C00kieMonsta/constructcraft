@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Cross-ties on chosen faces of a column (#439). `rebar_create` `ties` takes `tie_faces`, the faces of the section whose bars between the corners are tied, by their index in the column's `derived.faces`. In an annular sector column `[0, 2]` ties the bars of the outer and inner arcs to each other and leaves out the tie between the middle bars of the two radial faces, almost as long as the section is wide, which the stirrup already holds. Without it every face is tied, as before; sets and files without it are unchanged.
+
 ## [0.14.0] - 2026-11-22
 
 ### Added

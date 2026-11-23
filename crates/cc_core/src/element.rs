@@ -1469,8 +1469,14 @@ pub enum RebarLayout {
     Sides { count: u32, spacing: f64 },
     /// Cross-ties of a column every `spacing` up it: a straight bar with a
     /// hook at each end from every bar of its longitudinal set that is not
-    /// at a corner, across the section to the bar opposite.
-    Ties { spacing: f64 },
+    /// at a corner, across the section to the bar opposite. With `faces`,
+    /// only from the bars on those faces of the section (their indices in
+    /// the order the column's bars are given face by face); empty for all.
+    Ties {
+        spacing: f64,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        faces: Vec<u32>,
+    },
     /// Horizontal bars near one face of a wall (ring bars in an arc wall),
     /// spaced up the wall by `zones` from its base. `inner` puts them inside
     /// the vertical bars of that face instead of outside them.
@@ -1699,6 +1705,9 @@ impl FaceBars {
 }
 
 impl RebarLayout {
+    /// At most this many faces of a column's section listed for its ties.
+    pub const MAX_TIE_FACES: usize = 64;
+
     /// Whether the bars run along the host (and so may be spliced).
     pub fn runs_along(&self) -> bool {
         !matches!(
@@ -1796,7 +1805,7 @@ impl RebarLayout {
         match self {
             RebarLayout::Longitudinal { count, .. } => (1..=200).contains(count),
             RebarLayout::Stirrups { spacing, hooks } => spaced(*spacing) && hooks.is_none_or(|h| h.is_valid()),
-            RebarLayout::Ties { spacing } => spaced(*spacing),
+            RebarLayout::Ties { spacing, faces } => spaced(*spacing) && faces.len() <= Self::MAX_TIE_FACES,
             RebarLayout::Sides { count, spacing } => {
                 *count <= 200 && spacing.is_finite() && (*count > 0 || spaced(*spacing))
             }

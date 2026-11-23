@@ -120,6 +120,30 @@ fn face_bars(p: &Project, host: ElementId, counts: Option<&[u32]>, spacing: Opti
     }
 }
 
+/// The faces of a column whose bars `tie_faces` asks to tie: indices into
+/// its section's faces, each once, in order (none: every face).
+fn tie_faces(p: &Project, host: ElementId, list: Option<&[u32]>) -> Result<Vec<u32>> {
+    let Some(list) = list else { return Ok(Vec::new()) };
+    let data = p.element(host).and_then(|e| p.element_type(e.type_id)).map(|t| &t.data);
+    let count = data.map_or(0, |d| cc_geom::rebar::column_faces(p, d, 0.0).len());
+    if count == 0 {
+        return Err(EngineError::invalid("`tie_faces` goes in columns with a section"));
+    }
+    if list.is_empty() {
+        return Err(EngineError::invalid("give `tie_faces` at least one face, or leave it out for every face"));
+    }
+    if let Some(bad) = list.iter().find(|f| **f as usize >= count) {
+        return Err(EngineError::invalid(format!(
+            "the section has {count} faces, 0 to {}: no face {bad} (see `derived.faces` of the column)",
+            count - 1
+        )));
+    }
+    let mut faces = list.to_vec();
+    faces.sort_unstable();
+    faces.dedup();
+    Ok(faces)
+}
+
 /// The hooks of new stirrups: bent by `hook` degrees (default 135; 0 for
 /// none), with straight ends of `tail` bar diameters (default 10).
 pub(crate) fn stirrup_hooks(hook: Option<f64>, tail: Option<f64>) -> Result<Option<StirrupHooks>> {
@@ -246,7 +270,7 @@ pub(crate) fn splice(
 /// `face_spacing`; on a curved face they stand at even angles. Its
 /// `stirrups` follow the section's outline, and `ties` adds cross-ties every
 /// `spacing`: a hooked bar from each bar between the corners to the bar
-/// opposite. With `max_length` a column's vertical bars are cut in lifts
+/// opposite, or only from the bars on the faces listed in `tie_faces`. With `max_length` a column's vertical bars are cut in lifts
 /// that lap by `lap`, all at the same heights unless `stagger` moves the
 /// splices of every other bar around the section up (half a lap, or an
 /// offset). `same_type` gives the set to every column (or beam) of the
@@ -345,6 +369,11 @@ pub struct RebarCreate {
     /// face, meters.
     #[serde(default)]
     pub face_spacing: Option<f64>,
+    /// Columns, `ties`: tie only the bars on these faces of the section, by their index in
+    /// the column's `derived.faces` (0 for the first), e.g. the two arcs of an annular sector
+    /// `[0, 2]` (default: every face). Each tie still runs to the bar opposite.
+    #[serde(default)]
+    pub tie_faces: Option<Vec<u32>>,
     /// Also give the set to every other column (or beam) of the host's type (default false).
     #[serde(default)]
     pub same_type: Option<bool>,
@@ -397,7 +426,7 @@ impl Command for RebarCreate {
                 }
                 match self.layout.as_str() {
                     "ties" if beam => return Err(EngineError::invalid("cross-ties go in columns")),
-                    "ties" => RebarLayout::Ties { spacing },
+                    "ties" => RebarLayout::Ties { spacing, faces: tie_faces(p, host_id, self.tie_faces.as_deref())? },
                     _ => RebarLayout::Stirrups { spacing, hooks: stirrup_hooks(self.hook, self.tail)? },
                 }
             }
@@ -407,6 +436,9 @@ impl Command for RebarCreate {
                 )));
             }
         };
+        if self.tie_faces.is_some() && !matches!(layout, RebarLayout::Ties { .. }) {
+            return Err(EngineError::invalid("`tie_faces` goes with the `ties` of a column"));
+        }
         if (self.hook.is_some() || self.tail.is_some()) && !matches!(layout, RebarLayout::Stirrups { .. }) {
             return Err(EngineError::invalid("`hook` and `tail` go with `stirrups`"));
         }

@@ -51,6 +51,18 @@ impl SectionFace {
         }
     }
 
+    /// Distance from `p` to the face (its chords, an arc's drawn close).
+    pub fn distance(&self, p: DVec2) -> f64 {
+        self.points
+            .windows(2)
+            .map(|w| {
+                let (a, b) = (w[0], w[1]);
+                let t = ((p - a).dot(b - a) / (b - a).length_squared().max(1e-18)).clamp(0.0, 1.0);
+                p.distance(a + (b - a) * t)
+            })
+            .fold(f64::INFINITY, f64::min)
+    }
+
     /// The point the fraction `t` of the way along the face, and the unit
     /// normal into the section there (to the left of the way round).
     pub fn at(&self, t: f64) -> (DVec2, DVec2) {
@@ -309,6 +321,11 @@ fn first_hit(faces: &[SectionFace], from: DVec2, dir: DVec2, clear: f64) -> Opti
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, hit, normal)| (hit, normal))
+}
+
+/// The index of the face of `faces` nearest to `p` (none without faces).
+pub fn nearest_face(faces: &[SectionFace], p: DVec2) -> Option<usize> {
+    faces.iter().map(|f| f.distance(p)).enumerate().min_by(|a, b| a.1.total_cmp(&b.1)).map(|(i, _)| i)
 }
 
 /// Where a cross-tie from `from` (on a face whose normal into the section
