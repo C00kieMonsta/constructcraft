@@ -227,6 +227,8 @@ impl crate::ModelGeometry {
                 Some(t) => solid.add_polygons(tray(g.a, g.b, t)),
                 None => solid.add_polygons(cylinder(g.a, g.b, g.diameter * 0.5)),
             }
+            // The facets of round runs are one smooth surface: no lines between them in views.
+            solid.smooth_curved(0);
             self.solids.push(solid);
             self.segments.insert(e.id, g);
         }
@@ -234,6 +236,7 @@ impl crate::ModelGeometry {
             let Some(v) = valve_geom(project, e) else { continue };
             let mut solid = Solid::new(e.id, e.category(), project.system_color(e));
             solid.add_polygons(valve(&v));
+            solid.smooth_curved(0);
             self.solids.push(solid);
             self.valves.insert(e.id, v);
         }
@@ -255,11 +258,18 @@ impl crate::ModelGeometry {
                     solid.add_polygons(cylinder(b.a, b.b, b.radius));
                 }
             } else {
-                // Pipes and conduits: a socket a little wider than the pipe on each branch, part of the first run.
+                // Pipes and conduits: a socket a little wider than the pipe on each branch, part of the first
+                // run; an elbow's two close its outer corner.
+                let turn = match f.branches[..] {
+                    [(x, _), (y, _)] => 180.0 - x.angle_between(y).to_degrees(),
+                    _ => 0.0,
+                };
                 for &(dir, d) in &f.branches {
-                    solid.add_polygons(cylinder(f.point, f.point + dir * (d * 0.8), d * 0.6));
+                    let back = crate::fitting_catalog::corner_back(turn, d * 0.6);
+                    solid.add_polygons(cylinder(f.point - dir * back, f.point + dir * (d * 0.8), d * 0.6));
                 }
             }
+            solid.smooth_curved(0);
             self.solids.push(solid);
         }
         self.pipe_cuts = pipe_cut_lengths(&self.mep, &self.segments);

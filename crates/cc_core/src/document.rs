@@ -585,6 +585,8 @@ impl<'a> EditCtx<'a> {
                     || !v.graphics.is_empty()
                     || !v.tag_offsets.is_empty()
                     || !v.tags.is_empty()
+                    || !v.fitting_placements.is_empty()
+                    || v.fitting_tags
                     || !v.tag_types.is_empty()
                     || v.mark_type.is_some()
                     || !v.mark_offsets.is_empty()
@@ -598,7 +600,7 @@ impl<'a> EditCtx<'a> {
                     None => {}
                 }
                 new.graphics.repair(&p.filters, Some(&|id| p.elements.contains_key(&id)));
-                // Tags of deleted elements and deleted tag types go.
+                // Tags of deleted elements (and fittings of deleted runs) and deleted tag types go.
                 crate::tag::repair_view_tags(&mut new, &p.elements, &p.types);
                 // Mark types and moved markers of deleted types and views go.
                 crate::view_mark::repair_view_marks(&mut new, &elevations, &p.types);

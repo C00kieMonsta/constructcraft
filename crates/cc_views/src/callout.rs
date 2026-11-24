@@ -127,6 +127,7 @@ pub(crate) fn crop(d: &mut Drawing2D, project: &Project, view: ViewId, rect: Cro
     d.prims = out;
     d.underlay = under;
     d.tags.retain(|t| rect.contains(t.center));
+    d.fitting_tags.retain(|t| rect.contains(t.tag.center));
     d.marks.retain(|m| rect.contains(m.center));
     d.bubbles.retain(|b| rect.contains(b.center));
     d.levels.retain(|l| rect.min.y <= l.a.y && l.a.y <= rect.max.y);

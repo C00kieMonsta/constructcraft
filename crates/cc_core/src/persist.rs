@@ -12,7 +12,10 @@ use std::path::Path;
 /// 33: plugin data on elements and the project (`plugin_data`), which older
 /// builds would drop.
 /// 34: roof joins (`Roof::join_to`), which older builds would drop.
-pub const FORMAT_VERSION: u32 = 34;
+/// 35: tag types of pipes, conduits and cable trays (`TagTarget::Pipe`,
+/// `Conduit`, `CableTray`) and fitting labels (`View::fitting_tags`,
+/// `fitting_placements`), which older builds cannot read or would drop.
+pub const FORMAT_VERSION: u32 = 35;
 
 /// Largest project file read, bytes (pictures and textures are kept in it).
 pub const MAX_FILE_BYTES: u64 = 1 << 30;

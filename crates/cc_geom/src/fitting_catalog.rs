@@ -294,8 +294,9 @@ fn reducer_chain(series: &PipeSeries, from: &str, to: &str) -> Option<Vec<usize>
 }
 
 /// The nearest row of `kind` and main size `size` whose angle is within
-/// [`ANGLE_TOL`] of `angle` (rows without an angle match any), with a
-/// branch of `size2` (None: equal). Err tells whether the size exists at all.
+/// [`ANGLE_TOL`] of `angle` (rows without an angle have the usual one of
+/// their kind, [`usual_angle`]), with a branch of `size2` (None: equal). Err
+/// tells whether the size exists at all.
 fn find_row(
     series: &PipeSeries,
     kind: FittingRowKind,
@@ -314,7 +315,7 @@ fn find_row(
             continue;
         }
         any_size = true;
-        let off = match (angle, f.angle) {
+        let off = match (angle, f.angle.or(usual_angle(kind))) {
             (Some(a), Some(b)) => (a - b).abs(),
             _ => 0.0,
         };
@@ -381,10 +382,14 @@ fn plan_tee(series: &PipeSeries, b: &[Branch], kind: FittingRowKind) -> Result<P
     else {
         return Err(MissingReason::Size);
     };
+    // No tee or wye joins a run that turns: it is not sold.
+    if 180.0 - b[i].dir.angle_between(b[j].dir).to_degrees() > ANGLE_TOL {
+        return Err(MissingReason::Angle);
+    }
     // The outlet end of the run: the one the branch points away from.
     let (outlet, inlet) = if b[k].dir.dot(b[i].dir) <= b[k].dir.dot(b[j].dir) { (i, j) } else { (j, i) };
-    let angle = b[k].dir.angle_between(b[inlet].dir).to_degrees();
-    let angle = (kind == FittingRowKind::Wye).then_some(angle);
+    // The branch's angle to the run, which the row must have (a tee's is 90°).
+    let angle = Some(b[k].dir.angle_between(b[inlet].dir).to_degrees());
     let (big, other) = if b[outlet].row.de + SAME >= b[inlet].row.de { (outlet, inlet) } else { (inlet, outlet) };
     let main_size = &b[big].row.size;
     if b[k].row.de > b[big].row.de + SAME {
@@ -436,12 +441,40 @@ fn plan_cross(series: &PipeSeries, b: &[Branch]) -> Result<Plan, MissingReason> 
     }
     let main = find_row(series, FittingRowKind::Cross, &b[0].row.size, None, None)?;
     // The branch opposite the first is the run; the other two the branch pair.
+    let Some(o) = (1..4).min_by(|&x, &y| b[0].dir.dot(b[x].dir).total_cmp(&b[0].dir.dot(b[y].dir))) else {
+        return Err(MissingReason::Size);
+    };
+    let pair: Vec<usize> = (1..4).filter(|&x| x != o).collect();
+    let deg = |x: usize, y: usize| b[x].dir.angle_between(b[y].dir).to_degrees();
+    // A cross is two straight runs at right angles.
+    let [p, q] = pair[..] else { return Err(MissingReason::Size) };
+    if 180.0 - deg(0, o) > ANGLE_TOL || 180.0 - deg(p, q) > ANGLE_TOL || (deg(0, p) - 90.0).abs() > ANGLE_TOL {
+        return Err(MissingReason::Angle);
+    }
     let mut ends = vec![(End::Second, b[0].row.de); 4];
     ends[0] = (End::Main, b[0].row.de);
-    if let Some(o) = (1..4).min_by(|&x, &y| b[0].dir.dot(b[x].dir).total_cmp(&b[0].dir.dot(b[y].dir))) {
-        ends[o] = (End::Main, b[0].row.de);
-    }
+    ends[o] = (End::Main, b[0].row.de);
     Ok(Plan { main, ends, chains: vec![Vec::new(); 4] })
+}
+
+/// How far behind the center the body of each end of an elbow turning
+/// `turn` degrees starts, so the two bodies close the outer corner instead
+/// of leaving a notch: `radius · tan(turn / 2)`, at most the radius.
+pub fn corner_back(turn: f64, radius: f64) -> f64 {
+    if !(1.0..180.0).contains(&turn) {
+        return 0.0;
+    }
+    (radius * (turn.to_radians() / 2.0).tan()).clamp(0.0, radius)
+}
+
+/// The angle a row of `kind` has when its row gives none: 90° for elbows and
+/// tees, 45° for wyes (couplings, reducers and crosses are matched without one).
+fn usual_angle(kind: FittingRowKind) -> Option<f64> {
+    match kind {
+        FittingRowKind::Elbow | FittingRowKind::Tee => Some(90.0),
+        FittingRowKind::Wye => Some(45.0),
+        _ => None,
+    }
 }
 
 /// The kind of a derived fitting as a catalog row kind (None for cable trays and conduits).
@@ -527,9 +560,14 @@ fn build(series: &PipeSeries, point: DVec3, branches: &[Branch], plan: &Plan) ->
     let mut main = Piece { row: plan.main, at: point, bodies: Vec::new() };
     let mut reducers = Vec::new();
     let mut laying = Vec::with_capacity(branches.len());
+    let turn = match branches {
+        [x, y] => 180.0 - x.dir.angle_between(y.dir).to_degrees(),
+        _ => 0.0,
+    };
     for ((b, &(end, de)), chain) in branches.iter().zip(&plan.ends).zip(&plan.chains) {
         let (z, socket, radius) = dims(main_row, end, de, main_de);
-        main.bodies.push(Body { a: point, b: point + b.dir * (z + socket), radius });
+        let back = corner_back(turn, radius);
+        main.bodies.push(Body { a: point - b.dir * back, b: point + b.dir * (z + socket), radius });
         let mut at = z;
         let mut size_de = de;
         for &r in chain {
@@ -644,7 +682,8 @@ mod tests {
         // Krona's elbow 25: Z 14.4 mm, socket 19 mm, body 33.8 mm.
         assert!(m.laying.iter().all(|l| (l - 0.0144).abs() < 1e-9), "{:?}", m.laying);
         let body = m.pieces[0].bodies[0];
-        assert!((body.a.distance(body.b) - (0.0144 + 0.019)).abs() < 1e-9);
+        // From a radius behind the corner (closing it) to the end of the socket.
+        assert!((body.a.distance(body.b) - (0.0169 + 0.0144 + 0.019)).abs() < 1e-9);
         assert!((body.radius - 0.0169).abs() < 1e-9);
         let s = &doc.project.pipe_series[&m.series];
         assert_eq!(fitting_name("Joelho", r, s), "Joelho 90° PVC soldável 25 mm");
@@ -715,11 +754,12 @@ mod tests {
         // Two 90° elbows of Z 14.4 mm.
         let cut = geom.pipe_cut_length(middle).unwrap();
         assert!((cut - (2.0 - 2.0 * 0.0144)).abs() < 1e-9, "{cut}");
-        // The 3D fittings are the catalog's bodies: two cylinders of 33.8 mm, 33.4 mm long, per elbow.
+        // The 3D fittings are the catalog's bodies: two cylinders of 33.8 mm per elbow,
+        // 33.4 mm from the corner plus the 16.9 mm behind it that closes the corner.
         let elbows = geom.mep.fittings.iter().filter_map(|f| f.catalog.as_ref());
         for m in elbows {
             assert!(m.pieces[0].bodies.iter().all(|b| (b.radius - 0.0169).abs() < 1e-9));
-            assert!(m.pieces[0].bodies.iter().all(|b| (b.a.distance(b.b) - 0.0334).abs() < 1e-9));
+            assert!(m.pieces[0].bodies.iter().all(|b| (b.a.distance(b.b) - 0.0503).abs() < 1e-9));
         }
     }
 
@@ -757,5 +797,62 @@ mod tests {
         let m = f.catalog.as_ref().unwrap();
         assert_eq!(m.status, MatchStatus::Matched, "{m:?}");
         assert_eq!(row(&doc, m, 0).kind, FittingRowKind::Wye);
+    }
+
+    #[test]
+    fn a_branch_at_an_angle_no_fitting_has_is_missing() {
+        // A branch 60° from the run: neither a tee (90°) nor a wye (45°) is sold for it.
+        let (mut doc, t) = project_with(&["25 mm"]);
+        pipe(&mut doc, t[0], [0.0, 0.0], [4.0, 0.0]);
+        pipe(&mut doc, t[0], [2.0, 0.0], [3.0, 3.0_f64.sqrt()]);
+        let f = only(&doc);
+        assert_eq!(f.kind, K::Tee);
+        let m = f.catalog.as_ref().unwrap();
+        assert_eq!(m.status, MatchStatus::Missing(MissingReason::Angle), "{m:?}");
+        assert!(m.pieces.is_empty());
+    }
+
+    #[test]
+    fn three_runs_that_turn_have_no_tee() {
+        // Runs at 0°, 120° and 240°: no two of them are straight.
+        let (mut doc, t) = project_with(&["25 mm"]);
+        let c = [2.0, 2.0];
+        for deg in [0.0_f64, 120.0, 240.0] {
+            let (s, co) = deg.to_radians().sin_cos();
+            pipe(&mut doc, t[0], c, [c[0] + co * 2.0, c[1] + s * 2.0]);
+        }
+        let m = only(&doc).catalog.unwrap();
+        assert_eq!(m.status, MatchStatus::Missing(MissingReason::Angle), "{m:?}");
+    }
+
+    #[test]
+    fn an_elbows_bodies_close_its_outer_corner() {
+        assert!((corner_back(90.0, 0.02) - 0.02).abs() < 1e-12);
+        assert!(corner_back(0.0, 0.02).abs() < 1e-12);
+        let (mut doc, t) = project_with(&["25 mm"]);
+        pipe(&mut doc, t[0], [0.0, 0.0], [2.0, 0.0]);
+        pipe(&mut doc, t[0], [2.0, 0.0], [2.0, 2.0]);
+        let f = only(&doc);
+        let m = f.catalog.as_ref().unwrap();
+        // Each body starts behind the corner by its radius.
+        for b in &m.pieces[0].bodies {
+            let behind = (b.a - f.point).dot((b.b - b.a).normalize());
+            assert!((behind + b.radius).abs() < 1e-9, "{b:?}");
+        }
+    }
+
+    #[test]
+    fn pipe_and_fitting_facets_are_smooth() {
+        // Views draw no line between the facets of a round pipe or fitting, only their outlines.
+        let (mut doc, t) = project_with(&["25 mm"]);
+        let a = pipe(&mut doc, t[0], [0.0, 0.0], [2.0, 0.0]);
+        pipe(&mut doc, t[0], [2.0, 0.0], [2.0, 2.0]);
+        let geom = crate::ModelGeometry::build(&doc.project);
+        let solids: Vec<_> = geom.solids.iter().filter(|s| s.element == a).collect();
+        assert_eq!(solids.len(), 2, "the pipe and the elbow (part of its first run)");
+        for s in solids {
+            let smooth = s.faces.iter().filter(|f| f.smooth).count();
+            assert!(smooth >= s.faces.len() * 3 / 4, "{smooth} of {}", s.faces.len());
+        }
     }
 }

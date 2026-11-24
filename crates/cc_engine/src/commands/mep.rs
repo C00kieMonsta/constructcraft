@@ -118,8 +118,24 @@ pub(crate) fn joined_offset(
     system: Option<SystemId>,
     wanted: f64,
 ) -> Option<f64> {
+    joined_offset_except(p, level, start, category, system, wanted, None)
+}
+
+/// [`joined_offset`] leaving out the run `skip` (a run just drawn to `start`),
+/// so a tool can tell whether a point lies on another run of the network and
+/// at what elevation, to join the two with a vertical run.
+pub fn joined_offset_except(
+    p: &Project,
+    level: cc_core::LevelId,
+    start: Point,
+    category: Category,
+    system: Option<SystemId>,
+    wanted: f64,
+    skip: Option<ElementId>,
+) -> Option<f64> {
     let start = point(start).ok()?;
     p.segments_at(level)
+        .filter(|(e, _)| Some(e.id) != skip)
         .filter(|(e, seg)| e.category() == category && (category != Category::Pipe || seg.system() == system))
         .filter_map(|(_, seg)| {
             let (q, z) = nearest_on(&seg, start, wanted);

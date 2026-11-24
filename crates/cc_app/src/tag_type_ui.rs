@@ -36,6 +36,9 @@ pub fn target_label(target: TagTarget) -> String {
         TagTarget::Column => t!("tag-target-column"),
         TagTarget::Beam => t!("tag-target-beam"),
         TagTarget::Foundation => t!("tag-target-foundation"),
+        TagTarget::Pipe => t!("tag-target-pipe"),
+        TagTarget::Conduit => t!("tag-target-conduit"),
+        TagTarget::CableTray => t!("tag-target-cable-tray"),
     }
 }
 
@@ -122,6 +125,9 @@ fn target_category(target: TagTarget) -> Category {
         TagTarget::Column => Category::Column,
         TagTarget::Beam => Category::Beam,
         TagTarget::Foundation => Category::Foundation,
+        TagTarget::Pipe => Category::Pipe,
+        TagTarget::Conduit => Category::Conduit,
+        TagTarget::CableTray => Category::CableTray,
     }
 }
 
@@ -132,6 +138,24 @@ pub fn tag_fields(target: TagTarget) -> Vec<(String, String)> {
     if matches!(target, TagTarget::Column | TagTarget::Beam | TagTarget::Foundation) {
         out.push(("Section".into(), t!("tag-field-section")));
     }
+    // What plans of services have always written by their runs.
+    let runs: &[(&str, &str)] = match target {
+        TagTarget::Pipe => &[
+            ("Systems", "tag-field-systems"),
+            ("DiameterMark", "tag-field-diameter-mark"),
+            ("SlopeMark", "tag-field-slope-mark"),
+        ],
+        TagTarget::Conduit => &[
+            ("Systems", "tag-field-systems"),
+            ("Circuits", "tag-field-circuits"),
+            ("DiameterMark", "tag-field-diameter-mark"),
+        ],
+        TagTarget::CableTray => {
+            &[("Systems", "tag-field-systems"), ("Circuits", "tag-field-circuits"), ("TraySize", "tag-field-tray-size")]
+        }
+        _ => &[],
+    };
+    out.extend(runs.iter().map(|(k, key)| (k.to_string(), tr(key))));
     for f in cc_core::ScheduleField::available(target_category(target)) {
         if f == cc_core::ScheduleField::Count {
             continue;

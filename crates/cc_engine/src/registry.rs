@@ -387,6 +387,8 @@ registry![
         tags::TagTypeCreate,
         tags::TagSet,
         tags::TagGet,
+        tags::FittingTagSet,
+        tags::FittingTags,
         view_marks::ViewMarkTypeCreate,
         view_marks::MarkMove,
         annotate::DimensionChainCreate,

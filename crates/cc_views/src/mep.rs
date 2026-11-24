@@ -8,6 +8,7 @@
 //! ceiling light is a circle with its circuit above its power; a switch is
 //! a small filled circle; a board is a rectangle with a filled half.
 
+use crate::tag::{Align, TagCtx, TagSpot};
 use crate::{Anchor, Drawing2D, LineStyle, format};
 use cc_core::{ConductorRole, DeviceKind, Element, ElementKind, LevelId, MepData, MepDiscipline, Project, SystemClass};
 use cc_geom::ModelGeometry;
@@ -21,7 +22,10 @@ const MEDIUM: f64 = 1.6;
 /// Conduits lower than this are in the floor (drawn dashed).
 const IN_FLOOR: f64 = 0.3;
 
-/// Pipes or conduits of `level` and, in electrical plans, the device symbols.
+/// Pipes or conduits of `level` and, in electrical plans, the device
+/// symbols; runs are tagged as `view` adjusts their tags, and its fittings
+/// labelled when it says so. `label` translates keys.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn services(
     d: &mut Drawing2D,
     project: &Project,
@@ -29,15 +33,18 @@ pub(crate) fn services(
     level: LevelId,
     cut_height: f64,
     discipline: MepDiscipline,
-    scale: u32,
+    view: &cc_core::View,
+    label: &dyn Fn(&str) -> String,
 ) {
     use MepDiscipline as D;
-    let mm = scale as f64 / 1000.0;
+    let ctx = TagCtx { project, geom, scale: view.scale, placements: &view.tags, types: &view.tag_types, label };
+    let ctx = &ctx;
+    let mm = ctx.mm();
     // Cable trays first: conduits and devices are drawn over them.
     if matches!(discipline, D::Electrical | D::Communications) {
         for e in project.elements.values() {
             if let (ElementKind::CableTray(_), Some(s)) = (&e.kind, project.segment_at(e, level)) {
-                tray(d, project, geom, e, &s, mm);
+                tray(d, ctx, e, &s);
             }
         }
     }
@@ -50,12 +57,12 @@ pub(crate) fn services(
             (ElementKind::Pipe(_), D::Plumbing) | (ElementKind::Conduit(_), D::Electrical) => {
                 // The level's runs and the risers of other levels passing through it.
                 if let Some(s) = project.segment_at(e, level) {
-                    segment(d, project, geom, e, &s, cut_height, mm);
+                    segment(d, ctx, e, &s, cut_height);
                 }
             }
             (ElementKind::Conduit(_), D::Communications) if cabling(e) => {
                 if let Some(s) = project.segment_at(e, level) {
-                    segment(d, project, geom, e, &s, cut_height, mm);
+                    segment(d, ctx, e, &s, cut_height);
                 }
             }
             (ElementKind::LightningConductor(c), D::Lightning) => {
@@ -82,18 +89,31 @@ pub(crate) fn services(
             _ => {}
         }
     }
-    let category = match discipline {
-        D::Plumbing => Some(cc_core::Category::Pipe),
-        D::Electrical => Some(cc_core::Category::Conduit),
-        D::Lightning => Some(cc_core::Category::LightningConductor),
-        D::Communications => None,
-    };
-    for f in geom.mep.fittings.iter().filter(|f| f.level == level && Some(f.category) == category) {
+    for f in plan_fittings(geom, level, discipline) {
         fitting(d, project, f, mm);
+        if view.fitting_tags {
+            fitting_tag(d, ctx, view, f);
+        }
     }
     if discipline == MepDiscipline::Plumbing {
         valves(d, project, geom, level, mm);
     }
+}
+
+/// The fittings a services plan of `level` shows: those of the
+/// discipline's runs (none in communications plans).
+pub fn plan_fittings(
+    geom: &ModelGeometry,
+    level: LevelId,
+    discipline: MepDiscipline,
+) -> impl Iterator<Item = &cc_geom::mep_net::Fitting> {
+    let category = match discipline {
+        MepDiscipline::Plumbing => Some(cc_core::Category::Pipe),
+        MepDiscipline::Electrical => Some(cc_core::Category::Conduit),
+        MepDiscipline::Lightning => Some(cc_core::Category::LightningConductor),
+        MepDiscipline::Communications => None,
+    };
+    geom.mep.fittings.iter().filter(move |f| f.level == level && Some(f.category) == category)
 }
 
 /// The services plan that shows devices of a family of systems.
@@ -189,26 +209,107 @@ pub(crate) fn valve_symbol(
     }
 }
 
-/// Tag text of a cable tray: its section (width × height, mm or inches) and
-/// the circuits it carries.
-fn tray_tag(project: &Project, e: &Element, width: f64, height: f64) -> String {
-    let mm = |v: f64| format::size(v, format::MetricSize::MmNumber(0));
-    let size = format!("{}×{}", mm(width), mm(height));
-    let codes: Vec<&str> = e.systems().iter().filter_map(|s| project.system(*s)).map(|s| s.label()).collect();
-    if codes.is_empty() { size } else { format!("{size} ({})", codes.join(", ")) }
+/// The tag of the run `e` at `spot`, as the view tags it (none when hidden).
+fn run_tag(d: &mut Drawing2D, ctx: &TagCtx, e: &Element, spot: TagSpot) {
+    let Some(target) = cc_core::tag::TagTarget::of(e, ctx.project) else { return };
+    if !(spot.point.is_finite() && spot.anchor.is_finite()) {
+        return;
+    }
+    if let Some(tag) = crate::tag::prepare(ctx, e, target) {
+        crate::tag::draw(d, ctx, &tag, spot, false);
+    }
+}
+
+/// The tag spot along a run from `a` to `b`: at its middle, `gap` meters
+/// off it, reading left to right or bottom to top.
+fn along(a: DVec2, b: DVec2, gap: f64) -> Option<TagSpot> {
+    let dir = crate::tag::readable((b - a).try_normalize()?);
+    let mid = (a + b) * 0.5;
+    Some(TagSpot { point: mid + dir.perp() * gap, anchor: mid, host_dir: Some(dir), align: Align::CenterBottom })
+}
+
+/// Pen of the mark of a fitting the catalog has no piece for.
+const MISSING: [u8; 3] = [200, 30, 30];
+
+/// The lines of a fitting's label: its catalog pieces' names (the main one
+/// first); a fitting with no catalog its kind and sizes; a missing one
+/// those and why it is missing. `true` when missing.
+pub fn fitting_lines(ctx: &TagCtx, f: &cc_geom::mep_net::Fitting) -> (Vec<String>, bool) {
+    use cc_geom::fitting_catalog::{MatchStatus, fitting_name, kind_key};
+    let label = ctx.label;
+    let mut generic = vec![label(f.kind.key())];
+    if let Some(a) = f.kind.nominal_angle() {
+        generic.push(format!("{}°", format::number(a, 0)));
+    }
+    let sizes: Vec<String> = f.diameters().iter().map(|d| format::size(*d, format::MetricSize::MmNumber(0))).collect();
+    if !sizes.is_empty() {
+        generic.push(format!("Ø{}", sizes.join(" × ")));
+    }
+    let generic = generic.join(" ");
+    let catalog = f.catalog.as_ref().and_then(|m| ctx.project.pipe_series.get(&m.series).map(|s| (m, s)));
+    match catalog {
+        Some((m, _)) if let MatchStatus::Missing(reason) = m.status => (vec![generic, label(reason.key())], true),
+        Some((m, series)) => {
+            let names: Vec<String> = m
+                .pieces
+                .iter()
+                .filter_map(|x| series.fittings.get(x.row))
+                .map(|row| fitting_name(&label(kind_key(row.kind)), row, series))
+                .take(cc_core::tag::MAX_LINES)
+                .collect();
+            (if names.is_empty() { vec![generic] } else { names }, false)
+        }
+        None => (vec![generic], false),
+    }
+}
+
+/// The label of fitting `f` (see [`fitting_lines`]), above and to the
+/// right of it, moved, turned or hidden as `view` says; a missing fitting
+/// in red, circled.
+fn fitting_tag(d: &mut Drawing2D, ctx: &TagCtx, view: &cc_core::View, f: &cc_geom::mep_net::Fitting) {
+    let Some(&element) = f.runs.first() else { return };
+    let key = cc_core::tag::fitting_key(&f.runs);
+    let placement = view.fitting_placements.get(&key).copied().unwrap_or_default();
+    if placement.hidden {
+        return;
+    }
+    let mm = ctx.mm();
+    let c = DVec2::new(f.point.x, f.point.y);
+    let r = f.diameter().max(0.8 * mm) * 0.75;
+    let (lines, missing) = fitting_lines(ctx, f);
+    let red = missing.then_some(MISSING);
+    if missing {
+        let pen = crate::Pen { color: red, weight: Some(0.35), ..crate::Pen::default() };
+        let ring = circle(c, r + 0.8 * mm);
+        for (i, a) in ring.iter().enumerate() {
+            let b = ring[(i + 1) % ring.len()];
+            d.line_pen(*a, b, LineStyle::Annotation, Some(pen), Some(element));
+        }
+    }
+    let style = cc_core::tag::TagStyle { color: red, text_color: red, ..cc_core::tag::TagStyle::default() };
+    let tag = crate::tag::Tag {
+        element,
+        style: std::borrow::Cow::Owned(style),
+        lines: lines.into_iter().map(|t| (t, 1.8)).collect(),
+        placement,
+    };
+    let spot = TagSpot { point: c + DVec2::splat(r + mm), anchor: c, host_dir: None, align: Align::LeftBottom };
+    if spot.point.is_finite() {
+        crate::tag::draw_fitting(d, ctx, key, &tag, spot);
+    }
 }
 
 /// A cable tray run in an electrical plan: its outline as wide as the tray,
 /// lightly tinted in its circuit's color, with the rungs of a ladder tray
 /// and its tag; a vertical tray shows its section crossed.
-fn tray(d: &mut Drawing2D, project: &Project, geom: &ModelGeometry, e: &Element, s: &cc_core::MepSegment, mm: f64) {
-    let Some(g) = geom.segments.get(&e.id) else { return };
+fn tray(d: &mut Drawing2D, ctx: &TagCtx, e: &Element, s: &cc_core::MepSegment) {
+    let (project, mm) = (ctx.project, ctx.mm());
+    let Some(g) = ctx.geom.segments.get(&e.id) else { return };
     let Some(section) = g.tray else { return };
     let c = project.system_color(e);
     let tint = |v: u8| (255.0 - (255.0 - v as f64) * 0.25) as u8;
     let fill = [tint(c[0]), tint(c[1]), tint(c[2]), 255];
     let style = if s.start_offset.max(s.end_offset) < IN_FLOOR { LineStyle::Hidden } else { LineStyle::Projection };
-    let text = tray_tag(project, e, section.width, section.height);
     let (w, h) = (section.width * 0.5, section.height * 0.5);
     if s.is_vertical() {
         let o = s.start;
@@ -217,7 +318,9 @@ fn tray(d: &mut Drawing2D, project: &Project, geom: &ModelGeometry, e: &Element,
         d.polyline(&pts, true, style, Some(e.id));
         d.line(pts[0], pts[2], LineStyle::Thin, Some(e.id));
         d.line(pts[1], pts[3], LineStyle::Thin, Some(e.id));
-        d.tag_text(o + DVec2::new(w + mm, h + mm), text, 2.0, Anchor::LeftBottom, 0.0, Some(e.id));
+        let spot =
+            TagSpot { point: o + DVec2::new(w + mm, h + mm), anchor: o, host_dir: None, align: Align::LeftBottom };
+        run_tag(d, ctx, e, spot);
         return;
     }
     let length = s.plan_length();
@@ -239,12 +342,9 @@ fn tray(d: &mut Drawing2D, project: &Project, geom: &ModelGeometry, e: &Element,
     if length < 15.0 * mm {
         return;
     }
-    let (dir, angle) = {
-        let a = dir.to_angle();
-        if dir.x < -1e-9 || (dir.x.abs() <= 1e-9 && dir.y < 0.0) { (-dir, a + std::f64::consts::PI) } else { (dir, a) }
-    };
-    let mid = (s.start + s.end) * 0.5 + dir.perp() * (w + 0.8 * mm);
-    d.tag_text(mid, text, 2.0, Anchor::CenterBottom, angle, Some(e.id));
+    if let Some(spot) = along(s.start, s.end, w + 0.8 * mm) {
+        run_tag(d, ctx, e, spot);
+    }
 }
 
 /// A fitting in plan: a dot in the system's color on pipes; on conduits, a
@@ -290,29 +390,12 @@ fn circle(c: DVec2, r: f64) -> Vec<DVec2> {
     (0..24).map(|i| c + DVec2::from_angle(i as f64 / 24.0 * std::f64::consts::TAU) * r).collect()
 }
 
-/// Tag text of a segment: its systems' codes and its diameter.
-fn tag(project: &Project, e: &Element, diameter: f64) -> String {
-    let codes: Vec<&str> = e.systems().iter().filter_map(|s| project.system(*s)).map(|s| s.label()).collect();
-    let size = format!("Ø{}", format::size(diameter, format::MetricSize::MmNumber(0)));
-    match e.kind {
-        // Conduits carry circuit numbers; pipes their system code.
-        ElementKind::Conduit(_) if !codes.is_empty() => format!("{size} ({})", codes.join(", ")),
-        _ if !codes.is_empty() => format!("{} {size}", codes.join(", ")),
-        _ => size,
-    }
-}
-
-/// Run `e` with its elevations `s` above the plan's level.
-fn segment(
-    d: &mut Drawing2D,
-    project: &Project,
-    geom: &ModelGeometry,
-    e: &Element,
-    s: &cc_core::MepSegment,
-    cut_height: f64,
-    mm: f64,
-) {
-    let Some(g) = geom.segments.get(&e.id) else { return };
+/// Run `e` with its elevations `s` above the plan's level, and its tag
+/// (its systems' codes and diameter, the slope of a sloped pipe; see
+/// [`cc_core::tag::TagTarget::default_style`]).
+fn segment(d: &mut Drawing2D, ctx: &TagCtx, e: &Element, s: &cc_core::MepSegment, cut_height: f64) {
+    let (project, mm) = (ctx.project, ctx.mm());
+    let Some(g) = ctx.geom.segments.get(&e.id) else { return };
     let color = project.system_color(e);
     let conduit = matches!(e.kind, ElementKind::Conduit(_));
     // Pipes above the cut plane are dashed; conduits only when they run in the floor.
@@ -322,14 +405,14 @@ fn segment(
     } else {
         LineStyle::Projection
     };
-    let text = tag(project, e, g.diameter);
     if s.is_vertical() {
         // A riser: a circle (at least 2 mm across) with its tag beside it.
         let r = (g.diameter * 0.5).max(mm);
         let pts = circle(s.start, r);
         d.fill(pts.clone(), [color[0], color[1], color[2], 255], Some(e.id));
         d.polyline(&pts, true, style, Some(e.id));
-        d.tag_text(s.start + DVec2::new(r + mm, r + mm), text, 2.0, Anchor::LeftBottom, 0.0, Some(e.id));
+        let at = s.start + DVec2::new(r + mm, r + mm);
+        run_tag(d, ctx, e, TagSpot { point: at, anchor: s.start, host_dir: None, align: Align::LeftBottom });
         return;
     }
     // At least 0.8 mm on paper, so the system's color reads.
@@ -343,19 +426,9 @@ fn segment(
     if s.plan_length() < 15.0 * mm {
         return;
     }
-    let dir = (s.end - s.start) / s.plan_length();
-    let (dir, angle) = {
-        let a = dir.to_angle();
-        if dir.x < -1e-9 || (dir.x.abs() <= 1e-9 && dir.y < 0.0) { (-dir, a + std::f64::consts::PI) } else { (dir, a) }
-    };
-    let mid = (s.start + s.end) * 0.5 + dir.perp() * (width * 0.5 + 0.8 * mm);
-    let slope = s.slope();
-    let text = if matches!(e.kind, ElementKind::Pipe(_)) && slope.abs() > 1e-4 {
-        format!("{text}  i = {}", format::slope(slope.abs()))
-    } else {
-        text
-    };
-    d.tag_text(mid, text, 2.0, Anchor::CenterBottom, angle, Some(e.id));
+    if let Some(spot) = along(s.start, s.end, width * 0.5 + 0.8 * mm) {
+        run_tag(d, ctx, e, spot);
+    }
 }
 
 /// Where a symbol is drawn: the device's insertion point and rotation.
@@ -564,8 +637,48 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(texts.iter().any(|t| t.starts_with("ES Ø102") && t.contains("i = 1")), "{texts:?}");
+        assert!(texts.contains(&"ES Ø102  i = 1,0 %"), "{texts:?}");
         assert!(texts.contains(&"ES Ø102"), "{texts:?}");
+        // The runs' tags are tags of their own: moved off the run, with a leader back to it.
+        let home = d.tags.iter().find(|t| t.element == pipe).unwrap().center;
+        assert!(d.tags.iter().any(|t| t.element == riser));
+        let mut moved = plan(Some(MepDiscipline::Plumbing));
+        moved.tags.insert(pipe, cc_core::tag::TagPlacement { offset: DVec2::new(0.0, 2.0), ..Default::default() });
+        let m = crate::generate(&doc.project, &geom, &moved).unwrap();
+        let tag = m.tags.iter().find(|t| t.element == pipe).unwrap();
+        assert!(tag.center.distance(home + DVec2::new(0.0, 2.0)) < 1e-9);
+        let leaders = |d: &Drawing2D| {
+            d.prims
+                .iter()
+                .filter(
+                    |p| matches!(p, Prim::Line { element: Some(id), style: LineStyle::Annotation, .. } if *id == pipe),
+                )
+                .count()
+        };
+        assert_eq!((leaders(&d), leaders(&m)), (0, 1));
+        // Fittings are labelled when the plan says so, by the runs meeting there.
+        assert!(d.fitting_tags.is_empty());
+        moved.fitting_tags = true;
+        let key = cc_core::tag::fitting_key(&[riser, pipe]);
+        moved
+            .fitting_placements
+            .insert(key.clone(), cc_core::tag::TagPlacement { offset: DVec2::X, ..Default::default() });
+        let f = crate::generate(&doc.project, &geom, &moved).unwrap();
+        let label = f.fitting_tags.iter().find(|t| t.key == key).unwrap();
+        assert!((label.tag.offset - DVec2::X).length() < 1e-9);
+        let fitting = geom.mep.fittings.iter().find(|x| cc_core::tag::fitting_key(&x.runs) == key).unwrap();
+        let ctx = crate::tag::TagCtx {
+            project: &doc.project,
+            geom: &geom,
+            scale: 50,
+            placements: &moved.tags,
+            types: &moved.tag_types,
+            label: &|k| k.to_string(),
+        };
+        let (lines, _) = fitting_lines(&ctx, fitting);
+        assert!(!lines.is_empty() && lines.iter().all(|l| !l.is_empty()), "{lines:?}");
+        moved.fitting_placements.insert(key.clone(), cc_core::tag::TagPlacement { hidden: true, ..Default::default() });
+        assert!(crate::generate(&doc.project, &geom, &moved).unwrap().fitting_tags.is_empty());
         assert_eq!(d.hit_test(DVec2::new(2.5, 0.0), 0.01), Some(pipe));
         assert!(d.hit_test(DVec2::new(5.0, 0.0), 0.01).is_some());
         let colored = SystemKind::Sanitary.default_color();

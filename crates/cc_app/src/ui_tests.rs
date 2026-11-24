@@ -24,7 +24,7 @@ fn themed_harness(
     state: AppState,
     size: egui::Vec2,
     theme: egui::Theme,
-    draw: fn(&mut egui::Ui, &mut AppState),
+    mut draw: impl FnMut(&mut egui::Ui, &mut AppState) + 'static,
 ) -> Harness<'static, AppState> {
     let mut themed = false;
     let mut harness = Harness::builder().with_size(size).build_ui_state(
@@ -3320,12 +3320,17 @@ const PICK_SIZE: egui::Vec2 = egui::vec2(900.0, 640.0);
 /// The active plan over the whole window with its tools, the dialogs over
 /// it and the keyboard shortcuts, as the app runs them.
 fn pick_harness(state: AppState) -> Harness<'static, AppState> {
-    themed_harness(state, PICK_SIZE, egui::Theme::Light, |ui, state| {
+    pick_harness_at(state, PICK_ORIGIN)
+}
+
+/// [`pick_harness`] centered on the drawing point `origin`.
+fn pick_harness_at(state: AppState, origin: glam::DVec2) -> Harness<'static, AppState> {
+    themed_harness(state, PICK_SIZE, egui::Theme::Light, move |ui, state| {
         state.sync();
         state.hint.begin_frame();
         crate::app::shortcuts(ui.ctx(), state);
         let (resp, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
-        let xf = crate::paint::Xf { screen: resp.rect.center(), origin: PICK_ORIGIN, scale: PICK_SCALE };
+        let xf = crate::paint::Xf { screen: resp.rect.center(), origin, scale: PICK_SCALE };
         if let Some(view) = state.active_view.and_then(|v| state.project().view(v).cloned())
             && let Some(drawing) = state.drawing(view.id)
         {
@@ -3338,8 +3343,13 @@ fn pick_harness(state: AppState) -> Harness<'static, AppState> {
 
 /// A click at the plan point `p` of the pick harness.
 fn click_plan(harness: &mut Harness<'static, AppState>, p: [f64; 2]) {
+    click_at(harness, PICK_ORIGIN, p);
+}
+
+/// A click at the drawing point `p` of a pick harness centered on `origin`.
+fn click_at(harness: &mut Harness<'static, AppState>, origin: glam::DVec2, p: [f64; 2]) {
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, PICK_SIZE);
-    let xf = crate::paint::Xf { screen: rect.center(), origin: PICK_ORIGIN, scale: PICK_SCALE };
+    let xf = crate::paint::Xf { screen: rect.center(), origin, scale: PICK_SCALE };
     let pos = xf.to_screen(glam::DVec2::from(p));
     harness.input_mut().events.push(egui::Event::PointerMoved(pos));
     harness.run();
@@ -3353,6 +3363,182 @@ fn click_plan(harness: &mut Harness<'static, AppState>, p: [f64; 2]) {
         });
         harness.run();
     }
+}
+
+/// The pipes of the project as (start, end, start elevation, end elevation) in plan, rounded to cm.
+fn pipe_runs(state: &AppState) -> Vec<([i64; 2], [i64; 2], i64, i64)> {
+    let cm = |v: f64| (v * 100.0).round() as i64;
+    state
+        .project()
+        .elements
+        .values()
+        .filter_map(|e| match &e.kind {
+            cc_core::ElementKind::Pipe(s) => {
+                Some(([cm(s.start.x), cm(s.start.y)], [cm(s.end.x), cm(s.end.y)], cm(s.start_offset), cm(s.end_offset)))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_pipe_tool_joins_runs_at_other_elevations_with_vertical_runs() {
+    let mut state = sample_state();
+    let level = state.project().levels.first().map(|l| l.id).unwrap();
+    let plan = state.project().views.values().find(|v| v.is_plan() && v.level() == Some(level)).unwrap().id;
+    state.active_view = Some(plan);
+    let system = state.session.execute("system_create", serde_json::json!({"kind": "cold_water"})).unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    // A pipe 0.60 m above the level, away from the house.
+    state
+        .session
+        .execute(
+            "pipe_create",
+            serde_json::json!({"start": [32.0, 2.0], "end": [36.0, 2.0], "offset": 0.6, "system": system}),
+        )
+        .unwrap();
+    let type_id = state.project().default_type(cc_core::Category::Pipe).unwrap();
+    state.tool = crate::tools::Tool::Pipe { type_id };
+    state.mep.system = Some(cc_core::SystemId(system));
+    state.mep.offset = Some(2.5);
+    let mut harness = pick_harness(state);
+    harness.run();
+    // Starting on the end of the pipe at 2.50 m: a riser from it, then the run.
+    click_plan(&mut harness, [36.0, 2.0]);
+    assert_eq!(harness.state().mep.chain, Some(0.6));
+    click_plan(&mut harness, [40.0, 2.0]);
+    let runs = pipe_runs(harness.state());
+    assert!(runs.contains(&([3600, 200], [3600, 200], 60, 250)), "{runs:?}");
+    assert!(runs.contains(&([3600, 200], [4000, 200], 250, 250)), "{runs:?}");
+    // A new elevation, clicking the last point again: only the vertical run.
+    harness.state_mut().mep.rise = Some(1.0);
+    click_plan(&mut harness, [40.0, 2.0]);
+    assert!(pipe_runs(harness.state()).contains(&([4000, 200], [4000, 200], 250, 100)));
+    assert_eq!(harness.state().mep.chain, Some(1.0));
+    // A run at 2.50 m ending over the first pipe goes down to it there.
+    harness.state_mut().interaction.anchor = None;
+    harness.state_mut().mep.offset = Some(2.5);
+    click_plan(&mut harness, [34.0, 6.0]);
+    assert_eq!(harness.state().mep.chain, None);
+    click_plan(&mut harness, [34.0, 2.0]);
+    let runs = pipe_runs(harness.state());
+    assert!(runs.contains(&([3400, 600], [3400, 200], 250, 250)), "{runs:?}");
+    assert!(runs.contains(&([3400, 200], [3400, 200], 250, 60)), "{runs:?}");
+    assert_eq!(runs.len(), 6);
+    // The network joins them: a tee on the first pipe where the riser lands.
+    let geom = harness.state().session.geom();
+    let tee = geom.mep.fittings.iter().any(|f| {
+        matches!(f.kind, cc_geom::mep_net::FittingKind::Tee)
+            && f.point.truncate().distance(glam::dvec2(34.0, 2.0)) < 0.02
+    });
+    assert!(tee, "{:?}", geom.mep.fittings);
+}
+
+#[test]
+fn pipe_tags_and_fitting_labels_are_dragged_in_a_plumbing_plan() {
+    let mut state = sample_state();
+    let run = |state: &mut AppState, name: &str, args: serde_json::Value| state.session.execute(name, args).unwrap();
+    let plan = run(&mut state, "view_create", serde_json::json!({"kind": "plumbing_plan"}))["id"].as_u64().unwrap();
+    let plan = cc_core::ViewId(plan);
+    run(&mut state, "view_set", serde_json::json!({"view": plan.0, "fitting_tags": true}));
+    let pipe = |state: &mut AppState, a: [f64; 2], b: [f64; 2]| {
+        let args = serde_json::json!({"start": a, "end": b, "offset": 0.6, "system": "cold_water"});
+        cc_core::ElementId(run(state, "pipe_create", args)["id"].as_u64().unwrap())
+    };
+    let first = pipe(&mut state, [32.0, 2.0], [38.0, 2.0]);
+    let second = pipe(&mut state, [38.0, 2.0], [38.0, 6.0]);
+    state.active_view = Some(plan);
+    state.tool = crate::tools::Tool::Select;
+    let mut harness = pick_harness(state);
+    harness.run();
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, PICK_SIZE);
+    let xf = crate::paint::Xf { screen: rect.center(), origin: PICK_ORIGIN, scale: PICK_SCALE };
+    let drag = |h: &mut Harness<'static, AppState>, from: egui::Pos2, by: egui::Vec2| {
+        let button = egui::PointerButton::Primary;
+        h.input_mut().events.push(egui::Event::PointerMoved(from));
+        h.input_mut().events.push(egui::Event::PointerButton {
+            pos: from,
+            button,
+            pressed: true,
+            modifiers: Default::default(),
+        });
+        h.run();
+        for k in 1..=4 {
+            h.input_mut().events.push(egui::Event::PointerMoved(from + by * (k as f32 / 4.0)));
+            h.run();
+        }
+        let pos = from + by;
+        h.input_mut().events.push(egui::Event::PointerButton {
+            pos,
+            button,
+            pressed: false,
+            modifiers: Default::default(),
+        });
+        h.run();
+    };
+    // The pipe's tag moves 1 m to the right; the pipe stays.
+    let tag = harness.state_mut().drawing(plan).unwrap().tags.iter().find(|t| t.element == first).copied().unwrap();
+    drag(&mut harness, xf.to_screen(tag.center), egui::vec2(20.0, 0.0));
+    let placement = harness.state().project().view(plan).unwrap().tags.get(&first).copied().unwrap_or_default();
+    assert!((placement.offset - glam::DVec2::new(1.0, 0.0)).length() < 1e-6, "{placement:?}");
+    assert!(pipe_runs(harness.state()).contains(&([3200, 200], [3800, 200], 60, 60)));
+    // The elbow's label moves by the runs meeting there.
+    let key = cc_core::tag::fitting_key(&[first, second]);
+    let label = harness.state_mut().drawing(plan).unwrap().fitting_tags.iter().find(|t| t.key == key).cloned();
+    let label = label.unwrap_or_else(|| panic!("no label of fitting {key}"));
+    drag(&mut harness, xf.to_screen(label.tag.center), egui::vec2(20.0, 0.0));
+    let moved = harness.state().project().view(plan).unwrap().fitting_placements.get(&key).copied().unwrap_or_default();
+    assert!((moved.offset - glam::DVec2::new(1.0, 0.0)).length() < 1e-6, "{moved:?}");
+}
+
+#[test]
+fn the_pipe_tool_draws_vertical_runs_in_a_section() {
+    let mut state = sample_state();
+    let system = state.session.execute("system_create", serde_json::json!({"kind": "cold_water"})).unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    // A pipe 0.60 m above the ground level, 3 m behind a section looking south.
+    state
+        .session
+        .execute(
+            "pipe_create",
+            serde_json::json!({"start": [32.0, 2.0], "end": [36.0, 2.0], "offset": 0.6, "system": system}),
+        )
+        .unwrap();
+    let section = state
+        .session
+        .execute("view_create", serde_json::json!({"kind": "section", "start": [30.0, 5.0], "end": [42.0, 5.0]}))
+        .unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    let view = state.project().view(cc_core::ViewId(section)).cloned().unwrap();
+    let frame = cc_views::view_frame(&view).unwrap();
+    let ground = state.project().levels.iter().map(|l| state.project().level_elevation(l.id)).fold(f64::MAX, f64::min);
+    let at = |x: f64, y: f64, z: f64| frame.project(glam::dvec3(x, y, ground + z)).to_array();
+    state.active_view = Some(view.id);
+    let type_id = state.project().default_type(cc_core::Category::Pipe).unwrap();
+    state.tool = crate::tools::Tool::Pipe { type_id };
+    state.mep.system = Some(cc_core::SystemId(system));
+    // Clicks land where they are (no snap to the level lines of the section).
+    state.prefs.snaps.enabled = false;
+    let origin = glam::DVec2::from(at(36.0, 2.0, 1.5));
+    let mut harness = pick_harness_at(state, origin);
+    harness.run();
+    // From the end of the pipe straight up, then across at 2.50 m.
+    click_at(&mut harness, origin, at(36.0, 2.0, 0.6));
+    click_at(&mut harness, origin, at(36.0, 2.0, 2.5));
+    click_at(&mut harness, origin, at(40.0, 2.0, 2.5));
+    // (The harness's clicks may land a few pixels off in height: compare within 15 cm.)
+    let runs = pipe_runs(harness.state());
+    let riser = runs.iter().find(|r| r.0 == [3600, 200] && r.1 == [3600, 200]);
+    let Some(&(_, _, 60, top)) = riser else { panic!("no riser from the pipe: {runs:?}") };
+    assert!((top - 250).abs() <= 15, "{runs:?}");
+    assert!(runs.contains(&([3600, 200], [4000, 200], top, top)), "{runs:?}");
+    // The riser joins the pipe: an elbow at its foot and one at its top.
+    let geom = harness.state().session.geom();
+    let elbows = geom.mep.fittings.iter().filter(|f| matches!(f.kind, cc_geom::mep_net::FittingKind::Elbow { .. }));
+    assert_eq!(elbows.count(), 2, "{:?}", geom.mep.fittings);
 }
 
 /// The sample house with the form plugin, a wall and a column away from
