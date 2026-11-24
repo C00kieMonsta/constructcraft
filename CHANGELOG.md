@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Columns of an annular sector came back from IFC with a section of chords. The sector was written as a polygon, read back as a sketch of its points: the column lost a little of its volume, and its stirrups, laid out again on the polygon, had a straight leg at each end of each arc, so their shape and bar mark changed after an export and an import. The section is now written with its two arcs (an `IfcArbitraryClosedProfileDef` of trimmed circles joined by its radial sides) and read back as the annular sector, for columns and for beams of that profile, with its volume and its stirrups unchanged.
+
 ## [0.14.1] - 2026-11-23
 
 ### Added

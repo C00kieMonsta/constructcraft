@@ -377,6 +377,14 @@ fn ring_sector(curves: &[SketchCurve]) -> Option<RingSector> {
     Some(RingSector { center: band.center, r_in: band.r_in, r_out: band.r_out, sweep: band.sweep, axis })
 }
 
+/// The annular sector of `s`, to the hundredth of a millimeter and the
+/// thousandth of a degree: files round their points, and columns alike but
+/// for that noise are one profile.
+fn rounded_sector(s: &RingSector) -> ProfileShape {
+    let (length, angle) = (|v: f64| (v * 1e5).round() / 1e5, |v: f64| (v * 1e3).round() / 1e3);
+    ProfileShape::AnnularSector { r_in: length(s.r_in), r_out: length(s.r_out), sweep: angle(s.sweep.to_degrees()) }
+}
+
 /// A band of a ring: between the circles of radii `r_in` and `r_out` about
 /// `center`, from the angle `start` counter-clockwise through `sweep`
 /// (radians; a whole turn for a full ring).
@@ -3633,14 +3641,7 @@ impl<'a> Importer<'a> {
         // itself, placed by its ring, so the columns around a tank share one profile and type.
         let sector = ex.footprint_curves().as_deref().and_then(ring_sector).filter(|s| s.r_in > 1e-6);
         let (read, position, rotation) = if let Some(s) = sector {
-            // To the hundredth of a millimeter and the thousandth of a degree: files round
-            // their points, and columns alike but for that noise are one profile.
-            let (length, angle) = (|v: f64| (v * 1e5).round() / 1e5, |v: f64| (v * 1e3).round() / 1e3);
-            let shape = ProfileShape::AnnularSector {
-                r_in: length(s.r_in),
-                r_out: length(s.r_out),
-                sweep: angle(s.sweep.to_degrees()),
-            };
+            let shape = rounded_sector(&s);
             let Some(center) = shape.sector_center() else { return false };
             let name = self.read_section(id, &ex).and_then(|r| r.name);
             let read = ReadSection { shape, name, rotation_deg: 0.0, center: DVec2::ZERO };
@@ -3737,7 +3738,19 @@ impl<'a> Importer<'a> {
             let rotation_deg = if turn.abs() < 1e-12 { 0.0 } else { turn.to_degrees() };
             Some(ReadSection { shape, name: name.clone(), rotation_deg, center })
         });
-        parametric.or_else(|| loose_section(&ex.profile.pts, &ex.profile.holes).map(|r| ReadSection { name, ..r }))
+        // An outline of two concentric arcs joined by radial sides: the annular sector
+        // (as this program writes one), placed by its ring in the profile's plane.
+        let sector = || {
+            let s = ex.profile.curves.as_deref().and_then(ring_sector).filter(|s| s.r_in > 1e-6)?;
+            let shape = rounded_sector(&s);
+            let center = shape.sector_center()?;
+            let turn = s.axis.to_angle() - std::f64::consts::FRAC_PI_2;
+            let rotation_deg = if turn.abs() < 1e-12 { 0.0 } else { turn.to_degrees() };
+            Some(ReadSection { shape, name: name.clone(), rotation_deg, center: s.center - s.axis * center.y })
+        };
+        parametric
+            .or_else(sector)
+            .or_else(|| loose_section(&ex.profile.pts, &ex.profile.holes).map(|r| ReadSection { name, ..r }))
     }
 
     /// The material profile set the product `id` or its type uses (IFC4).
