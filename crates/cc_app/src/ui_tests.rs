@@ -2392,6 +2392,49 @@ fn from_walls_follows_the_chosen_wall_face() {
     assert!(harness.query_all_by_role(Role::ComboBox).next().is_some(), "the list of faces");
 }
 
+/// Issue #496: lines *From Walls* added move when the wall face changes,
+/// except those changed since; undo brings them back.
+#[test]
+fn from_walls_lines_follow_a_new_wall_face() {
+    use cc_core::LocationLine::{CoreExterior, FinishExterior};
+    let mut state = sample_state();
+    let level = state.project().walls().map(|(e, _)| e.level).next().unwrap();
+    let plan = state.project().views_of(cc_core::ViewCategory::FloorPlan).find(|v| v.level() == Some(level));
+    state.active_view = plan.map(|v| v.id);
+    let floor = state.project().default_type(cc_core::Category::Floor).unwrap();
+    state.set_tool(crate::tools::Tool::Sketch { category: cc_core::Category::Floor, type_id: floor });
+    let area = |state: &AppState| {
+        let sketch = cc_core::sketch::Sketch { curves: state.sketch.as_ref().unwrap().curves.clone() };
+        cc_geom::polygon::area(&sketch.profile().expect("a closed outline").outline)
+    };
+    let expected = |state: &AppState, face| {
+        cc_geom::polygon::area(&cc_engine::walls_loop_at(state.project(), level, face).unwrap())
+    };
+    crate::sketch_mode::set_wall_face(&mut state, FinishExterior);
+    crate::sketch_mode::pick_walls(&mut state);
+    assert!((area(&state) - expected(&state, FinishExterior)).abs() < 1e-9);
+    // A new face moves the lines: the outline is the core faces' loop now.
+    crate::sketch_mode::set_wall_face(&mut state, CoreExterior);
+    assert!((area(&state) - expected(&state, CoreExterior)).abs() < 1e-9, "{}", area(&state));
+    // And back again.
+    crate::sketch_mode::set_wall_face(&mut state, FinishExterior);
+    assert!((area(&state) - expected(&state, FinishExterior)).abs() < 1e-9);
+    // Undo brings the core faces back, and a new face still moves them.
+    state.sketch.as_mut().unwrap().undo();
+    assert!((area(&state) - expected(&state, CoreExterior)).abs() < 1e-9);
+    crate::sketch_mode::set_wall_face(&mut state, FinishExterior);
+    assert!((area(&state) - expected(&state, FinishExterior)).abs() < 1e-9);
+    // A line the user moved stays where it was put.
+    let s = state.sketch.as_mut().unwrap();
+    let cc_core::sketch::SketchCurve::Line { a, .. } = &mut s.curves[0] else { panic!("a line") };
+    *a += glam::DVec2::new(0.0, 0.0001);
+    let edited = s.curves[0].clone();
+    crate::sketch_mode::set_wall_face(&mut state, CoreExterior);
+    let s = state.sketch.as_ref().unwrap();
+    assert_eq!(s.curves[0], edited);
+    assert!(s.curves[1..].iter().all(|c| s.from_walls[0].contains(c)), "the others moved");
+}
+
 /// A piece of the component environment is sketched in the same sketch as
 /// outlines in plans: its ribbon, options, picked curve and Finish.
 #[test]

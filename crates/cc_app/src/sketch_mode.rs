@@ -128,11 +128,13 @@ struct Grip {
     which: u8,
 }
 
-/// What the sketch's undo brings back: its curves and a terrain's points.
+/// What the sketch's undo brings back: its curves, a terrain's points and
+/// which lines came from the walls.
 #[derive(Debug, Clone)]
 struct Snapshot {
     curves: Vec<SketchCurve>,
     points: Vec<DVec3>,
+    from_walls: Vec<Vec<SketchCurve>>,
 }
 
 /// An open sketch.
@@ -168,6 +170,9 @@ pub struct Session {
     /// Values typed after the first point (a length and an angle, or a
     /// rectangle's width and depth; Tab switches the field).
     pub typed: TypedInput,
+    /// The lines each *From Walls* added, side by side along the walls'
+    /// loop, so a new wall face moves those not changed since (#496).
+    pub from_walls: Vec<Vec<SketchCurve>>,
 }
 
 impl Session {
@@ -189,6 +194,7 @@ impl Session {
             points: Vec::new(),
             selected_points: BTreeSet::new(),
             typed: TypedInput::default(),
+            from_walls: Vec::new(),
         }
     }
 
@@ -254,13 +260,14 @@ impl Session {
     }
 
     fn snapshot(&self) -> Snapshot {
-        Snapshot { curves: self.curves.clone(), points: self.points.clone() }
+        Snapshot { curves: self.curves.clone(), points: self.points.clone(), from_walls: self.from_walls.clone() }
     }
 
     fn restore(&mut self, to: Snapshot) -> Snapshot {
         let now = Snapshot {
             curves: std::mem::replace(&mut self.curves, to.curves),
             points: std::mem::take(&mut self.points),
+            from_walls: std::mem::replace(&mut self.from_walls, to.from_walls),
         };
         self.points = to.points;
         now
@@ -295,6 +302,49 @@ impl Session {
         }
         self.remember();
         self.curves.extend(curves);
+    }
+
+    /// Add the lines *From Walls* made (one undo step), remembering them so
+    /// a new wall face can move them.
+    pub fn add_from_walls(&mut self, curves: Vec<SketchCurve>) {
+        let curves: Vec<SketchCurve> = curves.into_iter().filter(SketchCurve::is_valid).collect();
+        if curves.is_empty() {
+            return;
+        }
+        self.remember();
+        self.curves.extend(curves.iter().cloned());
+        self.from_walls.push(curves);
+    }
+
+    /// Move the lines *From Walls* added, those still as they were made, to
+    /// `fresh`: the same walls' loop on another face, side for side (the
+    /// loop has the same sides in the same order whatever the face). Lines
+    /// the user moved, trimmed or deleted stay as they are. One undo step;
+    /// returns how many lines moved.
+    pub fn refit_walls(&mut self, fresh: &[SketchCurve]) -> usize {
+        let mut groups = self.from_walls.clone();
+        let mut moves: Vec<(usize, SketchCurve)> = Vec::new();
+        for group in groups.iter_mut().filter(|g| g.len() == fresh.len()) {
+            for (old, new) in group.iter_mut().zip(fresh) {
+                let taken = |j: usize| moves.iter().any(|(k, _)| *k == j);
+                let found = self.curves.iter().enumerate().position(|(j, c)| c == old && !taken(j));
+                if let Some(j) = found {
+                    moves.push((j, new.clone()));
+                    *old = new.clone();
+                }
+            }
+        }
+        if moves.is_empty() {
+            return 0;
+        }
+        self.remember();
+        for (j, new) in &moves {
+            if let Some(c) = self.curves.get_mut(*j) {
+                *c = new.clone();
+            }
+        }
+        self.from_walls = groups;
+        moves.len()
     }
 
     pub fn can_undo(&self) -> bool {
@@ -907,10 +957,26 @@ pub fn pick_walls(state: &mut AppState) {
         Some(pts) => {
             let lines = Sketch::from_polygons(&pts, &[]).curves;
             if let Some(s) = state.sketch.as_mut() {
-                s.add(lines);
+                s.add_from_walls(lines);
             }
         }
         None => state.message = t!("msg-no-wall-loop"),
+    }
+}
+
+/// Choose the face of the walls *From Walls* follows; the lines it already
+/// added and that were not changed since move to the new face (#496).
+pub fn set_wall_face(state: &mut AppState, face: cc_core::LocationLine) {
+    state.modify.wall_face = Some(face);
+    let Some(level) = state.active_level() else { return };
+    if state.sketch.as_ref().is_none_or(|s| s.from_walls.is_empty()) {
+        return;
+    }
+    let Some(pts) = cc_engine::walls_loop_at(state.project(), level, face) else { return };
+    let fresh: Vec<SketchCurve> =
+        Sketch::from_polygons(&pts, &[]).curves.into_iter().filter(SketchCurve::is_valid).collect();
+    if let Some(s) = state.sketch.as_mut() {
+        s.refit_walls(&fresh);
     }
 }
 
@@ -1154,7 +1220,7 @@ fn select(
         }
         if resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down()) {
             if s.curves != before {
-                s.undo.push(Snapshot { curves: before, points: s.points.clone() });
+                s.undo.push(Snapshot { curves: before, points: s.points.clone(), from_walls: s.from_walls.clone() });
                 s.redo.clear();
             }
             s.drag = None;
@@ -1653,7 +1719,7 @@ pub fn options(ui: &mut Ui, state: &mut AppState) {
             }
         });
         if face != wall_face(state, category) {
-            state.modify.wall_face = Some(face);
+            set_wall_face(state, face);
         }
         ui.separator();
     }
