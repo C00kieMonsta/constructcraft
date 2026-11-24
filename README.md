@@ -139,7 +139,7 @@ Translations live in `assets/i18n/*.ftl`. A test ensures every language has the 
 
 ## Coming from Revit?
 
-ConstructCraft does not read `.rvt` files. To bring a Revit model in, export it to IFC from Revit (*File → Export → IFC*, IFC4 or IFC2x3) and open the file with *Insert → Import IFC…*. Storeys, walls, doors, windows, slabs, ceilings, roofs, spaces, columns and beams come across as native, editable elements with their types and materials; everything else comes across as generic objects with their IFC class and geometry, and the import message reports how many.
+ConstructCraft does not read `.rvt` files. To bring a Revit model in, export it to IFC from Revit (*File → Export → IFC*, IFC4 or IFC2x3) and open it in ConstructCraft with *Open* or *Import IFC…* (on the home screen, or *Insert → Import IFC…*), or drop it on the window. Storeys, walls, doors, windows, slabs, ceilings, roofs, spaces, columns and beams come across as native, editable elements with their types and materials; everything else comes across as generic objects with their IFC class and geometry, and the import message reports how many.
 
 If you do not have Revit, independent third-party tools can convert `.rvt` files to IFC; check their coverage and license terms yourself. ConstructCraft neither bundles nor endorses them.
 

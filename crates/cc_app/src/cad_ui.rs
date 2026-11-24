@@ -183,12 +183,20 @@ pub fn import_image_path(state: &mut AppState, path: PathBuf) {
     crate::jobs::start(state, t!("job-importing-image"), path, crate::jobs::Base::Current, run, finish);
 }
 
-/// DWG and DXF drawings, pictures and SVG files dropped on the window go into the active view.
+/// A project or IFC file dropped on the window opens, also on the home screen; DWG and DXF
+/// drawings, pictures and SVG files go into the active view.
 pub fn dropped_files(ctx: &egui::Context, state: &mut AppState) {
-    if !state.project_open || state.show_home || crate::jobs::busy(state) {
+    if crate::jobs::busy(state) {
         return;
     }
     let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
+    if let Some(path) = dropped.iter().find(|p| crate::actions::opens(p)) {
+        crate::actions::guarded(state, crate::state::PendingAction::OpenPath(path.clone()));
+        return;
+    }
+    if !state.project_open || state.show_home {
+        return;
+    }
     for path in dropped {
         if is_cad(&path) {
             import_cad_path(state, path);

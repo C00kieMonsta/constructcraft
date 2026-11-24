@@ -131,7 +131,7 @@ O [ConstructCraft Components](https://github.com/francisreboucas/constructcraft-
 
 ## Vindo do Revit?
 
-O ConstructCraft não lê arquivos `.rvt`. Para trazer um modelo do Revit, exporte-o para IFC no próprio Revit (*File → Export → IFC*, IFC4 ou IFC2x3) e abra o arquivo em *Inserir → Importar IFC…*. Pavimentos, paredes, portas, janelas, lajes, forros, telhados, ambientes, pilares e vigas chegam como elementos nativos e editáveis, com seus tipos e materiais; todo o resto chega como objetos genéricos com sua classe IFC e geometria, e a mensagem da importação informa quantos.
+O ConstructCraft não lê arquivos `.rvt`. Para trazer um modelo do Revit, exporte-o para IFC no próprio Revit (*File → Export → IFC*, IFC4 ou IFC2x3) e abra-o no ConstructCraft com *Abrir* ou *Importar IFC…* (na tela inicial, ou em *Inserir → Importar IFC…*), ou arraste-o para a janela. Pavimentos, paredes, portas, janelas, lajes, forros, telhados, ambientes, pilares e vigas chegam como elementos nativos e editáveis, com seus tipos e materiais; todo o resto chega como objetos genéricos com sua classe IFC e geometria, e a mensagem da importação informa quantos.
 
 Quem não tem o Revit pode usar ferramentas independentes de terceiros que convertem `.rvt` para IFC; verifique por conta própria a cobertura e a licença delas. O ConstructCraft não as inclui nem as endossa.
 
