@@ -1,5 +1,5 @@
 //! Tags of elements in plans: what a tag of a door, a window, a room, a
-//! column, a beam or a footing writes and how it looks (its type, a
+//! column, a beam, a footing, a pipe, a conduit or a cable tray writes and how it looks (its type, a
 //! [`TagStyle`] in a `TypeData::Tag`), and how each plan adjusts the tag
 //! of one element ([`TagPlacement`] in `View::tags`) or picks the type it
 //! tags a target with (`View::tag_types`).
@@ -8,7 +8,14 @@
 //! (`cc_views::tag`). A tag's text lines are templates whose `{Field}`
 //! placeholders (see [`crate::title_block::field_parts`]) name a schedule
 //! field by its serde name (`{Width}`, `{Comments}`) or one of the tag
-//! keys `Mark`, `TypeName`, `Name`, `Number`, `Area`, `Section` and `Level`.
+//! keys `Mark`, `TypeName`, `Name`, `Number`, `Area`, `Section` and `Level`,
+//! and for runs of services `Systems` (the systems' codes), `DiameterMark`
+//! (`Ø25`), `SlopeMark` (`i = 1 %`, sloped pipes), `Circuits` (the codes
+//! in parentheses) and `TraySize` (`300×100`).
+//!
+//! Services plans can also label their fittings (`View::fitting_tags`);
+//! fittings are not elements, so a view keeps the adjustment of a fitting's
+//! label by the runs meeting there ([`fitting_key`], `View::fitting_placements`).
 
 use crate::{Element, ElementId, ElementKind, ElementType, ElementTypeId, LeaderSymbol, TypeData, View};
 use glam::DVec2;
@@ -43,10 +50,31 @@ pub enum TagTarget {
     Beam,
     /// Pad footings and pile caps.
     Foundation,
+    /// Pipes, in plumbing plans.
+    Pipe,
+    /// Conduits, in electrical and communications plans.
+    Conduit,
+    /// Cable trays, in electrical and communications plans.
+    CableTray,
 }
 
 impl TagTarget {
-    pub const ALL: [TagTarget; 6] = [
+    pub const ALL: [TagTarget; 9] = [
+        TagTarget::Door,
+        TagTarget::Window,
+        TagTarget::Room,
+        TagTarget::Column,
+        TagTarget::Beam,
+        TagTarget::Foundation,
+        TagTarget::Pipe,
+        TagTarget::Conduit,
+        TagTarget::CableTray,
+    ];
+
+    /// The targets the template carries a tag type of (runs of services
+    /// draw their default style until `tag_type_create` makes one, so the
+    /// template's ids stay as they were).
+    pub const IN_TEMPLATE: [TagTarget; 6] = [
         TagTarget::Door,
         TagTarget::Window,
         TagTarget::Room,
@@ -70,6 +98,9 @@ impl TagTarget {
                 }) => TagTarget::Foundation,
                 _ => return None,
             },
+            ElementKind::Pipe(_) => TagTarget::Pipe,
+            ElementKind::Conduit(_) => TagTarget::Conduit,
+            ElementKind::CableTray(_) => TagTarget::CableTray,
             _ => return None,
         })
     }
@@ -79,7 +110,8 @@ impl TagTarget {
         Self::of_element(e, project.element_type(e.type_id).map(|t| &t.data))
     }
 
-    /// The name commands use: `door`, `window`, `room`, `column`, `beam`, `foundation`.
+    /// The name commands use: `door`, `window`, `room`, `column`, `beam`,
+    /// `foundation`, `pipe`, `conduit`, `cable_tray`.
     pub fn code(self) -> &'static str {
         match self {
             TagTarget::Door => "door",
@@ -88,6 +120,9 @@ impl TagTarget {
             TagTarget::Column => "column",
             TagTarget::Beam => "beam",
             TagTarget::Foundation => "foundation",
+            TagTarget::Pipe => "pipe",
+            TagTarget::Conduit => "conduit",
+            TagTarget::CableTray => "cable_tray",
         }
     }
 
@@ -106,6 +141,9 @@ impl TagTarget {
             TagTarget::Column => "tpl-tag-column",
             TagTarget::Beam => "tpl-tag-beam",
             TagTarget::Foundation => "tpl-tag-foundation",
+            TagTarget::Pipe => "tpl-tag-pipe",
+            TagTarget::Conduit => "tpl-tag-conduit",
+            TagTarget::CableTray => "tpl-tag-cable-tray",
         }
     }
 
@@ -131,6 +169,19 @@ impl TagTarget {
             }
             TagTarget::Beam => TagStyle {
                 lines: vec![line("{Mark} {Section}", 2.5)],
+                orientation: TagOrientation::AlongHost,
+                ..TagStyle::default()
+            },
+            // Along the run: "AF Ø25", "ES Ø100  i = 1 %", "Ø20 (1, 2)", "300×100 (A)".
+            TagTarget::Pipe | TagTarget::Conduit | TagTarget::CableTray => TagStyle {
+                lines: vec![line(
+                    match self {
+                        TagTarget::Pipe => "{Systems} {DiameterMark}  {SlopeMark}",
+                        TagTarget::Conduit => "{DiameterMark} {Circuits}",
+                        _ => "{TraySize} {Circuits}",
+                    },
+                    2.0,
+                )],
                 orientation: TagOrientation::AlongHost,
                 ..TagStyle::default()
             },
@@ -329,6 +380,26 @@ impl TagPlacement {
     }
 }
 
+/// Most runs a fitting key names.
+pub const MAX_FITTING_RUNS: usize = 16;
+
+/// The key of a fitting's label in a view: the ids of the runs meeting at
+/// the fitting, sorted and without repeats, joined by `-` (`"12-15-20"`).
+pub fn fitting_key(runs: &[ElementId]) -> String {
+    let mut ids: Vec<u64> = runs.iter().map(|id| id.0).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids.iter().map(u64::to_string).collect::<Vec<_>>().join("-")
+}
+
+/// The runs a fitting key names (`None`: not a key [`fitting_key`] makes).
+pub fn fitting_runs(key: &str) -> Option<Vec<ElementId>> {
+    let ids: Vec<ElementId> =
+        key.split('-').map(|s| s.trim().parse::<u64>().ok().map(ElementId)).collect::<Option<_>>()?;
+    let ok = !ids.is_empty() && ids.len() <= MAX_FITTING_RUNS && fitting_key(&ids) == key;
+    ok.then_some(ids)
+}
+
 /// Whether `ty` is a tag type of `target`.
 pub fn is_tag_type_of(ty: Option<&ElementType>, target: TagTarget) -> bool {
     matches!(ty.map(|t| &t.data), Some(TypeData::Tag { target: t, .. }) if *t == target)
@@ -385,6 +456,34 @@ pub fn repair_view_tags(
         let ok = is_tag_type_of(types.get(t), *target);
         n += usize::from(!ok);
         ok
+    });
+    if view.fitting_tags && !view.takes_fitting_tags() {
+        view.fitting_tags = false;
+        n += 1;
+    }
+    // Fittings: by the runs meeting there; they have no type and no start bubble.
+    view.fitting_placements.retain(|key, p| {
+        let Some(runs) = fitting_runs(key) else {
+            n += 1;
+            return false;
+        };
+        if runs.iter().any(|id| !elements.contains_key(id)) {
+            n += 1;
+            return false;
+        }
+        if !(p.offset.is_finite() && p.offset.length() < MAX_OFFSET) {
+            p.offset = DVec2::ZERO;
+            n += 1;
+        }
+        if p.start_offset != DVec2::ZERO || p.tag_type.is_some() {
+            (p.start_offset, p.tag_type) = (DVec2::ZERO, None);
+            n += 1;
+        }
+        if p.rotation_deg.is_some_and(|r| !(r.is_finite() && r.abs() <= 360.0)) {
+            p.rotation_deg = None;
+            n += 1;
+        }
+        !p.is_default()
     });
     n
 }
@@ -469,10 +568,16 @@ impl crate::Project {
 
     /// Add a tag type of the default style for every target that has none,
     /// named by `n` from the targets' template keys. The template carries one
-    /// per target; plans draw a target of a project without one (older
-    /// files) in its [default style](TagTarget::default_style).
+    /// per target of [`TagTarget::IN_TEMPLATE`]; plans draw a target of a
+    /// project without one (older files, runs of services) in its
+    /// [default style](TagTarget::default_style).
     pub fn ensure_tag_types(&mut self, n: &dyn Fn(&str) -> String) {
-        for target in TagTarget::ALL {
+        self.ensure_tag_types_of(&TagTarget::ALL, n);
+    }
+
+    /// [`Self::ensure_tag_types`] for `targets` only.
+    pub fn ensure_tag_types_of(&mut self, targets: &[TagTarget], n: &dyn Fn(&str) -> String) {
+        for &target in targets {
             if self.tag_types_of(target).next().is_some() {
                 continue;
             }
@@ -513,9 +618,13 @@ mod tests {
     #[test]
     fn placements_and_view_tag_types_are_repaired() {
         let mut p = crate::Project::from_template();
-        assert!(TagTarget::ALL.iter().all(|&t| p.tag_types_of(t).count() == 1), "the template has one per target");
+        assert!(
+            TagTarget::IN_TEMPLATE.iter().all(|&t| p.tag_types_of(t).count() == 1),
+            "the template has one per target"
+        );
+        assert_eq!(p.tag_types_of(TagTarget::Pipe).count(), 0, "but none of runs of services");
         p.ensure_tag_types(&|k: &str| k.to_string());
-        assert!(TagTarget::ALL.iter().all(|&t| p.tag_types_of(t).count() == 1), "and adds none to a project with one");
+        assert!(TagTarget::ALL.iter().all(|&t| p.tag_types_of(t).count() == 1), "and adds the missing ones only");
         let level = p.levels[0].id;
         let room_type = p.default_type(crate::Category::Room).unwrap();
         let room = ElementId(p.alloc_id());
@@ -558,5 +667,22 @@ mod tests {
         assert_eq!(view.tags[&room], TagPlacement { offset: DVec2::new(1.0, 0.0), ..Default::default() });
         assert_eq!(view.tag_types.len(), 1);
         assert_eq!(repair_view_tags(&mut view, &p.elements, &p.types), 0);
+
+        // Fitting labels: keyed by their runs, dropped with them; a plan without services shows none.
+        let key = fitting_key(&[room, room]);
+        assert_eq!(fitting_runs(&key), Some(vec![room]));
+        assert_eq!(fitting_key(&[ElementId(20), ElementId(3)]), "3-20");
+        for bad in ["", "20-3", "3-3", "a-1", "-1"] {
+            assert_eq!(fitting_runs(bad), None, "{bad}");
+        }
+        let moved = TagPlacement { offset: DVec2::X, tag_type: Some(door_tag), ..Default::default() };
+        view.fitting_placements.insert(key.clone(), moved);
+        view.fitting_placements.insert("3-20".into(), moved);
+        view.fitting_placements.insert("x".into(), moved);
+        view.fitting_tags = true;
+        assert_eq!(repair_view_tags(&mut view, &p.elements, &p.types), 4);
+        assert!(!view.fitting_tags, "an architectural plan labels no fittings");
+        assert_eq!(view.fitting_placements.len(), 1);
+        assert_eq!(view.fitting_placements[&key], TagPlacement { offset: DVec2::X, ..Default::default() });
     }
 }

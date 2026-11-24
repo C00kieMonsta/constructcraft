@@ -3436,6 +3436,63 @@ fn the_pipe_tool_joins_runs_at_other_elevations_with_vertical_runs() {
 }
 
 #[test]
+fn pipe_tags_and_fitting_labels_are_dragged_in_a_plumbing_plan() {
+    let mut state = sample_state();
+    let run = |state: &mut AppState, name: &str, args: serde_json::Value| state.session.execute(name, args).unwrap();
+    let plan = run(&mut state, "view_create", serde_json::json!({"kind": "plumbing_plan"}))["id"].as_u64().unwrap();
+    let plan = cc_core::ViewId(plan);
+    run(&mut state, "view_set", serde_json::json!({"view": plan.0, "fitting_tags": true}));
+    let pipe = |state: &mut AppState, a: [f64; 2], b: [f64; 2]| {
+        let args = serde_json::json!({"start": a, "end": b, "offset": 0.6, "system": "cold_water"});
+        cc_core::ElementId(run(state, "pipe_create", args)["id"].as_u64().unwrap())
+    };
+    let first = pipe(&mut state, [32.0, 2.0], [38.0, 2.0]);
+    let second = pipe(&mut state, [38.0, 2.0], [38.0, 6.0]);
+    state.active_view = Some(plan);
+    state.tool = crate::tools::Tool::Select;
+    let mut harness = pick_harness(state);
+    harness.run();
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, PICK_SIZE);
+    let xf = crate::paint::Xf { screen: rect.center(), origin: PICK_ORIGIN, scale: PICK_SCALE };
+    let drag = |h: &mut Harness<'static, AppState>, from: egui::Pos2, by: egui::Vec2| {
+        let button = egui::PointerButton::Primary;
+        h.input_mut().events.push(egui::Event::PointerMoved(from));
+        h.input_mut().events.push(egui::Event::PointerButton {
+            pos: from,
+            button,
+            pressed: true,
+            modifiers: Default::default(),
+        });
+        h.run();
+        for k in 1..=4 {
+            h.input_mut().events.push(egui::Event::PointerMoved(from + by * (k as f32 / 4.0)));
+            h.run();
+        }
+        let pos = from + by;
+        h.input_mut().events.push(egui::Event::PointerButton {
+            pos,
+            button,
+            pressed: false,
+            modifiers: Default::default(),
+        });
+        h.run();
+    };
+    // The pipe's tag moves 1 m to the right; the pipe stays.
+    let tag = harness.state_mut().drawing(plan).unwrap().tags.iter().find(|t| t.element == first).copied().unwrap();
+    drag(&mut harness, xf.to_screen(tag.center), egui::vec2(20.0, 0.0));
+    let placement = harness.state().project().view(plan).unwrap().tags.get(&first).copied().unwrap_or_default();
+    assert!((placement.offset - glam::DVec2::new(1.0, 0.0)).length() < 1e-6, "{placement:?}");
+    assert!(pipe_runs(harness.state()).contains(&([3200, 200], [3800, 200], 60, 60)));
+    // The elbow's label moves by the runs meeting there.
+    let key = cc_core::tag::fitting_key(&[first, second]);
+    let label = harness.state_mut().drawing(plan).unwrap().fitting_tags.iter().find(|t| t.key == key).cloned();
+    let label = label.unwrap_or_else(|| panic!("no label of fitting {key}"));
+    drag(&mut harness, xf.to_screen(label.tag.center), egui::vec2(20.0, 0.0));
+    let moved = harness.state().project().view(plan).unwrap().fitting_placements.get(&key).copied().unwrap_or_default();
+    assert!((moved.offset - glam::DVec2::new(1.0, 0.0)).length() < 1e-6, "{moved:?}");
+}
+
+#[test]
 fn the_pipe_tool_draws_vertical_runs_in_a_section() {
     let mut state = sample_state();
     let system = state.session.execute("system_create", serde_json::json!({"kind": "cold_water"})).unwrap()["id"]

@@ -56,6 +56,7 @@ mod phases;
 mod pile_rebar;
 mod piles;
 mod pipe_fittings;
+mod pipe_tags;
 mod pipes;
 mod plugin_data;
 mod plugin_scope;

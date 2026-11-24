@@ -491,7 +491,7 @@ impl Project {
         // Last, so the ids of everything above stay as they were.
         p.convert_sections_to_profiles(&n);
         // Tag and view mark types, after everything else for the same reason.
-        p.ensure_tag_types(&n);
+        p.ensure_tag_types_of(&crate::tag::TagTarget::IN_TEMPLATE, &n);
         p.ensure_mark_types(&n);
         // The pipe types are sizes of built-in series, copied in.
         p.link_template_pipes(system, &|key| vec![n(key)]);
@@ -1642,6 +1642,9 @@ pub fn template_default(key: &str) -> &'static str {
         "tpl-tag-column" => "Etiqueta de pilar",
         "tpl-tag-beam" => "Etiqueta de viga",
         "tpl-tag-foundation" => "Etiqueta de fundação",
+        "tpl-tag-pipe" => "Etiqueta de tubulação",
+        "tpl-tag-conduit" => "Etiqueta de eletroduto",
+        "tpl-tag-cable-tray" => "Etiqueta de eletrocalha",
         "tpl-mark-section" => "Marca de corte",
         "tpl-mark-elevation" => "Marca de elevação",
         "tpl-type-column-rect" => "Pilar 20 x 20 cm",

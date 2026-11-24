@@ -460,6 +460,14 @@ pub struct View {
     /// [`ViewKind::ThreeD`]'s `rebar` instead.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub rebar: bool,
+    /// Services plans: label each fitting of the plan's discipline (its
+    /// catalog piece, else its kind and size; a missing one marked).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fitting_tags: bool,
+    /// How the plan adjusts the label of each fitting, by the runs meeting
+    /// there ([`crate::tag::fitting_key`]).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub fitting_placements: std::collections::BTreeMap<String, crate::tag::TagPlacement>,
 }
 
 /// How a view shades faces and casts shadows in the styles that show more
@@ -860,7 +868,14 @@ impl View {
             render: None,
             shading: ShadingSettings::default(),
             rebar: false,
+            fitting_tags: false,
+            fitting_placements: Default::default(),
         }
+    }
+
+    /// Whether the view can label fittings: a floor plan of services.
+    pub fn takes_fitting_tags(&self) -> bool {
+        matches!(self.kind, ViewKind::FloorPlan { mep: Some(_), .. })
     }
 
     /// Whether the view draws the reinforcement: a 3D view of it, or a

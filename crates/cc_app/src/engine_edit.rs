@@ -137,6 +137,7 @@ pub fn view(state: &mut AppState, id: ViewId, key: Option<u64>, f: impl FnOnce(&
         }),
         mark_type: (new.mark_type != old.mark_type).then(|| new.mark_type.map(|t| Ref::Id(t.0))),
         rebar: (new.rebar != old.rebar).then_some(new.rebar),
+        fitting_tags: (new.fitting_tags != old.fitting_tags).then_some(new.fitting_tags),
     };
     run(state, key, command)
 }

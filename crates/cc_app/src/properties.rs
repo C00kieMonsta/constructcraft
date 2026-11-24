@@ -3329,6 +3329,13 @@ fn view_sections(ui: &mut Ui, state: &mut AppState, id: ViewId) {
                     crate::engine_edit::view(state, id, None, |v| v.rebar = on);
                 }
             }
+            // Services plans can label their fittings.
+            if view.takes_fitting_tags() {
+                let mut on = view.fitting_tags;
+                if row(ui, &t!("prop-fitting-tags"), |ui| crate::table::checkbox(ui, &mut on)).changed() {
+                    crate::engine_edit::view(state, id, None, |v| v.fitting_tags = on);
+                }
+            }
             if model_view {
                 // And in a visual style.
                 let current = view.style();

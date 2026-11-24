@@ -542,6 +542,11 @@ pub enum Drag {
     TagRotate {
         tag: cc_views::TagHandle,
     },
+    /// The label of a fitting in a services plan, as drawn when the drag started.
+    FittingTag {
+        tag: cc_views::FittingTagHandle,
+        start: DVec2,
+    },
     /// A grid's bubble, as drawn when the drag started.
     Bubble {
         bubble: cc_views::BubbleHandle,
@@ -688,6 +693,8 @@ pub struct Interaction {
     pub chain_redo: Vec<ChainStep>,
     /// The tag (or grid bubbles) a context menu was opened on: the view and the element.
     pub tag_menu: Option<(ViewId, ElementId)>,
+    /// The fitting label a context menu was opened on: the view and the fitting's key.
+    pub fitting_menu: Option<(ViewId, String)>,
     /// The level a context menu was opened on in an elevation or a section: the view and the level.
     pub level_menu: Option<(ViewId, LevelId)>,
     /// Tab cycling the Select tool's pre-selection (issue #406).
@@ -4393,7 +4400,7 @@ fn annotation_handles(
     xf: &Xf,
     drawing: &Drawing2D,
 ) -> bool {
-    use cc_engine::commands::tags::TagSet;
+    use cc_engine::commands::tags::{FittingTagSet, TagSet};
     let Some(view_id) = state.active_view else { return false };
     let Some(view) = state.project().view(view_id) else { return false };
     let floor_plan = matches!(view.kind, ViewKind::FloorPlan { .. });
@@ -4403,6 +4410,7 @@ fn annotation_handles(
     let shift = ui.input(|i| i.modifiers.shift);
     let raw = resp.hover_pos().map(|p| xf.to_world(p));
     let tag_set = |id: cc_core::ElementId| TagSet { view: Ref::Id(view_id.0), ids: vec![id.0], ..Default::default() };
+    let fitting_set = |key: String| FittingTagSet { view: Ref::Id(view_id.0), keys: vec![key], ..Default::default() };
 
     // A drag under way: its preview, and the change when it ends.
     let end = raw.or(state.cursor);
@@ -4419,6 +4427,21 @@ fn annotation_handles(
                 {
                     let delta = Some((p - start).to_array());
                     crate::actions::run_command(state, TagSet { delta, ..tag_set(tag.element) });
+                }
+            }
+            return true;
+        }
+        Some(Drag::FittingTag { tag, start }) => {
+            if let Some(raw) = raw {
+                tag_outline(painter, xf, &tag.tag, tag.tag.center + (raw - start), tag.tag.rotation);
+            }
+            if stopped {
+                state.interaction.drag = None;
+                if let Some(p) = end
+                    && p.distance(start) > 1e-6
+                {
+                    let delta = Some((p - start).to_array());
+                    crate::actions::run_command(state, FittingTagSet { delta, ..fitting_set(tag.key) });
                 }
             }
             return true;
@@ -4510,6 +4533,9 @@ fn annotation_handles(
         if tags_ok && let Some(tag) = drawing.tag_at(w) {
             return Some(Drag::Tag { tag, start: w });
         }
+        if tags_ok && let Some(tag) = drawing.fitting_tag_at(w) {
+            return Some(Drag::FittingTag { tag, start: w });
+        }
         if bubbles_ok && let Some(bubble) = drawing.bubble_at(w) {
             return Some(Drag::Bubble { bubble, start: w });
         }
@@ -4544,8 +4570,11 @@ fn annotation_handles(
             tag.or_else(|| drawing.bubble_at(w).filter(|_| bubbles_ok).map(|b| b.element))
         });
         state.interaction.tag_menu = picked.map(|id| (view_id, id));
+        // Else a fitting's label.
+        let fitting = raw.filter(|_| tags_ok && picked.is_none()).and_then(|w| drawing.fitting_tag_at(w));
+        state.interaction.fitting_menu = fitting.as_ref().map(|t| (view_id, t.key.clone()));
         // Else a level's head or line.
-        let level = raw.filter(|_| levels_ok && picked.is_none());
+        let level = raw.filter(|_| levels_ok && picked.is_none() && fitting.is_none());
         state.interaction.level_menu =
             level.and_then(|w| crate::level_head_ui::picked(drawing, w, xf)).map(|l| (view_id, l));
     }
@@ -4569,6 +4598,28 @@ fn annotation_handles(
             Some(true) => crate::tag_type_ui::hide_tag(state, view, id),
             Some(false) => crate::tag_type_ui::reset_tag(state, view, id),
             None => {}
+        }
+    }
+    if let Some((view, key)) = state.interaction.fitting_menu.clone() {
+        let mut hide = None;
+        let open = resp.context_menu(|ui| {
+            if ui.button(t!("menu-hide-tag")).clicked() {
+                hide = Some(true);
+                ui.close();
+            }
+            if ui.button(t!("action-reset-tag")).clicked() {
+                hide = Some(false);
+                ui.close();
+            }
+        });
+        if open.is_none() && !resp.secondary_clicked() {
+            state.interaction.fitting_menu = None;
+        }
+        if let Some(hidden) = hide {
+            let set = FittingTagSet { view: Ref::Id(view.0), keys: vec![key], ..Default::default() };
+            let command =
+                if hidden { FittingTagSet { hidden: Some(true), ..set } } else { FittingTagSet { reset: true, ..set } };
+            crate::actions::run_command(state, command);
         }
     }
     false
@@ -4933,6 +4984,7 @@ fn select(
                 | Drag::Callout { .. }
                 | Drag::Tag { .. }
                 | Drag::TagRotate { .. }
+                | Drag::FittingTag { .. }
                 | Drag::Bubble { .. }
                 | Drag::LevelHead { .. }
                 | Drag::Mark { .. },

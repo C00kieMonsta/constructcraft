@@ -102,15 +102,34 @@ pub fn prepare<'a>(ctx: &TagCtx<'a>, e: &Element, target: TagTarget) -> Option<T
 }
 
 /// `template` with its fields filled in for `e`, trimmed, its runs of
-/// whitespace made single spaces.
+/// whitespace made single spaces, except two or more spaces the template
+/// itself writes between two words, kept as two ("ES Ø100  i = 1 %").
 pub fn expand_line(ctx: &TagCtx, e: &Element, template: &str) -> String {
-    let raw = expand(ctx, e, template);
+    use cc_core::title_block::{FieldPart, field_parts};
+    let mut pieces: Vec<(Cow<str>, bool)> = Vec::new();
+    field_parts(template, |part| match part {
+        FieldPart::Text { shown, .. } => pieces.push((Cow::Borrowed(shown), true)),
+        FieldPart::Field { key, .. } => pieces.push((Cow::Owned(field(ctx, e, key.trim())), false)),
+    });
     let mut out = String::new();
-    for word in raw.split_whitespace() {
-        if !out.is_empty() {
-            out.push(' ');
+    // The gap before the next word: 0 none, 1 a space, 2 a wide gap.
+    let (mut gap, mut run) = (0u8, 0usize);
+    for (text, literal) in &pieces {
+        if !literal {
+            run = 0;
         }
-        out.push_str(word);
+        for c in text.chars() {
+            if c.is_whitespace() {
+                run += usize::from(*literal);
+                gap = gap.max(if run >= 2 { 2 } else { 1 });
+                continue;
+            }
+            if !out.is_empty() && gap > 0 {
+                out.push_str(if gap == 2 { "  " } else { " " });
+            }
+            (gap, run) = (0, 0);
+            out.push(c);
+        }
     }
     out.chars().take(MAX_LINE_CHARS).collect()
 }
@@ -135,6 +154,7 @@ pub fn field(ctx: &TagCtx, e: &Element, key: &str) -> String {
         "Section" => {
             p.element_type(e.type_id).and_then(|t| crate::annotate::section_label(p, &t.data)).unwrap_or_default()
         }
+        "Systems" | "Circuits" | "DiameterMark" | "SlopeMark" | "TraySize" => run_field(ctx, e, key),
         // A room not enclosed has no area.
         "Area" if matches!(e.kind, cc_core::ElementKind::Room(_)) => match ctx.geom.rooms.get(&e.id) {
             Some(boundary) => crate::format::area(cc_geom::polygon::area(boundary)),
@@ -143,6 +163,36 @@ pub fn field(ctx: &TagCtx, e: &Element, key: &str) -> String {
         _ => ScheduleField::from_name(key)
             .map(|f| crate::schedule::cell_text(p, ctx.geom, e, f, ctx.label))
             .unwrap_or_default(),
+    }
+}
+
+/// The fields of a run of services as its plan tag writes them: its
+/// systems' codes, the codes in parentheses, `Ø25`, `i = 1 %` (sloped
+/// pipes) and a tray's `300×100`; nothing for other elements.
+fn run_field(ctx: &TagCtx, e: &Element, key: &str) -> String {
+    use cc_core::ElementKind as K;
+    let p = ctx.project;
+    let run = match &e.kind {
+        K::Pipe(s) | K::Conduit(s) | K::CableTray(s) => s,
+        _ => return String::new(),
+    };
+    let codes = || -> Vec<&str> { e.systems().iter().filter_map(|s| p.system(*s)).map(|s| s.label()).collect() };
+    let mm = |v: f64| crate::format::size(v, crate::format::MetricSize::MmNumber(0));
+    let g = ctx.geom.segments.get(&e.id);
+    match key {
+        "Systems" => codes().join(", "),
+        "Circuits" => {
+            let codes = codes();
+            if codes.is_empty() { String::new() } else { format!("({})", codes.join(", ")) }
+        }
+        "DiameterMark" if !matches!(e.kind, K::CableTray(_)) => {
+            g.map(|g| format!("Ø{}", mm(g.diameter))).unwrap_or_default()
+        }
+        "SlopeMark" if matches!(e.kind, K::Pipe(_)) && !run.is_vertical() && run.slope().abs() > 1e-4 => {
+            format!("i = {}", crate::format::slope(run.slope().abs()))
+        }
+        "TraySize" => g.and_then(|g| g.tray).map(|t| format!("{}×{}", mm(t.width), mm(t.height))).unwrap_or_default(),
+        _ => String::new(),
     }
 }
 
@@ -300,6 +350,19 @@ fn pen(style: &TagStyle) -> Option<Pen> {
 /// room). `crossed` crosses the tag out (a room not enclosed, when the
 /// style says so).
 pub fn draw(d: &mut Drawing2D, ctx: &TagCtx, tag: &Tag, spot: TagSpot, crossed: bool) {
+    let handle = draw_tag(d, ctx, tag, spot, crossed);
+    d.tags.push(handle);
+}
+
+/// [`draw`] for the label of a fitting, recorded under its `key` (see
+/// [`cc_core::tag::fitting_key`]) instead of as its element's tag.
+pub fn draw_fitting(d: &mut Drawing2D, ctx: &TagCtx, key: String, tag: &Tag, spot: TagSpot) {
+    let handle = draw_tag(d, ctx, tag, spot, false);
+    d.fitting_tags.push(crate::FittingTagHandle { key, tag: handle });
+}
+
+/// Draw a tag (see [`draw`]) and return its box.
+fn draw_tag(d: &mut Drawing2D, ctx: &TagCtx, tag: &Tag, spot: TagSpot, crossed: bool) -> crate::TagHandle {
     let mm = ctx.mm();
     let id = Some(tag.element);
     let along = direction(tag, &spot);
@@ -315,7 +378,7 @@ pub fn draw(d: &mut Drawing2D, ctx: &TagCtx, tag: &Tag, spot: TagSpot, crossed: 
     let half = DVec2::new((lh.x * c).abs() + (lh.y * s).abs(), (lh.x * s).abs() + (lh.y * c).abs());
     let center = to(center_local);
     let moved = offset.length() > 1e-9;
-    d.tags.push(crate::TagHandle { element: tag.element, center, half: lh, rotation: angle, offset });
+    let handle = crate::TagHandle { element: tag.element, center, half: lh, rotation: angle, offset };
     let pen = pen(&tag.style);
     let outside = !(spot.anchor - center).abs().cmple(half).all();
     let leader = match tag.placement.leader.unwrap_or(tag.style.leader) {
@@ -369,6 +432,7 @@ pub fn draw(d: &mut Drawing2D, ctx: &TagCtx, tag: &Tag, spot: TagSpot, crossed: 
         d.line_pen(p + DVec2::new(-s, -s), p + DVec2::new(s, s), LineStyle::Annotation, pen, id);
         d.line_pen(p + DVec2::new(-s, s), p + DVec2::new(s, -s), LineStyle::Annotation, pen, id);
     }
+    handle
 }
 
 /// Closed outline from point to point.
@@ -515,7 +579,9 @@ mod tests {
             paints: Vec::new(),
             plugin_data: Default::default(),
         };
-        assert_eq!(expand_line(&ctx, &e, " {Mark}  {Comments} {{x}} {Nothing}"), "P1 two words {x}");
+        assert_eq!(expand_line(&ctx, &e, " {Mark} {Comments} {{x}} {Nothing}"), "P1 two words {x}");
+        // Two spaces the template writes between words stay two.
+        assert_eq!(expand_line(&ctx, &e, "{Mark}  {Comments}  {Nothing}"), "P1  two words");
         assert_eq!(expand_line(&ctx, &e, "{Name} {Number} {Area}"), "Sala 7 —", "a room not enclosed has no area");
         e.mark.clear();
         assert_eq!(expand_line(&ctx, &e, "{Mark} {Section}"), "");

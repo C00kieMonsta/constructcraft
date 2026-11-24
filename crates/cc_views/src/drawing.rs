@@ -219,6 +219,9 @@ pub struct Drawing2D {
     pub background: std::collections::BTreeSet<ElementId>,
     /// Tags that can be dragged: where each is and how far it was moved.
     pub tags: Vec<TagHandle>,
+    /// Labels of fittings in services plans that can be dragged, by key
+    /// ([`cc_core::tag::fitting_key`]).
+    pub fitting_tags: Vec<FittingTagHandle>,
     /// How many of the first `prims` are the plans of other levels drawn
     /// under a plan ([`cc_core::Underlay`]): halftone, with no element, not
     /// picked or snapped to.
@@ -241,6 +244,14 @@ pub struct Drawing2D {
     /// Lookups over `prims`, built the first time they are needed (see
     /// [`DrawingIndex`]); a copy of the drawing starts without them.
     pub index: DrawingIndex,
+}
+
+/// The label of a fitting, as drawn: its key in the view's
+/// `fitting_placements` and its box (`tag.element` is the fitting's first run).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FittingTagHandle {
+    pub key: String,
+    pub tag: TagHandle,
 }
 
 /// A section's mark in a plan, as drawn (meters on the plan).
@@ -415,6 +426,11 @@ impl Drawing2D {
     /// The tag at `p` (the last drawn on top), if any.
     pub fn tag_at(&self, p: DVec2) -> Option<TagHandle> {
         self.tags.iter().rev().find(|t| t.contains(p)).copied()
+    }
+
+    /// The fitting label at `p` (the last drawn on top), if any.
+    pub fn fitting_tag_at(&self, p: DVec2) -> Option<FittingTagHandle> {
+        self.fitting_tags.iter().rev().find(|t| t.tag.contains(p)).cloned()
     }
 
     /// The elevation marker at `p` (the last drawn on top), if any.

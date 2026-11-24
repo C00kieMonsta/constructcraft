@@ -18,11 +18,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
-/// A tag target by name: `door`, `window`, `room`, `column`, `beam` or
-/// `foundation` (pad footings and pile caps).
+/// A tag target by name: `door`, `window`, `room`, `column`, `beam`,
+/// `foundation` (pad footings and pile caps), `pipe`, `conduit` or `cable_tray`.
 pub(crate) fn target(name: &str) -> Result<TagTarget> {
     TagTarget::from_code(name).ok_or_else(|| {
-        EngineError::invalid(format!("unknown tag target '{name}': use door, window, room, column, beam or foundation"))
+        EngineError::invalid(format!(
+            "unknown tag target '{name}': use door, window, room, column, beam, foundation, pipe, conduit or cable_tray"
+        ))
     })
 }
 
@@ -92,7 +94,11 @@ fn check_style(p: &Project, style: &TagStyle) -> Result<()> {
 /// always drawn), shaped like `params.style` in `type_get`: `lines` (up to
 /// 8 of `{text, size}`: text with `{Field}` placeholders, a schedule field
 /// by name such as `{Width}`, `{Height}` or `{Comments}`, or `{Mark}`,
-/// `{TypeName}`, `{Name}`, `{Number}`, `{Area}`, `{Section}`, `{Level}`;
+/// `{TypeName}`, `{Name}`, `{Number}`, `{Area}`, `{Section}`, `{Level}`,
+/// and for pipes, conduits and cable trays `{Systems}` (the systems'
+/// codes), `{Circuits}` (the codes in parentheses), `{DiameterMark}`
+/// (`Ø25`), `{SlopeMark}` (`i = 1 %`, sloped pipes) and `{TraySize}`
+/// (`300×100`); two spaces between words are kept;
 /// `{{` and `}}` write braces; size in paper mm), `symbol` (`None`,
 /// `Circle`, `Hexagon`, `Rectangle`, `RoundedRectangle`, `Ellipse`,
 /// `Diamond`, `Triangle`, `Underline`, or `{"Component": id}` of a detail
@@ -107,8 +113,8 @@ fn check_style(p: &Project, style: &TagStyle) -> Result<()> {
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct TagTypeCreate {
-    /// What the type tags: `door`, `window`, `room`, `column`, `beam` or
-    /// `foundation` (pad footings and pile caps).
+    /// What the type tags: `door`, `window`, `room`, `column`, `beam`,
+    /// `foundation` (pad footings and pile caps), `pipe`, `conduit` or `cable_tray`.
     pub target: String,
     /// Type name (default: the language's name for the target's tag).
     #[serde(default)]
@@ -170,7 +176,8 @@ fn tagged(p: &Project, id: u64) -> Result<(ElementId, TagTarget)> {
     let e = p.element(id).ok_or_else(|| EngineError::not_found("element"))?;
     let target = TagTarget::of(e, p).ok_or_else(|| {
         EngineError::invalid(format!(
-            "element {} has no tag: doors, windows, rooms, columns, beams, pad footings and pile caps do",
+            "element {} has no tag: doors, windows, rooms, columns, beams, pad footings, pile caps, \
+             pipes, conduits and cable trays do",
             id.0
         ))
     })?;
@@ -206,7 +213,7 @@ pub struct TagSet {
     /// Plan id or name (or an elevation or a section, for grids only).
     pub view: Ref,
     /// Ids of the tagged elements (doors, windows, rooms, columns, beams,
-    /// pad footings and pile caps) or of grids.
+    /// pad footings, pile caps, pipes, conduits and cable trays) or of grids.
     pub ids: Vec<u64>,
     /// Place the tags `[dx, dy]` meters from their default spot (`null`: back there).
     #[serde(default, deserialize_with = "refs::nullable", skip_serializing_if = "Option::is_none")]
@@ -493,4 +500,208 @@ pub(crate) fn apply_view_tag_types(
         }
     }
     Ok(out)
+}
+
+/// The services plan `r` names, with its level and discipline (fitting labels live there).
+fn services_plan(p: &Project, r: &Ref) -> Result<(ViewId, cc_core::LevelId, cc_core::MepDiscipline)> {
+    let view = refs::view(p, r)?;
+    match p.view(view).map(|v| &v.kind) {
+        Some(cc_core::ViewKind::FloorPlan { level, mep: Some(d), .. }) => Ok((view, *level, *d)),
+        _ => Err(EngineError::invalid("fittings are labelled in services floor plans")),
+    }
+}
+
+/// A fitting key in its canonical form (`"15-12"` is `"12-15"`).
+fn fitting_key_arg(key: &str) -> Result<String> {
+    let ids: Option<Vec<ElementId>> = key.split('-').map(|s| s.trim().parse::<u64>().ok().map(ElementId)).collect();
+    match ids {
+        Some(ids) if !ids.is_empty() && ids.len() <= cc_core::tag::MAX_FITTING_RUNS => {
+            Ok(cc_core::tag::fitting_key(&ids))
+        }
+        _ => Err(EngineError::invalid(format!(
+            "'{key}' is not a fitting key: the ids of the runs meeting at the fitting joined by '-', \
+             as fitting_tags lists them"
+        ))),
+    }
+}
+
+/// Adjust the labels of fittings in a services floor plan (shown with
+/// `view_set` `fitting_tags`), in one undo step: move them (`offset` from
+/// their default spot or `delta` from where they are, meters in plan; a
+/// label moved off its fitting gets a leader to it), turn them
+/// (`rotation`), hide them (`hidden`) or set when they get a leader
+/// (`leader`: `auto`, `always`, `never`); `reset` clears everything first.
+/// Fittings are not elements: a fitting is named by its `key`, the ids of
+/// the runs meeting at it joined by `-` (`fitting_tags` lists them), and
+/// its label keeps its adjustments while those runs meet there (they go
+/// when one of the runs is deleted).
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields)]
+pub struct FittingTagSet {
+    /// Services plan id or name.
+    pub view: Ref,
+    /// Keys of the fittings (`"12-15"`), of the plan's level and discipline.
+    pub keys: Vec<String>,
+    /// Place the labels `[dx, dy]` meters from their default spot (`null`: back there).
+    #[serde(default, deserialize_with = "refs::nullable", skip_serializing_if = "Option::is_none")]
+    pub offset: Option<Option<Point>>,
+    /// Move the labels by `[dx, dy]` meters from where they are.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delta: Option<Point>,
+    /// The labels' angle, degrees counter-clockwise (`null`: level).
+    #[serde(default, deserialize_with = "refs::nullable", skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<Option<f64>>,
+    /// Hide the labels, or show them again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<bool>,
+    /// `auto`, `always` or `never` (`null`: auto).
+    #[serde(default, deserialize_with = "refs::nullable", skip_serializing_if = "Option::is_none")]
+    pub leader: Option<Option<String>>,
+    /// Put the labels back as the plan draws them by default, before the other fields apply.
+    #[serde(default)]
+    pub reset: bool,
+}
+
+impl Command for FittingTagSet {
+    const NAME: &'static str = "fitting_tag_set";
+    const KIND: CommandKind = CommandKind::Edit;
+    fn run(self, s: &mut Session) -> Result<Value> {
+        let (view, level, discipline) = services_plan(s.project(), &self.view)?;
+        if self.keys.is_empty() || self.keys.len() > MAX_IDS {
+            return Err(EngineError::invalid(format!("give 1 to {MAX_IDS} fitting keys")));
+        }
+        if matches!(self.offset, Some(Some(_))) && self.delta.is_some() {
+            return Err(EngineError::invalid("give offset or delta, not both"));
+        }
+        let offset = match self.offset {
+            Some(Some(o)) => Some(point(o)?),
+            Some(None) => Some(DVec2::ZERO),
+            None => None,
+        };
+        let delta = self.delta.map(point).transpose()?;
+        let rotation = match self.rotation {
+            Some(Some(r)) if r.is_finite() => Some(Some(r.rem_euclid(360.0))),
+            Some(Some(_)) => return Err(EngineError::invalid("rotation must be a finite number")),
+            Some(None) => Some(None),
+            None => None,
+        };
+        let leader = match &self.leader {
+            Some(Some(name)) => Some(Some(leader_mode(name)?)),
+            Some(None) => Some(None),
+            None => None,
+        };
+        let keys: Vec<String> = self.keys.iter().map(|k| fitting_key_arg(k)).collect::<Result<_>>()?;
+        let geom = s.geometry();
+        let shown: std::collections::BTreeSet<String> =
+            cc_views::plan_fittings(geom, level, discipline).map(|f| cc_core::tag::fitting_key(&f.runs)).collect();
+        if let Some(k) = keys.iter().find(|k| !shown.contains(*k)) {
+            return Err(EngineError::not_found(format!("no fitting {k} in this plan")));
+        }
+        let current = s.project().view(view).map(|v| v.fitting_placements.clone()).unwrap_or_default();
+        let mut placements: Vec<(String, TagPlacement)> = Vec::new();
+        for key in keys {
+            let mut t =
+                if self.reset { TagPlacement::default() } else { current.get(&key).copied().unwrap_or_default() };
+            if let Some(o) = offset {
+                t.offset = o;
+            }
+            if let Some(d) = delta {
+                t.offset += d;
+            }
+            if t.offset.length() > MAX_TAG_OFFSET {
+                return Err(EngineError::invalid(format!("a tag stays within {MAX_TAG_OFFSET} m of its element")));
+            }
+            if let Some(r) = rotation {
+                t.rotation_deg = r;
+            }
+            if let Some(h) = self.hidden {
+                t.hidden = h;
+            }
+            if let Some(l) = leader {
+                t.leader = l;
+            }
+            placements.push((key, t));
+        }
+        edit(s, t!("tx-set-fitting-tag"), |e| {
+            let v = e.view_mut(view).ok_or_else(|| EngineError::not_found("view"))?;
+            for (key, t) in &placements {
+                if t.is_default() {
+                    v.fitting_placements.remove(key);
+                } else {
+                    v.fitting_placements.insert(key.clone(), *t);
+                }
+            }
+            Ok(())
+        })?;
+        let p = s.project();
+        let tags: Vec<Value> = placements.iter().map(|(k, t)| fitting_placement_json(p, k, t)).collect();
+        Ok(json!({ "view": view.0, "fittings": tags }))
+    }
+}
+
+fn fitting_placement_json(p: &Project, key: &str, t: &TagPlacement) -> Value {
+    let mut v = placement_json(p, ElementId(0), t);
+    if let Some(m) = v.as_object_mut() {
+        m.remove("id");
+        m.remove("start_offset");
+        m.remove("type");
+        m.insert("key".into(), json!(key));
+    }
+    v
+}
+
+/// The fittings of a services floor plan (its level's fittings of its
+/// discipline) and their labels: each fitting's `key` (the runs meeting
+/// there, as `fitting_tag_set` takes it), `runs`, `kind`, `point`, the
+/// label's `texts` (the catalog pieces' names, else the kind and sizes;
+/// a `missing` fitting adds why), the plan's `placement`, and whether the
+/// label is `drawn` (the plan's `fitting_tags` is on and it is not hidden)
+/// with its box (`center`, `half`, `rotation` degrees).
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields)]
+pub struct FittingTags {
+    /// Services plan id or name.
+    pub view: Ref,
+}
+
+impl Command for FittingTags {
+    const NAME: &'static str = "fitting_tags";
+    const KIND: CommandKind = CommandKind::Query;
+    fn run(self, s: &mut Session) -> Result<Value> {
+        let (view, level, discipline) = services_plan(s.project(), &self.view)?;
+        let drawing = s.drawing(view);
+        s.geometry();
+        let (p, geom) = (s.project(), s.geom());
+        let v = p.view(view).ok_or_else(|| EngineError::not_found("view"))?;
+        let ctx = cc_views::tag::TagCtx {
+            project: p,
+            geom,
+            scale: v.scale,
+            placements: &v.tags,
+            types: &v.tag_types,
+            label: &crate::i18n::tr,
+        };
+        let fittings: Vec<Value> = cc_views::plan_fittings(geom, level, discipline)
+            .map(|f| {
+                let key = cc_core::tag::fitting_key(&f.runs);
+                let (texts, missing) = cc_views::fitting_lines(&ctx, f);
+                let placement = v.fitting_placements.get(&key).copied().unwrap_or_default();
+                let handle = drawing.as_ref().and_then(|d| d.fitting_tags.iter().find(|t| t.key == key).map(|t| t.tag));
+                json!({
+                    "key": key,
+                    "runs": f.runs.iter().map(|r| r.0).collect::<Vec<_>>(),
+                    "kind": f.kind.key().trim_start_matches("fitting-"),
+                    "point": [f.point.x, f.point.y, f.point.z],
+                    "texts": texts,
+                    "missing": missing,
+                    "placement": fitting_placement_json(p, &key, &placement),
+                    "drawn": handle.is_some(),
+                    "center": handle.map(|h| [h.center.x, h.center.y]),
+                    "half": handle.map(|h| [h.half.x, h.half.y]),
+                    "rotation": handle.map(|h| h.rotation.to_degrees()),
+                })
+            })
+            .collect();
+        Ok(json!({ "view": view.0, "fitting_tags": v.fitting_tags, "fittings": fittings }))
+    }
 }

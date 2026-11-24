@@ -334,6 +334,12 @@ pub struct ViewSet {
     /// 3D view, its own reinforcement switch (its `rebar` parameter).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rebar: Option<bool>,
+    /// Services floor plans: label each fitting of the plan's discipline
+    /// with its catalog piece's name (else its kind and size; a fitting the
+    /// catalog has no piece for in red, circled, with why). `fitting_tags`
+    /// lists them and `fitting_tag_set` moves, turns or hides them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fitting_tags: Option<bool>,
 }
 
 /// The render settings `patch` makes of `current` (the defaults when none):
@@ -457,6 +463,9 @@ impl Command for ViewSet {
         if self.rebar.is_some() && !view.kind.takes_rebar() && !matches!(view.kind, ViewKind::ThreeD { .. }) {
             return Err(EngineError::invalid("reinforcement shows in floor plans, elevations, sections and 3D views"));
         }
+        if self.fitting_tags == Some(true) && !view.takes_fitting_tags() {
+            return Err(EngineError::invalid("fittings are labelled in services floor plans"));
+        }
         let tag_types =
             self.tag_types.as_ref().map(|patch| super::tags::apply_view_tag_types(p, &view, patch)).transpose()?;
         let mark_type = self
@@ -538,6 +547,9 @@ impl Command for ViewSet {
                     ViewKind::ThreeD { rebar, .. } => *rebar = on,
                     _ => v.rebar = on,
                 }
+            }
+            if let Some(on) = self.fitting_tags {
+                v.fitting_tags = on;
             }
             Ok(())
         })?;

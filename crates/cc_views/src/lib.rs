@@ -28,7 +28,7 @@ pub mod level_heads;
 pub mod level_marks;
 pub mod linework;
 mod mep;
-pub use mep::discipline_of;
+pub use mep::{discipline_of, fitting_lines, plan_fittings};
 pub mod notes;
 mod plan;
 mod projected;
@@ -48,8 +48,8 @@ pub use annotate::{
 };
 pub use component_view::{ComponentView, ComponentViewKind, ViewConnector, component_view};
 pub use drawing::{
-    Anchor, BubbleHandle, Drawing2D, LevelHandle, LevelHeadHandle, LineStyle, MAX_HITS, MarkHandle, Pen, Prim,
-    ResolvedPen, SectionHandle, TagHandle, halftone,
+    Anchor, BubbleHandle, Drawing2D, FittingTagHandle, LevelHandle, LevelHeadHandle, LineStyle, MAX_HITS, MarkHandle,
+    Pen, Prim, ResolvedPen, SectionHandle, TagHandle, halftone,
 };
 pub use drawing_index::DrawingIndex;
 pub use legend::legend;
@@ -124,7 +124,7 @@ pub fn generate_temporary(
             if let Some(discipline) = services {
                 // The architecture stays in the background of a services plan.
                 fade(&mut d);
-                mep::services(&mut d, project, geom, *level, *cut_height, discipline, view.scale);
+                mep::services(&mut d, project, geom, *level, *cut_height, discipline, view, label);
             }
             // Regions over the model, under the plan's marks, tags and grids.
             region::regions(&mut d, project, view.id, view.scale);
