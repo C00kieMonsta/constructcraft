@@ -1414,7 +1414,8 @@ fn profiles_round_trip() {
         assert_eq!(bdef.name, def.name, "profile name of {}", t.name);
         assert_eq!(bdef.material, def.material, "profile material of {}", t.name);
         let mirrored = def.name.ends_with("mirrored");
-        if parametric.contains(&def.shape.code()) && !mirrored {
+        // An annular sector is written with its arcs and read back as one.
+        if (parametric.contains(&def.shape.code()) || def.shape.code() == "annular_sector") && !mirrored {
             assert_eq!(bdef.shape, def.shape, "shape of {}", t.name);
         } else {
             assert!(matches!(bdef.shape, ProfileShape::Sketch(_)), "{} is a sketch: {:?}", t.name, bdef.shape);

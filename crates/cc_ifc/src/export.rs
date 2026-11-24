@@ -901,6 +901,12 @@ impl<'a> Exporter<'a> {
             let args = [area, Value::from(name), Value::Ref(position)].into_iter().chain(values).collect();
             return self.w.add(entity, args);
         }
+        // An annular sector keeps its arcs, so it comes back as one.
+        let sector = shape.and_then(|s| sector_curves(s, rotation_deg, mirror));
+        if let Some(curves) = sector.filter(|c| on_outline(c, outline)) {
+            let curve = self.curve_loop(&curves, true);
+            return self.w.add("IFCARBITRARYCLOSEDPROFILEDEF", args![area, name, curve]);
+        }
         let curve = self.polyline(&outline.outer);
         if outline.holes.is_empty() {
             return self.w.add("IFCARBITRARYCLOSEDPROFILEDEF", args![area, name, curve]);
@@ -3890,16 +3896,59 @@ fn directrix(bar: &cc_geom::rebar::Bar, diameter: f64) -> Vec<DVec3> {
     std::iter::once(mid).chain(pts[1..].iter().copied()).chain([a, mid + back]).collect()
 }
 
+/// The outline of an annular sector with a hollow (`r_in` above 0) as
+/// curves, placed as its type places the section (mirrored across the Y
+/// axis, then turned by `rotation_deg`): the outer arc, a radial side, the
+/// inner arc and the other side, counter-clockwise. `None` for other shapes,
+/// a circular sector and invalid values.
+fn sector_curves(shape: &ProfileShape, rotation_deg: f64, mirror: bool) -> Option<Vec<SketchCurve>> {
+    let ProfileShape::AnnularSector { r_in, r_out, sweep } = *shape else { return None };
+    let center = shape.sector_center()?;
+    if !(r_in > 0.0 && r_out > r_in && sweep > 0.0 && rotation_deg.is_finite()) {
+        return None;
+    }
+    let half = sweep.to_radians() / 2.0;
+    let at = |r: f64, side: f64| center + DVec2::new(side * r * half.sin(), r * half.cos());
+    let turn = DVec2::from_angle(rotation_deg.to_radians());
+    // Mirroring a shape symmetric about the Y axis leaves it as it is.
+    let place = |p: DVec2| turn.rotate(if mirror { DVec2::new(-p.x, p.y) } else { p });
+    let (out_r, out_l, in_l, in_r) = (at(r_out, 1.0), at(r_out, -1.0), at(r_in, -1.0), at(r_in, 1.0));
+    let bulge = (sweep.to_radians() / 4.0).tan();
+    let [out_r, out_l, in_l, in_r] = [out_r, out_l, in_l, in_r].map(place);
+    Some(vec![
+        SketchCurve::Arc { a: out_r, b: out_l, bulge },
+        SketchCurve::Line { a: out_l, b: in_l },
+        SketchCurve::Arc { a: in_l, b: in_r, bulge: -bulge },
+        SketchCurve::Line { a: in_r, b: out_r },
+    ])
+}
+
+/// Whether a shape is an annular sector written with its arcs ([`sector_curves`]).
+fn is_hollow_sector(shape: &ProfileShape) -> bool {
+    matches!(*shape, ProfileShape::AnnularSector { r_in, r_out, sweep } if r_in > 0.0 && r_out > r_in && sweep > 0.0)
+}
+
+/// Whether the ends of `curves` are corners of `outline` (within 0.01 mm),
+/// so the curves draw the section the type places.
+fn on_outline(curves: &[SketchCurve], outline: &SectionOutline) -> bool {
+    let near = |p: DVec2| outline.outer.iter().any(|q| q.distance(p) <= 1e-5);
+    curves.iter().all(|c| match *c {
+        SketchCurve::Arc { a, b, .. } | SketchCurve::Line { a, b } => near(a) && near(b),
+        _ => false,
+    })
+}
+
 /// The area of a type's section as [`Exporter::type_profile`] writes it:
 /// exact when it is a parametric profile (circles, root and corner radii
-/// written as such), else its outline's, whose arcs are chords there too.
+/// written as such) or an annular sector (written with its arcs),
+/// else its outline's, whose arcs are chords there too.
 fn section_area(project: &Project, data: &TypeData) -> f64 {
     let (TypeData::Column { profile_mirror, .. } | TypeData::Beam { profile_mirror, .. }) = data else { return 0.0 };
     let Some(section) = project.type_section(data) else { return 0.0 };
     let parametric = section
         .profile
         .and_then(|p| project.profile(p))
-        .is_some_and(|d| !*profile_mirror && parametric_profile(&d.shape).is_some());
+        .is_some_and(|d| (!*profile_mirror && parametric_profile(&d.shape).is_some()) || is_hollow_sector(&d.shape));
     let exact = if parametric { project.exact_section_area(data) } else { None };
     exact.unwrap_or_else(|| section.outline.properties(0.0).area)
 }

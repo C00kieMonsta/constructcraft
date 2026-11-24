@@ -140,3 +140,89 @@ fn bars_without_their_host_keep_their_length() {
         }
     }
 }
+
+/// A column whose section is an annular sector (radii 2.15 and 2.45 m,
+/// 20°), turned a quarter, with stirrups of 5 mm every 15 cm and ties on its
+/// two arcs, as the columns under a round tank.
+fn sector_column_with_bars() -> (Project, ElementId, ElementId, ElementId) {
+    use cc_core::structural_profile::{ProfileDef, ProfileMaterial, ProfileShape};
+    use cc_core::{Column, ColumnSection, ElementType, ElementTypeId, ProfileId, WallTop};
+    let mut p = Project::from_template();
+    let pid = ProfileId(p.alloc_id());
+    let shape = ProfileShape::AnnularSector { r_in: 2.15, r_out: 2.45, sweep: 20.0 };
+    let def = ProfileDef {
+        id: pid,
+        uid: Uid::generate(),
+        name: "Sector 30".into(),
+        material: ProfileMaterial::Concrete,
+        shape,
+        catalog: None,
+        description: String::new(),
+    };
+    p.profiles.insert(pid, def);
+    let type_id = ElementTypeId(p.alloc_id());
+    let data = TypeData::Column {
+        section: ColumnSection::Rectangular { width: 0.1, depth: 0.1 },
+        material: "Concreto".into(),
+        profile: Some(pid),
+        profile_rotation_deg: 0.0,
+        profile_mirror: false,
+    };
+    let ty =
+        ElementType { id: type_id, name: "Sector column".into(), data, info: Default::default(), uid: Uid::generate() };
+    p.types.insert(type_id, ty);
+    let column = Column {
+        position: DVec2::new(2.3, 0.0),
+        rotation_deg: -90.0,
+        base_offset: 0.0,
+        height: 3.0,
+        top: WallTop::Unconnected,
+        structural: true,
+    };
+    let column = add(&mut p, type_id, ElementKind::Column(column));
+    let thin = bar_type(&p, 0.005);
+    // Five bars on each arc and the corners shared with the radial sides.
+    let mut bars = Rebar::new(column, RebarLayout::Longitudinal { face: BarFace::Perimeter, count: 10 }, 0.03);
+    bars.faces = [5, 2, 5, 2].map(|count| cc_core::FaceBars { count, spacing: 0.0 }).to_vec();
+    let thick = bar_type(&p, 0.0125);
+    add(&mut p, thick, ElementKind::Rebar(bars));
+    let stirrups = Rebar::new(column, RebarLayout::Stirrups { spacing: 0.15, hooks: None }, 0.03);
+    let stirrups = add(&mut p, thin, ElementKind::Rebar(stirrups));
+    let ties = Rebar::new(column, RebarLayout::Ties { spacing: 0.15, faces: vec![0, 2] }, 0.03);
+    let ties = add(&mut p, thin, ElementKind::Rebar(ties));
+    (p, column, stirrups, ties)
+}
+
+/// A column of an annular sector comes back as one, with its volume, and
+/// its stirrups keep their arcs: the same shape, so the same bar mark. Its
+/// section was written as a polygon, which came back as a sketch of chords,
+/// and the stirrups laid out again on it had straight legs at the ends of
+/// each arc.
+#[test]
+fn sector_columns_keep_their_arcs_and_their_stirrups() {
+    use cc_core::structural_profile::ProfileShape;
+    let (p, column, stirrups, ties) = sector_column_with_bars();
+    let text = text_of(&p);
+    let (back, _) = import(&text, Project::from_template()).unwrap();
+    let (g0, g1) = (ModelGeometry::build(&p), ModelGeometry::build(&back));
+    let col = same(&back, &p, column);
+    let TypeData::Column { profile: Some(pid), .. } = back.element_type(col.type_id).unwrap().data else {
+        panic!("a column with a profile");
+    };
+    let shape = &back.profile(pid).unwrap().shape;
+    assert_eq!(*shape, ProfileShape::AnnularSector { r_in: 2.15, r_out: 2.45, sweep: 20.0 });
+    let (v0, v1) = (g0.volume(column), g1.volume(col.id));
+    assert!((v0 - v1).abs() <= 1e-6 * v0, "volume {v1} vs {v0}");
+    for set in [stirrups, ties] {
+        let e = same(&back, &p, set);
+        assert!(matches!(e.kind, ElementKind::Rebar(_)), "set {set:?} comes back in its column");
+        let (a, b) = (&g0.rebar[&set].bars, &g1.rebar[&e.id].bars);
+        assert_eq!(a.len(), b.len());
+        let (sa, sb) = (cc_geom::bar_shape::summary(&a[0]), cc_geom::bar_shape::summary(&b[0]));
+        assert!(sa.matches(&sb, 1e-4, 1e-4), "shape {sb:?} vs {sa:?}");
+    }
+    // The stirrup has two arcs and two radial sides.
+    let shape = cc_geom::bar_shape::summary(&g1.rebar[&same(&back, &p, stirrups).id].bars[0]);
+    assert_eq!(shape.legs.len(), 4, "{shape:?}");
+    assert_eq!(shape.legs.iter().filter(|l| l.radius.is_some()).count(), 2);
+}
