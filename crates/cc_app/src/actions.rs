@@ -360,12 +360,33 @@ fn close_project(state: &mut AppState) {
 }
 
 pub fn open(state: &mut AppState) {
-    let Some(path) = file_dialog(state).pick_file() else { return };
+    let mut dialog = rfd::FileDialog::new()
+        .add_filter(t!("file-filter-openable"), &["ccad", "ifc"])
+        .add_filter(t!("file-filter"), &["ccad"])
+        .add_filter(t!("file-filter-ifc"), &["ifc"]);
+    if let Some(dir) = state.prefs.projects_dir() {
+        dialog = dialog.set_directory(dir);
+    }
+    let Some(path) = dialog.pick_file() else { return };
     open_path(state, path);
 }
 
+fn has_extension(path: &std::path::Path, ext: &str) -> bool {
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case(ext))
+}
+
+/// Whether Open takes `path`: a project, or an IFC file it imports as a new project.
+pub fn opens(path: &std::path::Path) -> bool {
+    has_extension(path, "ccad") || has_extension(path, "ifc")
+}
+
 /// Open the project at `path`, read on a worker thread behind the progress dialog.
+/// An IFC file is imported as a new project instead.
 pub fn open_path(state: &mut AppState, path: std::path::PathBuf) {
+    if has_extension(&path, "ifc") {
+        import_ifc_path(state, path);
+        return;
+    }
     let (file, shown) = (path.clone(), path.clone());
     let run = move |s: &mut cc_engine::Session| s.run(project::ProjectOpen { path: file });
     let finish: crate::jobs::Finish = Box::new(move |state, result, doc| opened(state, path, result, doc));
@@ -500,6 +521,11 @@ fn import_ifc(state: &mut AppState) {
         dialog = dialog.set_directory(dir);
     }
     let Some(path) = dialog.pick_file() else { return };
+    import_ifc_path(state, path);
+}
+
+/// Replace the document with a project imported from the IFC file at `path`.
+fn import_ifc_path(state: &mut AppState, path: std::path::PathBuf) {
     let (file, shown) = (path.clone(), path.clone());
     let run = move |s: &mut cc_engine::Session| s.run(io::IfcImport { path: file });
     let finish: crate::jobs::Finish = Box::new(move |state, result, doc| ifc_imported(state, path, result, doc));
@@ -1253,6 +1279,36 @@ pub fn terrain_on_level(state: &AppState) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_takes_projects_and_ifc_files() {
+        use std::path::Path;
+        assert!(opens(Path::new("house.ccad")));
+        assert!(opens(Path::new("P0032_EXT.IFC")));
+        assert!(!opens(Path::new("plan.dxf")));
+        assert!(!opens(Path::new("ifc")));
+    }
+
+    /// Opening an IFC file, from Open, a drop or the command line, imports it as a new project.
+    #[test]
+    fn opening_an_ifc_file_imports_it() {
+        let mut source = AppState::new(Document::new(new_project()));
+        run_command(
+            &mut source,
+            cc_engine::commands::create::WallCreate { start: [0.0, 0.0], end: [5.0, 0.0], ..Default::default() },
+        )
+        .unwrap();
+        let path = std::env::temp_dir().join(format!("ccad-open-{}.ifc", std::process::id()));
+        source.session.run(io::IfcExport { path: path.clone() }).unwrap();
+
+        let mut state = AppState::new(Document::new(new_project()));
+        open_path(&mut state, path.clone());
+        crate::jobs::wait(&mut state);
+        std::fs::remove_file(&path).ok();
+        assert!(state.dialogs.error.is_none(), "{:?}", state.dialogs.error);
+        assert_eq!(state.project().walls().count(), 1);
+        assert!(state.session.doc.path.is_none(), "an imported project has no file yet");
+    }
 
     #[test]
     fn a_recorded_macro_replays_on_another_project() {
