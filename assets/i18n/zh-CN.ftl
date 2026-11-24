@@ -390,6 +390,7 @@ status-unsaved-file = （未保存）
 
 # Messages
 msg-plan-only = 此工具在平面视图中使用。请打开楼层平面图或天花板平面图。
+msg-run-start-on-run = 在立面视图中，请从视图中可见的管道、导管或电缆桥架开始。
 msg-open-plan = 请打开楼层平面图以使用此工具。
 msg-no-type = 此类别没有可用的类型。
 msg-deleted = 已删除 { $count } 个图元。

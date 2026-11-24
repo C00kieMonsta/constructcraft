@@ -40,6 +40,12 @@ impl Frame {
         DVec2::new(r.dot(self.right), r.dot(self.up))
     }
 
+    /// The model point drawn at `p` that lies `depth` along the view
+    /// direction (the inverse of [`Frame::project`] and [`Frame::depth`]).
+    pub fn unproject(&self, p: DVec2, depth: f64) -> DVec3 {
+        self.origin + self.right * p.x + self.up * p.y + self.forward * depth
+    }
+
     pub fn depth(&self, p: DVec3) -> f64 {
         (p - self.origin).dot(self.forward)
     }

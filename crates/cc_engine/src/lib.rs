@@ -76,6 +76,7 @@ pub fn element_params_patch(old: &cc_core::ElementKind, new: &cc_core::ElementKi
     commands::clearing_patch(&element_params(old), &element_params(new), &check)
 }
 
+pub use commands::mep::joined_offset_except;
 pub use defaults::{
     conduit_offset, default_roof_base, default_top, default_wall_face, device_height, drain_slope, next_number,
     pipe_offset, tray_offset, walls_loop, walls_loop_at,

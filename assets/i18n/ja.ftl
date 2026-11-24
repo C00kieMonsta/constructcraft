@@ -390,6 +390,7 @@ status-unsaved-file = (未保存)
 
 # Messages
 msg-plan-only = このツールは平面ビューで動作します。平面図または天井伏図を開いてください。
+msg-run-start-on-run = 立面図では、ビューに表示されている配管、電線管、ケーブルラックから始めてください。
 msg-open-plan = このツールを使用するには平面図を開いてください。
 msg-no-type = このカテゴリで使用可能なタイプがありません。
 msg-deleted = { $count } 個の要素を削除しました。

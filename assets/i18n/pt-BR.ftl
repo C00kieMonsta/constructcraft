@@ -390,6 +390,7 @@ status-unsaved-file = (não salvo)
 
 # Mensagens
 msg-plan-only = Esta ferramenta funciona em plantas. Abra uma planta de piso ou de forro.
+msg-run-start-on-run = Em uma elevação, comece sobre um tubo, eletroduto ou eletrocalha visível na vista.
 msg-open-plan = Abra uma planta de piso para usar esta ferramenta.
 msg-no-type = Nenhum tipo disponível para esta categoria.
 msg-deleted = { $count } elemento(s) excluído(s).

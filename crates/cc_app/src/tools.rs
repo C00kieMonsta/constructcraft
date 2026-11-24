@@ -1749,6 +1749,22 @@ pub fn handle(
             }
             select(ui, resp, painter, state, is_plan, xf, drawing, None);
         }
+        // Pipes, conduits and cable trays are also drawn in sections and elevations.
+        (
+            Tool::Pipe { type_id }
+            | Tool::Conduit { type_id }
+            | Tool::CableTray { type_id }
+            | Tool::LightningConductor { type_id },
+            _,
+        ) if crate::run_section_ui::hosts(view) => {
+            let run = match tool {
+                Tool::Pipe { .. } => Run::Pipe,
+                Tool::Conduit { .. } => Run::Conduit,
+                Tool::CableTray { .. } => Run::Tray,
+                _ => Run::Conductor,
+            };
+            crate::run_section_ui::tool(ui, resp, painter, state, view, *type_id, run, xf, drawing);
+        }
         (_, None) | (_, Some(_)) if !is_plan => {
             if resp.clicked() {
                 state.message = t!("msg-plan-only");
@@ -1884,6 +1900,9 @@ pub struct MepOptions {
     /// Elevation a chain goes up or down to at its last point before the next
     /// run (a vertical run), set by changing the elevation while drawing.
     pub rise: Option<f64>,
+    /// In a section or elevation, how far along the view direction the chain
+    /// being drawn lies (`cc_views::Frame::depth`).
+    pub depth: Option<f64>,
 }
 
 /// The device kind of a component type, if it is an electrical device.
@@ -1964,6 +1983,45 @@ pub enum Run {
     Conductor,
 }
 
+/// The elevation above the level new runs of `run` take when none is set
+/// (pipes by the kind of `system`, conduits and trays by `level`).
+pub fn default_run_offset(
+    project: &Project,
+    run: Run,
+    system: Option<cc_core::SystemId>,
+    level: Option<LevelId>,
+) -> f64 {
+    let kind = system.and_then(|id| project.system(id)).map(|s| s.kind);
+    match (run, level) {
+        (Run::Pipe, _) => cc_engine::pipe_offset(project, kind),
+        (Run::Conduit, Some(level)) => cc_engine::conduit_offset(project, level),
+        (Run::Tray, Some(level)) => cc_engine::tray_offset(project, level),
+        // Conductors lie on the roof under them unless an elevation is given.
+        (Run::Conductor, _) => 0.0,
+        (_, None) => project.defaults().ceiling,
+    }
+}
+
+/// The elevation of a run of the tool's network at `p` (pipes of the tool's
+/// system, any conduit or any tray; risers of other floors included) nearest
+/// `wanted`, leaving out `skip`. Conductors follow the roof, so none.
+fn joined_at(
+    state: &AppState,
+    run: Run,
+    level: LevelId,
+    p: DVec2,
+    wanted: f64,
+    skip: Option<ElementId>,
+) -> Option<f64> {
+    let (category, system) = match run {
+        Run::Pipe => (Category::Pipe, state.mep.system),
+        Run::Conduit => (Category::Conduit, None),
+        Run::Tray => (Category::CableTray, None),
+        Run::Conductor => return None,
+    };
+    cc_engine::joined_offset_except(state.project(), level, p.to_array(), category, system, wanted, skip)
+}
+
 /// Clicks chain pipe, conduit, cable tray or lightning conductor runs: each ends where the next
 /// one starts, at the elevation the last one reached (a sloped drain keeps
 /// falling). A new elevation set while drawing makes a vertical run at the
@@ -2016,68 +2074,78 @@ fn segment_tool(
         state.interaction.anchor = Some(s.point);
         state.mep.chain = None;
         state.mep.rise = None;
+        // Starting on a run of the network: the chain starts at its elevation
+        // there, and an elevation set apart from it is reached by a vertical run first.
+        let wanted = state.mep.offset.unwrap_or_else(|| default_run_offset(state.project(), run, system, Some(level)));
+        if let Some(z) = joined_at(state, run, level, s.point, wanted, None) {
+            state.mep.chain = Some(z);
+            if state.mep.offset.is_some() && (z - wanted).abs() > 1e-3 {
+                state.mep.rise = Some(wanted);
+            }
+        }
         return;
     };
     let level_ref = Some(Ref::Id(level.0));
-    let create = |state: &mut AppState, end: Option<DVec2>, offset: Option<f64>, end_offset: Option<f64>| {
-        let circuits = state.mep.circuit.map(|id| Ref::Id(id.0)).into_iter().collect();
-        match run {
-            Run::Pipe => {
-                let command = cc_engine::commands::mep::PipeCreate {
-                    start: a.to_array(),
-                    end: end.map(|p| p.to_array()),
-                    level: level_ref.clone(),
-                    type_ref: Some(Ref::Id(type_id.0)),
-                    system: state.mep.system.map(|id| Ref::Id(id.0)),
-                    offset,
-                    end_offset,
-                    slope: state.mep.slope,
-                };
-                let out = crate::actions::run_command(state, command);
-                if let Some(id) = out.as_ref().and_then(|o| o["id"].as_u64()) {
-                    crate::pipe_catalog_dialog::report_fittings(state, ElementId(id));
+    let create =
+        |state: &mut AppState, start: DVec2, end: Option<DVec2>, offset: Option<f64>, end_offset: Option<f64>| {
+            let circuits = state.mep.circuit.map(|id| Ref::Id(id.0)).into_iter().collect();
+            match run {
+                Run::Pipe => {
+                    let command = cc_engine::commands::mep::PipeCreate {
+                        start: start.to_array(),
+                        end: end.map(|p| p.to_array()),
+                        level: level_ref.clone(),
+                        type_ref: Some(Ref::Id(type_id.0)),
+                        system: state.mep.system.map(|id| Ref::Id(id.0)),
+                        offset,
+                        end_offset,
+                        slope: state.mep.slope,
+                    };
+                    let out = crate::actions::run_command(state, command);
+                    if let Some(id) = out.as_ref().and_then(|o| o["id"].as_u64()) {
+                        crate::pipe_catalog_dialog::report_fittings(state, ElementId(id));
+                    }
+                    out
                 }
-                out
+                Run::Conduit => {
+                    let command = cc_engine::commands::mep::ConduitCreate {
+                        start: start.to_array(),
+                        end: end.map(|p| p.to_array()),
+                        level: level_ref.clone(),
+                        type_ref: Some(Ref::Id(type_id.0)),
+                        circuits,
+                        offset,
+                        end_offset,
+                    };
+                    crate::actions::run_command(state, command)
+                }
+                Run::Tray => {
+                    let command = cc_engine::commands::cable_tray::CableTrayCreate {
+                        start: start.to_array(),
+                        end: end.map(|p| p.to_array()),
+                        level: level_ref.clone(),
+                        type_ref: Some(Ref::Id(type_id.0)),
+                        circuits,
+                        offset,
+                        end_offset,
+                    };
+                    crate::actions::run_command(state, command)
+                }
+                Run::Conductor => {
+                    let command = cc_engine::commands::lightning::LpsConductorCreate {
+                        start: start.to_array(),
+                        end: end.map(|p| p.to_array()),
+                        level: level_ref.clone(),
+                        type_ref: Some(Ref::Id(type_id.0)),
+                        role: None,
+                        offset,
+                        end_offset,
+                        system: state.mep.lightning.map(|id| Ref::Id(id.0)),
+                    };
+                    crate::actions::run_command(state, command)
+                }
             }
-            Run::Conduit => {
-                let command = cc_engine::commands::mep::ConduitCreate {
-                    start: a.to_array(),
-                    end: end.map(|p| p.to_array()),
-                    level: level_ref.clone(),
-                    type_ref: Some(Ref::Id(type_id.0)),
-                    circuits,
-                    offset,
-                    end_offset,
-                };
-                crate::actions::run_command(state, command)
-            }
-            Run::Tray => {
-                let command = cc_engine::commands::cable_tray::CableTrayCreate {
-                    start: a.to_array(),
-                    end: end.map(|p| p.to_array()),
-                    level: level_ref.clone(),
-                    type_ref: Some(Ref::Id(type_id.0)),
-                    circuits,
-                    offset,
-                    end_offset,
-                };
-                crate::actions::run_command(state, command)
-            }
-            Run::Conductor => {
-                let command = cc_engine::commands::lightning::LpsConductorCreate {
-                    start: a.to_array(),
-                    end: end.map(|p| p.to_array()),
-                    level: level_ref.clone(),
-                    type_ref: Some(Ref::Id(type_id.0)),
-                    role: None,
-                    offset,
-                    end_offset,
-                    system: state.mep.lightning.map(|id| Ref::Id(id.0)),
-                };
-                crate::actions::run_command(state, command)
-            }
-        }
-    };
+        };
     let (before, depth) = (chain_at(state), state.session.doc.undo_depth());
     let select = |state: &mut AppState, out: &serde_json::Value| {
         if let Some(id) = out["id"].as_u64() {
@@ -2086,19 +2154,28 @@ fn segment_tool(
     };
     if let (Some(to), Some(from)) = (state.mep.rise.take(), state.mep.chain)
         && (to - from).abs() > 1e-3
-        && let Some(out) = create(state, None, Some(from), Some(to))
+        && let Some(out) = create(state, a, None, Some(from), Some(to))
     {
         select(state, &out);
         state.mep.chain = Some(to);
     }
-    if a.distance(s.point) <= 0.01 {
-        return;
-    }
-    let offset = state.mep.chain.or(state.mep.offset);
-    if let Some(out) = create(state, Some(s.point), offset, None) {
-        select(state, &out);
-        state.mep.chain = out["params"]["end_offset"].as_f64();
-        state.interaction.anchor = Some(s.point);
+    if a.distance(s.point) > 0.01 {
+        let offset = state.mep.chain.or(state.mep.offset);
+        if let Some(out) = create(state, a, Some(s.point), offset, None) {
+            select(state, &out);
+            let end = out["params"]["end_offset"].as_f64();
+            state.mep.chain = end;
+            state.interaction.anchor = Some(s.point);
+            // Ending on another run of the network at a different elevation:
+            // a vertical run there joins the two.
+            let id = out["id"].as_u64().map(ElementId);
+            if let Some(e) = end
+                && let Some(z) = joined_at(state, run, level, s.point, e, id)
+                && (z - e).abs() > 1e-3
+            {
+                create(state, s.point, None, Some(e), Some(z));
+            }
+        }
     }
     chain_placed(state, before, depth);
 }

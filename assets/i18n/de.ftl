@@ -390,6 +390,7 @@ status-unsaved-file = (nicht gespeichert)
 
 # Meldungen
 msg-plan-only = Dieses Werkzeug funktioniert in Grundrissen. Öffnen Sie einen Grundriss oder Deckenspiegel.
+msg-run-start-on-run = Beginnen Sie in einer Ansicht auf einem sichtbaren Rohr, Leerrohr oder Kabelkanal.
 msg-open-plan = Öffnen Sie einen Grundriss, um dieses Werkzeug zu verwenden.
 msg-no-type = Für diese Kategorie ist kein Typ verfügbar.
 msg-deleted = { $count } Bauteil(e) gelöscht.

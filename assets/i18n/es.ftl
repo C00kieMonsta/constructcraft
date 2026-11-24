@@ -390,6 +390,7 @@ status-unsaved-file = (sin guardar)
 
 # Mensajes
 msg-plan-only = Esta herramienta funciona en vistas de planta. Abra una planta o una planta de cielorraso.
+msg-run-start-on-run = En un alzado, empiece sobre una tubería, un conducto o una bandeja portacables visible en la vista.
 msg-open-plan = Abra una planta para usar esta herramienta.
 msg-no-type = No hay ningún tipo disponible para esta categoría.
 msg-deleted = { $count } elemento(s) eliminado(s).

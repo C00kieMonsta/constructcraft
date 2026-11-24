@@ -390,6 +390,7 @@ status-unsaved-file = (niezapisany)
 
 # Komunikaty
 msg-plan-only = To narzędzie działa w widokach rzutów. Otwórz rzut kondygnacji lub sufitu.
+msg-run-start-on-run = W elewacji zacznij od rury, peszla lub koryta kablowego widocznego w widoku.
 msg-open-plan = Otwórz rzut kondygnacji, aby użyć tego narzędzia.
 msg-no-type = Brak dostępnego typu dla tej kategorii.
 msg-deleted = Usunięte elementy: { $count }.

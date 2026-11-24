@@ -390,6 +390,7 @@ status-unsaved-file = (non salvato)
 
 # Messaggi
 msg-plan-only = Questo strumento funziona nelle viste in pianta. Apri una pianta o una pianta del controsoffitto.
+msg-run-start-on-run = In un prospetto, inizia su un tubo, un condotto o una passerella portacavi visibile nella vista.
 msg-open-plan = Apri una pianta per usare questo strumento.
 msg-no-type = Nessun tipo disponibile per questa categoria.
 msg-deleted = { $count } elementi eliminati.

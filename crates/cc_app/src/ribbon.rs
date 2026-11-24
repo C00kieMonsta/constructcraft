@@ -1244,14 +1244,7 @@ fn segment_options(ui: &mut Ui, state: &mut AppState, type_id: cc_core::ElementT
     }
     let project = state.project();
     let kind = system.and_then(|id| project.system(id)).map(|s| s.kind);
-    let default_offset = match (run, state.active_level()) {
-        (Run::Pipe, _) => cc_engine::pipe_offset(project, kind),
-        (Run::Conduit, Some(level)) => cc_engine::conduit_offset(project, level),
-        (Run::Tray, Some(level)) => cc_engine::tray_offset(project, level),
-        // Conductors lie on the roof under them unless an elevation is given.
-        (Run::Conductor, _) => 0.0,
-        (_, None) => project.defaults().ceiling,
-    };
+    let default_offset = crate::tools::default_run_offset(project, run, system, state.active_level());
     let diameter = project.element_type(type_id).and_then(|t| t.diameter()).unwrap_or(0.1);
     let default_slope = if kind.is_some_and(cc_core::SystemKind::is_drainage) {
         cc_engine::drain_slope(project, diameter) * 100.0
@@ -1260,9 +1253,15 @@ fn segment_options(ui: &mut Ui, state: &mut AppState, type_id: cc_core::ElementT
     };
     ui.label(t!("prop-elevation-offset"));
     let mut offset = state.mep.offset.unwrap_or(default_offset);
+    let before = offset;
     if ui.add(crate::properties::length_drag(&mut offset).speed(0.01)).changed() {
         state.mep.offset = Some(offset);
-        // While drawing, the chain goes up or down to it at its last point.
+        // While drawing, the chain goes up or down to it at its last point,
+        // also at its first point (a riser from the elevation shown before);
+        // conductors without a chain lie on the roof, so only a chain rises.
+        if state.interaction.anchor.is_some() && state.mep.chain.is_none() && run != Run::Conductor {
+            state.mep.chain = Some(before);
+        }
         if state.interaction.anchor.is_some() && state.mep.chain.is_some() {
             state.mep.rise = Some(offset);
         } else {

@@ -390,6 +390,7 @@ status-unsaved-file = (unsaved)
 
 # Messages
 msg-plan-only = This tool works in plan views. Open a floor or ceiling plan.
+msg-run-start-on-run = In an elevation, start on a pipe, conduit or cable tray the view shows.
 msg-open-plan = Open a floor plan to use this tool.
 msg-no-type = No type is available for this category.
 msg-deleted = { $count } element(s) deleted.

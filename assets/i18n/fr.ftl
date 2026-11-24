@@ -390,6 +390,7 @@ status-unsaved-file = (non enregistré)
 
 # Messages
 msg-plan-only = Cet outil fonctionne dans les vues en plan. Ouvrez un plan d'étage ou de plafond.
+msg-run-start-on-run = Dans une élévation, commencez sur un tuyau, un conduit ou un chemin de câbles visible dans la vue.
 msg-open-plan = Ouvrez un plan d'étage pour utiliser cet outil.
 msg-no-type = Aucun type n'est disponible pour cette catégorie.
 msg-deleted = { $count } élément(s) supprimé(s).
