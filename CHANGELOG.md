@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Draco mesh compression in glTF. `gltf_import` (*Insert → Import glTF…*) now reads meshes compressed with Draco (`KHR_draco_mesh_compression`), which it used to refuse; meshopt-compressed files are still refused. `gltf_export` takes `draco` (*Export glTF…* asks for it in a new dialog) and then writes every mesh compressed: files several times smaller, positions kept to 1/65536 of each element's size (about 1.5 mm over 100 m), normals and texture coordinates quantized too; the program that opens the file must support Draco. The result also gives the file's size in `bytes`. The codec is the pure Rust `draco-core` crate (Apache-2.0); streams are read with bounded counts, and a crafted one is an error, never a crash.
+- A local cache of decoded Draco meshes. The app keeps them in `draco-cache` in its data folder, named by the SHA-256 of the stream; each entry also holds the SHA-256 of its contents, checked before it is used, so a damaged or stale entry is decoded again and rewritten. The folder is trimmed to 512 MB, oldest entries first; streams under 4 KB are not kept.
+
 ### Fixed
 
 - Columns of an annular sector came back from IFC with a section of chords. The sector was written as a polygon, read back as a sketch of its points: the column lost a little of its volume, and its stirrups, laid out again on the polygon, had a straight leg at each end of each arc, so their shape and bar mark changed after an export and an import. The section is now written with its two arcs (an `IfcArbitraryClosedProfileDef` of trimmed circles joined by its radial sides) and read back as the annular sector, for columns and for beams of that profile, with its volume and its stirrups unchanged.

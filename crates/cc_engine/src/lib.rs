@@ -15,6 +15,7 @@
 
 mod defaults;
 pub mod dimensions;
+pub mod draco;
 mod error;
 pub mod extension;
 pub mod files;

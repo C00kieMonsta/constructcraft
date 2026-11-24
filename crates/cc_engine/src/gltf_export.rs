@@ -19,6 +19,10 @@
 //! has texture coordinates: in repeats of the texture where it has one, in
 //! meters along the face otherwise, so materials applied later are laid at
 //! their real size.
+//!
+//! On request the meshes are compressed with Draco
+//! (`KHR_draco_mesh_compression`): files several times smaller, read by web
+//! viewers and most engines, at the precision [`crate::draco`] keeps.
 
 use cc_core::material::{Finish, MaterialClass, MaterialTexture};
 use cc_core::raster::RasterFormat;
@@ -98,24 +102,49 @@ impl Writer {
     }
 
     /// An accessor of float vectors; its index.
-    fn floats<const N: usize>(&mut self, data: &[[f32; N]], kind: &str, bounds: bool) -> usize {
+    fn floats<const N: usize>(&mut self, data: &[[f32; N]], kind: &str, with_bounds: bool) -> usize {
         let bytes: Vec<u8> = data.iter().flat_map(|v| v.iter().flat_map(|f| f.to_le_bytes())).collect();
         let view = self.view(&bytes, Some(34962));
         let mut a = json!({ "bufferView": view, "componentType": 5126, "count": data.len(), "type": kind });
-        if bounds && let Some(obj) = a.as_object_mut() {
-            let mut lo = [f32::INFINITY; N];
-            let mut hi = [f32::NEG_INFINITY; N];
-            for v in data {
-                for k in 0..N {
-                    lo[k] = lo[k].min(v[k]);
-                    hi[k] = hi[k].max(v[k]);
-                }
-            }
+        if with_bounds && let Some(obj) = a.as_object_mut() {
+            let (lo, hi) = bounds(data);
             obj.insert("min".into(), json!(lo.to_vec()));
             obj.insert("max".into(), json!(hi.to_vec()));
         }
         self.accessors.push(a);
         self.accessors.len() - 1
+    }
+
+    /// A primitive's mesh compressed with Draco: the stream in a buffer view
+    /// and accessors with no view of their own (as
+    /// `KHR_draco_mesh_compression` asks); its attributes and the extension.
+    fn draco(&mut self, p: &Primitive) -> Result<(Value, Option<usize>, Value), String> {
+        let out = crate::draco::encode(&p.positions, &p.normals, &p.uvs, &p.indices)?;
+        let view = self.view(&out.bytes, None);
+        let mut accessor = |kind: &str, count: usize, component: u32, extra: Option<(Value, Value)>| {
+            let mut a = json!({ "componentType": component, "count": count, "type": kind });
+            if let (Some((lo, hi)), Some(obj)) = (extra, a.as_object_mut()) {
+                obj.insert("min".into(), lo);
+                obj.insert("max".into(), hi);
+            }
+            self.accessors.push(a);
+            self.accessors.len() - 1
+        };
+        let (lo, hi) = bounds(&p.positions);
+        let position = accessor("VEC3", out.points, 5126, Some((json!(lo), json!(hi))));
+        let indices = accessor("SCALAR", out.faces * 3, 5125, None);
+        let mut attributes = json!({ "POSITION": position });
+        let mut ids = json!({ "POSITION": out.position });
+        for (name, kind, id) in [("NORMAL", "VEC3", out.normal), ("TEXCOORD_0", "VEC2", out.uv)] {
+            let Some(id) = id else { continue };
+            let index = accessor(kind, out.points, 5126, None);
+            if let (Some(a), Some(i)) = (attributes.as_object_mut(), ids.as_object_mut()) {
+                a.insert(name.into(), json!(index));
+                i.insert(name.into(), json!(id));
+            }
+        }
+        let ext = json!({ "KHR_draco_mesh_compression": { "bufferView": view, "attributes": ids } });
+        Ok((attributes, Some(indices), ext))
     }
 
     /// An accessor of triangle indices; its index.
@@ -126,6 +155,19 @@ impl Writer {
             .push(json!({ "bufferView": view, "componentType": 5125, "count": data.len(), "type": "SCALAR" }));
         self.accessors.len() - 1
     }
+}
+
+/// The smallest and largest of each component.
+fn bounds<const N: usize>(data: &[[f32; N]]) -> ([f32; N], [f32; N]) {
+    let mut lo = [f32::INFINITY; N];
+    let mut hi = [f32::NEG_INFINITY; N];
+    for v in data {
+        for k in 0..N {
+            lo[k] = lo[k].min(v[k]);
+            hi[k] = hi[k].max(v[k]);
+        }
+    }
+    (lo, hi)
 }
 
 /// An sRGB channel as linear light.
@@ -352,8 +394,10 @@ fn element_name(project: &Project, id: ElementId, category: Category) -> String 
 /// The `.glb` of what `view` shows of the model: `geom` is the geometry of
 /// the view (its phase and design options), and the elements its graphics
 /// hide are left out, as are conceptual masses and pieces not shown at its
-/// detail level. Errors past [`MAX_TRIANGLES`].
-pub fn export(project: &Project, geom: &ModelGeometry, view: &View) -> Result<Exported, String> {
+/// detail level. `draco` compresses every mesh with Draco
+/// (`KHR_draco_mesh_compression`, then required to read the file; see
+/// [`crate::draco`] for the precision kept). Errors past [`MAX_TRIANGLES`].
+pub fn export(project: &Project, geom: &ModelGeometry, view: &View, draco: bool) -> Result<Exported, String> {
     let mut resolver = cc_views::graphics::Resolver::new(project, geom, view, None);
     let mut shown: HashMap<ElementId, bool> = HashMap::new();
     let mut w = Writer::default();
@@ -382,21 +426,28 @@ pub fn export(project: &Project, geom: &ModelGeometry, view: &View) -> Result<Ex
     let mut by_level: BTreeMap<(i64, String), Vec<usize>> = BTreeMap::new();
     for (id, category) in &order {
         let Some(prims) = elements.remove(id) else { continue };
-        let primitives: Vec<Value> = prims
-            .into_iter()
-            .filter(|(_, p)| !p.indices.is_empty())
-            .map(|(material, p)| {
-                let position = w.floats(&p.positions, "VEC3", true);
-                let normal = w.floats(&p.normals, "VEC3", false);
-                let uv = w.floats(&p.uvs, "VEC2", false);
-                let indices = w.indices(&p.indices);
-                json!({
-                    "attributes": { "POSITION": position, "NORMAL": normal, "TEXCOORD_0": uv },
+        let mut primitives: Vec<Value> = Vec::new();
+        for (material, p) in prims.into_iter().filter(|(_, p)| !p.indices.is_empty()) {
+            if draco {
+                let (attributes, indices, ext) = w.draco(&p)?;
+                primitives.push(json!({
+                    "attributes": attributes,
                     "indices": indices,
                     "material": material,
-                })
-            })
-            .collect();
+                    "extensions": ext,
+                }));
+                continue;
+            }
+            let position = w.floats(&p.positions, "VEC3", true);
+            let normal = w.floats(&p.normals, "VEC3", false);
+            let uv = w.floats(&p.uvs, "VEC2", false);
+            let indices = w.indices(&p.indices);
+            primitives.push(json!({
+                "attributes": { "POSITION": position, "NORMAL": normal, "TEXCOORD_0": uv },
+                "indices": indices,
+                "material": material,
+            }));
+        }
         if primitives.is_empty() {
             continue;
         }
@@ -452,6 +503,10 @@ pub fn export(project: &Project, geom: &ModelGeometry, view: &View) -> Result<Ex
                 "samplers".into(),
                 json!([{ "magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497 }]),
             );
+        }
+        if draco && !meshes.is_empty() {
+            obj.insert("extensionsUsed".into(), json!(["KHR_draco_mesh_compression"]));
+            obj.insert("extensionsRequired".into(), json!(["KHR_draco_mesh_compression"]));
         }
         while !w.bin.len().is_multiple_of(4) {
             w.bin.push(0);

@@ -226,10 +226,22 @@ fn bad_gltf_files_are_errors() {
     let mut old = json.clone();
     old["asset"]["version"] = json!("1.0");
     rejected(&mut s, "old.glb", glb(&old, &bin));
-    // Compressed meshes.
-    let mut draco = json.clone();
-    draco["extensionsRequired"] = json!(["KHR_draco_mesh_compression"]);
-    rejected(&mut s, "draco.glb", glb(&draco, &bin));
+    // Meshes compressed with meshopt.
+    let mut meshopt = json.clone();
+    meshopt["extensionsRequired"] = json!(["EXT_meshopt_compression"]);
+    rejected(&mut s, "meshopt.glb", glb(&meshopt, &bin));
+    // Draco streams that are not streams, or missing views: nothing decodes, no panic.
+    for view in [json!(0), json!(1), json!(99), json!("x")] {
+        let mut draco = json.clone();
+        draco["extensionsRequired"] = json!(["KHR_draco_mesh_compression"]);
+        for mesh in draco["meshes"].as_array_mut().unwrap() {
+            for p in mesh["primitives"].as_array_mut().unwrap() {
+                p["extensions"] =
+                    json!({"KHR_draco_mesh_compression": {"bufferView": view, "attributes": {"POSITION": 0}}});
+            }
+        }
+        rejected(&mut s, "draco.glb", glb(&draco, &bin));
+    }
     // Offsets, counts and indices out of range, a node cycle, a bad matrix: nothing to import, no panic.
     let mut broken = json.clone();
     broken["accessors"][0]["count"] = json!(1_000_000);

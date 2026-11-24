@@ -181,7 +181,7 @@ No parameters.
 
 ### `gltf_import`
 
-*edit* — Import a glTF 2.0 model (.glb, or .gltf with its buffers embedded or in files next to it) into the project. Each node of the scene's root, with everything below it, becomes a component element on `level`, of a component type holding its triangles as fixed mesh pieces, one per material, inserted at the center of its footprint and the bottom of its extent. glTF is in meters with Y up. Materials take their base color times its texture's average, the texture itself (repeating as the texture coordinates say) and, when blended, their opacity; missing materials are added by name. Lines and points are ignored, and compressed meshes (Draco, meshopt) are refused.
+*edit* — Import a glTF 2.0 model (.glb, or .gltf with its buffers embedded or in files next to it) into the project. Each node of the scene's root, with everything below it, becomes a component element on `level`, of a component type holding its triangles as fixed mesh pieces, one per material, inserted at the center of its footprint and the bottom of its extent. glTF is in meters with Y up. Materials take their base color times its texture's average, the texture itself (repeating as the texture coordinates say) and, when blended, their opacity; missing materials are added by name. Lines and points are ignored; meshes compressed with Draco (KHR_draco_mesh_compression) are decoded, those compressed with meshopt refused.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -201,11 +201,12 @@ No parameters.
 
 ### `gltf_export`
 
-*file* — Export what a 3D view shows as a binary glTF 2.0 file (.glb), for visualization programs such as real-time renderers: one node per level, under it one node per element named `<type> [<id>]` (its id, unique id, category, type, mark and level in `extras`), one mesh primitive per material, materials named after the project's with their color, finish, transparency and texture, and texture coordinates on every face (in meters where the material has no texture). Exporting again gives the same names, so a program that reimports the file can keep the materials it replaced. The view's phase, design options, detail level and hidden elements apply; conceptual masses are left out. In meters, Y up. Returns the path, the elements, materials and textures written and the triangles.
+*file* — Export what a 3D view shows as a binary glTF 2.0 file (.glb), for visualization programs such as real-time renderers: one node per level, under it one node per element named `<type> [<id>]` (its id, unique id, category, type, mark and level in `extras`), one mesh primitive per material, materials named after the project's with their color, finish, transparency and texture, and texture coordinates on every face (in meters where the material has no texture). Exporting again gives the same names, so a program that reimports the file can keep the materials it replaced. The view's phase, design options, detail level and hidden elements apply; conceptual masses are left out. In meters, Y up. With `draco`, meshes are compressed with Draco (KHR_draco_mesh_compression). Returns the path, the elements, materials and textures written, the triangles and the file size in bytes.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
 | `path` | string | required | Path of the .glb file to write. |
+| `draco` | boolean | optional | Compress the meshes with Draco (KHR_draco_mesh_compression): a much smaller file, positions kept to 1/65536 of each element's size (about 1.5 mm over 100 m); the program reading it must support the extension. |
 | `view` | id or name | optional | 3D view id or name (default: the first 3D view). |
 
 ### `sheet_export`

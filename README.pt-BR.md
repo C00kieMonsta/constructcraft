@@ -258,4 +258,4 @@ Copyright © Francis Rebouças <francisreboucas@gmail.com>.
 
 O ConstructCraft é distribuído sob a [GNU General Public License v3.0 ou posterior](LICENSE) (GPL-3.0-or-later).
 
-O ícone do aplicativo é de [Magnific – Flaticon](https://www.flaticon.com/) (veja `assets/icons/FLATICON.txt`). A fonte [Inter](https://rsms.me/inter/) incluída é © The Inter Project Authors e distribuída sob a [SIL Open Font License 1.1](assets/fonts/OFL-Inter.txt). A renderização usa o crate [sort-raytracing](https://crates.io/crates/sort-raytracing), distribuído sob a GPL-3.0-only.
+O ícone do aplicativo é de [Magnific – Flaticon](https://www.flaticon.com/) (veja `assets/icons/FLATICON.txt`). A fonte [Inter](https://rsms.me/inter/) incluída é © The Inter Project Authors e distribuída sob a [SIL Open Font License 1.1](assets/fonts/OFL-Inter.txt). A renderização usa o crate [sort-raytracing](https://crates.io/crates/sort-raytracing), distribuído sob a GPL-3.0-only. A compressão de malhas Draco usa o crate [draco-core](https://crates.io/crates/draco-core), distribuído sob a Apache-2.0.

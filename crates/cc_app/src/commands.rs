@@ -1991,7 +1991,7 @@ pub fn run(state: &mut AppState, ctx: &egui::Context, command: UiCommand) {
         ImportObj => crate::obj_ui::import_obj(state),
         ImportGltf => crate::obj_ui::import_gltf(state),
         ExportIfc => actions::export_ifc(state),
-        ExportGltf => actions::export_gltf(state),
+        ExportGltf => crate::gltf_export_ui::open(state),
         ExportPdf => actions::export_sheet(state, actions::SheetFormat::Pdf),
         ExportSvg => actions::export_sheet(state, actions::SheetFormat::Svg),
         ExportImage => actions::export_image(state),

@@ -28,6 +28,7 @@ mod dim_type_ui;
 mod engine_edit;
 mod fill_patterns_dialog;
 mod gestures;
+mod gltf_export_ui;
 mod gpu;
 mod graph_ui;
 mod graphics_dialog;
@@ -117,6 +118,8 @@ fn main() -> eframe::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,wgpu_hal::gles=error")).init();
     // Panics are logged to the crash log (release builds on Windows have no console).
     recovery::install_panic_hook();
+    // Decoded Draco meshes are kept between imports (checked by SHA-256 before use).
+    cc_engine::draco::set_cache_dir(recovery::data_dir().map(|d| d.join("draco-cache")));
     let args = parse_args(raw.into_iter());
     let viewport = egui::ViewportBuilder::default()
         .with_inner_size([1440.0, 900.0])
