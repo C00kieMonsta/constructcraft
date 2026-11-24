@@ -4844,6 +4844,10 @@ fn every_dialog_keeps_its_body_inside() {
         ("new project".into(), Box::new(crate::new_project_dialog::open)),
         ("new component".into(), Box::new(crate::new_component_dialog::open)),
         ("component library".into(), Box::new(crate::library::open)),
+        (
+            "gltf export".into(),
+            Box::new(|s| s.dialogs.gltf_export = Some(std::path::PathBuf::from("a rather long project name.glb"))),
+        ),
         ("macro restart".into(), Box::new(|s| crate::macro_ui::ask(s, true))),
         ("macro discard".into(), Box::new(|s| crate::macro_ui::ask(s, false))),
         (

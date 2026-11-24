@@ -128,6 +128,10 @@ pub struct Dialogs {
     pub library: Option<crate::library::Library>,
     /// The .obj file whose import options are being asked.
     pub obj_import: Option<std::path::PathBuf>,
+    /// The .glb file whose export options are being asked.
+    pub gltf_export: Option<std::path::PathBuf>,
+    /// Whether the last glTF export compressed its meshes with Draco.
+    pub gltf_draco: bool,
     /// The last choices of the OBJ import dialog.
     pub obj_options: crate::obj_ui::ObjOptions,
     /// The Preferences window.

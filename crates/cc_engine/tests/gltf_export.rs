@@ -191,3 +191,71 @@ fn embeds_textures_as_png_and_lays_them_on_the_faces() {
     assert_eq!((decoded.width(), decoded.height()), (4, 2));
     assert_eq!(decoded.get_pixel(0, 0).0, [200, 40, 10]);
 }
+
+/// The bounds of every mesh piece of the project's component types.
+fn mesh_bounds(s: &Session) -> ([f64; 3], [f64; 3]) {
+    let (mut lo, mut hi) = ([f64::MAX; 3], [f64::MIN; 3]);
+    for t in s.project().types.values() {
+        let cc_core::TypeData::Component { def, .. } = &t.data else { continue };
+        for item in &def.items {
+            let cc_core::ComponentShape::Mesh { vertices, .. } = &item.shape else { continue };
+            for v in vertices.iter() {
+                for k in 0..3 {
+                    lo[k] = lo[k].min(v[k]);
+                    hi[k] = hi[k].max(v[k]);
+                }
+            }
+        }
+    }
+    (lo, hi)
+}
+
+#[test]
+fn draco_compresses_the_meshes_and_reads_back() {
+    let mut s = house();
+    let plain = scratch("house-plain.glb");
+    let packed = scratch("house-draco.glb");
+    let a = run(&mut s, "gltf_export", json!({"path": plain}));
+    let b = run(&mut s, "gltf_export", json!({"path": packed, "draco": true}));
+    assert_eq!(a["triangles"], b["triangles"]);
+    assert!(b["bytes"].as_u64().unwrap() * 2 < a["bytes"].as_u64().unwrap(), "{a} {b}");
+    let bytes = std::fs::read(&packed).unwrap();
+    assert_eq!(bytes.len() as u64, b["bytes"].as_u64().unwrap());
+    let again = scratch("house-draco-again.glb");
+    run(&mut s, "gltf_export", json!({"path": again, "draco": true}));
+    assert_eq!(std::fs::read(&again).unwrap(), bytes, "the same model gives the same bytes");
+
+    let (gltf, bin) = parse(&bytes);
+    assert_eq!(gltf["extensionsUsed"], json!(["KHR_draco_mesh_compression"]));
+    assert_eq!(gltf["extensionsRequired"], json!(["KHR_draco_mesh_compression"]));
+    let accessors = gltf["accessors"].as_array().unwrap();
+    let views = gltf["bufferViews"].as_array().unwrap();
+    for mesh in gltf["meshes"].as_array().unwrap() {
+        for p in mesh["primitives"].as_array().unwrap() {
+            let ext = &p["extensions"]["KHR_draco_mesh_compression"];
+            let view = &views[ext["bufferView"].as_u64().unwrap() as usize];
+            let start = view["byteOffset"].as_u64().unwrap() as usize;
+            assert_eq!(&bin[start..start + 5], b"DRACO");
+            for name in ["POSITION", "NORMAL", "TEXCOORD_0"] {
+                assert!(ext["attributes"][name].is_u64(), "{name}: {ext}");
+                let acc = &accessors[p["attributes"][name].as_u64().unwrap() as usize];
+                assert!(acc.get("bufferView").is_none(), "compressed accessors have no view: {acc}");
+            }
+            let pos = &accessors[p["attributes"]["POSITION"].as_u64().unwrap() as usize];
+            assert!(pos["min"].is_array() && pos["max"].is_array());
+            let idx = &accessors[p["indices"].as_u64().unwrap() as usize];
+            assert_eq!(idx["count"].as_u64().unwrap() % 3, 0);
+        }
+    }
+
+    // Read back: the same triangles, at the same places to within the quantization.
+    let mut one = Session::default();
+    let mut two = Session::default();
+    let x = run(&mut one, "gltf_import", json!({"path": plain, "merge": true}));
+    let y = run(&mut two, "gltf_import", json!({"path": packed, "merge": true}));
+    assert_eq!(x["faces"], y["faces"], "{x} {y}");
+    let ((lo1, hi1), (lo2, hi2)) = (mesh_bounds(&one), mesh_bounds(&two));
+    for k in 0..3 {
+        assert!((lo1[k] - lo2[k]).abs() < 2e-3 && (hi1[k] - hi2[k]).abs() < 2e-3, "{lo1:?} {hi1:?} / {lo2:?} {hi2:?}");
+    }
+}

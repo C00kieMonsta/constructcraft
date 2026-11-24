@@ -10,14 +10,17 @@
 //!
 //! Files are hostile input: every index, offset and count is checked, the
 //! node graph is walked with a depth limit and a visited set, and the sizes
-//! read are bounded. Compressed meshes (Draco, meshopt) are not read.
+//! read are bounded. Meshes compressed with Draco
+//! (`KHR_draco_mesh_compression`) are decoded (see [`crate::draco`]);
+//! meshopt-compressed ones are refused.
 
 use crate::import_material::{ImportedMaterial, UvScale};
 use crate::skp::{Converted, MeshBuild, SkpPlacement, SkpType, mesh_definition};
 use glam::{DMat4, DQuat, DVec2, DVec3};
 use serde_json::Value;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
+use std::rc::Rc;
 
 /// Largest file read, in bytes (also each external buffer).
 pub const MAX_BYTES: u64 = 512 * 1024 * 1024;
@@ -134,11 +137,8 @@ impl Doc {
     fn image(&self, index: Option<&Value>) -> Option<Vec<u8>> {
         let image = self.item("images", index)?;
         let limit = cc_core::material::MAX_TEXTURE_BYTES;
-        if let Some(view) = self.item("bufferViews", image.get("bufferView")) {
-            let buffer = self.buffers.get(usize::try_from(view.get("buffer")?.as_u64()?).ok()?)?.as_ref()?;
-            let start = usize::try_from(view.get("byteOffset").and_then(Value::as_u64).unwrap_or(0)).ok()?;
-            let len = usize::try_from(view.get("byteLength")?.as_u64()?).ok().filter(|l| *l <= limit)?;
-            return buffer.get(start..start.checked_add(len)?).map(<[u8]>::to_vec);
+        if image.get("bufferView").is_some() {
+            return self.view_bytes(image.get("bufferView")).filter(|b| b.len() <= limit).map(<[u8]>::to_vec);
         }
         let uri = image.get("uri")?.as_str()?;
         if let Some(data) = uri.strip_prefix("data:") {
@@ -159,6 +159,15 @@ impl Doc {
         let webp = texture.get("extensions").and_then(|e| e.get("EXT_texture_webp")).and_then(|w| w.get("source"));
         let set = info.get("texCoord").and_then(Value::as_u64).unwrap_or(0);
         Some((texture.get("source").or(webp), set))
+    }
+
+    /// The bytes of buffer view `index`.
+    fn view_bytes(&self, index: Option<&Value>) -> Option<&[u8]> {
+        let view = self.item("bufferViews", index)?;
+        let buffer = self.buffers.get(usize::try_from(view.get("buffer")?.as_u64()?).ok()?)?.as_ref()?;
+        let start = usize::try_from(view.get("byteOffset").and_then(Value::as_u64).unwrap_or(0)).ok()?;
+        let len = usize::try_from(view.get("byteLength")?.as_u64()?).ok()?;
+        buffer.get(start..start.checked_add(len)?)
     }
 
     fn array(&self, key: &str) -> &[Value] {
@@ -268,6 +277,20 @@ struct Walker<'a> {
     faces: usize,
     /// Texture repeats of the file's materials.
     scales: Vec<UvScale>,
+    /// Draco streams decoded, by buffer view (`None` when broken), so
+    /// meshes placed many times are decoded once.
+    draco: HashMap<usize, Option<Rc<crate::draco::Decoded>>>,
+}
+
+/// What a primitive's triangles are made of: positions (three numbers per
+/// point), point indices (`None`: the points in order) and the texture
+/// coordinates the material reads (two per point; empty when none).
+struct Primitive {
+    positions: Vec<f64>,
+    indices: Option<Vec<usize>>,
+    uvs: Vec<f64>,
+    /// How the indices make triangles (decoded Draco meshes are lists).
+    mode: u64,
 }
 
 impl Walker<'_> {
@@ -312,10 +335,17 @@ impl Walker<'_> {
             if !matches!(mode, 4..=6) {
                 continue;
             }
-            let Some(positions) = self.doc.accessor(primitive.get("attributes").and_then(|a| a.get("POSITION")), 3)
-            else {
-                continue;
+            let material = primitive.get("material").and_then(Value::as_u64).and_then(|m| usize::try_from(m).ok());
+            // The texture coordinates the material's base color reads.
+            let set = material
+                .and_then(|m| self.doc.array("materials").get(m))
+                .and_then(|m| self.doc.base_texture(m))
+                .map(|(_, set)| set);
+            let read = match primitive.get("extensions").and_then(|e| e.get("KHR_draco_mesh_compression")) {
+                Some(ext) => self.draco(ext, set),
+                None => self.plain(primitive, set, mode),
             };
+            let Some(Primitive { positions, indices, uvs, mode }) = read else { continue };
             let points: Vec<DVec3> = positions
                 .as_chunks::<3>()
                 .0
@@ -326,23 +356,8 @@ impl Walker<'_> {
                     DVec3::new(w.x, -w.z, w.y)
                 })
                 .collect();
-            let indices: Vec<usize> = match primitive.get("indices") {
-                Some(i) => match self.doc.accessor(Some(i), 1) {
-                    Some(v) => v.into_iter().map(|i| i as usize).collect(),
-                    None => continue,
-                },
-                None => (0..points.len()).collect(),
-            };
-            let material = primitive.get("material").and_then(Value::as_u64).and_then(|m| usize::try_from(m).ok());
-            // The texture coordinates the material's base color reads.
-            let set = material.and_then(|m| self.doc.array("materials").get(m)).and_then(|m| self.doc.base_texture(m));
-            let uvs: Vec<glam::DVec2> = set
-                .and_then(|(_, set)| {
-                    let attributes = primitive.get("attributes")?;
-                    self.doc.accessor(attributes.get(format!("TEXCOORD_{set}")), 2)
-                })
-                .map(|v| v.as_chunks::<2>().0.iter().map(|t| glam::DVec2::new(t[0], t[1])).collect())
-                .unwrap_or_default();
+            let indices = indices.unwrap_or_else(|| (0..points.len()).collect());
+            let uvs: Vec<DVec2> = uvs.as_chunks::<2>().0.iter().map(|t| DVec2::new(t[0], t[1])).collect();
             let corners: Vec<[usize; 3]> = match mode {
                 4 => indices.as_chunks::<3>().0.to_vec(),
                 // Strips alternate their winding.
@@ -377,6 +392,38 @@ impl Walker<'_> {
             }
         }
         Ok(())
+    }
+}
+
+impl Walker<'_> {
+    /// A primitive stored in accessors.
+    fn plain(&self, primitive: &Value, set: Option<u64>, mode: u64) -> Option<Primitive> {
+        let attributes = primitive.get("attributes");
+        let positions = self.doc.accessor(attributes.and_then(|a| a.get("POSITION")), 3)?;
+        let indices = match primitive.get("indices") {
+            Some(i) => Some(self.doc.accessor(Some(i), 1)?.into_iter().map(|i| i as usize).collect()),
+            None => None,
+        };
+        let uvs =
+            set.and_then(|set| self.doc.accessor(attributes?.get(format!("TEXCOORD_{set}")), 2)).unwrap_or_default();
+        Some(Primitive { positions, indices, uvs, mode })
+    }
+
+    /// A primitive compressed with Draco: the stream in the extension's
+    /// buffer view, its attributes found by the stream's unique ids.
+    fn draco(&mut self, ext: &Value, set: Option<u64>) -> Option<Primitive> {
+        let view = usize::try_from(ext.get("bufferView")?.as_u64()?).ok()?;
+        let doc = self.doc;
+        let mesh = self
+            .draco
+            .entry(view)
+            .or_insert_with(|| doc.view_bytes(ext.get("bufferView")).and_then(crate::draco::decode).map(Rc::new))
+            .clone()?;
+        let id = |name: &str| ext.get("attributes")?.get(name)?.as_u64().and_then(|i| u32::try_from(i).ok());
+        let positions = mesh.attribute(id("POSITION")?, 3)?;
+        let indices = mesh.triangles().into_iter().flatten().collect();
+        let uvs = set.and_then(|set| mesh.attribute(id(&format!("TEXCOORD_{set}"))?, 2)).unwrap_or_default();
+        Some(Primitive { positions, indices: Some(indices), uvs, mode: 4 })
     }
 }
 
@@ -421,9 +468,8 @@ pub fn convert(bytes: &[u8], dir: Option<&Path>, name: &str, merge: bool) -> Res
         return Err(GltfError::Invalid);
     }
     let required = json.get("extensionsRequired").and_then(Value::as_array).into_iter().flatten();
-    if let Some(ext) = required
-        .filter_map(Value::as_str)
-        .find(|e| matches!(*e, "KHR_draco_mesh_compression" | "EXT_meshopt_compression" | "KHR_meshopt_compression"))
+    if let Some(ext) =
+        required.filter_map(Value::as_str).find(|e| matches!(*e, "EXT_meshopt_compression" | "KHR_meshopt_compression"))
     {
         return Err(GltfError::Unsupported(ext.to_string()));
     }
@@ -458,7 +504,7 @@ pub fn convert(bytes: &[u8], dir: Option<&Path>, name: &str, merge: bool) -> Res
         }
     };
     let scales = vec![UvScale::default(); doc.array("materials").len()];
-    let mut walker = Walker { doc: &doc, visits: 0, faces: 0, scales };
+    let mut walker = Walker { doc: &doc, visits: 0, faces: 0, scales, draco: HashMap::new() };
     let mut objects: Vec<Object> = Vec::new();
     for root in roots {
         let mut object =

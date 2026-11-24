@@ -73,8 +73,10 @@ impl Command for IfcExport {
 /// meters where the material has no texture). Exporting again gives the same
 /// names, so a program that reimports the file can keep the materials it
 /// replaced. The view's phase, design options, detail level and hidden
-/// elements apply; conceptual masses are left out. In meters, Y up. Returns
-/// the path, the elements, materials and textures written and the triangles.
+/// elements apply; conceptual masses are left out. In meters, Y up. With
+/// `draco`, meshes are compressed with Draco (KHR_draco_mesh_compression).
+/// Returns the path, the elements, materials and textures written, the
+/// triangles and the file size in bytes.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GltfExport {
@@ -83,6 +85,12 @@ pub struct GltfExport {
     /// 3D view id or name (default: the first 3D view).
     #[serde(default)]
     pub view: Option<Ref>,
+    /// Compress the meshes with Draco (KHR_draco_mesh_compression): a much
+    /// smaller file, positions kept to 1/65536 of each element's size
+    /// (about 1.5 mm over 100 m); the program reading it must support the
+    /// extension.
+    #[serde(default)]
+    pub draco: bool,
 }
 
 impl Command for GltfExport {
@@ -112,7 +120,8 @@ impl Command for GltfExport {
         let project = s.project();
         let geom = s.geom_for(id);
         let view = project.view(id).ok_or_else(|| EngineError::not_found("view"))?;
-        let out = guard(|| crate::gltf_export::export(project, geom, view))?.map_err(EngineError::invalid)?;
+        let draco = self.draco;
+        let out = guard(|| crate::gltf_export::export(project, geom, view, draco))?.map_err(EngineError::invalid)?;
         write(&self.path, &out.bytes)?;
         Ok(json!({
             "path": self.path,
@@ -121,6 +130,7 @@ impl Command for GltfExport {
             "materials": out.materials,
             "textures": out.textures,
             "triangles": out.triangles,
+            "bytes": out.bytes.len(),
         }))
     }
 }
@@ -610,8 +620,9 @@ impl Command for ObjImport {
 /// extent. glTF is in meters with Y up. Materials take their base color
 /// times its texture's average, the texture itself (repeating as the
 /// texture coordinates say) and, when blended, their opacity; missing
-/// materials are added by name. Lines and points are ignored, and
-/// compressed meshes (Draco, meshopt) are refused.
+/// materials are added by name. Lines and points are ignored;
+/// meshes compressed with Draco (KHR_draco_mesh_compression) are decoded,
+/// those compressed with meshopt refused.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GltfImport {

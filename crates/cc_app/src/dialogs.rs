@@ -52,6 +52,7 @@ pub fn show(ctx: &Context, state: &mut AppState) {
     crate::wall_framing_ui::show(ctx, state);
     crate::library::show(ctx, state);
     crate::obj_ui::show(ctx, state);
+    crate::gltf_export_ui::show(ctx, state);
     crate::macro_ui::dialog(ctx, state);
     // Before the messages are drained: what a plugin command waiting printed goes to its form.
     crate::plugin_job::poll(ctx, state);
