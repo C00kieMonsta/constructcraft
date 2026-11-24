@@ -314,18 +314,23 @@ fn text_styles(scale: f32) -> std::collections::BTreeMap<TextStyle, FontId> {
 fn fonts() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     fonts.font_data.insert(
-        "inter".into(),
-        Arc::new(FontData::from_static(include_bytes!("../../../assets/fonts/Inter-Regular.ttf"))),
+        "plex-sans".into(),
+        Arc::new(FontData::from_static(include_bytes!("../../../assets/fonts/IBMPlexSans-Regular.ttf"))),
     );
     fonts.font_data.insert(
-        "inter-semibold".into(),
-        Arc::new(FontData::from_static(include_bytes!("../../../assets/fonts/Inter-SemiBold.ttf"))),
+        "plex-sans-semibold".into(),
+        Arc::new(FontData::from_static(include_bytes!("../../../assets/fonts/IBMPlexSans-SemiBold.ttf"))),
     );
-    // Inter first; egui's bundled fonts stay as fallbacks for symbols and emoji.
+    fonts.font_data.insert(
+        "plex-mono".into(),
+        Arc::new(FontData::from_static(include_bytes!("../../../assets/fonts/IBMPlexMono-Regular.ttf"))),
+    );
+    // IBM Plex first; egui's bundled fonts stay as fallbacks for symbols and emoji.
+    fonts.families.entry(FontFamily::Monospace).or_default().insert(0, "plex-mono".into());
     let proportional = fonts.families.entry(FontFamily::Proportional).or_default();
-    proportional.insert(0, "inter".into());
+    proportional.insert(0, "plex-sans".into());
     let fallbacks: Vec<String> = proportional[1..].to_vec();
-    let mut semibold_family = vec!["inter-semibold".to_string()];
+    let mut semibold_family = vec!["plex-sans-semibold".to_string()];
     semibold_family.extend(fallbacks);
     fonts.families.insert(semibold(), semibold_family);
     // Chinese, Japanese, Korean and Lao text from the system's fonts, last.

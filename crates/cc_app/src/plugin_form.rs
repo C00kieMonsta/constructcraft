@@ -1092,7 +1092,10 @@ fn result_body(ui: &mut Ui, printed: &[String], result: Option<&str>) {
 /// The arguments as JSON.
 fn json_body(ui: &mut Ui, text: &mut String, message: Option<&str>) {
     ui.label(RichText::new(t!("palette-arguments")).size(12.0).color(PALETTE.text_muted));
-    egui::ScrollArea::vertical().id_salt("pform-json").max_height(360.0).auto_shrink([false, true]).show(ui, |ui| {
+    // Claim the editor's height from the first frame, so its scroll bar does
+    // not flicker while the dialog grows to fit.
+    let json_area = egui::ScrollArea::vertical().id_salt("pform-json").max_height(360.0).min_scrolled_height(360.0);
+    json_area.auto_shrink([false, true]).show(ui, |ui| {
         let editor = egui::TextEdit::multiline(text).code_editor().desired_rows(10).desired_width(f32::INFINITY);
         let r = ui.add(editor);
         name_node(ui, &r, &t!("palette-arguments"));
