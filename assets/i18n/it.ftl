@@ -2272,6 +2272,8 @@ prop-cad-primitives = Oggetti
 prop-cad-all-layers = Tutti i layer
 msg-comp-origin-plane = I piani di origine del componente non si possono spostare né eliminare.
 msg-comp-plane-driven = Il piano { $name } è definito da un'espressione; modifica l'espressione o etichetta la quota con un parametro.
+msg-comp-equal-fixed = Nessuno dei tre piani può muoversi per tenere { $name } a metà: togli l'etichetta o il blocco di una quota o modifica un'espressione.
+hint-comp-dim-lock = Blocca la distanza: il piano che la quota sposta segue l'altro.
 comp-axis-x = Sinistra/destra (X)
 comp-axis-y = Fronte/retro (Y)
 comp-axis-z = Altezza (Z)
@@ -2349,7 +2351,7 @@ comp-env-equal = Uguaglianza (EQ)
 comp-env-connector = Connettore
 cmd-desc-comp-equal = Mantiene un piano di riferimento a metà tra due paralleli: li segue quando si muovono.
 cmd-desc-comp-connector = Indica dove tubi e condotti si collegano al componente: sistema, posizione, direzione e diametro.
-comp-env-hint-equal = Fai clic sul piano { $count } di 3: uno esterno, quello tenuto a metà, l'altro esterno · Esc ricomincia
+comp-env-hint-equal = Fai clic sul piano { $count } di 3, in qualsiasi ordine: quello tra gli altri due è tenuto a metà · Esc ricomincia
 comp-env-hint-connector = Fai clic nella pianta, nella vista frontale o laterale per posizionare un connettore; vicino a un piano di riferimento vi resta vincolato · Esc termina
 comp-env-points = Punti
 

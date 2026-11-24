@@ -394,7 +394,7 @@ pub fn finish(state: &mut AppState) {
         }
         _ => {}
     }
-    let view = cc_views::component_view(&def, &Default::default(), kind, crate::component_env::VIEW_SCALE);
+    let view = cc_views::component_view(&def, &Default::default(), kind, crate::component_env::view_scale(state));
     create(state, &def, &view, &session.curves, &piece, None);
 }
 

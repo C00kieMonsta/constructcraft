@@ -2272,6 +2272,8 @@ prop-cad-primitives = 对象
 prop-cad-all-layers = 所有图层
 msg-comp-origin-plane = 构件的原点平面不能移动或删除。
 msg-comp-plane-driven = 平面 { $name } 由表达式确定；请修改表达式或用参数标记该尺寸。
+msg-comp-equal-fixed = 三个平面都不能移动以使 { $name } 保持居中：请去掉某个尺寸的标签或锁定，或修改表达式。
+hint-comp-dim-lock = 锁定距离：尺寸移动的平面跟随另一个平面。
 comp-axis-x = 左/右 (X)
 comp-axis-y = 前/后 (Y)
 comp-axis-z = 高度 (Z)
@@ -2349,7 +2351,7 @@ comp-env-equal = 等分 (EQ)
 comp-env-connector = 接头
 cmd-desc-comp-equal = 使参照平面保持在两个平行平面的正中间：它们移动时它会跟随。
 cmd-desc-comp-connector = 标示管道与导管接入构件的位置：系统、位置、方向与直径。
-comp-env-hint-equal = 单击第 { $count } 个平面（共 3 个）：一个外侧平面、保持居中的平面、另一个外侧平面 · Esc 重新开始
+comp-env-hint-equal = 以任意顺序单击第 { $count } 个平面（共 3 个）：位于另两个之间的平面保持居中 · Esc 重新开始
 comp-env-hint-connector = 在平面、前视或侧视图中单击以放置接头；靠近参考平面时会锁定到该平面 · Esc 结束
 comp-env-points = 点
 
