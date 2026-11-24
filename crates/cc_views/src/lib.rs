@@ -46,7 +46,7 @@ mod topography;
 pub use annotate::{
     DimensionLayout, HIGHLIGHT_ONLY, dimension_layout, dimension_type, draw_dimension, draw_marks, grid_style,
 };
-pub use component_view::{ComponentView, ComponentViewKind, ViewConnector, component_view};
+pub use component_view::{ComponentView, ComponentViewKind, ViewConnector, ViewDimension, component_view};
 pub use drawing::{
     Anchor, BubbleHandle, Drawing2D, FittingTagHandle, LevelHandle, LevelHeadHandle, LineStyle, MAX_HITS, MarkHandle,
     Pen, Prim, ResolvedPen, SectionHandle, TagHandle, halftone,

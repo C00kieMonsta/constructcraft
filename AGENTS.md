@@ -58,7 +58,7 @@ The crates in one line each:
 
 The detailed notes (types, functions, invariants, commands and app entry points of each feature) live in `docs/architecture/`, one file per area. **Before working on a feature, read the file that covers it** (or search the folder for the type or command name). **When a change adds or alters a feature, update its bullet there** (a new feature gets a new bullet in the file of its area), and add the topic to this list; do not put feature details in this file, which must stay under 40,000 characters.
 
-- [`docs/architecture/core.md`](docs/architecture/core.md) — cc_core, Components, cc_engine, Measurement systems, Visual programming graphs, cc_plugins, Plugin development, cc_cli.
+- [`docs/architecture/core.md`](docs/architecture/core.md) — cc_core, Components, Component reference planes and dimensions, cc_engine, Measurement systems, Visual programming graphs, cc_plugins, Plugin development, cc_cli.
 - [`docs/architecture/geometry.md`](docs/architecture/geometry.md) — cc_geom, cc_render, Joined pieces.
 - [`docs/architecture/walls.md`](docs/architecture/walls.md) — Curtain walls, Wall profiles, Spline walls, Niches, Wall flip. 
 - [`docs/architecture/elements.md`](docs/architecture/elements.md) — Sketches, Roof coverings and framing, Roof joins, Conceptual masses, Terrain, Building pads, Shafts, Swept profiles.

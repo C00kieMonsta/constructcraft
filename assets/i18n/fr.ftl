@@ -2272,6 +2272,8 @@ prop-cad-primitives = Éléments
 prop-cad-all-layers = Tous les calques
 msg-comp-origin-plane = Les plans d'origine du composant ne peuvent être ni déplacés ni supprimés.
 msg-comp-plane-driven = Le plan { $name } est défini par une expression ; modifiez l'expression ou étiquetez la cote avec un paramètre.
+msg-comp-equal-fixed = Aucun des trois plans ne peut bouger pour garder { $name } au milieu : retirez l'étiquette ou le verrou d'une cote, ou modifiez une expression.
+hint-comp-dim-lock = Verrouille la distance : le plan que la cote déplace suit l'autre.
 comp-axis-x = Gauche/droite (X)
 comp-axis-y = Avant/arrière (Y)
 comp-axis-z = Hauteur (Z)
@@ -2349,7 +2351,7 @@ comp-env-equal = Égalité (EQ)
 comp-env-connector = Connecteur
 cmd-desc-comp-equal = Maintient un plan de référence à mi-chemin entre deux autres parallèles : il suit quand ils bougent.
 cmd-desc-comp-connector = Marque où les tuyaux et conduits se raccordent au composant : système, position, direction et diamètre.
-comp-env-hint-equal = Cliquez le plan { $count } sur 3 : un extérieur, celui maintenu au milieu, l'autre extérieur · Échap recommence
+comp-env-hint-equal = Cliquez le plan { $count } sur 3, dans n'importe quel ordre : celui entre les deux autres est maintenu au milieu · Échap recommence
 comp-env-hint-connector = Cliquez dans la vue en plan, de face ou de côté pour placer un connecteur ; près d’un plan de référence il s’y verrouille · Échap termine
 comp-env-points = Points
 

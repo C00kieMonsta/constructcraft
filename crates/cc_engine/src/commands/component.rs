@@ -575,10 +575,11 @@ impl Command for ComponentRefLineDelete {
     }
 }
 
-/// Take a dimension's label off: its moving plane stays where it is.
+/// Take a dimension's label or lock off: its moving plane stays where it is.
 fn unlabel(def: &mut ComponentDef, scope: &component_ref::Scope, index: usize) {
     let Some(d) = def.dimensions.get_mut(index) else { return };
     d.label = None;
+    d.locked = false;
     let to = d.to.clone();
     if let (Some(plane), Some(v)) = (def.ref_planes.iter_mut().find(|p| p.name == to), scope.get(&to)) {
         plane.at = number(v);
@@ -592,16 +593,11 @@ fn unlabel(def: &mut ComponentDef, scope: &component_ref::Scope, index: usize) {
 fn label(def: &mut ComponentDef, index: usize, label: &str) -> Result<()> {
     let scope = def.scope(&BTreeMap::new(), &[]);
     let distance = def.dimension_value(&scope, index).map_err(|e| EngineError::invalid(e.to_string()))?;
-    let Some(d) = def.dimensions.get_mut(index) else { return Err(EngineError::not_found("dimension")) };
-    let origin = |n: &str| component_ref::ORIGIN_PLANES.iter().any(|(o, _)| *o == n);
-    if origin(&d.to) {
-        if origin(&d.from) {
-            return Err(EngineError::rejected(t!("msg-comp-origin-plane")));
-        }
-        std::mem::swap(&mut d.from, &mut d.to);
+    let (from, to) = moving_last(def, index)?;
+    if let Some(d) = def.dimensions.get_mut(index) {
+        d.label = Some(label.to_string());
+        d.locked = false;
     }
-    let (from, to) = (d.from.clone(), d.to.clone());
-    d.label = Some(label.to_string());
     if def.param(label).is_none() {
         let name = check_name(def, label)?;
         def.params.push(ComponentParam {
@@ -620,10 +616,52 @@ fn label(def: &mut ComponentDef, index: usize, label: &str) -> Result<()> {
     Ok(())
 }
 
+/// Put the plane a dimension moves last (`to`): the other one when `to` is
+/// an origin plane. Returns `(from, to)`; refused when both are origins.
+fn moving_last(def: &mut ComponentDef, index: usize) -> Result<(String, String)> {
+    let Some(d) = def.dimensions.get_mut(index) else { return Err(EngineError::not_found("dimension")) };
+    let origin = |n: &str| component_ref::ORIGIN_PLANES.iter().any(|(o, _)| *o == n);
+    if origin(&d.to) {
+        if origin(&d.from) {
+            return Err(EngineError::rejected(t!("msg-comp-origin-plane")));
+        }
+        std::mem::swap(&mut d.from, &mut d.to);
+    }
+    Ok((d.from.clone(), d.to.clone()))
+}
+
+/// Lock dimension `index` at `distance` (its current one when `None`): its
+/// moving plane is written as the other plus or minus it, so it follows the
+/// other. A labeled dimension is already held by its parameter; a moving
+/// plane another expression sets is refused (locking would undo it).
+fn lock(def: &mut ComponentDef, index: usize, distance: Option<f64>) -> Result<()> {
+    let scope = def.scope(&BTreeMap::new(), &[]);
+    let current = def.dimension_value(&scope, index).map_err(|e| EngineError::invalid(e.to_string()))?;
+    if def.dimensions.get(index).is_some_and(|d| d.label.is_some()) {
+        return Ok(());
+    }
+    let was_locked = def.dimensions.get(index).is_some_and(|d| d.locked);
+    let (from, to) = moving_last(def, index)?;
+    let Some(plane) = def.ref_planes.iter_mut().find(|p| p.name == to) else {
+        return Err(EngineError::not_found(format!("no reference plane '{to}'")));
+    };
+    if !was_locked && expr::eval(&plane.at, &|_: &str| None).is_err() {
+        return Err(EngineError::rejected(t!("msg-comp-plane-driven", "name" => to.clone())));
+    }
+    let below = scope.get(&to).zip(scope.get(&from)).is_some_and(|(t, f)| t < f);
+    let distance = number(distance.unwrap_or(current));
+    plane.at = if below { format!("{from} - {distance}") } else { format!("{from} + {distance}") };
+    if let Some(d) = def.dimensions.get_mut(index) {
+        d.locked = true;
+    }
+    Ok(())
+}
+
 /// Dimension two parallel reference planes in a view (`plan`, `front` or
 /// `side`, one that sees them edge-on). With `label`, a length parameter
 /// drives it: the second plane moves to the first plus the parameter (the
-/// parameter is created with the current distance when missing).
+/// parameter is created with the current distance when missing). A
+/// `locked` one keeps its distance: the second plane follows the first.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ComponentDimensionAdd {
@@ -642,6 +680,9 @@ pub struct ComponentDimensionAdd {
     /// Where the dimension line sits across the planes (meters, default 0).
     #[serde(default)]
     pub place: Option<f64>,
+    /// Keep the distance: the second plane follows the first.
+    #[serde(default)]
+    pub locked: bool,
 }
 
 impl Command for ComponentDimensionAdd {
@@ -651,13 +692,16 @@ impl Command for ComponentDimensionAdd {
         let view = sketch_plane(&self.view)?;
         let place = refs::finite(self.place.unwrap_or(0.0), "place")?;
         let index = edit_def(s, &self.type_ref, &[], |def| {
-            let d = RefDimension { view, from: self.from.clone(), to: self.to.clone(), label: None, place };
+            let d =
+                RefDimension { view, from: self.from.clone(), to: self.to.clone(), label: None, place, locked: false };
             def.dimensions.push(d);
             let index = def.dimensions.len() - 1;
             let scope = def.scope(&BTreeMap::new(), &[]);
             def.dimension_value(&scope, index).map_err(|e| EngineError::invalid(e.to_string()))?;
             if let Some(l) = &self.label {
                 label(def, index, l.trim())?;
+            } else if self.locked {
+                lock(def, index, None)?;
             }
             Ok(index)
         })?;
@@ -667,8 +711,10 @@ impl Command for ComponentDimensionAdd {
 
 /// Change a dimension between reference planes: label it with a parameter
 /// (`label`, created when missing), take its label off (`label: ""`, the
-/// planes stay), move its line (`place`) or give it a new `value` (the
-/// label's parameter for this type, or the moving plane's position).
+/// planes stay), lock or unlock it (`locked`: a locked dimension keeps its
+/// distance, its moving plane following the other), move its line
+/// (`place`) or give it a new `value` (the label's parameter for this type,
+/// or the moving plane's position).
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ComponentDimensionSet {
@@ -686,6 +732,9 @@ pub struct ComponentDimensionSet {
     /// Where the dimension line sits across the planes.
     #[serde(default)]
     pub place: Option<f64>,
+    /// Lock (`true`, at its distance) or unlock (`false`, the planes stay).
+    #[serde(default)]
+    pub locked: Option<bool>,
 }
 
 impl Command for ComponentDimensionSet {
@@ -709,6 +758,14 @@ impl Command for ComponentDimensionSet {
                 Some(l) => label(def, self.index, l)?,
                 None => {}
             }
+            match self.locked {
+                Some(true) => lock(def, self.index, None)?,
+                Some(false) if def.dimensions.get(self.index).is_some_and(|d| d.locked) => {
+                    let scope = def.scope(&BTreeMap::new(), &[]);
+                    unlabel(def, &scope, self.index);
+                }
+                _ => {}
+            }
             if let Some(v) = value {
                 set_distance(def, self.index, v)?;
             }
@@ -722,8 +779,8 @@ impl Command for ComponentDimensionSet {
 }
 
 /// Make dimension `index` measure `value`: its label's parameter takes it,
-/// or else its moving plane goes there (refused when that plane's position
-/// is an expression other than a number).
+/// a locked one keeps the new distance, or else its moving plane goes there
+/// (refused when that plane's position is an expression other than a number).
 fn set_distance(def: &mut ComponentDef, index: usize, value: f64) -> Result<()> {
     let Some(d) = def.dimensions.get(index).cloned() else { return Err(EngineError::not_found("dimension")) };
     if let Some(label) = &d.label {
@@ -731,6 +788,9 @@ fn set_distance(def: &mut ComponentDef, index: usize, value: f64) -> Result<()> 
             p.value = value;
         }
         return Ok(());
+    }
+    if d.locked {
+        return lock(def, index, Some(value));
     }
     let scope = def.scope(&BTreeMap::new(), &[]);
     let origin = |n: &str| component_ref::ORIGIN_PLANES.iter().any(|(o, _)| *o == n);
@@ -748,7 +808,8 @@ fn set_distance(def: &mut ComponentDef, index: usize, value: f64) -> Result<()> 
     Ok(())
 }
 
-/// Remove a dimension between reference planes (the planes stay).
+/// Remove a dimension between reference planes (the planes stay; a locked
+/// one's moving plane no longer follows).
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ComponentDimensionDelete {
@@ -767,6 +828,10 @@ impl Command for ComponentDimensionDelete {
             if self.index >= def.dimensions.len() {
                 return Err(EngineError::not_found(format!("no dimension {}", self.index)));
             }
+            if def.dimensions.get(self.index).is_some_and(|d| d.locked) {
+                let scope = def.scope(&BTreeMap::new(), &[]);
+                unlabel(def, &scope, self.index);
+            }
             def.dimensions.remove(self.index);
             Ok(())
         })?;
@@ -774,9 +839,55 @@ impl Command for ComponentDimensionDelete {
     }
 }
 
+/// The ways equality `index` can be made to hold, best first, as a plane and
+/// its new position: the middle written `(a + b) / 2`; or, when the middle
+/// cannot move (an origin plane, or one a labeled or locked dimension
+/// moves), the outer plane a dimension between `a` and `b` measures from,
+/// half that dimension from the middle (so `Width` stays centered); or an
+/// outer plane mirroring the other about the middle.
+fn equal_candidates(def: &ComponentDef, index: usize) -> Vec<(String, String)> {
+    let Some(q) = def.equals.get(index) else { return Vec::new() };
+    let origin = |n: &str| component_ref::ORIGIN_PLANES.iter().any(|(o, _)| *o == n);
+    let driven = |n: &str| def.dimensions.iter().any(|d| d.to == n && (d.label.is_some() || d.locked));
+    let movable = |n: &str| !origin(n) && !driven(n);
+    let scope = def.scope(&BTreeMap::new(), &[]);
+    let mut out = Vec::new();
+    if movable(&q.middle) {
+        out.push((q.middle.clone(), q.expression()));
+    }
+    let m = &q.middle;
+    for d in &def.dimensions {
+        let spans = (d.from == q.a && d.to == q.b) || (d.from == q.b && d.to == q.a);
+        if !spans || !movable(&d.from) {
+            continue;
+        }
+        let half = match (&d.label, d.locked) {
+            (Some(label), _) => format!("{label} / 2"),
+            (None, true) => {
+                let (Some(f), Some(t)) = (scope.get(&d.from), scope.get(&d.to)) else { continue };
+                number((t - f).abs() / 2.0)
+            }
+            (None, false) => continue,
+        };
+        // The from plane on its side of the middle, the to plane following it.
+        let below = scope.get(&d.from).zip(scope.get(&d.to)).is_some_and(|(f, t)| f < t);
+        out.push((d.from.clone(), if below { format!("{m} - {half}") } else { format!("{m} + {half}") }));
+    }
+    for (moving, other) in [(&q.b, &q.a), (&q.a, &q.b)] {
+        if movable(moving) {
+            out.push((moving.clone(), format!("2 * {m} - {other}")));
+        }
+    }
+    out
+}
+
 /// Keep the plane `middle` halfway between the parallel planes `a` and `b`
 /// (an equality, EQ): its position becomes `(a + b) / 2`, so it follows
-/// whatever moves them. Shown in `view` (`plan`, `front` or `side`) as two
+/// whatever moves them. When the middle cannot move (an origin plane, or one
+/// a labeled or locked dimension sets), an outer plane moves instead: with a
+/// dimension between `a` and `b`, the plane it measures from goes half of it
+/// from the middle (a `Width` centered on `CenterX`), else one outer plane
+/// mirrors the other. Shown in `view` (`plan`, `front` or `side`) as two
 /// equal dimensions.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -807,17 +918,28 @@ impl Command for ComponentEqualAdd {
             return Err(EngineError::invalid("an equality needs three different planes"));
         }
         let index = edit_def(s, &self.type_ref, &[], |def| {
-            if component_ref::ORIGIN_PLANES.iter().any(|(n, _)| *n == self.middle) {
-                return Err(EngineError::rejected(t!("msg-comp-origin-plane")));
+            for name in [&self.a, &self.middle, &self.b] {
+                if def.ref_plane(name).is_none() {
+                    return Err(EngineError::invalid(format!("no reference plane '{name}'")));
+                }
             }
+            let before = def.ref_problems().len();
             let q =
                 cc_core::RefEqual { view, a: self.a.clone(), middle: self.middle.clone(), b: self.b.clone(), place };
-            let Some(plane) = def.ref_planes.iter_mut().find(|p| p.name == self.middle) else {
-                return Err(EngineError::invalid(format!("no reference plane '{}'", self.middle)));
-            };
-            plane.at = q.expression();
             def.equals.push(q);
-            Ok(def.equals.len() - 1)
+            let index = def.equals.len() - 1;
+            // The first way that holds without new problems (a cycle, say).
+            for (plane, at) in equal_candidates(def, index) {
+                let mut tried = def.clone();
+                if let Some(p) = tried.ref_planes.iter_mut().find(|p| p.name == plane) {
+                    p.at = at;
+                }
+                if tried.equal_holds(index).is_ok() && tried.ref_problems().len() <= before {
+                    *def = tried;
+                    return Ok(index);
+                }
+            }
+            Err(EngineError::rejected(t!("msg-comp-equal-fixed", "name" => self.middle.clone())))
         })?;
         Ok(json!({ "index": index }))
     }

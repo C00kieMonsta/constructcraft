@@ -362,18 +362,10 @@ fn equalities_keep_a_plane_halfway_as_the_others_move() {
     let c = run(&mut s, "component_get", json!({"type": ty}));
     assert!((plane(&c, "Right") - 0.6).abs() < 1e-12 && plane(&c, "Mid").abs() < 1e-12, "{c}");
     assert!(c["problems"].as_array().unwrap().is_empty(), "{}", c["problems"]);
-    // Moving the middle by hand would break it: refused. Origin planes cannot be the middle.
+    // Moving the middle by hand would break it: refused.
     assert_eq!(
         fails(&mut s, "component_ref_plane_set", json!({"type": ty, "name": "Mid", "at": "0.2"})),
         ErrorCode::InvalidArguments
-    );
-    assert_eq!(
-        fails(
-            &mut s,
-            "component_equal_add",
-            json!({"type": ty, "view": "plan", "a": "Left", "middle": "CenterX", "b": "Right"})
-        ),
-        ErrorCode::Rejected
     );
     assert_eq!(
         fails(
@@ -389,6 +381,88 @@ fn equalities_keep_a_plane_halfway_as_the_others_move() {
     run(&mut s, "component_equal_add", json!({"type": ty, "view": "plan", "a": "Left", "middle": "Mid", "b": "Right"}));
     run(&mut s, "component_ref_plane_delete", json!({"type": ty, "name": "Mid"}));
     assert!(run(&mut s, "component_get", json!({"type": ty}))["def"]["equals"].is_null());
+}
+
+/// #499: an equality whose middle cannot move (an origin plane, or one a
+/// dimension drives) moves an outer plane instead.
+#[test]
+fn equalities_about_a_fixed_middle_move_an_outer_plane() {
+    let mut s = Session::default();
+    let ty = bench(&mut s)["id"].clone();
+    for (name, at) in [("Left", "-0.3"), ("Right", "Left + 1")] {
+        run(&mut s, "component_ref_plane_add", json!({"type": ty, "axis": "x", "at": at, "name": name}));
+    }
+    // Width labels Left–Right: centered on CenterX, Left goes half of it to the left.
+    let width = json!({"type": ty, "view": "plan", "from": "Left", "to": "Right", "label": "Width"});
+    run(&mut s, "component_dimension_add", width);
+    let eq = json!({"type": ty, "view": "plan", "a": "Left", "middle": "CenterX", "b": "Right"});
+    assert_eq!(run(&mut s, "component_equal_add", eq)["index"], 0);
+    let c = run(&mut s, "component_get", json!({"type": ty}));
+    assert!((plane(&c, "Left") + 0.6).abs() < 1e-12 && (plane(&c, "Right") - 0.6).abs() < 1e-12, "{c}");
+    assert!(c["problems"].as_array().unwrap().is_empty(), "{}", c["problems"]);
+    run(&mut s, "component_param_set", json!({"type": ty, "name": "Width", "value": 2.0}));
+    let c = run(&mut s, "component_get", json!({"type": ty}));
+    assert!((plane(&c, "Left") + 1.0).abs() < 1e-12 && (plane(&c, "Right") - 1.0).abs() < 1e-12, "{c}");
+
+    // With no dimension between them, one outer plane mirrors the other.
+    for (name, at) in [("Back", "-0.1"), ("Front", "0.5")] {
+        run(&mut s, "component_ref_plane_add", json!({"type": ty, "axis": "y", "at": at, "name": name}));
+    }
+    let eq = json!({"type": ty, "view": "plan", "a": "Back", "middle": "CenterY", "b": "Front"});
+    run(&mut s, "component_equal_add", eq);
+    let c = run(&mut s, "component_get", json!({"type": ty}));
+    assert!((plane(&c, "Front") - 0.1).abs() < 1e-12, "{c}");
+
+    // Nothing can move: both outer planes driven by labels from the middle.
+    for (name, at) in [("Low", "0.2"), ("High", "0.9")] {
+        run(&mut s, "component_ref_plane_add", json!({"type": ty, "axis": "z", "at": at, "name": name}));
+    }
+    for (to, label) in [("Low", "Sill"), ("High", "Head")] {
+        let dim = json!({"type": ty, "view": "front", "from": "Base", "to": to, "label": label});
+        run(&mut s, "component_dimension_add", dim);
+    }
+    let eq = json!({"type": ty, "view": "front", "a": "Low", "middle": "Base", "b": "High"});
+    assert_eq!(fails(&mut s, "component_equal_add", eq), ErrorCode::Rejected);
+}
+
+/// #499: a locked dimension keeps its distance; its moving plane follows.
+#[test]
+fn locked_dimensions_keep_their_distance() {
+    let mut s = Session::default();
+    let ty = bench(&mut s)["id"].clone();
+    for (name, at) in [("Left", "-0.6"), ("Right", "0.4")] {
+        run(&mut s, "component_ref_plane_add", json!({"type": ty, "axis": "x", "at": at, "name": name}));
+    }
+    let dim = json!({"type": ty, "view": "plan", "from": "Left", "to": "Right", "locked": true});
+    let index = run(&mut s, "component_dimension_add", dim)["index"].clone();
+    let c = run(&mut s, "component_get", json!({"type": ty}));
+    assert_eq!(c["def"]["dimensions"][0]["locked"], true);
+    // Moving Left moves Right.
+    run(&mut s, "component_ref_plane_set", json!({"type": ty, "name": "Left", "at": "-0.2"}));
+    let c = run(&mut s, "component_get", json!({"type": ty}));
+    assert!((plane(&c, "Right") - 0.8).abs() < 1e-12, "{c}");
+    // A new value is kept too.
+    run(&mut s, "component_dimension_set", json!({"type": ty, "index": index, "value": 0.5}));
+    run(&mut s, "component_ref_plane_set", json!({"type": ty, "name": "Left", "at": "0"}));
+    let c = run(&mut s, "component_get", json!({"type": ty}));
+    assert!((plane(&c, "Right") - 0.5).abs() < 1e-12, "{c}");
+    // Unlocked, Right stays where it is and no longer follows.
+    run(&mut s, "component_dimension_set", json!({"type": ty, "index": index, "locked": false}));
+    run(&mut s, "component_ref_plane_set", json!({"type": ty, "name": "Left", "at": "0.1"}));
+    let c = run(&mut s, "component_get", json!({"type": ty}));
+    assert!((plane(&c, "Right") - 0.5).abs() < 1e-12, "{c}");
+    assert!(c["def"]["dimensions"][0]["locked"].is_null(), "{c}");
+    // A plane another expression sets cannot be locked over.
+    run(&mut s, "component_ref_plane_set", json!({"type": ty, "name": "Right", "at": "Left * 3"}));
+    let lock = json!({"type": ty, "index": index, "locked": true});
+    assert_eq!(fails(&mut s, "component_dimension_set", lock), ErrorCode::Rejected);
+    // Deleting a locked dimension leaves its plane where it is.
+    run(&mut s, "component_ref_plane_set", json!({"type": ty, "name": "Right", "at": "0.7"}));
+    run(&mut s, "component_dimension_set", json!({"type": ty, "index": index, "locked": true}));
+    run(&mut s, "component_dimension_delete", json!({"type": ty, "index": index}));
+    run(&mut s, "component_ref_plane_set", json!({"type": ty, "name": "Left", "at": "-0.5"}));
+    let c = run(&mut s, "component_get", json!({"type": ty}));
+    assert!((plane(&c, "Right") - 0.7).abs() < 1e-12, "{c}");
 }
 
 #[test]

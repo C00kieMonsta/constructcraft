@@ -23,8 +23,10 @@ use egui_dock::{DockArea, DockState, NodeIndex, TabViewer};
 use glam::DVec2;
 use std::collections::BTreeMap;
 
-/// Scale the views are drawn at (text and dimension sizes).
+/// Scale the views open at (text and dimension sizes): 1:10.
 pub(crate) const VIEW_SCALE: u32 = 10;
+/// Scales the views can be drawn at, picked in the options bar.
+const SCALES: [u32; 8] = [1, 2, 5, 10, 20, 25, 50, 100];
 /// Pick distance, screen points.
 const PICK_PX: f32 = 6.0;
 
@@ -84,6 +86,8 @@ pub struct Env {
     cameras: BTreeMap<u8, Camera>,
     /// Text being typed in the panel's fields, until committed.
     drafts: BTreeMap<String, String>,
+    /// Scale the views are drawn at (1:`scale`): the size of their texts and dimensions.
+    pub scale: u32,
     /// A title block shows on one Sheet view instead ([`crate::title_block_env`]).
     pub sheet: Option<crate::title_block_env::SheetEditor>,
 }
@@ -103,6 +107,7 @@ impl Env {
             start_depth,
             created: false,
             cameras: BTreeMap::new(),
+            scale: VIEW_SCALE,
             drafts: BTreeMap::new(),
             sheet: None,
         }
@@ -217,9 +222,14 @@ pub(crate) fn type_ref(state: &AppState) -> Ref {
 }
 
 /// The view of the environment's component in `kind`.
+/// The scale the views are drawn at (1:10 with no environment open).
+pub(crate) fn view_scale(state: &AppState) -> u32 {
+    state.component_env.as_ref().map_or(VIEW_SCALE, |e| e.scale)
+}
+
 fn view(state: &AppState, kind: ComponentViewKind) -> Option<ComponentView> {
     let (_, def) = component(state)?;
-    Some(component_view(&def, &BTreeMap::new(), kind, VIEW_SCALE))
+    Some(component_view(&def, &BTreeMap::new(), kind, view_scale(state)))
 }
 
 // --- Picking (pure, tested) ---
@@ -340,14 +350,51 @@ fn paint_connectors(painter: &egui::Painter, view: &ComponentView, xf: &Xf, pick
     }
 }
 
-/// The dimension whose text is within `tol` of `p`.
+/// The dimension whose line or text is within `tol` of `p`.
 pub fn dimension_at(view: &ComponentView, p: DVec2, tol: f64) -> Option<usize> {
-    view.dimensions
-        .iter()
-        .map(|d| (d.text_pos.distance(p), d.index))
+    nearest_dimension(&view.dimensions, p, tol)
+}
+
+/// The equality (EQ) one of whose dimensions is within `tol` of `p`.
+pub fn equal_at(view: &ComponentView, p: DVec2, tol: f64) -> Option<usize> {
+    nearest_dimension(&view.equals, p, tol)
+}
+
+fn nearest_dimension(dims: &[cc_views::ViewDimension], p: DVec2, tol: f64) -> Option<usize> {
+    dims.iter()
+        .map(|d| (d.distance_to(p), d.index))
         .filter(|(dist, _)| *dist <= tol)
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, i)| i)
+}
+
+/// Three planes picked for an equality, in any order, as outer, middle
+/// (the one between the others where the view shows them) and outer; `None`
+/// unless they are three parallel planes of the view.
+pub fn equal_order(view: &ComponentView, picked: &[String]) -> Option<[String; 3]> {
+    let mut planes: Vec<(f64, bool, &String)> = picked
+        .iter()
+        .map(|n| {
+            let pl = view.planes.iter().find(|pl| pl.name == *n)?;
+            let vertical = (pl.b - pl.a).x.abs() < 1e-9;
+            Some((if vertical { pl.a.x } else { pl.a.y }, vertical, n))
+        })
+        .collect::<Option<_>>()?;
+    let [first, ..] = planes.as_slice() else { return None };
+    if planes.len() != 3 || planes.iter().any(|p| p.1 != first.1) {
+        return None;
+    }
+    planes.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let [a, m, b] = planes.as_slice() else { return None };
+    Some([a.2.clone(), m.2.clone(), b.2.clone()])
+}
+
+/// Where the padlock of a dimension sits on screen: past the end of its text.
+fn padlock_rect(d: &cc_views::ViewDimension, xf: &Xf) -> egui::Rect {
+    let along = DVec2::from_angle(d.text_angle);
+    let at = d.text_pos + along.perp() * (d.text_height / 2.0) + along * (d.text_width / 2.0);
+    let dir = egui::vec2(along.x as f32, -along.y as f32);
+    egui::Rect::from_center_size(xf.to_screen(at) + dir * 12.0, egui::vec2(14.0, 14.0))
 }
 
 fn view_name(kind: ComponentViewKind) -> &'static str {
@@ -407,6 +454,22 @@ pub fn options(ui: &mut Ui, state: &mut AppState) {
         EnvTool::SheetImage { .. } => t!("tb-hint-image"),
     };
     ui.label(theme::muted(hint));
+    scale_picker(ui, state);
+}
+
+/// The scale the views are drawn at, which sizes their texts and
+/// dimensions (a small component reads better at 1:1, a large one at 1:50).
+fn scale_picker(ui: &mut Ui, state: &mut AppState) {
+    let Some(env) = state.component_env.as_mut() else { return };
+    ui.separator();
+    ui.label(t!("prop-scale"));
+    let mut scale = env.scale;
+    egui::ComboBox::from_id_salt("comp-env-scale").selected_text(format!("1:{scale}")).show_ui(ui, |ui| {
+        for s in SCALES {
+            ui.selectable_value(&mut scale, s, format!("1:{s}"));
+        }
+    });
+    env.scale = scale;
 }
 
 /// The central area: the component's views in tabs.
@@ -485,7 +548,7 @@ fn canvas(ui: &mut Ui, state: &mut AppState, kind: ComponentViewKind) {
     env.cameras.insert(key, cam);
     let xf = Xf { screen: rect.center(), origin: cam.center, scale: cam.scale };
     // Text stays readable when zoomed out.
-    let px_per_mm = (cam.scale * f64::from(VIEW_SCALE) / 1000.0).max(4.5);
+    let px_per_mm = (cam.scale * f64::from(env.scale) / 1000.0).max(4.5);
     let none = Default::default();
     paint_drawing(&painter, &view.drawing, &xf, &PaintOptions { highlight: &none, px_per_mm, mono: None, only: None });
     if !view.errors.is_empty() {
@@ -508,16 +571,61 @@ fn canvas(ui: &mut Ui, state: &mut AppState, kind: ComponentViewKind) {
     if let Some(Pick::Plane(name)) = &pick {
         highlight(name, PALETTE.accent);
     }
+    let mark_dimension = |d: &cc_views::ViewDimension, color: Color32| {
+        painter.line_segment([xf.to_screen(d.line.0), xf.to_screen(d.line.1)], Stroke::new(2.0, color));
+        let along = DVec2::from_angle(d.text_angle);
+        let up = along.perp();
+        let (w, h) = (along * (d.text_width / 2.0 + 2.0 / xf.scale), up * d.text_height);
+        let base = d.text_pos;
+        let corners = [base - w, base + w, base + w + h, base - w + h].map(|p| xf.to_screen(p));
+        painter.add(egui::Shape::closed_line(corners.to_vec(), Stroke::new(1.0, color)));
+    };
     if let Some(Pick::Dimension(i)) = pick
         && let Some(d) = view.dimensions.iter().find(|d| d.index == i)
     {
-        painter.circle_stroke(xf.to_screen(d.text_pos), 10.0, Stroke::new(1.5, PALETTE.accent));
+        mark_dimension(d, PALETTE.accent);
     }
     if let Some(Pick::Equal(i)) = pick {
         for d in view.equals.iter().filter(|d| d.index == i) {
-            painter.circle_stroke(xf.to_screen(d.text_pos), 10.0, Stroke::new(1.5, PALETTE.accent));
+            mark_dimension(d, PALETTE.accent);
         }
     }
+    // Locked dimensions show a closed padlock; the picked one (not driven by
+    // a label) an open or closed one that a click toggles.
+    let picked_dim = match pick {
+        Some(Pick::Dimension(i)) => view.dimensions.iter().find(|d| d.index == i && d.label.is_none()),
+        _ => None,
+    };
+    for d in view.dimensions.iter().filter(|d| d.locked && picked_dim.is_none_or(|p| p.index != d.index)) {
+        crate::dim_edit::paint_padlock(&painter, padlock_rect(d, &xf), true, PALETTE.text_muted);
+    }
+    let mut toggle_lock = None;
+    if let Some(d) = picked_dim {
+        let rect = padlock_rect(d, &xf);
+        let hovered = resp.hover_pos().is_some_and(|p| rect.expand(2.0).contains(p));
+        let color = if hovered || d.locked { PALETTE.accent } else { PALETTE.text_muted };
+        crate::dim_edit::paint_padlock(&painter, rect, d.locked, color);
+        if hovered {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            resp.clone().on_hover_text_at_pointer(t!("hint-comp-dim-lock"));
+            if resp.clicked_by(egui::PointerButton::Primary) {
+                toggle_lock = Some((d.index, !d.locked));
+            }
+        }
+    }
+    if let Some((index, locked)) = toggle_lock {
+        let command = cmd::ComponentDimensionSet {
+            type_ref: type_ref(state),
+            index,
+            label: None,
+            value: None,
+            place: None,
+            locked: Some(locked),
+        };
+        crate::actions::run_command(state, command);
+        return;
+    }
+    let Some(env) = state.component_env.as_mut() else { return };
     if let Some(Pick::Piece(i)) = pick
         && let Some((_, edges)) = view.pieces.iter().find(|(item, _)| *item == i)
     {
@@ -525,7 +633,16 @@ fn canvas(ui: &mut Ui, state: &mut AppState, kind: ComponentViewKind) {
             painter.line_segment([xf.to_screen(*a), xf.to_screen(*b)], Stroke::new(2.0, PALETTE.accent));
         }
     }
-    let hovered_plane = hover.and_then(|p| plane_at(&view, p, tol));
+    // In Select, a dimension or EQ under the pointer wins over the planes.
+    let selecting = env.tool == EnvTool::Select && state.sketch.is_none();
+    let hovered_dim = hover.filter(|_| selecting).and_then(|p| {
+        let equal = equal_at(&view, p, tol * 2.0).and_then(|i| view.equals.iter().find(|d| d.index == i));
+        equal.or_else(|| dimension_at(&view, p, tol * 2.0).and_then(|i| view.dimensions.iter().find(|d| d.index == i)))
+    });
+    if let Some(d) = hovered_dim {
+        mark_dimension(d, PALETTE.accent.gamma_multiply(0.5));
+    }
+    let hovered_plane = hover.and_then(|p| plane_at(&view, p, tol)).filter(|_| hovered_dim.is_none());
     if let Some(name) = &hovered_plane {
         highlight(name, PALETTE.accent.gamma_multiply(0.5));
     }
@@ -544,17 +661,10 @@ fn canvas(ui: &mut Ui, state: &mut AppState, kind: ComponentViewKind) {
     match tool {
         EnvTool::Select => {
             if clicked && let Some(p) = hover {
-                let equal = view
-                    .equals
-                    .iter()
-                    .map(|d| (d.text_pos.distance(p), d.index))
-                    .filter(|(dist, _)| *dist <= tol * 2.0)
-                    .min_by(|a, b| a.0.total_cmp(&b.0))
-                    .map(|(_, i)| Pick::Equal(i));
                 let picked = connector_at(&view, p, tol * 2.0)
                     .map(Pick::Connector)
-                    .or(equal)
-                    .or(dimension_at(&view, p, tol * 2.0).map(Pick::Dimension))
+                    .or_else(|| equal_at(&view, p, tol * 2.0).map(Pick::Equal))
+                    .or_else(|| dimension_at(&view, p, tol * 2.0).map(Pick::Dimension))
                     .or(hovered_plane.map(Pick::Plane))
                     .or_else(|| piece_at(&view, p, tol).map(Pick::Piece));
                 if let Some(env) = state.component_env.as_mut() {
@@ -574,17 +684,20 @@ fn canvas(ui: &mut Ui, state: &mut AppState, kind: ComponentViewKind) {
                 return;
             }
             picked.push(name);
-            if let [a, middle, b] = picked.as_slice() {
-                let place = match view.planes.iter().find(|pl| pl.name == *a) {
+            if let [first, second, third] = picked.as_slice() {
+                // In any order: the plane between the others is kept halfway.
+                let [a, middle, b] =
+                    equal_order(&view, &picked).unwrap_or_else(|| [first.clone(), second.clone(), third.clone()]);
+                let place = match view.planes.iter().find(|pl| pl.name == a) {
                     Some(pl) if (pl.b - pl.a).x.abs() < 1e-9 => p.y,
                     _ => p.x,
                 };
                 let command = cmd::ComponentEqualAdd {
                     type_ref: type_ref(state),
                     view: view_name(kind).into(),
-                    a: a.clone(),
-                    middle: middle.clone(),
-                    b: b.clone(),
+                    a,
+                    middle,
+                    b,
                     place: Some(place),
                 };
                 if let Some(out) = crate::actions::run_command(state, command)
@@ -663,6 +776,7 @@ fn canvas(ui: &mut Ui, state: &mut AppState, kind: ComponentViewKind) {
                         to: name,
                         label: None,
                         place: Some(place),
+                        locked: false,
                     };
                     if let Some(out) = crate::actions::run_command(state, command)
                         && let Some(env) = state.component_env.as_mut()
@@ -1024,8 +1138,31 @@ fn dimension_props(ui: &mut Ui, state: &mut AppState, def: &cc_core::ComponentDe
         let before = value;
         let r = crate::table::row(ui, &t!("prop-value"), |ui| ui.add(crate::properties::length_drag(&mut value)));
         if r.changed() && value > 0.0 && (value - before).abs() > 1e-12 {
-            let command =
-                cmd::ComponentDimensionSet { type_ref: t.clone(), index, label: None, value: Some(value), place: None };
+            let command = cmd::ComponentDimensionSet {
+                type_ref: t.clone(),
+                index,
+                label: None,
+                value: Some(value),
+                place: None,
+                locked: None,
+            };
+            crate::actions::run_command(state, command);
+        }
+    }
+    // Locked: it keeps its distance (a labeled one is held by its parameter).
+    if d.label.is_none() {
+        let mut locked = d.locked;
+        let r = crate::table::row(ui, &t!("prop-dim-locked"), |ui| crate::table::checkbox(ui, &mut locked))
+            .on_hover_text(t!("hint-comp-dim-lock"));
+        if r.changed() {
+            let command = cmd::ComponentDimensionSet {
+                type_ref: t.clone(),
+                index,
+                label: None,
+                value: None,
+                place: None,
+                locked: Some(locked),
+            };
             crate::actions::run_command(state, command);
         }
     }
@@ -1044,8 +1181,14 @@ fn dimension_props(ui: &mut Ui, state: &mut AppState, def: &cc_core::ComponentDe
             });
     });
     if label != before {
-        let command =
-            cmd::ComponentDimensionSet { type_ref: t.clone(), index, label: Some(label), value: None, place: None };
+        let command = cmd::ComponentDimensionSet {
+            type_ref: t.clone(),
+            index,
+            label: Some(label),
+            value: None,
+            place: None,
+            locked: None,
+        };
         crate::actions::run_command(state, command);
     }
     // A new parameter named here labels it at once.
@@ -1054,7 +1197,14 @@ fn dimension_props(ui: &mut Ui, state: &mut AppState, def: &cc_core::ComponentDe
         new_label = draft_field(ui, state, &format!("dim-new:{index}"), "", 120.0)
     });
     if let Some(name) = new_label.filter(|n| !n.is_empty()) {
-        let command = cmd::ComponentDimensionSet { type_ref: t, index, label: Some(name), value: None, place: None };
+        let command = cmd::ComponentDimensionSet {
+            type_ref: t,
+            index,
+            label: Some(name),
+            value: None,
+            place: None,
+            locked: None,
+        };
         crate::actions::run_command(state, command);
     }
     if ui.button(t!("action-delete")).clicked() {
@@ -1402,6 +1552,27 @@ mod tests {
         (state, table)
     }
 
+    /// #499: the three planes of an equality may be clicked in any order.
+    #[test]
+    fn equality_planes_are_ordered_by_where_they_are() {
+        let (mut state, table) = table_state();
+        open(&mut state, table);
+        add_plane(&mut state, PlaneAxis::X, 0.4);
+        add_plane(&mut state, PlaneAxis::X, -0.4);
+        add_plane(&mut state, PlaneAxis::Y, 0.2);
+        let plan = view(&state, ComponentViewKind::Plan).unwrap();
+        let names = |n: [&str; 3]| n.map(String::from).to_vec();
+        let ordered = equal_order(&plan, &names(["CenterX", "Plane1", "Plane2"]));
+        assert_eq!(ordered, Some(["Plane2", "CenterX", "Plane1"].map(String::from)));
+        assert_eq!(equal_order(&plan, &names(["Plane1", "Plane2", "Plane3"])), None);
+        // CenterX in the middle: the outer planes move to keep it halfway.
+        let [a, middle, b] = ordered.unwrap();
+        let command =
+            cmd::ComponentEqualAdd { type_ref: type_ref(&state), view: "plan".into(), a, middle, b, place: None };
+        crate::actions::run_command(&mut state, command).unwrap();
+        assert_eq!(component(&state).unwrap().1.equals.len(), 1);
+    }
+
     #[test]
     fn two_clicks_make_a_plane_square_to_the_view() {
         use ComponentViewKind::*;
@@ -1485,11 +1656,23 @@ mod tests {
             to: "Plane1".into(),
             label: Some("Half".into()),
             place: Some(-0.6),
+            locked: false,
         };
         crate::actions::run_command(&mut state, command).unwrap();
         let plan = view(&state, ComponentViewKind::Plan).unwrap();
         let text = plan.dimensions[0].text_pos;
         assert_eq!(dimension_at(&plan, text + DVec2::splat(0.001), 0.01), Some(0));
+        // #499: anywhere along its line or its text picks it, not just the text's middle.
+        let (a, b) = plan.dimensions[0].line;
+        assert!((a.y + 0.6).abs() < 1e-9 && (b.y + 0.6).abs() < 1e-9, "{a} {b}");
+        assert_eq!(dimension_at(&plan, DVec2::new(0.05, -0.6 + 0.004), 0.01), Some(0));
+        assert_eq!(dimension_at(&plan, text + DVec2::new(0.07, 0.015), 0.01), Some(0));
+        assert_eq!(dimension_at(&plan, DVec2::new(0.05, -0.7), 0.01), None);
+        // #499: the views' scale sizes their texts.
+        state.component_env.as_mut().unwrap().scale = 50;
+        let big = view(&state, ComponentViewKind::Plan).unwrap();
+        assert!((big.dimensions[0].text_height - 5.0 * plan.dimensions[0].text_height).abs() < 1e-12);
+        state.component_env.as_mut().unwrap().scale = VIEW_SCALE;
         // Delete takes the selected dimension away; Cancel undoes the whole session.
         state.component_env.as_mut().unwrap().pick = Some(Pick::Dimension(0));
         delete_pick(&mut state);

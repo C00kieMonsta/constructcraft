@@ -2772,7 +2772,7 @@ No parameters.
 
 ### `component_dimension_add`
 
-*edit* — Dimension two parallel reference planes in a view (`plan`, `front` or `side`, one that sees them edge-on). With `label`, a length parameter drives it: the second plane moves to the first plus the parameter (the parameter is created with the current distance when missing).
+*edit* — Dimension two parallel reference planes in a view (`plan`, `front` or `side`, one that sees them edge-on). With `label`, a length parameter drives it: the second plane moves to the first plus the parameter (the parameter is created with the current distance when missing). A `locked` one keeps its distance: the second plane follows the first.
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -2781,23 +2781,25 @@ No parameters.
 | `type` | id or name | required | A type of the component: id or name. |
 | `view` | string | required | `plan`, `front` or `side`. |
 | `label` | string | optional | Parameter that drives the distance. |
+| `locked` | boolean | optional | Keep the distance: the second plane follows the first. |
 | `place` | number | optional | Where the dimension line sits across the planes (meters, default 0). |
 
 ### `component_dimension_set`
 
-*edit* — Change a dimension between reference planes: label it with a parameter (`label`, created when missing), take its label off (`label: ""`, the planes stay), move its line (`place`) or give it a new `value` (the label's parameter for this type, or the moving plane's position).
+*edit* — Change a dimension between reference planes: label it with a parameter (`label`, created when missing), take its label off (`label: ""`, the planes stay), lock or unlock it (`locked`: a locked dimension keeps its distance, its moving plane following the other), move its line (`place`) or give it a new `value` (the label's parameter for this type, or the moving plane's position).
 
 | Parameter | Type | | Description |
 |---|---|---|---|
 | `index` | integer | required | The dimension's index (from `component_get`). |
 | `type` | id or name | required | A type of the component: id or name. |
 | `label` | string | optional | Parameter that drives it; empty to take the label off. |
+| `locked` | boolean | optional | Lock (`true`, at its distance) or unlock (`false`, the planes stay). |
 | `place` | number | optional | Where the dimension line sits across the planes. |
 | `value` | number | optional | New distance (meters). |
 
 ### `component_dimension_delete`
 
-*edit* — Remove a dimension between reference planes (the planes stay).
+*edit* — Remove a dimension between reference planes (the planes stay; a locked one's moving plane no longer follows).
 
 | Parameter | Type | | Description |
 |---|---|---|---|
@@ -2806,7 +2808,7 @@ No parameters.
 
 ### `component_equal_add`
 
-*edit* — Keep the plane `middle` halfway between the parallel planes `a` and `b` (an equality, EQ): its position becomes `(a + b) / 2`, so it follows whatever moves them. Shown in `view` (`plan`, `front` or `side`) as two equal dimensions.
+*edit* — Keep the plane `middle` halfway between the parallel planes `a` and `b` (an equality, EQ): its position becomes `(a + b) / 2`, so it follows whatever moves them. When the middle cannot move (an origin plane, or one a labeled or locked dimension sets), an outer plane moves instead: with a dimension between `a` and `b`, the plane it measures from goes half of it from the middle (a `Width` centered on `CenterX`), else one outer plane mirrors the other. Shown in `view` (`plan`, `front` or `side`) as two equal dimensions.
 
 | Parameter | Type | | Description |
 |---|---|---|---|

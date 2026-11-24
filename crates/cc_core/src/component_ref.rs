@@ -99,7 +99,9 @@ fn zero() -> String {
 /// A dimension between the parallel reference planes `from` and `to`, shown
 /// in `view`; `label` is the parameter that drives it, if any. `place` is
 /// where its line sits across the planes (meters, in the view's other
-/// coordinate).
+/// coordinate). A `locked` dimension keeps its distance: its moving plane
+/// is written as the other plus (or minus) that distance, so it follows
+/// when the other moves.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RefDimension {
     pub view: SketchPlane,
@@ -109,11 +111,15 @@ pub struct RefDimension {
     pub label: Option<String>,
     #[serde(default)]
     pub place: f64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
 }
 
 /// An equality (EQ): the plane `middle` stays halfway between the parallel
 /// planes `a` and `b`, shown in `view` as two equal dimensions at `place`.
-/// Its position is written `(a + b) / 2` when the equality is made.
+/// When the equality is made the middle is written `(a + b) / 2`, or, when
+/// it cannot move (an origin plane, or one a dimension drives), an outer
+/// plane is written to mirror the other about it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RefEqual {
     pub view: SketchPlane,
@@ -264,7 +270,8 @@ impl ComponentDef {
     }
 
     /// Whether equality `index` holds: three parallel planes seen edge-on
-    /// in its view, the middle one written halfway between the others.
+    /// in its view, the middle one halfway between the others (whichever of
+    /// them is written to keep it so).
     pub fn equal_holds(&self, index: usize) -> Result<(), RefError> {
         let bad = || RefError::Equal { index };
         let q = self.equals.get(index).ok_or_else(bad)?;
@@ -274,8 +281,11 @@ impl ComponentDef {
         if planes.iter().any(|p| p.axis != axis) || axis.in_view(q.view).is_none() {
             return Err(bad());
         }
-        let middle = planes.get(1).ok_or_else(bad)?;
-        if middle.at.replace(' ', "") != q.expression().replace(' ', "") {
+        let scope = self.scope(&BTreeMap::new(), &[(crate::component::WALL_THICKNESS, 0.2)]);
+        let [Some(a), Some(m), Some(b)] = [&q.a, &q.middle, &q.b].map(|n| scope.get(n)) else {
+            return Err(bad());
+        };
+        if ((a + b) / 2.0 - m).abs() > 1e-9 * (1.0 + a.abs().max(b.abs())) {
             return Err(bad());
         }
         Ok(())
@@ -452,6 +462,13 @@ mod tests {
         // A middle moved by hand breaks it; so does a plane of another axis.
         def.ref_planes[3].at = "0.1".into();
         assert!(def.equal_holds(0).is_err());
+        // An outer plane mirrored about a fixed middle keeps it too.
+        def.ref_planes[3].at = "0".into();
+        def.ref_planes[1].at = "2 * Mid - Right".into();
+        def.ref_planes[0].at = "0.6".into();
+        assert!(def.equal_holds(0).is_ok(), "{:?}", def.ref_problems());
+        def.ref_planes[0].at = "L + Width".into();
+        def.ref_planes[1].at = "-Width/2".into();
         def.ref_planes[3].at = "(L + Right) / 2".into();
         def.equals[0].b = "Top".into();
         assert!(def.equal_holds(0).is_err());
@@ -466,6 +483,7 @@ mod tests {
             to: to.into(),
             label: Some("Width".into()),
             place: 0.0,
+            locked: false,
         };
         def.dimensions = vec![dim(SketchPlane::Plan, "Left", "Right"), dim(SketchPlane::Side, "Left", "Right")];
         def.dimensions.push(dim(SketchPlane::Front, BASE, "Top"));

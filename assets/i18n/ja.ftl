@@ -2272,6 +2272,8 @@ prop-cad-primitives = アイテム
 prop-cad-all-layers = すべての画層
 msg-comp-origin-plane = コンポーネントの原点面は移動または削除できません。
 msg-comp-plane-driven = 面 { $name } は式で決まっています。式を変更するか、寸法にパラメータのラベルを付けてください。
+msg-comp-equal-fixed = 3 つの面のどれも動かして { $name } を中間に保つことができません: 寸法のラベルかロックを外すか、式を変更してください。
+hint-comp-dim-lock = 距離をロックします: 寸法が動かす面がもう一方に追従します。
 comp-axis-x = 左右 (X)
 comp-axis-y = 前後 (Y)
 comp-axis-z = 高さ (Z)
@@ -2349,7 +2351,7 @@ comp-env-equal = 均等 (EQ)
 comp-env-connector = コネクタ
 cmd-desc-comp-equal = 参照面を平行な 2 つの面のちょうど中間に保ちます。それらが動くと追従します。
 cmd-desc-comp-connector = 配管や電線管がコンポーネントに接続する位置を示します: システム、位置、方向、直径。
-comp-env-hint-equal = 面 { $count } / 3 をクリック: 外側の面、中間に保つ面、もう一方の外側の面 · Esc でやり直し
+comp-env-hint-equal = 面 { $count } / 3 を任意の順でクリック: 他の 2 面の間にある面が中間に保たれます · Esc でやり直し
 comp-env-hint-connector = 平面図、正面図、側面図でクリックしてコネクタを配置。参照面の近くではその面にロックされます · Esc で終了
 comp-env-points = 点
 

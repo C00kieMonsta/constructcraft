@@ -2272,6 +2272,8 @@ prop-cad-primitives = Objekte
 prop-cad-all-layers = Alle Layer
 msg-comp-origin-plane = Die Ursprungsebenen der Komponente können weder verschoben noch gelöscht werden.
 msg-comp-plane-driven = Die Ebene { $name } wird durch einen Ausdruck bestimmt; ändern Sie den Ausdruck oder beschriften Sie das Maß mit einem Parameter.
+msg-comp-equal-fixed = Keine der drei Ebenen kann sich bewegen, um { $name } mittig zu halten: Entfernen Sie die Beschriftung oder Sperre eines Maßes oder ändern Sie einen Ausdruck.
+hint-comp-dim-lock = Sperrt den Abstand: die Ebene, die das Maß bewegt, folgt der anderen.
 comp-axis-x = Links/rechts (X)
 comp-axis-y = Vorne/hinten (Y)
 comp-axis-z = Höhe (Z)
@@ -2349,7 +2351,7 @@ comp-env-equal = Gleichheit (EQ)
 comp-env-connector = Anschluss
 cmd-desc-comp-equal = Hält eine Referenzebene mittig zwischen zwei parallelen: sie folgt, wenn diese sich bewegen.
 cmd-desc-comp-connector = Markiert, wo Rohre und Leerrohre an das Bauteil anschließen: System, Position, Richtung und Durchmesser.
-comp-env-hint-equal = Ebene { $count } von 3 klicken: eine äußere, die mittig gehaltene, die andere äußere · Esc beginnt neu
+comp-env-hint-equal = Ebene { $count } von 3 in beliebiger Reihenfolge klicken: die zwischen den beiden anderen wird mittig gehalten · Esc beginnt neu
 comp-env-hint-connector = In Grundriss, Vorder- oder Seitenansicht klicken, um einen Anschluss zu setzen; nahe einer Referenzebene wird er an sie gebunden · Esc beendet
 comp-env-points = Punkte
 

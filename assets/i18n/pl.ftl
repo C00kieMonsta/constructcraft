@@ -2272,6 +2272,8 @@ prop-cad-primitives = Obiekty
 prop-cad-all-layers = Wszystkie warstwy
 msg-comp-origin-plane = Płaszczyzn początkowych komponentu nie można przesuwać ani usuwać.
 msg-comp-plane-driven = Płaszczyzna { $name } jest określona wyrażeniem; zmień wyrażenie lub opisz wymiar parametrem.
+msg-comp-equal-fixed = Żadna z trzech płaszczyzn nie może się przesunąć, aby utrzymać { $name } pośrodku: zdejmij opis lub blokadę wymiaru albo zmień wyrażenie.
+hint-comp-dim-lock = Blokuje odległość: płaszczyzna przesuwana przez wymiar podąża za drugą.
 comp-axis-x = Lewo/prawo (X)
 comp-axis-y = Przód/tył (Y)
 comp-axis-z = Wysokość (Z)
@@ -2349,7 +2351,7 @@ comp-env-equal = Równość (EQ)
 comp-env-connector = Przyłącze
 cmd-desc-comp-equal = Utrzymuje płaszczyznę odniesienia w połowie między dwiema równoległymi: podąża, gdy się przesuwają.
 cmd-desc-comp-connector = Oznacza, gdzie rury i przewody łączą się z komponentem: system, położenie, kierunek i średnica.
-comp-env-hint-equal = Kliknij płaszczyznę { $count } z 3: zewnętrzną, środkową, drugą zewnętrzną · Esc zaczyna od nowa
+comp-env-hint-equal = Kliknij płaszczyznę { $count } z 3, w dowolnej kolejności: ta między dwiema pozostałymi jest utrzymywana pośrodku · Esc zaczyna od nowa
 comp-env-hint-connector = Kliknij w rzucie, widoku z przodu lub z boku, aby umieścić przyłącze; blisko płaszczyzny odniesienia zostaje do niej przypięte · Esc kończy
 comp-env-points = Punkty
 

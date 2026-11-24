@@ -85,6 +85,29 @@ pub struct ViewDimension {
     pub text_angle: f64,
     pub value: f64,
     pub label: Option<String>,
+    /// The dimension line, between its end marks.
+    pub line: (DVec2, DVec2),
+    /// About how wide and how tall its text is (model units), for picking.
+    pub text_width: f64,
+    pub text_height: f64,
+    /// Locked: it keeps its distance.
+    pub locked: bool,
+}
+
+impl ViewDimension {
+    /// How far `p` is from the dimension: from its line or from its text's
+    /// box (zero inside it), so a click anywhere on either picks it.
+    pub fn distance_to(&self, p: DVec2) -> f64 {
+        let on_line = cc_geom::polygon::closest_on_segment(self.line.0, self.line.1, p).0.distance(p);
+        let along = DVec2::from_angle(self.text_angle);
+        let up = along.perp();
+        let local = p - (self.text_pos + up * (self.text_height / 2.0));
+        let outside = DVec2::new(
+            (local.dot(along).abs() - self.text_width / 2.0).max(0.0),
+            (local.dot(up).abs() - self.text_height / 2.0).max(0.0),
+        );
+        on_line.min(outside.length())
+    }
 }
 
 /// A connector as seen in a view: where it is and which way runs leave it.
@@ -118,6 +141,20 @@ pub struct ComponentView {
     pub bounds: Option<(DVec2, DVec2)>,
     /// Pieces that do not resolve, with why.
     pub errors: Vec<String>,
+}
+
+/// About how wide `text` is at the 2.5 mm the dimensions use (`mm`: a
+/// paper millimeter in model units).
+fn text_width(text: &str, mm: f64) -> f64 {
+    text.chars().count() as f64 * 2.5 * 0.6 * mm
+}
+
+/// The dimension line of `layout`: between its end marks (else `a` to `b`).
+fn dimension_line(layout: &crate::DimensionLayout, a: DVec2, b: DVec2) -> (DVec2, DVec2) {
+    match (layout.marks.first(), layout.marks.last()) {
+        (Some(p), Some(q)) if p.0.distance(q.0) > 1e-12 => (p.0, q.0),
+        _ => (a, b),
+    }
 }
 
 fn grow(b: &mut Option<(DVec2, DVec2)>, p: DVec2) {
@@ -266,14 +303,16 @@ pub fn component_view(
         };
         let Some(layout) = crate::dimension_layout(&dim, scale, &style) else { continue };
         crate::draw_marks(&mut out.drawing, &layout, &style, scale, None);
-        for (p, q, style) in layout.lines {
+        for (p, q, style) in layout.lines.iter().cloned() {
             out.drawing.line(p, q, style, None);
         }
         let text = match &d.label {
             Some(label) => format!("{label} = {}", format::meters(value)),
             None => format::meters(value),
         };
+        let text_width = text_width(&text, mm);
         out.drawing.text_at(layout.text_pos, text, 2.5, Anchor::CenterBottom, layout.text_angle);
+        let line = dimension_line(&layout, a, b);
         grow(&mut out.bounds, layout.text_pos);
         grow(&mut out.bounds, a);
         grow(&mut out.bounds, b);
@@ -283,6 +322,10 @@ pub fn component_view(
             text_angle: layout.text_angle,
             value,
             label: d.label.clone(),
+            line,
+            text_width,
+            text_height: 2.5 * mm,
+            locked: d.locked && d.label.is_none(),
         });
     }
     // Equalities: two equal dimensions marked EQ.
@@ -312,10 +355,11 @@ pub fn component_view(
             };
             let Some(layout) = crate::dimension_layout(&dim, scale, &style) else { continue };
             crate::draw_marks(&mut out.drawing, &layout, &style, scale, None);
-            for (p, q2, style) in layout.lines {
+            for (p, q2, style) in layout.lines.iter().cloned() {
                 out.drawing.line(p, q2, style, None);
             }
             out.drawing.text_at(layout.text_pos, "EQ", 2.5, Anchor::CenterBottom, layout.text_angle);
+            let line = dimension_line(&layout, pa, pb);
             grow(&mut out.bounds, layout.text_pos);
             out.equals.push(ViewDimension {
                 index,
@@ -323,6 +367,10 @@ pub fn component_view(
                 text_angle: layout.text_angle,
                 value: (to - from).abs(),
                 label: Some("EQ".into()),
+                line,
+                text_width: text_width("EQ", mm),
+                text_height: 2.5 * mm,
+                locked: false,
             });
         }
     }
@@ -354,6 +402,7 @@ mod tests {
                 to: "Right".into(),
                 label: Some("Width".into()),
                 place: -0.6,
+                locked: false,
             }],
             items: vec![ComponentItem {
                 name: "Top".into(),

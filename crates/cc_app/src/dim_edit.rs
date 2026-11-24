@@ -121,6 +121,25 @@ pub fn set_locked(state: &mut AppState, id: ElementId, locked: bool) {
     crate::actions::run_command(state, command);
 }
 
+/// A padlock in `rect` (about 14 points square): closed when `locked`, its
+/// shackle lifted to one side when not.
+pub(crate) fn paint_padlock(painter: &Painter, rect: egui::Rect, locked: bool, color: egui::Color32) {
+    let stroke = egui::Stroke::new(1.5, color);
+    let body = egui::Rect::from_min_max(egui::pos2(rect.left() + 2.0, rect.center().y - 1.0), rect.right_bottom());
+    painter.rect(body, 1.5, color.gamma_multiply(if locked { 0.9 } else { 0.15 }), stroke, egui::StrokeKind::Inside);
+    let (left, right) = (body.left() + 2.5, body.right() - 2.5);
+    let lift = if locked { 0.0 } else { 3.0 };
+    let top = rect.top() + 1.0 - lift;
+    let shackle = vec![
+        egui::pos2(left, body.top()),
+        egui::pos2(left, top + 3.0),
+        egui::pos2((left + right) / 2.0, top),
+        egui::pos2(right, top + 3.0),
+        egui::pos2(right, body.top() - lift),
+    ];
+    painter.add(egui::Shape::line(shackle, stroke));
+}
+
 /// The padlock beside the text of a selected dimension that can be locked
 /// (#447): closed when locked; a click locks or unlocks it. Returns true
 /// when the click was used.
@@ -144,21 +163,7 @@ fn lock_toggle(
     let rect = egui::Rect::from_center_size(at, egui::vec2(14.0, 14.0));
     let hovered = resp.hover_pos().is_some_and(|p| rect.expand(2.0).contains(p));
     let color = if hovered || locked { crate::theme::PALETTE.accent } else { crate::theme::PALETTE.text_muted };
-    let stroke = egui::Stroke::new(1.5, color);
-    // The body and the shackle, open (lifted to one side) when unlocked.
-    let body = egui::Rect::from_min_max(egui::pos2(rect.left() + 2.0, rect.center().y - 1.0), rect.right_bottom());
-    painter.rect(body, 1.5, color.gamma_multiply(if locked { 0.9 } else { 0.15 }), stroke, egui::StrokeKind::Inside);
-    let (left, right) = (body.left() + 2.5, body.right() - 2.5);
-    let lift = if locked { 0.0 } else { 3.0 };
-    let top = rect.top() + 1.0 - lift;
-    let shackle = vec![
-        egui::pos2(left, body.top()),
-        egui::pos2(left, top + 3.0),
-        egui::pos2((left + right) / 2.0, top),
-        egui::pos2(right, top + 3.0),
-        egui::pos2(right, body.top() - lift),
-    ];
-    painter.add(egui::Shape::line(shackle, stroke));
+    paint_padlock(painter, rect, locked, color);
     if hovered {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         egui::Tooltip::always_open(ui.ctx().clone(), ui.layer_id(), egui::Id::new(("dim-lock", id.0)), rect)
