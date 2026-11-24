@@ -44,6 +44,16 @@ fn set_title(ctx: &egui::Context, last: &mut String, title: String) {
     }
 }
 
+/// The window title of an open project: the name of its file (`casa.ccad`),
+/// or, not saved yet, the project's name; ` *` when it has unsaved changes.
+/// The project's name alone stayed "New Project" in files saved under
+/// another name (#498).
+fn window_title(path: Option<&std::path::Path>, name: &str, dirty: bool) -> String {
+    let file = path.and_then(|p| p.file_name()).map(|f| f.to_string_lossy().into_owned());
+    let dirty = if dirty { " *" } else { "" };
+    format!("ConstructCraft — {}{dirty}", file.as_deref().unwrap_or(name))
+}
+
 impl ConstructApp {
     /// Create the app; see [`Args`] for the startup options.
     pub fn new(cc: &eframe::CreationContext<'_>, args: Args) -> Self {
@@ -532,13 +542,11 @@ impl ConstructApp {
         self.handle_close(&ctx);
         self.sync_dock();
 
-        let title = if self.state.project_open {
-            let dirty = if self.state.session.doc.is_dirty() { " *" } else { "" };
-            format!("ConstructCraft — {}{dirty}", self.state.project().info.name)
-        } else {
-            "ConstructCraft".to_string()
-        };
-        set_title(&ctx, &mut self.title, title);
+        let title = self.state.project_open.then(|| {
+            let doc = &self.state.session.doc;
+            window_title(doc.path.as_deref(), &self.state.project().info.name, doc.is_dirty())
+        });
+        set_title(&ctx, &mut self.title, title.unwrap_or_else(|| "ConstructCraft".to_string()));
 
         if self.state.show_home {
             crate::home::show(ui, &mut self.state);
@@ -775,6 +783,16 @@ mod tests {
         let every_frame =
             |ctx: &egui::Context| ctx.send_viewport_cmd(egui::ViewportCommand::Title("ConstructCraft".into()));
         assert_eq!(settle(&mut { every_frame }), None, "sending it every frame never settles");
+    }
+
+    /// #498: the title names the open file, not the project's name.
+    #[test]
+    fn the_window_title_names_the_open_file() {
+        let path = std::path::Path::new("projetos/casa.ccad");
+        assert_eq!(window_title(Some(path), "Novo projeto", false), "ConstructCraft — casa.ccad");
+        assert_eq!(window_title(Some(path), "Novo projeto", true), "ConstructCraft — casa.ccad *");
+        // Not saved yet: the project's name.
+        assert_eq!(window_title(None, "Novo projeto", true), "ConstructCraft — Novo projeto *");
     }
 
     #[test]
