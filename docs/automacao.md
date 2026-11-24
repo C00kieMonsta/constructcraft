@@ -666,13 +666,13 @@ claude mcp add constructcad -- ccad mcp --plugins /caminho/para/plugins
 id = "quick_rooms"          # letras minúsculas, dígitos e sublinhados simples, até 32
 name = "Quick rooms"
 version = "0.2.0"
-api = 2                     # a API de plugins para a qual ele foi escrito (1 ou 2, veja abaixo)
+api = 2                     # a API de plugins para a qual ele foi escrito (1, 2 ou 3, veja abaixo)
 description = "Rectangular rooms in one step, and wall totals by type."
 authors = ["…"]
 license = "GPL-3.0-or-later"
 homepage = "https://…"
 main = "main.lua"           # o padrão
-permissions = []            # ou ["files"], ["tools"] (api 2), veja abaixo
+permissions = []            # ou ["files"], ["tools"] (api 2), ["network"] (api 3), veja abaixo
 ```
 
 `main.lua` roda uma vez quando o plugin carrega e registra comandos com `ccad.command`:
@@ -706,7 +706,7 @@ ccad.command {
 
 ### API de plugins 2: botões, configurações, traduções e dados
 
-Um plugin escrito para `api = 2` (`ccad.api` vale 2 nesta versão) também pode declarar botões da faixa de opções e configurações no manifesto, traduzir os seus textos e dar aos parâmetros dicas para a interface. Manifestos com `api = 1` carregam como antes; botões e configurações são recusados com `api = 1` (`buttons need api = 2`), de modo que o índice nunca oferece um plugin assim a uma versão que só conhece a API 1.
+Um plugin escrito para `api = 2` (`ccad.api` vale 3 nesta versão, veja a API 3 abaixo) também pode declarar botões da faixa de opções e configurações no manifesto, traduzir os seus textos e dar aos parâmetros dicas para a interface. Manifestos com `api = 1` carregam como antes; botões e configurações são recusados com `api = 1` (`buttons need api = 2`), de modo que o índice nunca oferece um plugin assim a uma versão que só conhece a API 1.
 
 ```toml
 id = "quick_rooms"
@@ -925,6 +925,60 @@ ccad.on("project_saved", function(e) print("salvo em " .. e.path) end)
 - **Orçamento:** cada chamada de tratador pode usar no máximo 50 milhões de instruções Lua e 5 segundos (e o limite de memória do plugin).
 - **Falhas nunca fazem o comando falhar:** um erro ou um orçamento estourado num tratador vira uma mensagem (`[id] model_changed handler 1: …`, na saída de erro com o `ccad`, na barra de status e no log no aplicativo), e o que aquela chamada guardou é descartado. Um tratador que falha 3 vezes seguidas fica desligado até os plugins carregarem de novo.
 - **Custo:** as listas de `model_changed` vêm do mecanismo de desfazer do projeto: enquanto algum plugin escuta esse evento, cada comando anota os elementos que toca como eram antes dele (uma vez cada) e os compara com o que são depois; nenhuma geometria é reconstruída, e nada é anotado enquanto nenhum plugin escuta.
+
+### API de plugins 3: acesso à rede e catálogos de componentes
+
+Um plugin escrito para `api = 3` (`ccad.api` vale 3 nesta versão) também pode baixar dados por HTTPS e oferecer um catálogo de componentes na janela da Biblioteca de Componentes. Manifestos com `api = 1` ou `2` carregam como antes; `network`, `allowed_hosts` e `[[catalogs]]` são recusados abaixo de `api = 3`.
+
+```toml
+api = 3
+permissions = ["network"]                              # precisa de api = 3
+allowed_hosts = ["example.org", "*.cdn.example.org"]   # no máximo 16
+
+[[catalogs]]                                           # no máximo 8
+id = "furniture"                                       # como o id de um plugin
+label = "Móveis"                                       # o nome da aba; pode ser "%chave%"
+description = "Modelos de example.org"                 # opcional, mostrado na barra lateral
+```
+
+**A permissão `network`.** Ela precisa de ao menos um host em `allowed_hosts`: nomes de host em minúsculas, ou `*.` e um domínio para os seus subdomínios (não o próprio domínio); sem esquema, porta, caminho, `localhost` ou endereço IP. No aplicativo ela é escolha do usuário, *Permitir acesso à rede* na janela de Plugins (guardada por plugin, desligada de início, mostrando os hosts); `ccad --plugins` concede o que o manifesto pede, já que você indicou a pasta.
+
+**`ccad.http`.** Só são buscadas URLs `https://` cujo host está em `allowed_hosts`, conferido de novo a cada redirecionamento (no máximo 5, para URLs `https://` absolutas ou caminhos no mesmo host); URLs com credenciais ou porta são recusadas, as respostas têm no máximo 64 MiB e as requisições expiram (30 s por padrão, no máximo 120 s). Sem a permissão, cada função é um erro. Uma requisição espera a resposta: num comando, faça poucos downloads e pequenos, e deixe os grandes para um catálogo (abaixo), que roda numa thread própria.
+
+```lua
+local body, status = ccad.http.get(url, { max_bytes = 1e6, timeout = 10 })   -- no máximo 16 MiB por padrão
+local path = ccad.http.download(url, "models/chair.glb", { sha256 = "…" })  -- para o cache do plugin
+local path = ccad.http.cached("models/chair.glb", { sha256 = "…" })         -- nil quando não está lá; sem rede
+local text = ccad.http.read_cached("data/index.json", { max_bytes = 1e6 })  -- os bytes, ou nil; sem rede
+```
+
+Cada plugin tem a sua pasta de cache (no aplicativo, `plugin-cache/<id do plugin>` na pasta de dados dele; no `ccad`, a pasta de cache do usuário). As chaves são caminhos relativos de letras, dígitos, `.`, `_` e `-`, com no máximo 5 níveis e 160 caracteres, de modo que uma chave nunca sai da pasta. Com `sha256` (64 dígitos hexadecimais), um download só é guardado quando o SHA-256 confere, e um arquivo do cache que deixou de conferir é apagado e lido como ausente; `download` reaproveita um arquivo do cache que confere em vez de buscá-lo de novo. Um comando de plugin pode ler arquivos da sua própria pasta de cache (para passá-los a `gltf_component_load`, por exemplo) sem a permissão `files`.
+
+**Catálogos.** Cada entrada `[[catalogs]]` vira uma aba da janela da Biblioteca de Componentes (ao lado de *Minhas pastas* e da biblioteca online), registrada pelo `main.lua` enquanto ele carrega:
+
+```lua
+ccad.catalog {
+  id = "furniture",
+  load = function()            -- uma vez, quando a aba abre
+    return { total = 1200, notice = "…", categories = { { id = "chairs", name = "Cadeiras", count = 140 } },
+             colors = { "white", "black" } }
+  end,
+  search = function(q)         -- q: text, category?, color?, max_width?, max_depth?, max_height? (m), offset, limit
+    return { total = 3, items = { { id = "c1", name = "Cadeira", subtitle = "Carvalho", kind = "furniture",
+             article = "000.123.45", bytes = 250000, dimensions = { width = 0.45, depth = 0.5, height = 0.8 },
+             colors = { "white" }, url = "https://example.org/c1", has_thumbnail = true } } }
+  end,
+  thumbnail = function(id)     -- opcional: o caminho de uma imagem no cache do plugin
+    return ccad.http.download(base .. id .. ".png", "thumbs/" .. id .. ".png")
+  end,
+  prepare = function(id)       -- quando o usuário carrega o item: baixá-lo e dizer como carregá-lo
+    local path = ccad.http.download(base .. id .. ".glb", "models/" .. id .. ".glb", { sha256 = sums[id] })
+    return { command = "gltf_component_load", args = { path = path, name = "Cadeira", kind = "furniture" } }
+  end,
+}
+```
+
+As funções do catálogo rodam numa thread própria, de modo que a janela continua respondendo enquanto elas baixam. Uma miniatura precisa ser um arquivo dentro do cache do plugin, com no máximo 4 MiB e 2048 pixels de lado; `prepare` precisa indicar `gltf_component_load`, `component_load` ou `skp_component_load` com um `path` dentro do cache do plugin, senão o aplicativo o recusa. Um catálogo declarado no `plugin.toml` que o `main.lua` não registra é um erro de carga, e `ccad.catalog` chamado depois é um erro. `ccad plugins` lista os `catalogs` e os `allowed_hosts` de cada plugin.
 
 ### Desenvolvendo um plugin
 

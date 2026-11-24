@@ -155,7 +155,10 @@ impl PluginCatalogClient {
                         WorkerResp::Searched(q, res)
                     }
                     WorkerReq::Thumbnail(id) => {
-                        let res = plugin.catalog_thumbnail(&cid, &id).map_err(|e| e.message);
+                        let res = plugin.catalog_thumbnail(&cid, &id).map_err(|e| e.message).and_then(|p| match p {
+                            Some(p) => check_thumbnail(&p, &cache_root).map(Some),
+                            None => Ok(None),
+                        });
                         WorkerResp::Thumbnail(id, res)
                     }
                     WorkerReq::Prepare(id) => {
@@ -364,6 +367,36 @@ fn run_search(plugin: &mut Plugin, cid: &str, q: &CatalogQuery) -> Result<(usize
     Ok((total, items))
 }
 
+/// Largest thumbnail file a catalog may give, in bytes.
+pub const MAX_THUMBNAIL_BYTES: u64 = 4 * 1024 * 1024;
+/// Largest thumbnail side, in pixels.
+pub const MAX_THUMBNAIL_SIDE: u32 = 2048;
+
+/// The picture a catalog's `thumbnail(item_id)` named, when it may be shown:
+/// a file inside the plugin's cache folder (a plugin must not make the app
+/// read other files), at most [`MAX_THUMBNAIL_BYTES`], whose header gives
+/// sides of at most [`MAX_THUMBNAIL_SIDE`] (checked before it is decoded).
+fn check_thumbnail(path: &Path, cache_root: &Path) -> Result<PathBuf, String> {
+    let path = std::fs::canonicalize(path).map_err(|e| format!("thumbnail missing: {e}"))?;
+    let root = std::fs::canonicalize(cache_root).map_err(|e| format!("cache root missing: {e}"))?;
+    if !path.starts_with(&root) {
+        return Err("thumbnail must reside inside the plugin's cache folder".into());
+    }
+    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if !meta.is_file() || meta.len() > MAX_THUMBNAIL_BYTES {
+        return Err(format!("thumbnail must be a file of at most {MAX_THUMBNAIL_BYTES} bytes"));
+    }
+    let (w, h) = image::ImageReader::open(&path)
+        .and_then(|r| r.with_guessed_format())
+        .map_err(|e| e.to_string())?
+        .into_dimensions()
+        .map_err(|e| e.to_string())?;
+    if w == 0 || h == 0 || w > MAX_THUMBNAIL_SIDE || h > MAX_THUMBNAIL_SIDE {
+        return Err(format!("thumbnail of {w}×{h} pixels (at most {MAX_THUMBNAIL_SIDE} a side)"));
+    }
+    Ok(path)
+}
+
 fn run_prepare(plugin: &mut Plugin, cid: &str, item_id: &str, cache_root: &Path) -> Result<PreparedLoad, String> {
     let val = plugin.catalog_prepare(cid, item_id).map_err(|e| e.message)?;
     let command = val
@@ -380,4 +413,36 @@ fn run_prepare(plugin: &mut Plugin, cid: &str, item_id: &str, cache_root: &Path)
         return Err("prepared file must reside inside the plugin's cache folder".into());
     }
     Ok(PreparedLoad { command, args, path })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn thumbnails_must_be_small_pictures_inside_the_cache() {
+        let base = std::env::temp_dir().join(format!("ccad-catalog-thumbs-{}", std::process::id()));
+        let cache = base.join("cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        let ok = cache.join("ok.png");
+        image::RgbaImage::new(360, 240).save(&ok).unwrap();
+        assert_eq!(check_thumbnail(&ok, &cache).unwrap(), std::fs::canonicalize(&ok).unwrap());
+        // A picture outside the plugin's cache, also reached through `..`.
+        let outside = base.join("outside.png");
+        image::RgbaImage::new(8, 8).save(&outside).unwrap();
+        assert!(check_thumbnail(&outside, &cache).is_err());
+        assert!(check_thumbnail(&cache.join("../outside.png"), &cache).is_err());
+        // Too many pixels (refused from the header), not a picture, too big a file, missing.
+        let wide = cache.join("wide.png");
+        image::GrayImage::new(MAX_THUMBNAIL_SIDE + 1, 1).save(&wide).unwrap();
+        assert!(check_thumbnail(&wide, &cache).is_err());
+        let text = cache.join("note.png");
+        std::fs::write(&text, b"not a picture").unwrap();
+        assert!(check_thumbnail(&text, &cache).is_err());
+        let big = cache.join("big.png");
+        std::fs::write(&big, vec![0u8; MAX_THUMBNAIL_BYTES as usize + 1]).unwrap();
+        assert!(check_thumbnail(&big, &cache).is_err());
+        assert!(check_thumbnail(&cache.join("missing.png"), &cache).is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
