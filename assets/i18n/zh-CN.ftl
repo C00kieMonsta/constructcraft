@@ -4142,3 +4142,14 @@ pform-json-unknown = 表单中没有字段 { $name }：请继续使用 JSON。
 pform-json-wrong = { $name } 的值不适合其字段：请继续使用 JSON。
 tool-pick-element = 拾取图元
 tool-pick-point = 拾取点
+
+plug-network = 允许访问网络
+plug-network-hint = 允许的主机：{ $hosts }
+lib-open-website = 打开网站
+lib-catalog-loading = 正在加载目录…
+lib-catalog-network-off = 请在 管理 → 插件 中为此插件启用网络访问。
+lib-filter-color = 颜色
+lib-filter-max-dims = 最大尺寸
+lib-dim-w = 宽
+lib-dim-d = 深
+lib-dim-h = 高

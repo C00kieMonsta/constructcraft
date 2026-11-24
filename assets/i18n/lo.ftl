@@ -4144,3 +4144,14 @@ pform-json-unknown = ແບບຟອມບໍ່ມີຊ່ອງ { $name }: �
 pform-json-wrong = ຄ່າຂອງ { $name } ບໍ່ເໝາະກັບຊ່ອງຂອງມັນ: ສືບຕໍ່ໃນ JSON.
 tool-pick-element = ຊີ້ເລືອກອົງປະກອບ
 tool-pick-point = ຊີ້ເລືອກຈຸດ
+
+plug-network = ອະນຸຍາດໃຫ້ເຂົ້າເຖິງເຄືອຂ່າຍ
+plug-network-hint = ໂຮສທີ່ອະນຸຍາດ: { $hosts }
+lib-open-website = ເປີດເວັບໄຊ
+lib-catalog-loading = ກຳລັງໂຫຼດລາຍການ…
+lib-catalog-network-off = ເປີດການເຂົ້າເຖິງເຄືອຂ່າຍສຳລັບປລັກອິນນີ້ໃນ ຈັດການ → ປລັກອິນ.
+lib-filter-color = ສີ
+lib-filter-max-dims = ຂະໜາດສູງສຸດ
+lib-dim-w = ກ
+lib-dim-d = ລ
+lib-dim-h = ສ

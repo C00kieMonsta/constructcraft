@@ -4142,3 +4142,14 @@ pform-json-unknown = El formulario no tiene el campo { $name }: siga en JSON.
 pform-json-wrong = El valor de { $name } no cabe en su campo: siga en JSON.
 tool-pick-element = Designar elemento
 tool-pick-point = Designar punto
+
+plug-network = Permitir acceso a la red
+plug-network-hint = Hosts permitidos: { $hosts }
+lib-open-website = Abrir sitio web
+lib-catalog-loading = Cargando catálogo…
+lib-catalog-network-off = Active el acceso a la red para este plugin en Gestionar → Plugins.
+lib-filter-color = Color
+lib-filter-max-dims = Tamaño máx.
+lib-dim-w = An
+lib-dim-d = Pr
+lib-dim-h = Al

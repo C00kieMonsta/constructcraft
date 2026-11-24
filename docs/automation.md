@@ -667,13 +667,13 @@ claude mcp add constructcad -- ccad mcp --plugins /path/to/plugins
 id = "quick_rooms"          # lowercase letters, digits and single underscores, up to 32
 name = "Quick rooms"
 version = "0.2.0"
-api = 2                     # the plugin API it is written for (1 or 2, see below)
+api = 2                     # the plugin API it is written for (1, 2 or 3, see below)
 description = "Rectangular rooms in one step, and wall totals by type."
 authors = ["…"]
 license = "GPL-3.0-or-later"
 homepage = "https://…"
 main = "main.lua"           # the default
-permissions = []            # or ["files"], ["tools"] (api 2), see below
+permissions = []            # or ["files"], ["tools"] (api 2), ["network"] (api 3), see below
 ```
 
 `main.lua` runs once when the plugin loads and registers commands with `ccad.command`:
@@ -707,7 +707,7 @@ ccad.command {
 
 ### Plugin API 2: buttons, settings, translations and data
 
-A plugin written for `api = 2` (`ccad.api` is 2 in this version) can also declare ribbon buttons and settings in its manifest, translate its text and give its parameters hints for the interface. Manifests with `api = 1` load as before; buttons and settings are refused under `api = 1` (`buttons need api = 2`), so the index never offers such a plugin to a build that only knows API 1.
+A plugin written for `api = 2` (`ccad.api` is 3 in this version, see API 3 below) can also declare ribbon buttons and settings in its manifest, translate its text and give its parameters hints for the interface. Manifests with `api = 1` load as before; buttons and settings are refused under `api = 1` (`buttons need api = 2`), so the index never offers such a plugin to a build that only knows API 1.
 
 ```toml
 id = "quick_rooms"
@@ -926,6 +926,60 @@ ccad.on("project_saved", function(e) print("saved to " .. e.path) end)
 - **Budget:** each handler call may take at most 50 million Lua instructions and 5 seconds (and the plugin's memory limit).
 - **Failures never fail the command:** an error or a budget overrun in a handler becomes a message (`[id] model_changed handler 1: …`, on standard error with `ccad`, in the status bar and the log in the app), and what that call stored is dropped. A handler that fails 3 times in a row is turned off until the plugins load again.
 - **Cost:** the lists of `model_changed` come from the project's undo machinery: while some plugin listens to it, each command notes the elements it touches as they were before it (once each), and compares them with what they are after; no geometry is rebuilt, and nothing is noted while no plugin listens.
+
+### Plugin API 3: network access and component catalogs
+
+A plugin written for `api = 3` (`ccad.api` is 3 in this version) can also download data over HTTPS and offer a catalog of components in the Component Library window. Manifests with `api = 1` or `2` load as before; `network`, `allowed_hosts` and `[[catalogs]]` are refused below `api = 3`.
+
+```toml
+api = 3
+permissions = ["network"]                              # needs api = 3
+allowed_hosts = ["example.org", "*.cdn.example.org"]   # at most 16
+
+[[catalogs]]                                           # at most 8
+id = "furniture"                                       # like a plugin id
+label = "Furniture"                                    # the tab's name; may be "%key%"
+description = "Models from example.org"                # optional, shown in the sidebar
+```
+
+**The `network` permission.** It needs at least one host in `allowed_hosts`: lowercase host names, or `*.` and a domain for its subdomains (not the domain itself); no scheme, port, path, `localhost` or IP address. In the app it is the user's choice, *Allow it to access the network* in the Plugins window (kept per plugin, off by default, showing the hosts); `ccad --plugins` grants what the manifest asks for, since you named the folder.
+
+**`ccad.http`.** Only `https://` URLs whose host is in `allowed_hosts` are fetched, checked again on every redirect (at most 5, to absolute `https://` URLs or paths on the same host); URLs with credentials or a port are refused, responses are at most 64 MiB, and requests time out (30 s by default, at most 120 s). Without the permission each function is an error. A request waits for its answer: in a command, keep downloads few and small, and leave large ones to a catalog (below), which runs on a thread of its own.
+
+```lua
+local body, status = ccad.http.get(url, { max_bytes = 1e6, timeout = 10 })   -- at most 16 MiB by default
+local path = ccad.http.download(url, "models/chair.glb", { sha256 = "…" })  -- into the plugin's cache
+local path = ccad.http.cached("models/chair.glb", { sha256 = "…" })         -- nil when not there; no network
+local text = ccad.http.read_cached("data/index.json", { max_bytes = 1e6 })  -- its bytes, or nil; no network
+```
+
+Each plugin has its own cache folder (in the app, `plugin-cache/<plugin id>` in its data folder; for `ccad`, the user's cache folder). Keys are relative paths of letters, digits, `.`, `_` and `-`, at most 5 levels and 160 characters, so a key never leaves the folder. With `sha256` (64 hexadecimal digits), a download is kept only when its SHA-256 matches, and a cached file that no longer matches is deleted and reads as missing; `download` reuses a cached file that matches instead of fetching it again. A plugin command may read files in its own cache folder (to pass them to `gltf_component_load`, for example) without the `files` permission.
+
+**Catalogs.** Each `[[catalogs]]` entry becomes a tab of the Component Library window (beside *My Folders* and the online library), registered by `main.lua` while it loads:
+
+```lua
+ccad.catalog {
+  id = "furniture",
+  load = function()            -- once, when the tab opens
+    return { total = 1200, notice = "…", categories = { { id = "chairs", name = "Chairs", count = 140 } },
+             colors = { "white", "black" } }
+  end,
+  search = function(q)         -- q: text, category?, color?, max_width?, max_depth?, max_height? (m), offset, limit
+    return { total = 3, items = { { id = "c1", name = "Chair", subtitle = "Oak", kind = "furniture",
+             article = "000.123.45", bytes = 250000, dimensions = { width = 0.45, depth = 0.5, height = 0.8 },
+             colors = { "white" }, url = "https://example.org/c1", has_thumbnail = true } } }
+  end,
+  thumbnail = function(id)     -- optional: the path of a picture in the plugin's cache
+    return ccad.http.download(base .. id .. ".png", "thumbs/" .. id .. ".png")
+  end,
+  prepare = function(id)       -- when the user loads the item: download it and say how to load it
+    local path = ccad.http.download(base .. id .. ".glb", "models/" .. id .. ".glb", { sha256 = sums[id] })
+    return { command = "gltf_component_load", args = { path = path, name = "Chair", kind = "furniture" } }
+  end,
+}
+```
+
+The catalog's functions run on a thread of their own, so the window keeps working while they download. A thumbnail must be a file inside the plugin's cache, at most 4 MiB and 2048 pixels a side; `prepare` must name `gltf_component_load`, `component_load` or `skp_component_load` with a `path` inside the plugin's cache, else the app refuses it. A catalog declared in `plugin.toml` that `main.lua` does not register is a load error, and `ccad.catalog` called later is an error. `ccad plugins` lists each plugin's `catalogs` and `allowed_hosts`.
 
 ### Developing a plugin
 
