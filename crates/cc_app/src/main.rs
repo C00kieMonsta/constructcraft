@@ -46,6 +46,7 @@ mod line_styles_dialog;
 mod lps_cabling_ui;
 mod macro_ui;
 mod material_browser;
+mod material_library_dialog;
 mod mcp_bridge;
 mod member_host_ui;
 mod modify;

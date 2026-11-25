@@ -114,6 +114,8 @@ pub struct Dialogs {
     pub profiles: Option<crate::profiles_dialog::ProfilesDialog>,
     /// The Pipe Catalog.
     pub pipe_catalog: Option<crate::pipe_catalog_dialog::PipeCatalogDialog>,
+    /// The Material Libraries dialog, over the Material Browser.
+    pub material_library: Option<crate::material_library_dialog::MaterialLibraryDialog>,
     /// *Structure → Grid Frame*.
     pub grid_frame: Option<crate::grid_frame_ui::GridFrameDialog>,
     /// *Structure → Steel Building*.

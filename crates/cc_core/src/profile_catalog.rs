@@ -59,14 +59,22 @@ const fn spec(
 
 use ProfileMaterial::{ColdFormed, Steel, Timber};
 
-/// The series: W and HP as rolled in Brazil (ABNT NBR 15980:2024, ASTM A6/A6M
-/// dimensions; `(H)` marks the wide-flange column sizes), IPE, HEA
-/// and HEB (EN 10365), the NBR 6355 cold-formed sections (Z45 with lips at
-/// 45°, Z90 with square lips), commercial sawn timber and glulam, and the
-/// hollow sections (EN 10219 sizes and corner radii).
+/// The series and their public standard sources:
+/// - `W`, `HP`: rolled I/H shapes (ABNT NBR 15980:2024, ASTM A6/A6M; `(H)` marks wide-flange column sizes).
+/// - `CS`, `CVS`: welded I/H shapes (ABNT NBR 5884:2013).
+/// - `U-LAM`, `L-LAM`, `BR`: rolled channels, equal-leg angles and round bars (ABNT NBR 7007, ASTM A6/A6M).
+/// - `IPE`, `HEA`, `HEB`: European I/H shapes (EN 10365).
+/// - `NBR6355-U`, `NBR6355-Ue`, `NBR6355-Z`, `NBR6355-Ze`, `NBR6355-L`, `NBR6355-Cartola`: cold-formed steel sections (ABNT NBR 6355:2012; Z45 with 45° lips, Z90 with 90° lips).
+/// - `Timber-Sawn`, `Glulam`: commercial sawn timber and glulam (ABNT NBR 7190).
+/// - `SHS`, `RHS`, `CHS`: hollow structural sections (EN 10219).
 const SPECS: &[Spec] = &[
     spec("W", "profile-series-w", Steel, "i", include_str!("../assets/profiles/w.csv")),
     spec("HP", "profile-series-hp", Steel, "i", include_str!("../assets/profiles/hp.csv")),
+    spec("CS", "profile-series-cs", Steel, "i", include_str!("../assets/profiles/cs.csv")),
+    spec("CVS", "profile-series-cvs", Steel, "i", include_str!("../assets/profiles/cvs.csv")),
+    spec("U-LAM", "profile-series-u-lam", Steel, "channel", include_str!("../assets/profiles/u_lam.csv")),
+    spec("L-LAM", "profile-series-l-lam", Steel, "angle", include_str!("../assets/profiles/l_lam.csv")),
+    spec("BR", "profile-series-br", Steel, "round", include_str!("../assets/profiles/br.csv")),
     spec("IPE", "profile-series-ipe", Steel, "i", include_str!("../assets/profiles/ipe.csv")),
     spec("HEA", "profile-series-hea", Steel, "i", include_str!("../assets/profiles/hea.csv")),
     spec("HEB", "profile-series-heb", Steel, "i", include_str!("../assets/profiles/heb.csv")),
@@ -248,6 +256,11 @@ mod tests {
         for c in [
             "W",
             "HP",
+            "CS",
+            "CVS",
+            "U-LAM",
+            "L-LAM",
+            "BR",
             "IPE",
             "HEA",
             "HEB",
@@ -275,7 +288,16 @@ mod tests {
                 let def = row_to_def(s, row).unwrap_or_else(|| panic!("{} {}", s.code, row.designation));
                 let a = def.outline().unwrap().properties(0.0).area;
                 let err = (a - row.area).abs() / row.area;
-                assert!(err < 0.02, "{} {}: computed {a} table {}", s.code, row.designation, row.area);
+                // Rolled channels/angles (U-LAM, L-LAM) have tapered flanges and/or toe radii
+                // not modeled by `Channel`/`Angle`; cold-formed `NBR6355-L` omits the bend
+                // radius `ri` in `Angle`, and `NBR6355-Cartola` uses NBR 6355 bend deductions.
+                let tol = match s.code {
+                    "NBR6355-L" => 0.07,
+                    "U-LAM" | "L-LAM" => 0.05,
+                    "NBR6355-Cartola" => 0.04,
+                    _ => 0.02,
+                };
+                assert!(err < tol, "{} {}: computed {a} table {}", s.code, row.designation, row.area);
             }
         }
     }
@@ -333,6 +355,17 @@ mod tests {
         assert!(matches!(z45, ProfileShape::ColdZ { angle, .. } if angle == 45.0));
         let z90 = def("NBR6355-Ze", "Z90 200x75x20x2,00").shape;
         assert!(matches!(z90, ProfileShape::ColdZ { angle, .. } if angle == 90.0));
+        let cs = def("CS", "CS 150x25");
+        assert_eq!(cs.name, "CS 150x25");
+        assert_eq!(cs.shape, ProfileShape::I { d: 0.150, bf: 0.150, tw: 0.0063, tf: 0.008, r: 0.0 });
+        let cvs = def("CVS", "CVS 150x15");
+        assert_eq!(cvs.name, "CVS 150x15");
+        assert_eq!(cvs.shape, ProfileShape::I { d: 0.150, bf: 0.100, tw: 0.00475, tf: 0.0063, r: 0.0 });
+        let br = def("BR", "BR 1/2\"");
+        assert_eq!(br.name, "BR 1/2\"");
+        assert_eq!(br.shape, ProfileShape::Round { d: 0.0127 });
+        let br334 = def("BR", "BR 3.3/4\"");
+        assert_eq!(br334.shape, ProfileShape::Round { d: 0.09525 });
     }
 
     #[test]

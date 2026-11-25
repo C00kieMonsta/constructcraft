@@ -1,0 +1,58 @@
+{
+  "format": 1,
+  "code": "BR-ACO-ARMADURA",
+  "name": "Aços para armadura (NBR 7480)",
+  "region": "brazil",
+  "standard": "ABNT NBR 7480, NBR 6118",
+  "sources": [
+    "ABNT NBR 7480:2022: categorias CA-25, CA-50, CA-60 (fyk)",
+    "ABNT NBR 6118:2023, 8.3.3 a 8.3.5: ρ = 7 850 kg/m³, α = 10⁻⁵ /°C, Es = 210 GPa"
+  ],
+  "materials": [
+    {
+      "name": "Aço CA-25 (NBR 7480)",
+      "class": "Metal",
+      "color": [
+        107,
+        110,
+        114
+      ],
+      "description": "Aço para armadura CA-25 (fyk = 250 MPa)",
+      "density": 7850.0,
+      "thermal_expansion": 1e-05,
+      "youngs_modulus": 210000.0,
+      "poisson": 0.3,
+      "yield_strength": 250.0
+    },
+    {
+      "name": "Aço CA-50 (NBR 7480)",
+      "class": "Metal",
+      "color": [
+        107,
+        110,
+        114
+      ],
+      "description": "Aço para armadura CA-50 (fyk = 500 MPa)",
+      "density": 7850.0,
+      "thermal_expansion": 1e-05,
+      "youngs_modulus": 210000.0,
+      "poisson": 0.3,
+      "yield_strength": 500.0
+    },
+    {
+      "name": "Aço CA-60 (NBR 7480)",
+      "class": "Metal",
+      "color": [
+        107,
+        110,
+        114
+      ],
+      "description": "Aço para armadura CA-60 (fyk = 600 MPa)",
+      "density": 7850.0,
+      "thermal_expansion": 1e-05,
+      "youngs_modulus": 210000.0,
+      "poisson": 0.3,
+      "yield_strength": 600.0
+    }
+  ]
+}
