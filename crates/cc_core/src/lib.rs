@@ -37,6 +37,7 @@ pub mod level_mark;
 pub mod lightning;
 pub mod mass;
 pub mod material;
+pub mod material_library;
 pub mod member_host;
 pub mod mep;
 pub mod openings;

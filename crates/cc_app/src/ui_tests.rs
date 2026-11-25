@@ -4893,6 +4893,7 @@ fn every_dialog_keeps_its_body_inside() {
         ("tag types".into(), Box::new(crate::tag_type_ui::open_list)),
         ("fill patterns".into(), Box::new(crate::fill_patterns_dialog::open)),
         ("pipe catalog".into(), Box::new(crate::pipe_catalog_dialog::open)),
+        ("material library".into(), Box::new(crate::material_library_dialog::open)),
         ("phases".into(), Box::new(crate::phases_dialog::open)),
         ("filters".into(), Box::new(crate::graphics_dialog::open_filters)),
         ("view templates".into(), Box::new(crate::graphics_dialog::open_templates)),
@@ -8381,4 +8382,49 @@ fn plugin_catalog_tab_shows_categories_colors_and_details() {
     assert_eq!(harness.query_all_by_label("OMAR").count(), 2, "item card and details title shown");
     assert!(harness.query_by_label("000.697.68").is_some(), "article number shown");
     assert!(harness.query_by_role_and_label(Role::Button, &t!("lib-open-website")).is_some(), "Open Website shown");
+}
+
+/// The Material Libraries dialog loads the materials checked of a built-in
+/// library (or all of them); OK keeps them, Cancel takes them out again.
+#[test]
+fn material_libraries_load_and_cancel() {
+    let mut state = sample_state();
+    let before = state.project().materials.len();
+    crate::material_library_dialog::open(&mut state);
+    let mut harness = themed_harness(state, egui::vec2(1200.0, 900.0), egui::Theme::Light, |ui, state| {
+        crate::dialogs::show(ui.ctx(), state);
+    });
+    harness.run();
+    let concretes = format!("{} (12)", t!("material-library-br-concreto"));
+    harness.get_by_label(&concretes).click();
+    harness.run();
+    assert_eq!(
+        harness.state().dialogs.material_library.as_ref().and_then(|d| d.selected.clone()).as_deref(),
+        Some("BR-CONCRETO")
+    );
+    harness.get_by_label(&t!("mat-lib-load-all")).click();
+    harness.run();
+    assert_eq!(harness.state().project().materials.len(), before + 12);
+    assert!(harness.state().project().material("Concreto C30 (NBR 6118)").is_some());
+    harness.get_by_label(&t!("action-ok")).click();
+    harness.run();
+    assert!(harness.state().dialogs.material_library.is_none());
+    assert_eq!(harness.state().project().materials.len(), before + 12, "OK keeps them");
+
+    // Two steels checked, then Cancel: nothing stays.
+    crate::material_library_dialog::open(harness.state_mut());
+    harness.run();
+    let steels = format!("{} (12)", t!("material-library-br-aco-estrutural"));
+    harness.get_by_label(&steels).click();
+    harness.run();
+    if let Some(d) = harness.state_mut().dialogs.material_library.as_mut() {
+        d.picked = ["Aço MR250 (NBR 7007)".to_string(), "Aço ASTM A36".to_string()].into();
+    }
+    harness.run();
+    harness.get_by_label(&t!("mat-lib-load-picked", "count" => 2)).click();
+    harness.run();
+    assert_eq!(harness.state().project().materials.len(), before + 14);
+    harness.get_by_label(&t!("action-cancel")).click();
+    harness.run();
+    assert_eq!(harness.state().project().materials.len(), before + 12, "Cancel undoes the load");
 }

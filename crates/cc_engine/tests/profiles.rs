@@ -841,17 +841,16 @@ fn round_beams_have_their_exact_volume() {
 #[test]
 fn brazil_profile_series_and_material_library_import() {
     let mut s = Session::default();
-    let res = run(&mut s, "material_library_import", json!({"library": "brazil"}));
+    let res = run(&mut s, "material_library_import", json!({"library": "BR-ACO-ESTRUTURAL"}));
     let imported = res["imported"].as_array().unwrap();
-    assert!(imported.len() >= 20, "imported steels, rebars and concretes: {}", imported.len());
-    assert!(s.project().material("Steel MR250 (NBR 7007)").is_some());
-    assert!(s.project().material("Steel CIVIL 350").is_some());
-    assert!(s.project().material("Concrete C30 (NBR 6118)").is_some());
+    assert_eq!(imported.len(), 12, "the structural steels");
+    assert!(s.project().material("Aço MR250 (NBR 7007)").is_some());
+    assert!(s.project().material("Aço CIVIL 350").is_some());
 
     // Calling again keeps existing materials untouched.
-    let res2 = run(&mut s, "material_library_import", json!({"library": "brazil", "kind": "steel"}));
+    let res2 = run(&mut s, "material_library_import", json!({"library": "BR-ACO-ESTRUTURAL"}));
     assert!(res2["imported"].as_array().unwrap().is_empty());
-    assert!(!res2["kept"].as_array().unwrap().is_empty());
+    assert_eq!(res2["kept"].as_array().unwrap().len(), 12);
 
     // Import CS, CVS and BR profiles and create types with MR250 steel.
     let cs = run(&mut s, "profile_import", json!({"series": "CS", "designations": ["CS 250x43"]}));
@@ -864,7 +863,7 @@ fn brazil_profile_series_and_material_library_import() {
     let col_ty = run(
         &mut s,
         "profile_type_create",
-        json!({"profile": "CS 250x43", "category": "column", "material": "Steel MR250 (NBR 7007)"}),
+        json!({"profile": "CS 250x43", "category": "column", "material": "Aço MR250 (NBR 7007)"}),
     );
     let col = run(&mut s, "column_create", json!({"type": col_ty["id"], "position": [0.0, 0.0], "height": 4.0}));
     assert!(s.geometry().volume(ElementId(col["id"].as_u64().unwrap())) > 0.0);
