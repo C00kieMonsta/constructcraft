@@ -7179,9 +7179,12 @@ fn tab_cycles_the_preselection_on_the_canvas() {
     let hint = |h: &Harness<'static, AppState>| h.state().hint.shown().map(str::to_string);
     let index = |h: &Harness<'static, AppState>| h.state().interaction.tab.cycle.map(|c| c.index);
 
-    // Over the wall: it is pre-selected, and the canvas takes Tab next frame.
+    // Over the wall: it is pre-selected, the status bar says Tab steps through
+    // what else is there, and the canvas takes Tab next frame.
     point(&mut harness, center);
-    assert_eq!(hint(&harness), Some(wall_text.clone()));
+    // Five candidates are under the pointer: the wall, its chain and what lies there.
+    let tab_hint = t!("status-preselect-tab", "label" => wall_text.clone(), "count" => 5);
+    assert_eq!(hint(&harness), Some(tab_hint.clone()));
     assert!(harness.state().interaction.tab.armed.is_some());
     assert_eq!(index(&harness), None);
     // Tab: the chain, counted among the candidates.
@@ -7206,7 +7209,7 @@ fn tab_cycles_the_preselection_on_the_canvas() {
     assert_eq!(index(&harness), None);
     // Back over the wall: the wall again, with no count.
     point(&mut harness, center);
-    assert_eq!((index(&harness), hint(&harness)), (None, Some(wall_text.clone())));
+    assert_eq!((index(&harness), hint(&harness)), (None, Some(tab_hint.clone())));
     // A click on the chain selects all its walls and ends the cycle.
     tab(&mut harness, 1);
     click(&mut harness, center);
@@ -8613,4 +8616,59 @@ fn file_is_a_page_over_the_window() {
     harness.key_press(egui::Key::Escape);
     harness.run();
     assert_eq!(harness.state().ribbon_tab, RibbonTab::View, "back to the tab shown before");
+}
+
+/// The status bar's count opens the selection's filter: unchecking a
+/// category deselects it, checking it again brings it back, and *Only*
+/// keeps that category alone.
+#[test]
+fn the_selection_is_filtered_by_category() {
+    let mut state = sample_state();
+    let walls: Vec<_> = state.project().walls().map(|(e, _)| e.id).take(2).collect();
+    let grid = state.project().elements_of(cc_core::Category::Grid).next().map(|e| e.id).unwrap();
+    state.selection = walls.iter().copied().chain([grid]).collect();
+    let mut harness = themed_harness(state, egui::vec2(900.0, 400.0), egui::Theme::Light, |ui, state| {
+        ui.add_space(300.0);
+        crate::ribbon::status_bar(ui, state);
+    });
+    harness.get_by_label(&t!("status-selected", "count" => 3)).click();
+    harness.run();
+    let wall_row = format!("{} (2)", crate::actions::t_category(cc_core::Category::Wall));
+    harness.get_by_label(&wall_row).click();
+    harness.run();
+    assert_eq!(harness.state().selection, std::collections::BTreeSet::from([grid]), "walls unchecked");
+    harness.get_by_label(&wall_row).click();
+    harness.run();
+    assert_eq!(harness.state().selection.len(), 3, "walls checked again");
+    harness.get_all_by_label(&t!("selection-filter-only")).last().unwrap().click();
+    harness.run();
+    assert_eq!(harness.state().selection, std::collections::BTreeSet::from([grid]), "only the grids");
+}
+
+/// The properties panel's search keeps the rows whose name holds the text
+/// and leaves the others out: hidden, they no longer take clicks.
+#[test]
+fn properties_are_searched_by_name() {
+    let mut state = sample_state();
+    let level = state.project().levels[0].id.0;
+    let args = serde_json::json!({"level": level, "start": [100, 100], "end": [106, 100], "height": 3.0});
+    let wall = cc_core::ElementId(state.session.execute("wall_create", args).unwrap()["id"].as_u64().unwrap());
+    let params = serde_json::json!({"id": wall.0, "params": {"structural": true}});
+    state.session.execute("element_set", params).unwrap();
+    state.selection = [wall].into_iter().collect();
+    let mut harness = themed_harness(state, egui::vec2(360.0, 1600.0), egui::Theme::Light, |ui, state| {
+        crate::properties::show(ui, state);
+    });
+    harness.run();
+    // The search field is the first text field, above the rows.
+    harness.get_all_by_role(Role::TextInput).next().unwrap().focus();
+    harness.run();
+    harness.get_all_by_role(Role::TextInput).next().unwrap().type_text("zzzz");
+    harness.run();
+    let typed: Option<String> = harness.ctx.data(|d| d.get_temp(egui::Id::new("props-search")));
+    assert_eq!(typed.as_deref(), Some("zzzz"));
+    // The typical reinforcement button's row matches nothing: a click on it does nothing.
+    harness.get_by_label(&t!("action-rebar-typical")).click();
+    harness.run();
+    assert_eq!(harness.state().project().rebar_of(wall).count(), 0, "the hidden row took no click");
 }

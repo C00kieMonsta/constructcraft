@@ -50,9 +50,25 @@ fn section_open(ui: &mut Ui, id: &str, title: String, default_open: bool, add: i
         open = !open;
         ui.data_mut(|d| d.insert_persisted(state_id, open));
     }
-    if open {
+    // While the properties are searched, every section shows what it holds that matches.
+    if open || filter(ui.ctx()).is_some() {
         add(ui);
     }
+}
+
+/// Temp-data key of the text the properties panel is being searched for.
+const FILTER: &str = "table-row-filter";
+
+/// Search the rows drawn from now on for `text` (lowercase, no accents;
+/// see [`crate::palette::fold`]), or stop with `None`. The properties panel
+/// sets it around its body, so dialogs drawn later are not searched.
+pub fn set_filter(ctx: &egui::Context, text: Option<String>) {
+    let text = text.filter(|t| !t.trim().is_empty());
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(FILTER), text));
+}
+
+fn filter(ctx: &egui::Context) -> Option<String> {
+    ctx.data(|d| d.get_temp::<Option<String>>(egui::Id::new(FILTER))).flatten()
 }
 
 /// One table row: a label cell and a value cell filled by `add`.
@@ -62,6 +78,14 @@ pub fn row<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
 
 /// [`row`] whose label shows `tip` when hovered (else the label itself).
 pub fn row_tip<R>(ui: &mut Ui, label: &str, tip: Option<&str>, add: impl FnOnce(&mut Ui) -> R) -> R {
+    // A row the properties search leaves out is laid out where nothing shows or takes clicks.
+    if let Some(text) = filter(ui.ctx())
+        && !crate::palette::fold(label).contains(text.trim())
+    {
+        let rect = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), 0.0));
+        let mut hidden = ui.new_child(UiBuilder::new().max_rect(rect).invisible());
+        return add(&mut hidden);
+    }
     let width = ui.available_width();
     let row_h = row_height();
     let (rect, _) = ui.allocate_exact_size(vec2(width, row_h), Sense::hover());
@@ -241,4 +265,27 @@ pub fn commit_text(
     ui.data_mut(|d| d.remove::<String>(id));
     let text = text.trim().to_string();
     (r.lost_focus() && text != current).then_some(text)
+}
+
+#[cfg(test)]
+mod filter_tests {
+    use super::*;
+
+    /// A row the search leaves out is drawn hidden and still gives its value;
+    /// a matching one, accents and case aside, shows.
+    #[test]
+    fn rows_are_searched_by_their_names() {
+        let ctx = egui::Context::default();
+        let mut seen = Vec::new();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            set_filter(ui.ctx(), Some(crate::palette::fold("ESTRUTURAL")));
+            for label in ["Estrutural", "Comentários"] {
+                seen.push((label, row(ui, label, |ui| ui.is_visible())));
+            }
+            set_filter(ui.ctx(), None);
+            seen.push(("Comentários", row(ui, "Comentários", |ui| ui.is_visible())));
+        });
+        out.textures_delta.clear();
+        assert_eq!(seen, vec![("Estrutural", true), ("Comentários", false), ("Comentários", true)]);
+    }
 }
