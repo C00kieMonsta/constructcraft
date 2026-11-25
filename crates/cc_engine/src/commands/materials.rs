@@ -1,4 +1,4 @@
-//! Materials: create, duplicate, rename, change, delete.
+//! Materials: create, duplicate, rename, change, delete; the material libraries.
 
 use super::{edit, patch_value};
 use crate::error::{EngineError, Result};
@@ -6,10 +6,12 @@ use crate::refs::{self, Ref};
 use crate::registry::{Command, CommandKind};
 use crate::session::Session;
 use crate::t;
+use cc_core::material_library::{LibraryMaterial, MaterialLibrary};
 use cc_core::{Material, Project};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::path::PathBuf;
 
 /// `base`, or `base 2`, `base 3`… when taken.
 fn unique_name(p: &Project, base: &str) -> String {
@@ -342,5 +344,214 @@ impl Command for MaterialTextureClear {
             Ok(())
         })?;
         Ok(material_out(s, &name))
+    }
+}
+
+/// The name of built-in library `code` in the active language, else `fallback`.
+fn library_name(code: &str, fallback: &str) -> String {
+    cc_core::material_library::find(code)
+        .and_then(|(b, _)| crate::i18n::try_tr(b.name_key))
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+/// A library's summary: code, name, region, standard, number of materials.
+fn library_json(lib: &MaterialLibrary) -> Value {
+    json!({
+        "code": lib.code,
+        "name": library_name(&lib.code, &lib.name),
+        "region": lib.region,
+        "standard": lib.standard,
+        "materials": lib.materials.len(),
+    })
+}
+
+/// The built-in material libraries (the materials of a region or standard,
+/// such as Brazil's structural steels, reinforcing steels and concretes):
+/// each one's `code`, translated `name`, `region`, `standard` and number of
+/// `materials`. With `library`, that library alone, with its `sources` and
+/// its `materials` (name, class, color, description and physical values in
+/// SI units: kg/m³, W/(m·K), J/(kg·K), 1/K, MPa), each saying whether the
+/// project has a material of that name (`in_project`).
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields)]
+pub struct MaterialCatalog {
+    /// A built-in library's code (ignoring case): list its materials.
+    #[serde(default)]
+    pub library: Option<String>,
+}
+
+impl Command for MaterialCatalog {
+    const NAME: &'static str = "material_catalog";
+    const KIND: CommandKind = CommandKind::Query;
+    fn run(self, s: &mut Session) -> Result<Value> {
+        let Some(code) = &self.library else {
+            let all: Vec<Value> = cc_core::material_library::built_in().iter().map(|(_, l)| library_json(l)).collect();
+            return Ok(json!({ "libraries": all }));
+        };
+        let (_, lib) = cc_core::material_library::find(code)
+            .ok_or_else(|| EngineError::not_found(format!("no built-in material library '{code}'")))?;
+        let p = s.project();
+        let materials: Vec<Value> = lib
+            .materials
+            .iter()
+            .map(|m| {
+                let mut v = serde_json::to_value(m).unwrap_or(Value::Null);
+                if let Some(o) = v.as_object_mut() {
+                    o.insert("in_project".into(), json!(p.material(&m.name).is_some()));
+                }
+                v
+            })
+            .collect();
+        let mut out = library_json(lib);
+        if let Some(o) = out.as_object_mut() {
+            o.insert("sources".into(), json!(lib.sources));
+            o.insert("materials".into(), json!(materials));
+        }
+        Ok(json!({ "libraries": [out] }))
+    }
+}
+
+/// Import materials from a library into the project: a built-in one by
+/// `library` (see `material_catalog`), or a library file (JSON, the format
+/// `material_library_export` writes) by `path` or `text`. `materials` picks
+/// some by name (default: all). A material whose name the project already
+/// has is kept as it is. One undo step; returns the names `imported` and
+/// `kept`.
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields)]
+pub struct MaterialLibraryImport {
+    /// A built-in library's code (or give `path` or `text`).
+    #[serde(default)]
+    pub library: Option<String>,
+    /// Path of a library file.
+    #[serde(default)]
+    pub path: Option<PathBuf>,
+    /// A library file's text.
+    #[serde(default)]
+    pub text: Option<String>,
+    /// The materials to import, by name (default: all of the library's).
+    #[serde(default)]
+    pub materials: Option<Vec<String>>,
+}
+
+/// A library file read for an import, its errors as engine errors.
+fn read_library(text: &str) -> Result<MaterialLibrary> {
+    cc_core::material_library::read_library(text).map_err(|e| EngineError::invalid(e.to_string()))
+}
+
+impl Command for MaterialLibraryImport {
+    const NAME: &'static str = "material_library_import";
+    const KIND: CommandKind = CommandKind::Edit;
+    const READS_FILES: bool = true;
+    fn run(self, s: &mut Session) -> Result<Value> {
+        use cc_core::material_library::MAX_FILE_BYTES;
+        let lib = match (&self.library, &self.path, self.text) {
+            (Some(code), None, None) => cc_core::material_library::find(code)
+                .map(|(_, l)| l.clone())
+                .ok_or_else(|| EngineError::not_found(format!("no built-in material library '{code}'")))?,
+            (None, Some(path), None) => {
+                s.require_read("path", path)?;
+                let len = std::fs::metadata(path)?.len();
+                if len > MAX_FILE_BYTES as u64 {
+                    return Err(EngineError::invalid(format!("the file is larger than {} MB", MAX_FILE_BYTES >> 20)));
+                }
+                read_library(&String::from_utf8_lossy(&std::fs::read(path)?))?
+            }
+            (None, None, Some(text)) => read_library(&text)?,
+            _ => return Err(EngineError::invalid("give exactly one of library, path or text")),
+        };
+        let picked: Vec<&LibraryMaterial> = match &self.materials {
+            None => lib.materials.iter().collect(),
+            Some(names) => names
+                .iter()
+                .map(|n| {
+                    lib.material(n).ok_or_else(|| EngineError::not_found(format!("no material '{n}' in {}", lib.code)))
+                })
+                .collect::<Result<_>>()?,
+        };
+        let p = s.project();
+        let (mut new, mut kept): (Vec<Material>, Vec<String>) = (Vec::new(), Vec::new());
+        for m in picked {
+            if p.material(&m.name).is_some() || new.iter().any(|x| x.name.eq_ignore_ascii_case(&m.name)) {
+                kept.push(m.name.clone());
+            } else {
+                new.push(m.to_material());
+            }
+        }
+        let imported: Vec<String> = new.iter().map(|m| m.name.clone()).collect();
+        if !new.is_empty() {
+            edit(s, t!("tx-import-materials"), |e| {
+                e.materials_mut().extend(new);
+                Ok(())
+            })?;
+        }
+        Ok(json!({ "library": lib.code, "imported": imported, "kept": kept }))
+    }
+}
+
+/// Write project materials as a library file (JSON, SI units) that
+/// `material_library_import` reads, for another project or another user:
+/// to `path` when given; the `text` is returned either way. `materials`
+/// picks them by name (default: all of the project's).
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MaterialLibraryExport {
+    /// The library's code, as importing projects see it.
+    pub code: String,
+    /// The library's name.
+    pub name: String,
+    /// The region it is for: `brazil`, `europe`, `us`, or empty.
+    #[serde(default)]
+    pub region: String,
+    /// The standards its values follow.
+    #[serde(default)]
+    pub standard: String,
+    /// The documents its values come from.
+    #[serde(default)]
+    pub sources: Vec<String>,
+    /// The materials to write, by name (default: all of the project's).
+    #[serde(default)]
+    pub materials: Option<Vec<String>>,
+    /// Path of the file to write.
+    #[serde(default)]
+    pub path: Option<PathBuf>,
+}
+
+impl Command for MaterialLibraryExport {
+    const NAME: &'static str = "material_library_export";
+    const KIND: CommandKind = CommandKind::File;
+    const CHECKS_PATHS: bool = true;
+    fn run(self, s: &mut Session) -> Result<Value> {
+        if let Some(path) = &self.path {
+            s.require_write("path", path)?;
+        }
+        let p = s.project();
+        let materials: Vec<LibraryMaterial> = match &self.materials {
+            None => p.materials.iter().map(LibraryMaterial::of_material).collect(),
+            Some(names) => names
+                .iter()
+                .map(|n| {
+                    p.material(n)
+                        .map(LibraryMaterial::of_material)
+                        .ok_or_else(|| EngineError::not_found(format!("material '{n}'")))
+                })
+                .collect::<Result<_>>()?,
+        };
+        let lib = MaterialLibrary {
+            format: cc_core::material_library::FILE_FORMAT,
+            code: self.code,
+            name: self.name,
+            region: self.region,
+            standard: self.standard,
+            sources: self.sources,
+            materials,
+        };
+        let text = cc_core::material_library::write_library(&lib);
+        // What is written must read back: a bad code, name or value is refused here.
+        read_library(&text)?;
+        if let Some(path) = &self.path {
+            std::fs::write(path, &text)?;
+        }
+        Ok(json!({ "code": lib.code, "materials": lib.materials.len(), "text": text }))
     }
 }

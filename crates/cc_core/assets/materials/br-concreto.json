@@ -1,0 +1,194 @@
+{
+  "format": 1,
+  "code": "BR-CONCRETO",
+  "name": "Concretos (NBR 8953, NBR 6118)",
+  "region": "brazil",
+  "standard": "ABNT NBR 8953, NBR 6118",
+  "sources": [
+    "ABNT NBR 8953:2015: classes de resistência C20 a C90 (fck)",
+    "ABNT NBR 6118:2023, 8.2.2: ρ = 2 500 kg/m³ (concreto armado); 8.2.3: α = 10⁻⁵ /°C; 8.2.9: ν = 0,2",
+    "ABNT NBR 6118:2023, 8.2.8: Ecs = αi · Eci, Eci = αE · 5 600 √fck (C20 a C50) ou 21,5 · 10³ · αE (fck/10 + 1,25)^(1/3) (C55 a C90), αE = 1,0 (granito e gnaisse); arredondado a 100 MPa"
+  ],
+  "materials": [
+    {
+      "name": "Concreto C20 (NBR 6118)",
+      "class": "Concrete",
+      "color": [
+        168,
+        168,
+        168
+      ],
+      "description": "Concreto classe C20, NBR 8953 / NBR 6118 (fck = 20 MPa)",
+      "density": 2500.0,
+      "thermal_expansion": 1e-05,
+      "youngs_modulus": 21300.0,
+      "poisson": 0.2,
+      "compressive_strength": 20.0
+    },
+    {
+      "name": "Concreto C25 (NBR 6118)",
+      "class": "Concrete",
+      "color": [
+        168,
+        168,
+        168
+      ],
+      "description": "Concreto classe C25, NBR 8953 / NBR 6118 (fck = 25 MPa)",
+      "density": 2500.0,
+      "thermal_expansion": 1e-05,
+      "youngs_modulus": 24200.0,
+      "poisson": 0.2,
+      "compressive_strength": 25.0
+    },
+    {
+      "name": "Concreto C30 (NBR 6118)",
+      "class": "Concrete",
+      "color": [
+        168,
+        168,
+        168
+      ],
+      "description": "Concreto classe C30, NBR 8953 / NBR 6118 (fck = 30 MPa)",
+      "density": 2500.0,
+      "thermal_expansion": 1e-05,
+      "youngs_modulus": 26800.0,
+      "poisson": 0.2,
+      "compressive_strength": 30.0
+    },
+    {
+      "name": "Concreto C35 (NBR 6118)",
+      "class": "Concrete",
+      "color": [
+        168,
+        168,
+        168
+      ],
+      "description": "Concreto classe C35, NBR 8953 / NBR 6118 (fck = 35 MPa)",
+      "density": 2500.0,
+      "thermal_expansion": 1e-05,
+      "youngs_modulus": 29400.0,
+      "poisson": 0.2,
+      "compressive_strength": 35.0
+    },
+    {
+      "name": "Concreto C40 (NBR 6118)",
+      "class": "Concrete",
+      "color": [
+        168,
+        168,
+        168
+      ],
+      "description": "Concreto classe C40, NBR 8953 / NBR 6118 (fck = 40 MPa)",
+      "density": 2500.0,
+      "thermal_expansion": 1e-05,
+      "youngs_modulus": 31900.0,
+      "poisson": 0.2,
+      "compressive_strength": 40.0
+    },
+    {
+      "name": "Concreto C45 (NBR 6118)",
+      "class": "Concrete",
+      "color": [
+        168,
+        168,
+        168
+      ],
+      "description": "Concreto classe C45, NBR 8953 / NBR 6118 (fck = 45 MPa)",
+      "density": 2500.0,
+      "thermal_expansion": 1e-05,
+      "youngs_modulus": 34300.0,
+      "poisson": 0.2,
+      "compressive_strength": 45.0
+    },
+    {
+      "name": "Concreto C50 (NBR 6118)",
+      "class": "Concrete",
+      "color": [
+        168,
+        168,
+        168
+      ],
+      "description": "Concreto classe C50, NBR 8953 / NBR 6118 (fck = 50 MPa)",
+      "density": 2500.0,
+      "thermal_expansion": 1e-05,
+      "youngs_modulus": 36600.0,
+      "poisson": 0.2,
+      "compressive_strength": 50.0
+    },
+    {
+      "name": "Concreto C55 (NBR 6118)",
+      "class": "Concrete",
+      "color": [
+        168,
+        168,
+        168
+      ],
+      "description": "Concreto classe C55, NBR 8953 / NBR 6118 (fck = 55 MPa)",
+      "density": 2500.0,
+      "thermal_expansion": 1e-05,
+      "youngs_modulus": 38100.0,
+      "poisson": 0.2,
+      "compressive_strength": 55.0
+    },
+    {
+      "name": "Concreto C60 (NBR 6118)",
+      "class": "Concrete",
+      "color": [
+        168,
+        168,
+        168
+      ],
+      "description": "Concreto classe C60, NBR 8953 / NBR 6118 (fck = 60 MPa)",
+      "density": 2500.0,
+      "thermal_expansion": 1e-05,
+      "youngs_modulus": 39500.0,
+      "poisson": 0.2,
+      "compressive_strength": 60.0
+    },
+    {
+      "name": "Concreto C70 (NBR 6118)",
+      "class": "Concrete",
+      "color": [
+        168,
+        168,
+        168
+      ],
+      "description": "Concreto classe C70, NBR 8953 / NBR 6118 (fck = 70 MPa)",
+      "density": 2500.0,
+      "thermal_expansion": 1e-05,
+      "youngs_modulus": 42400.0,
+      "poisson": 0.2,
+      "compressive_strength": 70.0
+    },
+    {
+      "name": "Concreto C80 (NBR 6118)",
+      "class": "Concrete",
+      "color": [
+        168,
+        168,
+        168
+      ],
+      "description": "Concreto classe C80, NBR 8953 / NBR 6118 (fck = 80 MPa)",
+      "density": 2500.0,
+      "thermal_expansion": 1e-05,
+      "youngs_modulus": 45100.0,
+      "poisson": 0.2,
+      "compressive_strength": 80.0
+    },
+    {
+      "name": "Concreto C90 (NBR 6118)",
+      "class": "Concrete",
+      "color": [
+        168,
+        168,
+        168
+      ],
+      "description": "Concreto classe C90, NBR 8953 / NBR 6118 (fck = 90 MPa)",
+      "density": 2500.0,
+      "thermal_expansion": 1e-05,
+      "youngs_modulus": 46700.0,
+      "poisson": 0.2,
+      "compressive_strength": 90.0
+    }
+  ]
+}

@@ -363,13 +363,15 @@ pub struct MaterialPhysical {
     pub poisson: Option<f64>,
     /// MPa.
     pub compressive_strength: Option<f64>,
-    /// MPa.
+    /// MPa: where a metal starts to yield (a steel's `fy`, a reinforcing bar's `fyk`).
+    pub yield_strength: Option<f64>,
+    /// MPa: a metal's ultimate strength (`fu`).
     pub tensile_strength: Option<f64>,
 }
 
 impl MaterialPhysical {
     /// Values as (field key, value) pairs, in display order.
-    pub fn values_mut(&mut self) -> [(&'static str, &mut Option<f64>); 8] {
+    pub fn values_mut(&mut self) -> [(&'static str, &mut Option<f64>); 9] {
         [
             ("phys-density", &mut self.density),
             ("phys-conductivity", &mut self.thermal_conductivity),
@@ -378,6 +380,7 @@ impl MaterialPhysical {
             ("phys-youngs", &mut self.youngs_modulus),
             ("phys-poisson", &mut self.poisson),
             ("phys-compressive", &mut self.compressive_strength),
+            ("phys-yield", &mut self.yield_strength),
             ("phys-tensile", &mut self.tensile_strength),
         ]
     }
