@@ -797,10 +797,10 @@ fn file_tab(ui: &mut Ui, state: &mut AppState) {
 fn insert_tab(ui: &mut Ui, state: &mut AppState) {
     use UiCommand::{
         ComponentLibrary, CreateDetailComponent, EditComponent, ImportCad, ImportGltf, ImportIfc, ImportImage,
-        ImportObj, ImportSkp, LoadComponent, NewComponent, NewTitleBlock,
+        ImportObj, ImportRvt, ImportSkp, LoadComponent, NewComponent, NewTitleBlock,
     };
     group(ui, t!("group-import"), |ui| {
-        command_buttons(ui, state, &[ImportIfc, ImportCad, ImportSkp, ImportObj, ImportGltf, ImportImage]);
+        command_buttons(ui, state, &[ImportIfc, ImportRvt, ImportCad, ImportSkp, ImportObj, ImportGltf, ImportImage]);
         plugin_file_entries(ui, state, false);
     });
     group(ui, t!("group-library"), |ui| {

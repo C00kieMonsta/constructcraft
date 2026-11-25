@@ -11,7 +11,7 @@ use std::io::{BufRead, Write};
 const VERSIONS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
 const INSTRUCTIONS: &str = "ConstructCraft BIM engine. One project is open per session: start with \
-project_new, project_open or ifc_import; save with project_save. Lengths are meters, angles degrees, \
+project_new, project_open, ifc_import or rvt_import; save with project_save. Lengths are meters, angles degrees, \
 points [x, y]. Levels, types, views and materials accept an id or a name; elements take ids (see \
 elements_list). element_get/type_get/view_get show the params that element_set/type_set/view_set change. \
 Every edit is one undo step (undo, redo).";

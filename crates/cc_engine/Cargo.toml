@@ -18,6 +18,7 @@ cc_raytracing.workspace = true
 cc_ifc.workspace = true
 cc_cad.workspace = true
 cc_skp.workspace = true
+cc_rvt.workspace = true
 glam.workspace = true
 png.workspace = true
 draco-core.workspace = true

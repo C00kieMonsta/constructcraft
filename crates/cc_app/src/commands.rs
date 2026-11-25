@@ -40,6 +40,8 @@ pub enum UiCommand {
     SaveAs,
     CloseProject,
     ImportIfc,
+    /// Open a Revit project (.rvt) as a new project, converted to IFC first.
+    ImportRvt,
     /// Import a DWG or DXF drawing into the active view.
     ImportCad,
     /// Import a picture or an SVG drawing into the active view.
@@ -332,6 +334,7 @@ impl UiCommand {
             SaveAs,
             CloseProject,
             ImportIfc,
+            ImportRvt,
             ImportCad,
             ImportImage,
             ImportSkp,
@@ -527,7 +530,7 @@ impl UiCommand {
         match self {
             Home => Icon::Home,
             New => Icon::New,
-            Open | ImportIfc | ImportSkp | ImportObj | ImportGltf => Icon::Open,
+            Open | ImportIfc | ImportRvt | ImportSkp | ImportObj | ImportGltf => Icon::Open,
             Save => Icon::Save,
             SaveAs => Icon::SaveAs,
             CloseProject => Icon::CloseProject,
@@ -731,7 +734,7 @@ impl UiCommand {
             | PanelDiagram
             | NewTitleBlock
             | CreateDetailComponent => Some(Badge::New),
-            ImportIfc | ImportCad | ImportImage | ImportSkp | ImportObj | ImportGltf | LoadComponent => {
+            ImportIfc | ImportRvt | ImportCad | ImportImage | ImportSkp | ImportObj | ImportGltf | LoadComponent => {
                 Some(Badge::Import)
             }
             ExportPdf | ExportSvg | ExportImage | ExportDxf | AnalyticalExport => Some(Badge::Export),
@@ -751,6 +754,7 @@ impl UiCommand {
             SaveAs => t!("action-save-as"),
             CloseProject => t!("action-close-project"),
             ImportIfc => t!("action-import-ifc"),
+            ImportRvt => t!("action-import-rvt"),
             ImportCad => t!("action-import-cad"),
             ImportImage => t!("action-import-image"),
             ImportSkp => t!("action-import-skp"),
@@ -977,6 +981,7 @@ impl UiCommand {
             SaveAs => t!("cmd-desc-save-as"),
             CloseProject => t!("cmd-desc-close-project"),
             ImportIfc => t!("cmd-desc-import-ifc"),
+            ImportRvt => t!("cmd-desc-import-rvt"),
             ImportCad => t!("cmd-desc-import-cad"),
             ImportImage => t!("cmd-desc-import-image"),
             ImportSkp => t!("cmd-desc-import-skp"),
@@ -1315,6 +1320,7 @@ impl UiCommand {
             Save | SaveAs => "project_save",
             VisualProgramming => "graph_run",
             ImportIfc => "ifc_import",
+            ImportRvt => "rvt_import",
             ImportCad => "cad_import",
             ImportImage => "image_import",
             ImportSkp => "skp_import",
@@ -1485,7 +1491,8 @@ impl UiCommand {
         }
         let project_open = state.project_open && !state.show_home;
         match self {
-            Home | New | Open | ImportIfc | About | CheckUpdates | Preferences | ToggleRibbon | CommandPalette => {
+            Home | New | Open | ImportIfc | ImportRvt | About | CheckUpdates | Preferences | ToggleRibbon
+            | CommandPalette => {
                 return None;
             }
             _ if !project_open => return Some(t!("why-no-project")),
@@ -1985,6 +1992,7 @@ pub fn run(state: &mut AppState, ctx: &egui::Context, command: UiCommand) {
         }
         CloseProject => actions::guarded(state, PendingAction::Close),
         ImportIfc => actions::guarded(state, PendingAction::ImportIfc),
+        ImportRvt => actions::guarded(state, PendingAction::ImportRvt),
         ImportCad => crate::cad_ui::import_cad(state),
         ImportImage => crate::cad_ui::import_image(state),
         ImportSkp => actions::import_skp(state),

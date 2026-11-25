@@ -186,6 +186,7 @@ registry![
         project::UnitsSet,
         project::LanguageSet,
         io::IfcImport,
+        io::RvtImport,
         io::SkpImport,
         io::SkpComponentLoad,
         io::ObjImport,

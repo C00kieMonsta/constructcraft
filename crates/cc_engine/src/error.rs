@@ -111,6 +111,18 @@ impl From<cc_ifc::ImportError> for EngineError {
     }
 }
 
+impl From<cc_rvt::RvtError> for EngineError {
+    fn from(err: cc_rvt::RvtError) -> Self {
+        use crate::t;
+        Self::io(match err {
+            cc_rvt::RvtError::Read(detail) | cc_rvt::RvtError::Internal(detail) => {
+                t!("err-rvt-read", "detail" => detail)
+            }
+            cc_rvt::RvtError::Partial { streams } => t!("err-rvt-partial", "count" => streams),
+        })
+    }
+}
+
 impl From<std::io::Error> for EngineError {
     fn from(e: std::io::Error) -> Self {
         Self::io(crate::t!("err-io", "detail" => e))

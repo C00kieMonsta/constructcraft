@@ -38,6 +38,7 @@ pub enum PendingAction {
     OpenPath(std::path::PathBuf),
     OpenSample(&'static str),
     ImportIfc,
+    ImportRvt,
     Close,
     Quit,
 }

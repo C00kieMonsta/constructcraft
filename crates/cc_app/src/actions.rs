@@ -346,6 +346,7 @@ pub fn run_pending(state: &mut AppState, action: PendingAction) {
             }
         }
         PendingAction::ImportIfc => import_ifc(state),
+        PendingAction::ImportRvt => import_rvt(state),
         PendingAction::Close => close_project(state),
         PendingAction::Quit => state.quit_confirmed = true,
     }
@@ -361,9 +362,10 @@ fn close_project(state: &mut AppState) {
 
 pub fn open(state: &mut AppState) {
     let mut dialog = rfd::FileDialog::new()
-        .add_filter(t!("file-filter-openable"), &["ccad", "ifc"])
+        .add_filter(t!("file-filter-openable"), &["ccad", "ifc", "rvt"])
         .add_filter(t!("file-filter"), &["ccad"])
-        .add_filter(t!("file-filter-ifc"), &["ifc"]);
+        .add_filter(t!("file-filter-ifc"), &["ifc"])
+        .add_filter(t!("file-filter-rvt"), &["rvt"]);
     if let Some(dir) = state.prefs.projects_dir() {
         dialog = dialog.set_directory(dir);
     }
@@ -375,16 +377,20 @@ fn has_extension(path: &std::path::Path, ext: &str) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case(ext))
 }
 
-/// Whether Open takes `path`: a project, or an IFC file it imports as a new project.
+/// Whether Open takes `path`: a project, or an IFC or Revit file it imports as a new project.
 pub fn opens(path: &std::path::Path) -> bool {
-    has_extension(path, "ccad") || has_extension(path, "ifc")
+    ["ccad", "ifc", "rvt"].iter().any(|ext| has_extension(path, ext))
 }
 
 /// Open the project at `path`, read on a worker thread behind the progress dialog.
-/// An IFC file is imported as a new project instead.
+/// An IFC or Revit file is imported as a new project instead.
 pub fn open_path(state: &mut AppState, path: std::path::PathBuf) {
     if has_extension(&path, "ifc") {
         import_ifc_path(state, path);
+        return;
+    }
+    if has_extension(&path, "rvt") {
+        import_rvt_path(state, path);
         return;
     }
     let (file, shown) = (path.clone(), path.clone());
@@ -530,6 +536,31 @@ fn import_ifc_path(state: &mut AppState, path: std::path::PathBuf) {
     let run = move |s: &mut cc_engine::Session| s.run(io::IfcImport { path: file });
     let finish: crate::jobs::Finish = Box::new(move |state, result, doc| ifc_imported(state, path, result, doc));
     crate::jobs::start(state, t!("job-importing-ifc"), shown, crate::jobs::Base::Fresh, run, finish);
+}
+
+/// Replace the document with a project converted from a Revit file. The
+/// result has no file path: saving asks where to write the `.ccad`.
+fn import_rvt(state: &mut AppState) {
+    let mut dialog = rfd::FileDialog::new().add_filter(t!("file-filter-rvt"), &["rvt"]);
+    if let Some(dir) = state.prefs.projects_dir() {
+        dialog = dialog.set_directory(dir);
+    }
+    let Some(path) = dialog.pick_file() else { return };
+    import_rvt_path(state, path);
+}
+
+/// Replace the document with a project converted from the Revit file at `path`.
+fn import_rvt_path(state: &mut AppState, path: std::path::PathBuf) {
+    let (file, shown) = (path.clone(), path.clone());
+    let run = move |s: &mut cc_engine::Session| s.run(io::RvtImport { path: file });
+    let finish: crate::jobs::Finish = Box::new(move |state, result, doc| {
+        let boxes = result.as_ref().ok().and_then(|r| r["converted"]["boxes"].as_u64()).unwrap_or(0);
+        ifc_imported(state, path, result, doc);
+        if boxes > 0 {
+            state.message = format!("{} {}", state.message, t!("msg-rvt-boxes", "count" => boxes));
+        }
+    });
+    crate::jobs::start(state, t!("job-importing-rvt"), shown, crate::jobs::Base::Fresh, run, finish);
 }
 
 fn ifc_imported(
@@ -1285,6 +1316,7 @@ mod tests {
         use std::path::Path;
         assert!(opens(Path::new("house.ccad")));
         assert!(opens(Path::new("P0032_EXT.IFC")));
+        assert!(opens(Path::new("P0032_EXT.rvt")));
         assert!(!opens(Path::new("plan.dxf")));
         assert!(!opens(Path::new("ifc")));
     }
@@ -1307,6 +1339,17 @@ mod tests {
         std::fs::remove_file(&path).ok();
         assert!(state.dialogs.error.is_none(), "{:?}", state.dialogs.error);
         assert_eq!(state.project().walls().count(), 1);
+        assert!(state.session.doc.path.is_none(), "an imported project has no file yet");
+    }
+
+    /// Opening a Revit file converts and imports it as a new project.
+    #[test]
+    fn opening_a_revit_file_imports_it() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../cc_rvt/tests/fixtures/synthetic.rvt");
+        let mut state = AppState::new(Document::new(new_project()));
+        open_path(&mut state, path);
+        crate::jobs::wait(&mut state);
+        assert!(state.dialogs.error.is_none(), "{:?}", state.dialogs.error);
         assert!(state.session.doc.path.is_none(), "an imported project has no file yet");
     }
 

@@ -61,7 +61,7 @@ A Lua script calls commands with ccad.run(name, args) and gets its arguments
 what it returns is printed as JSON.
 
 Options:
-  -p, --project <file>   open a project (.ccad, or .ifc to import) first
+  -p, --project <file>   open a project (.ccad, or .ifc or .rvt to import) first
   --save                 save the project afterwards (to its file)
   --save-as <file>       save the project afterwards to <file>
   --plugins <folder>     load the plugin in <folder>, or each plugin in its
@@ -175,7 +175,7 @@ fn default_plugin_cache_dir() -> PathBuf {
 }
 
 /// The session for the options: a new project, or the given file (`.ifc`
-/// is imported), with the plugins of `--plugins`.
+/// and `.rvt` are imported), with the plugins of `--plugins`.
 fn session(o: &Options) -> Result<Session, EngineError> {
     let mut s = Session::default();
     if !o.plugins.is_empty() {
@@ -183,8 +183,12 @@ fn session(o: &Options) -> Result<Session, EngineError> {
         flush_messages(&mut s);
     }
     if let Some(path) = &o.project {
-        let is_ifc = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("ifc"));
-        let command = if is_ifc { "ifc_import" } else { "project_open" };
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+        let command = match ext.as_str() {
+            "ifc" => "ifc_import",
+            "rvt" => "rvt_import",
+            _ => "project_open",
+        };
         s.execute(command, json!({ "path": path }))?;
     }
     Ok(s)

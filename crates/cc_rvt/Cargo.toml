@@ -1,0 +1,15 @@
+[package]
+name = "cc_rvt"
+description = "ConstructCraft Revit import: .rvt files read by the rvt crate and written as IFC4 for cc_ifc to import"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+rvt.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
