@@ -252,7 +252,7 @@ group-selection = Sélection
 group-history = Historique
 group-create-views = Créer
 group-documentation = Documentation
-group-navigate = Naviguer
+group-browser = Navigateur de projet
 
 # Outils
 tool-select = Sélectionner
@@ -1630,7 +1630,6 @@ fitting-missing-sizes = La série n'a pas de raccord entre ces dimensions
 fitting-elbow = Coude
 fitting-reducer = Réduction
 fitting-tee = Té
-group-analysis = Analyse
 group-electrical = Électricité
 group-plumbing = Plomberie
 group-systems = Systèmes
@@ -3225,7 +3224,6 @@ door-op-right = Battante, paumelles à droite
 door-op-double = Battante, 2 vantaux
 
 # Profile Manager
-group-profiles = Sections
 cmd-profiles = Profilés
 cmd-profiles-desc = Les profilés structurels du projet (acier laminé, formé à froid, bois et béton) utilisés par les types de poteaux et de poutres : dimensions, caractéristiques de la section et import depuis les catalogues
 profiles-title = Gestionnaire de profilés

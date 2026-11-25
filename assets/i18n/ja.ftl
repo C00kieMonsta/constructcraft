@@ -252,7 +252,7 @@ group-selection = 選択
 group-history = 履歴
 group-create-views = 作成
 group-documentation = ドキュメント
-group-navigate = ナビゲート
+group-browser = プロジェクトブラウザ
 
 # Tools
 tool-select = 選択
@@ -1733,7 +1733,6 @@ prop-valve-kind = 機能
 prop-valve-distance = 始点からの距離
 prop-valve-pipe = 配管
 tx-mep-connect = ネットワークに接続
-group-analysis = 解析
 dlg-mep-sizing = 管径計算 (サイジング)
 cmd-desc-mep-sizing = 器具負荷単位に基づいて排水管を、流量に基づいて給水管を、電流と電圧降下に基づいて回路をサイジングし、サイズ不足の配管に必要な直径を付与します。
 sizing-pipes = 配管
@@ -3225,7 +3224,6 @@ door-op-right = 開き戸、右吊り元
 door-op-double = 両開き
 
 # Profile Manager
-group-profiles = 断面
 cmd-profiles = 形鋼・断面
 cmd-profiles-desc = 柱と梁のタイプが使うプロジェクトの構造断面（熱間圧延鋼、軽量形鋼、木材、コンクリート）：寸法、断面性能、カタログからの読み込み
 profiles-title = 断面マネージャー

@@ -71,14 +71,13 @@ pub fn row_tip<R>(ui: &mut Ui, label: &str, tip: Option<&str>, add: impl FnOnce(
     painter.hline(rect.x_range(), rect.bottom() - 0.5, grid);
     painter.vline(split + 0.5, rect.y_range(), grid);
     let label_rect = Rect::from_min_max(rect.min, egui::pos2(split, rect.bottom()));
+    // A label wider than its column ends in an ellipsis; the tooltip shows it whole.
     let font = egui::FontId::proportional(font_size());
-    ui.painter_at(label_rect.shrink2(vec2(6.0, 0.0))).text(
-        egui::pos2(label_rect.left() + 10.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        label,
-        font,
-        PALETTE.text_muted,
-    );
+    let mut job = egui::text::LayoutJob::simple_singleline(label.to_string(), font, PALETTE.text_muted);
+    job.wrap = egui::text::TextWrapping::truncate_at_width((label_rect.width() - 16.0).max(0.0));
+    let galley = ui.painter().layout_job(job);
+    let pos = egui::pos2(label_rect.left() + 10.0, rect.center().y - galley.size().y / 2.0);
+    ui.painter_at(label_rect.shrink2(vec2(6.0, 0.0))).galley(pos, galley, PALETTE.text_muted);
     let label_hover = ui.interact(label_rect, ui.id().with(("prop-label", label)), Sense::hover());
     label_hover.on_hover_text(tip.unwrap_or(label));
 

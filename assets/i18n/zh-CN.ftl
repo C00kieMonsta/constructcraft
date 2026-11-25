@@ -252,7 +252,7 @@ group-selection = 选择
 group-history = 历史记录
 group-create-views = 创建
 group-documentation = 文档
-group-navigate = 导航
+group-browser = 项目浏览器
 
 # Tools
 tool-select = 选择
@@ -1733,7 +1733,6 @@ prop-valve-kind = 功能
 prop-valve-distance = 距起点距离
 prop-valve-pipe = 管道
 tx-mep-connect = 连接到管网
-group-analysis = 分析
 dlg-mep-sizing = 尺寸计算
 cmd-desc-mep-sizing = 按卫生器具当量计算排水管径，按流量计算给水管径，按电流和电压降计算回路，并为管径不足的管道指定所需直径。
 sizing-pipes = 管道
@@ -3225,7 +3224,6 @@ door-op-right = 平开，铰链在右
 door-op-double = 双扇平开
 
 # Profile Manager
-group-profiles = 截面
 cmd-profiles = 型材
 cmd-profiles-desc = 项目中柱和梁类型使用的结构型材（热轧钢、冷弯型钢、木材和混凝土）：尺寸、截面特性，并可从目录导入
 profiles-title = 型材管理器

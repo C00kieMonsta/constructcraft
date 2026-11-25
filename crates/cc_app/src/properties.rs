@@ -190,9 +190,6 @@ fn multi_props(ui: &mut Ui, state: &mut AppState, n: usize) {
                 ui.label(format!("{}: {k}", actions::t_category(*c)));
             });
         }
-        if ui.button(t!("action-delete")).clicked() {
-            state.delete_selection();
-        }
     });
     if let Some(category) = single {
         multi_edit(ui, state, category);
@@ -1208,11 +1205,6 @@ fn element_props(ui: &mut Ui, state: &mut AppState, id: ElementId) {
     crate::design_options_ui::element_rows(ui, state, &el);
     section(ui, "ifc", t!("section-ifc"), |ui| {
         readonly_row(ui, &t!("prop-ifc-guid"), cc_ifc::guid::encode(el.uid.0));
-    });
-    padded(ui, |ui| {
-        if ui.button(t!("action-delete")).clicked() {
-            state.delete_selection();
-        }
     });
 }
 

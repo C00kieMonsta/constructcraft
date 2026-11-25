@@ -243,7 +243,7 @@ group-selection = ການເລືອກ
 group-history = ປະຫວັດການເຮັດວຽກ
 group-create-views = ສ້າງມຸມມອງ
 group-documentation = ເອກະສານແບບ
-group-navigate = ການນຳທາງ
+group-browser = ຕົວຈັດການໂຄງການ
 
 # Tools
 tool-select = ເລືອກ
@@ -1693,7 +1693,6 @@ prop-valve-kind = ໜ້າທີ່
 prop-valve-distance = ໄລຍະຫ່າງຈາກຈຸດເລີ່ມ
 prop-valve-pipe = ທໍ່
 tx-mep-connect = ເຊື່ອມຕໍ່ເຂົ້າຕາໜ່າງລະບົບ
-group-analysis = ການວິເຄາະ
 dlg-mep-sizing = ການຄຳນວນຂະໜາດທໍ່ ແລະ ສາຍໄຟ
 cmd-desc-mep-sizing = ຄຳນວນຂະໜາດທໍ່ລະບາຍຕາມໜ່ວຍສຸຂະພັນ, ທໍ່ນ້ຳປະປາຕາມອັດຕາການໄຫຼ ແລະ ວົງຈອນໄຟຟ້າຕາມກະແສໄຟກັບແຮງດັນຕົກ, ພ້ອມປັບຂະໜາດທໍ່ທີ່ນ້ອຍເກີນໄປໃຫ້ໄດ້ມາດຕະຖານ.
 sizing-pipes = ທໍ່ນ້ຳ
@@ -3227,7 +3226,6 @@ door-op-right = ບານໄຂ, ບານພັບຂວາ
 door-op-double = ບານໄຂ 2 ບານ
 
 # Profile Manager
-group-profiles = ໜ້າຕັດ
 cmd-profiles = ໂປຣໄຟລ໌
 cmd-profiles-desc = ໂປຣໄຟລ໌ໂຄງສ້າງຂອງໂຄງການ (ເຫຼັກລີດຮ້ອນ, ເຫຼັກພັບເຢັນ, ໄມ້ ແລະ ຄອນກຣີດ) ທີ່ປະເພດເສົາ ແລະ ຄານໃຊ້: ຂະໜາດ, ຄຸນສົມບັດໜ້າຕັດ ແລະ ການນຳເຂົ້າຈາກແຄັດຕາລັອກ
 profiles-title = ຕົວຈັດການໂປຣໄຟລ໌

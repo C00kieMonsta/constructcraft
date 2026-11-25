@@ -252,7 +252,7 @@ group-selection = Seleção
 group-history = Histórico
 group-create-views = Criar
 group-documentation = Documentação
-group-navigate = Navegar
+group-browser = Navegador de projeto
 
 # Ferramentas
 tool-select = Selecionar
@@ -1733,7 +1733,6 @@ prop-valve-kind = Função
 prop-valve-distance = Distância do início
 prop-valve-pipe = Tubo
 tx-mep-connect = Ligar à rede
-group-analysis = Análise
 dlg-mep-sizing = Dimensionamento
 cmd-desc-mep-sizing = Dimensiona o esgoto pelas UHC, a água pela vazão e os circuitos pela corrente e pela queda de tensão, e dá aos tubos subdimensionados os diâmetros necessários.
 sizing-pipes = Tubulações
@@ -3225,7 +3224,6 @@ door-op-right = De giro, dobradiça à direita
 door-op-double = De giro, 2 folhas
 
 # Profile Manager
-group-profiles = Seções
 cmd-profiles = Perfis
 cmd-profiles-desc = Os perfis estruturais do projeto (aço laminado, formado a frio, madeira e concreto) que os tipos de pilar e viga usam: dimensões, propriedades da seção e importação dos catálogos
 profiles-title = Gerenciador de perfis

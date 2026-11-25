@@ -252,7 +252,7 @@ group-selection = Auswahl
 group-history = Verlauf
 group-create-views = Erstellen
 group-documentation = Dokumentation
-group-navigate = Navigieren
+group-browser = Projektbrowser
 
 # Werkzeuge
 tool-select = Auswählen
@@ -1630,7 +1630,6 @@ fitting-missing-sizes = Die Serie hat kein Formstück zwischen diesen Größen
 fitting-elbow = Bogen
 fitting-reducer = Reduzierstück
 fitting-tee = T-Stück
-group-analysis = Analyse
 group-electrical = Elektro
 group-plumbing = Sanitär
 group-systems = Systeme
@@ -3225,7 +3224,6 @@ door-op-right = Drehtür, Anschlag rechts
 door-op-double = Drehtür, 2 Flügel
 
 # Profile Manager
-group-profiles = Querschnitte
 cmd-profiles = Profile
 cmd-profiles-desc = Die Tragwerksprofile des Projekts (Walzstahl, kaltgeformt, Holz und Beton), die Stützen- und Trägertypen verwenden: Abmessungen, Querschnittswerte und Import aus den Katalogen
 profiles-title = Profilverwaltung

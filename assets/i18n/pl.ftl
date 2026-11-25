@@ -252,7 +252,7 @@ group-selection = Zaznaczenie
 group-history = Historia
 group-create-views = Utwórz
 group-documentation = Dokumentacja
-group-navigate = Nawigacja
+group-browser = Przeglądarka projektu
 
 # Narzędzia
 tool-select = Zaznacz
@@ -1630,7 +1630,6 @@ fitting-missing-sizes = Seria nie ma kształtki między tymi rozmiarami
 fitting-elbow = Kolano
 fitting-reducer = Redukcja
 fitting-tee = Trójnik
-group-analysis = Analiza
 group-electrical = Elektryka
 group-plumbing = Wod-kan
 group-systems = Systemy
@@ -3225,7 +3224,6 @@ door-op-right = Rozwierane, zawiasy z prawej
 door-op-double = Rozwierane, 2 skrzydła
 
 # Profile Manager
-group-profiles = Przekroje
 cmd-profiles = Profile
 cmd-profiles-desc = Profile konstrukcyjne projektu (stal walcowana, stal gięta na zimno, drewno i beton) używane przez typy słupów i belek: wymiary, charakterystyki przekroju i import z katalogów
 profiles-title = Menedżer profili
