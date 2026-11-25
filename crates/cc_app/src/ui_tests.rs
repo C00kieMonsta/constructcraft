@@ -5423,7 +5423,13 @@ fn profile_manager_imports_and_cancels() {
     assert_eq!(users(&harness), vec![beam]);
     harness.get_by_role_and_label(Role::Button, &t!("cmd-profiles")).click();
     harness.run();
-    harness.get_by_label("IPE 200").click();
+    // The list names each profile with its material: "IPE 200 (Steel)".
+    let row = harness
+        .query_all_by_role(Role::Button)
+        .map(|n| n.accesskit_node().label().unwrap_or_default())
+        .find(|l| l.starts_with("IPE 200 ("))
+        .expect("IPE 200 in the list");
+    harness.get_by_role_and_label(Role::Button, &row).click();
     harness.run();
     assert_eq!(harness.state().dialogs.profiles.as_ref().and_then(|d| d.selected), Some(ipe));
     harness.get_by_role_and_label(Role::Button, &t!("profiles-delete")).click();

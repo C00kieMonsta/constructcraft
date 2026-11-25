@@ -373,7 +373,7 @@ fn list(ui: &mut Ui, state: &mut AppState, d: &mut ProfilesDialog) {
                         .list
                         .iter()
                         .filter(|r| r.shape == shape && r.name.to_lowercase().contains(&search))
-                        .map(|r| (r.id, format!("{}  ({})", r.name, tr(r.material.key()))))
+                        .map(|r| (r.id, format!("{} ({})", r.name, tr(r.material.key()))))
                         .collect();
                     if rows.is_empty() {
                         continue;
