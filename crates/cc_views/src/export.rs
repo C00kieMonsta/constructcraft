@@ -538,6 +538,8 @@ pub fn view_on_paper(drawing: &Drawing2D, scale: u32, margin: f64) -> (Drawing2D
             prims,
             fit_elements: drawing.fit_elements,
             background: drawing.background.clone(),
+            datum: drawing.datum.clone(),
+            yielding: drawing.yielding.clone(),
             tags: Vec::new(),
             fitting_tags: Vec::new(),
             sections: Vec::new(),

@@ -4674,6 +4674,11 @@ fn select(
     {
         let cycled = state.interaction.tab.cycle.is_some().then_some((index, candidates.len()));
         if let Some(text) = crate::preselect::label(state.project(), c, cycled) {
+            // Several under the pointer: say that Tab steps through them.
+            let text = match candidates.len() {
+                n if n > 1 && cycled.is_none() => t!("status-preselect-tab", "label" => text, "count" => n),
+                _ => text,
+            };
             state.hint.set(text);
         }
     }
@@ -4696,12 +4701,7 @@ fn select(
         && (index > 0 || !c.ids().iter().all(|id| state.selection.contains(id)))
     {
         let only: BTreeSet<ElementId> = c.ids().iter().copied().collect();
-        let opts = PaintOptions {
-            highlight: &only,
-            px_per_mm: 0.0,
-            mono: Some(HIGHLIGHT.gamma_multiply(0.7)),
-            only: Some(&only),
-        };
+        let opts = PaintOptions { highlight: &only, px_per_mm: 0.0, mono: Some(HIGHLIGHT), only: Some(&only) };
         paint_drawing(painter, drawing, xf, &opts);
     }
 

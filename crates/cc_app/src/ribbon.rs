@@ -2191,6 +2191,51 @@ pub fn options_bar(ui: &mut Ui, state: &mut AppState) {
     });
 }
 
+/// Temp-data key of the selection the filter was opened on.
+const FILTER_BASE: &str = "selection-filter-base";
+
+/// The selection's filter: the categories of the selection it was opened
+/// on, each with its count, checked while its elements are selected;
+/// unchecking one deselects them, checking it selects them again, and
+/// *Only* keeps that category alone.
+fn selection_filter(ui: &mut Ui, state: &mut AppState) {
+    let base: std::collections::BTreeSet<cc_core::ElementId> =
+        ui.data(|d| d.get_temp(egui::Id::new(FILTER_BASE))).unwrap_or_else(|| state.selection.clone());
+    let mut by_category: std::collections::BTreeMap<Category, Vec<cc_core::ElementId>> = Default::default();
+    for id in base.iter().take(100_000) {
+        if let Some(e) = state.project().element(*id) {
+            by_category.entry(e.category()).or_default().push(*id);
+        }
+    }
+    ui.set_min_width(240.0);
+    ui.label(RichText::new(t!("selection-filter-title")).family(theme::semibold()).color(PALETTE.text));
+    let mut change = None;
+    for (category, ids) in &by_category {
+        let mut on = ids.iter().any(|id| state.selection.contains(id));
+        ui.horizontal(|ui| {
+            let label = format!("{} ({})", actions::t_category(*category), ids.len());
+            if ui.checkbox(&mut on, label).changed() {
+                change = Some((ids.clone(), on, false));
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.small_button(t!("selection-filter-only")).clicked() {
+                    change = Some((ids.clone(), true, true));
+                }
+            });
+        });
+    }
+    match change {
+        Some((ids, _, true)) => state.selection = ids.into_iter().collect(),
+        Some((ids, true, false)) => state.selection.extend(ids),
+        Some((ids, false, false)) => {
+            for id in ids {
+                state.selection.remove(&id);
+            }
+        }
+        None => {}
+    }
+}
+
 pub fn status_bar(ui: &mut Ui, state: &mut AppState) {
     ui.horizontal(|ui| {
         if let Some(c) = state.cursor {
@@ -2208,7 +2253,16 @@ pub fn status_bar(ui: &mut Ui, state: &mut AppState) {
         }
         let n = state.selection.len();
         if n > 0 {
-            ui.label(t!("status-selected", "count" => n));
+            // The count opens the selection's filter by category.
+            let r = ui.add(Button::new(t!("status-selected", "count" => n)).frame(false));
+            let r = r.on_hover_text(t!("selection-filter-hint"));
+            if r.clicked() {
+                let base = state.selection.clone();
+                ui.data_mut(|d| d.insert_temp(egui::Id::new(FILTER_BASE), base));
+            }
+            egui::Popup::menu(&r)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .show(|ui| selection_filter(ui, state));
             ui.separator();
         }
         // What the pointer pre-selects stands in for the message meanwhile.

@@ -209,7 +209,26 @@ pub fn generate_temporary(
     }
     // The sun path last, over everything: neither cropped nor overridden.
     sun_path::draw(&mut d, project, geom, view, label);
+    pick_ranks(&mut d, project);
     Some(d)
+}
+
+/// Mark the drawing's datum elements and the ones whose outline yields to
+/// another's, for picking (see [`Drawing2D::hits_at`]).
+fn pick_ranks(d: &mut Drawing2D, project: &Project) {
+    use cc_core::Category as C;
+    let ids: std::collections::BTreeSet<_> = d.prims.iter().filter_map(Prim::element).collect();
+    for id in ids {
+        match project.element(id).map(|e| e.category()) {
+            Some(C::Grid | C::Level) => {
+                d.datum.insert(id);
+            }
+            Some(C::Floor | C::Ceiling | C::Roof | C::Foundation | C::Topography | C::Pad) => {
+                d.yielding.insert(id);
+            }
+            _ => {}
+        }
+    }
 }
 
 /// The elements of `geom` that the view's graphics keep out of its sun's
