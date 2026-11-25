@@ -53,40 +53,54 @@ fn import_report(report: &cc_ifc::ImportReport) -> serde_json::Map<String, Value
 /// Import a Revit project file (.rvt), replacing the session's project. The
 /// file is converted to IFC4 by the `rvt` crate (rvt-rs, which reads Revit
 /// files without Revit) and imported as `ifc_import` imports an IFC file.
-/// Files saved by Revit 2023 to 2025 come across best; an element whose shape
-/// the converter cannot decode comes in as its bounding box, and parametric
-/// families, views and sheets do not come across. Returns what `ifc_import`
-/// returns, plus `revit_version` and `converted`: the building elements the
-/// converter wrote, those with a body, those that are their bounding box and
-/// its notes. The result has no file yet; save it with `project_save` and a
-/// path.
+/// The conversion runs in a separate process, stopped after `timeout`: a
+/// file that crashes or hangs the converter is an error and the open
+/// project is kept. Files saved by Revit 2023 to 2025 come across best; an
+/// element whose shape the converter cannot decode comes in as its bounding
+/// box, and parametric families, views and sheets do not come across.
+/// Returns what `ifc_import` returns, plus `revit_version` and `converted`:
+/// the building elements the converter wrote, those with a body, those that
+/// are their bounding box and its notes (in English). The result has no file
+/// yet; save it with `project_save` and a path. Only in builds with the
+/// `rvt` feature.
+#[cfg(feature = "rvt")]
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RvtImport {
     /// Path of the .rvt file.
     pub path: PathBuf,
+    /// Seconds the conversion may take before it is stopped (default 600).
+    #[serde(default)]
+    pub timeout: Option<f64>,
 }
 
+#[cfg(feature = "rvt")]
 impl Command for RvtImport {
     const NAME: &'static str = "rvt_import";
     const KIND: CommandKind = CommandKind::File;
     fn run(self, s: &mut Session) -> Result<Value> {
+        let timeout = match self.timeout {
+            None => cc_rvt::DEFAULT_TIMEOUT,
+            Some(t) => std::time::Duration::try_from_secs_f64(refs::positive(t, "timeout")?)
+                .map_err(|_| EngineError::invalid("timeout is too long"))?,
+        };
         let len = std::fs::metadata(&self.path)?.len();
         if len > cc_rvt::MAX_RVT_BYTES {
             return Err(EngineError::io(t!("err-rvt-too-large", "mb" => cc_rvt::MAX_RVT_BYTES >> 20)));
         }
-        let converted = cc_rvt::to_ifc(std::fs::read(&self.path)?)?;
+        let converted = cc_rvt::convert_in_child(&crate::rvt::converter()?, &self.path, timeout)?;
         let (project, report) = guard(|| cc_ifc::import(&converted.ifc, new_project()))??;
         s.replace(Document::new(project));
+        let summary = converted.summary;
         let mut out = import_report(&report);
-        out.insert("revit_version".into(), json!(converted.revit_version));
+        out.insert("revit_version".into(), json!(summary.revit_version));
         out.insert(
             "converted".into(),
             json!({
-                "elements": converted.elements,
-                "with_geometry": converted.with_geometry,
-                "boxes": converted.boxes,
-                "notes": converted.notes,
+                "elements": summary.elements,
+                "with_geometry": summary.with_geometry,
+                "boxes": summary.boxes,
+                "notes": summary.notes,
             }),
         );
         Ok(Value::Object(out))

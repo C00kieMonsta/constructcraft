@@ -111,14 +111,17 @@ impl From<cc_ifc::ImportError> for EngineError {
     }
 }
 
+#[cfg(feature = "rvt")]
 impl From<cc_rvt::RvtError> for EngineError {
     fn from(err: cc_rvt::RvtError) -> Self {
         use crate::t;
+        use cc_rvt::RvtError as E;
         Self::io(match err {
-            cc_rvt::RvtError::Read(detail) | cc_rvt::RvtError::Internal(detail) => {
-                t!("err-rvt-read", "detail" => detail)
-            }
-            cc_rvt::RvtError::Partial { streams } => t!("err-rvt-partial", "count" => streams),
+            E::Read(detail) | E::Internal(detail) => t!("err-rvt-read", "detail" => detail),
+            E::Partial { streams } => t!("err-rvt-partial", "count" => streams),
+            E::Timeout { seconds } => t!("err-rvt-timeout", "seconds" => seconds),
+            E::Crashed(detail) => t!("err-rvt-crashed", "detail" => detail),
+            E::Process(detail) => t!("err-rvt-converter", "detail" => detail),
         })
     }
 }

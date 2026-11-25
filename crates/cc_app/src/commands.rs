@@ -41,6 +41,7 @@ pub enum UiCommand {
     CloseProject,
     ImportIfc,
     /// Open a Revit project (.rvt) as a new project, converted to IFC first.
+    #[cfg(feature = "rvt")]
     ImportRvt,
     /// Import a DWG or DXF drawing into the active view.
     ImportCad,
@@ -334,6 +335,7 @@ impl UiCommand {
             SaveAs,
             CloseProject,
             ImportIfc,
+            #[cfg(feature = "rvt")]
             ImportRvt,
             ImportCad,
             ImportImage,
@@ -530,7 +532,9 @@ impl UiCommand {
         match self {
             Home => Icon::Home,
             New => Icon::New,
-            Open | ImportIfc | ImportRvt | ImportSkp | ImportObj | ImportGltf => Icon::Open,
+            Open | ImportIfc | ImportSkp | ImportObj | ImportGltf => Icon::Open,
+            #[cfg(feature = "rvt")]
+            ImportRvt => Icon::Open,
             Save => Icon::Save,
             SaveAs => Icon::SaveAs,
             CloseProject => Icon::CloseProject,
@@ -734,9 +738,11 @@ impl UiCommand {
             | PanelDiagram
             | NewTitleBlock
             | CreateDetailComponent => Some(Badge::New),
-            ImportIfc | ImportRvt | ImportCad | ImportImage | ImportSkp | ImportObj | ImportGltf | LoadComponent => {
+            ImportIfc | ImportCad | ImportImage | ImportSkp | ImportObj | ImportGltf | LoadComponent => {
                 Some(Badge::Import)
             }
+            #[cfg(feature = "rvt")]
+            ImportRvt => Some(Badge::Import),
             ExportPdf | ExportSvg | ExportImage | ExportDxf | AnalyticalExport => Some(Badge::Export),
             Delete | DetachTop | UnjoinRoof | RemovePaint | ResetWallProfile => Some(Badge::Remove),
             _ => None,
@@ -754,6 +760,7 @@ impl UiCommand {
             SaveAs => t!("action-save-as"),
             CloseProject => t!("action-close-project"),
             ImportIfc => t!("action-import-ifc"),
+            #[cfg(feature = "rvt")]
             ImportRvt => t!("action-import-rvt"),
             ImportCad => t!("action-import-cad"),
             ImportImage => t!("action-import-image"),
@@ -981,6 +988,7 @@ impl UiCommand {
             SaveAs => t!("cmd-desc-save-as"),
             CloseProject => t!("cmd-desc-close-project"),
             ImportIfc => t!("cmd-desc-import-ifc"),
+            #[cfg(feature = "rvt")]
             ImportRvt => t!("cmd-desc-import-rvt"),
             ImportCad => t!("cmd-desc-import-cad"),
             ImportImage => t!("cmd-desc-import-image"),
@@ -1320,6 +1328,7 @@ impl UiCommand {
             Save | SaveAs => "project_save",
             VisualProgramming => "graph_run",
             ImportIfc => "ifc_import",
+            #[cfg(feature = "rvt")]
             ImportRvt => "rvt_import",
             ImportCad => "cad_import",
             ImportImage => "image_import",
@@ -1491,10 +1500,11 @@ impl UiCommand {
         }
         let project_open = state.project_open && !state.show_home;
         match self {
-            Home | New | Open | ImportIfc | ImportRvt | About | CheckUpdates | Preferences | ToggleRibbon
-            | CommandPalette => {
+            Home | New | Open | ImportIfc | About | CheckUpdates | Preferences | ToggleRibbon | CommandPalette => {
                 return None;
             }
+            #[cfg(feature = "rvt")]
+            ImportRvt => return None,
             _ if !project_open => return Some(t!("why-no-project")),
             _ => {}
         }
@@ -1992,6 +2002,7 @@ pub fn run(state: &mut AppState, ctx: &egui::Context, command: UiCommand) {
         }
         CloseProject => actions::guarded(state, PendingAction::Close),
         ImportIfc => actions::guarded(state, PendingAction::ImportIfc),
+        #[cfg(feature = "rvt")]
         ImportRvt => actions::guarded(state, PendingAction::ImportRvt),
         ImportCad => crate::cad_ui::import_cad(state),
         ImportImage => crate::cad_ui::import_image(state),

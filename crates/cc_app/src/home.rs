@@ -60,6 +60,7 @@ fn sidebar(ui: &mut Ui, state: &mut AppState) {
     if side_button(ui, Icon::Open, &t!("action-import-ifc")).clicked() {
         actions::guarded(state, PendingAction::ImportIfc);
     }
+    #[cfg(feature = "rvt")]
     if side_button(ui, Icon::Open, &t!("action-import-rvt")).clicked() {
         actions::guarded(state, PendingAction::ImportRvt);
     }

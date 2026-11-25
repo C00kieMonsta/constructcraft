@@ -878,6 +878,8 @@ name = "cc_rvt"
 version = "0.14.1"
 dependencies = [
  "rvt",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 
