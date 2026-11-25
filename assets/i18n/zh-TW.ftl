@@ -252,7 +252,7 @@ group-selection = 選取
 group-history = 歷程記錄
 group-create-views = 建立
 group-documentation = 文件
-group-navigate = 導覽
+group-browser = 專案瀏覽器
 
 # 工具
 tool-select = 選取
@@ -1630,7 +1630,6 @@ fitting-missing-sizes = 該系列沒有這些尺寸之間的管件
 fitting-elbow = 彎頭
 fitting-reducer = 異徑接頭
 fitting-tee = 三通
-group-analysis = 分析
 group-electrical = 電氣
 group-plumbing = 衛生設備
 group-systems = 系統
@@ -3225,7 +3224,6 @@ door-op-right = 平開，鉸鏈在右
 door-op-double = 雙扇平開
 
 # Profile Manager
-group-profiles = 斷面
 cmd-profiles = 型材
 cmd-profiles-desc = 專案中柱與梁類型所用的結構型材（熱軋鋼、冷軋型鋼、木材與混凝土）：尺寸、斷面性質，並可從型錄匯入
 profiles-title = 型材管理員

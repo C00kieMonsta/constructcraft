@@ -252,7 +252,7 @@ group-selection = Selection
 group-history = History
 group-create-views = Create
 group-documentation = Documentation
-group-navigate = Navigate
+group-browser = Project Browser
 
 # Tools
 tool-select = Select
@@ -1733,7 +1733,6 @@ prop-valve-kind = Function
 prop-valve-distance = Distance from start
 prop-valve-pipe = Pipe
 tx-mep-connect = Connect to Network
-group-analysis = Analysis
 dlg-mep-sizing = Sizing
 cmd-desc-mep-sizing = Size the drains by fixture units, the water pipes by flow and the circuits by current and voltage drop, and give undersized pipes the required diameters.
 sizing-pipes = Pipes
@@ -3225,7 +3224,6 @@ door-op-right = Swing, hinged right
 door-op-double = Swing, 2 leaves
 
 # Profile Manager
-group-profiles = Sections
 cmd-profiles = Profiles
 cmd-profiles-desc = The project's structural profiles (rolled steel, cold-formed, timber and concrete) that column and beam types use: dimensions, section properties and import from the catalogs
 profiles-title = Profile Manager

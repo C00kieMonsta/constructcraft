@@ -201,7 +201,7 @@ fn narrow_ribbon_scrolls() {
     assert!(!harness.get_by_label(&left).accesskit_node().is_disabled(), "scrolled away from the start");
     // Wide enough, no arrows.
     let mut state = sample_state();
-    state.ribbon_tab = RibbonTab::Structure;
+    state.ribbon_tab = RibbonTab::MassingSite;
     let harness = ribbon_harness(state, 1100.0);
     assert!(harness.query_by_label(&t!("ribbon-scroll-right")).is_none());
 }
@@ -316,11 +316,22 @@ fn ribbon_buttons_are_accessible() {
         let mut state = sample_state();
         state.ribbon_tab = tab;
         state.prefs.structure_material = material;
-        let harness = ribbon_harness(state, 1600.0);
-        for node in harness.query_all_by_role(Role::Button) {
-            let label = node.accesskit_node().label().unwrap_or_default();
-            assert!(!label.trim().is_empty(), "{tab:?}: a button without a name");
-            found.insert(label);
+        let mut harness = ribbon_harness(state, 1600.0);
+        // Families too long for the row open as menus: open each one.
+        let menus = [t!("group-temporary"), t!("group-documentation")];
+        let mut open = vec![None];
+        open.extend(menus.iter().map(Some));
+        for menu in open {
+            if let Some(menu) = menu {
+                let Some(button) = harness.query_by_role_and_label(Role::Button, menu) else { continue };
+                button.click();
+                harness.run();
+            }
+            for node in harness.query_all_by_role(Role::Button) {
+                let label = node.accesskit_node().label().unwrap_or_default();
+                assert!(!label.trim().is_empty(), "{tab:?}: a button without a name");
+                found.insert(label);
+            }
         }
     }
     // The component environment shows its own ribbon.
@@ -369,7 +380,8 @@ fn ribbon_buttons_are_accessible() {
         found.insert(node.accesskit_node().label().unwrap_or_default());
     }
     let state = sample_state();
-    let hidden = [UiCommand::CommandPalette, UiCommand::ToggleRibbon];
+    // Zoom to Fit lives in each view's bar (and ZE), not in a tab.
+    let hidden = [UiCommand::CommandPalette, UiCommand::ToggleRibbon, UiCommand::ZoomFit];
     for command in UiCommand::all().into_iter().filter(|c| !hidden.contains(c)) {
         assert!(found.contains(&command.label(&state)), "{command:?} is not in the ribbon");
     }
@@ -5373,7 +5385,7 @@ fn profile_manager_imports_and_cancels() {
     use cc_engine::Ref;
     use cc_engine::commands::profiles::ProfileTypeCreate;
     let mut state = sample_state();
-    state.ribbon_tab = RibbonTab::Structure;
+    state.ribbon_tab = RibbonTab::Manage;
     let depth = state.session.doc.undo_depth();
     let mut harness = app_harness(state);
     harness.get_by_role_and_label(Role::Button, &t!("cmd-profiles")).click();
@@ -7868,8 +7880,8 @@ fn idf_plugins_folder(name: &str) -> std::path::PathBuf {
     root
 }
 
-/// A plugin's exporters join the File and Insert tabs' Export groups and its
-/// importers the Insert tab's Import group; a chosen path opens the
+/// A plugin's exporters join the File tab's Export group and its importers
+/// the Insert tab's Import group; a chosen path opens the
 /// command's form with it set (its field has Browse…), or runs a command
 /// whose only parameter is the path at once.
 #[test]
@@ -7885,9 +7897,8 @@ fn plugin_exporters_and_importers_join_the_ribbon() {
     assert!(harness.query_by_role_and_label(Role::Button, "Weather (.epw)").is_none(), "no Import group there");
     harness.state_mut().ribbon_tab = RibbonTab::Insert;
     harness.run();
-    for label in ["EnergyPlus (.idf)", "Plain text (.txt)", "Weather (.epw)"] {
-        assert!(harness.query_by_role_and_label(Role::Button, label).is_some(), "Insert tab: {label}");
-    }
+    assert!(harness.query_by_role_and_label(Role::Button, "Weather (.epw)").is_some(), "Insert tab, Import");
+    assert!(harness.query_by_role_and_label(Role::Button, "EnergyPlus (.idf)").is_none(), "exports only in File");
     // The dialog cannot be driven: the path it would return opens the form.
     let out = folder.join("model.idf");
     let entry = harness.state().plugins.exporters[0].clone();

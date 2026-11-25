@@ -252,7 +252,7 @@ group-selection = Selección
 group-history = Historial
 group-create-views = Crear
 group-documentation = Documentación
-group-navigate = Navegar
+group-browser = Navegador de proyecto
 
 # Herramientas
 tool-select = Seleccionar
@@ -1630,7 +1630,6 @@ fitting-missing-sizes = La serie no tiene conexión entre estos tamaños
 fitting-elbow = Codo
 fitting-reducer = Reducción
 fitting-tee = Te
-group-analysis = Análisis
 group-electrical = Eléctrica
 group-plumbing = Sanitaria
 group-systems = Sistemas
@@ -3225,7 +3224,6 @@ door-op-right = Abatible, bisagra a la derecha
 door-op-double = Abatible, 2 hojas
 
 # Profile Manager
-group-profiles = Secciones
 cmd-profiles = Perfiles
 cmd-profiles-desc = Los perfiles estructurales del proyecto (acero laminado, conformado en frío, madera y hormigón) que usan los tipos de pilar y viga: dimensiones, propiedades de la sección e importación desde los catálogos
 profiles-title = Administrador de perfiles

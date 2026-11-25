@@ -252,7 +252,7 @@ group-selection = Selezione
 group-history = Cronologia
 group-create-views = Crea
 group-documentation = Documentazione
-group-navigate = Naviga
+group-browser = Browser di progetto
 
 # Strumenti
 tool-select = Seleziona
@@ -1630,7 +1630,6 @@ fitting-missing-sizes = La serie non ha raccordi tra queste misure
 fitting-elbow = Gomito
 fitting-reducer = Riduzione
 fitting-tee = Raccordo a T
-group-analysis = Analisi
 group-electrical = Elettrico
 group-plumbing = Idrosanitario
 group-systems = Sistemi
@@ -3225,7 +3224,6 @@ door-op-right = A battente, cerniere a destra
 door-op-double = A battente, 2 ante
 
 # Profile Manager
-group-profiles = Sezioni
 cmd-profiles = Profili
 cmd-profiles-desc = I profili strutturali del progetto (acciaio laminato, formato a freddo, legno e calcestruzzo) usati dai tipi di pilastro e trave: dimensioni, caratteristiche della sezione e importazione dai cataloghi
 profiles-title = Gestione profili
