@@ -252,7 +252,7 @@ group-selection = Виділення
 group-history = Історія
 group-create-views = Створити
 group-documentation = Документація
-group-navigate = Навігація
+group-browser = Браузер проєкту
 
 # Інструменти
 tool-select = Вибрати
@@ -1631,7 +1631,6 @@ fitting-missing-sizes = Серія не має фітинга між цими р
 fitting-elbow = Коліно
 fitting-reducer = Перехідник
 fitting-tee = Трійник
-group-analysis = Аналіз
 group-electrical = Електрика
 group-plumbing = Водопровід і каналізація
 group-systems = Системи
@@ -3226,7 +3225,6 @@ door-op-right = Розпашні, завіси праворуч
 door-op-double = Розпашні, 2 стулки
 
 # Profile Manager
-group-profiles = Перерізи
 cmd-profiles = Профілі
 cmd-profiles-desc = Конструкційні профілі проєкту (гарячекатана сталь, гнуті профілі, деревина та бетон), які використовують типи колон і балок: розміри, характеристики перерізу та імпорт із каталогів
 profiles-title = Менеджер профілів

@@ -277,6 +277,98 @@ fn stack_columns<T>(ui: &mut Ui, items: &[T], mut each: impl FnMut(&mut Ui, &T))
     }
 }
 
+/// One family of related commands as medium buttons (icon and label on one
+/// line) in columns of two or three, like [`stacked`]; a column's buttons
+/// share its widest one's width. Returns the clicked command.
+fn stacked_labelled(ui: &mut Ui, state: &AppState, family: &[UiCommand]) -> Option<UiCommand> {
+    let mut clicked = None;
+    let rows = stack_rows(family.len());
+    let column_h = rows as f32 * STACK_BUTTON.y + (rows as f32 - 1.0) * 2.0;
+    for chunk in family.chunks(rows) {
+        ui.vertical(|ui| {
+            ui.add_space(((BUTTON_HEIGHT - column_h) / 2.0).max(0.0));
+            clicked = labelled_column(ui, state, chunk).or(clicked);
+        });
+    }
+    clicked
+}
+
+/// `commands` as medium buttons one under the other, all as wide as the
+/// widest. Returns the clicked command.
+fn labelled_column(ui: &mut Ui, state: &AppState, commands: &[UiCommand]) -> Option<UiCommand> {
+    let font = egui::FontId::proportional(12.0);
+    let labels: Vec<String> = commands.iter().map(|c| c.label(state)).collect();
+    let text_w = labels
+        .iter()
+        .map(|l| ui.painter().layout_no_wrap(l.clone(), font.clone(), PALETTE.text).size().x)
+        .fold(0.0, f32::max);
+    let width = MEDIUM_PAD + MEDIUM_ICON_SIZE + MEDIUM_GAP + text_w + MEDIUM_PAD;
+    ui.spacing_mut().item_spacing.y = 2.0;
+    let mut clicked = None;
+    for (command, label) in commands.iter().zip(labels) {
+        let why = command.unavailable(state);
+        let enabled = why.is_none();
+        let glyph = Glyph::Icon(command.icon(), command.badge());
+        let r = medium_button(ui, glyph, &label, width, enabled, command.selected(state));
+        if command_tooltip(r, state, *command, why).clicked() && enabled {
+            clicked = Some(*command);
+        }
+    }
+    clicked
+}
+
+/// A large button named `label` (with the first command's icon) that opens a
+/// menu of `commands` as medium buttons: for a family whose names are too
+/// long to show in the row. Unavailable ones are greyed, their reason on hover.
+fn menu_of(ui: &mut Ui, state: &mut AppState, label: &str, commands: &[UiCommand]) {
+    let Some(first) = commands.first() else { return };
+    let r = big_button(ui, Glyph::Icon(first.icon(), None), label, false, true, true);
+    let mut clicked = None;
+    egui::Popup::menu(&r).show(|ui| clicked = labelled_column(ui, state, commands));
+    if let Some(command) = clicked {
+        commands::run(state, &ui.ctx().clone(), command);
+    }
+}
+
+/// Icon size of a medium ribbon button.
+const MEDIUM_ICON_SIZE: f32 = 16.0;
+/// Room before the icon and after the label of a medium button.
+const MEDIUM_PAD: f32 = 4.0;
+/// Room between a medium button's icon and its label.
+const MEDIUM_GAP: f32 = 5.0;
+
+/// A medium ribbon button: a small icon with its label on one line, for the
+/// secondary commands of a group, whose icons do not explain themselves.
+fn medium_button(ui: &mut Ui, glyph: Glyph<'_>, label: &str, width: f32, enabled: bool, selected: bool) -> Response {
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, r) = ui.allocate_exact_size(vec2(width, STACK_BUTTON.y), sense);
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        let radius = theme::RADIUS as f32;
+        if selected {
+            painter.rect_filled(rect, radius, PALETTE.accent_soft);
+            let border = Stroke::new(1.0, PALETTE.accent.gamma_multiply(0.55));
+            painter.rect_stroke(rect, radius, border, StrokeKind::Inside);
+        } else if enabled && r.hovered() {
+            let fill = if r.is_pointer_button_down_on() { PALETTE.pressed } else { PALETTE.hover };
+            painter.rect_filled(rect, radius, fill);
+        }
+        let color = match (enabled, selected) {
+            (false, _) => PALETTE.text_faint,
+            (true, true) => PALETTE.accent_text,
+            (true, false) => PALETTE.text,
+        };
+        let icon_center = egui::pos2(rect.left() + MEDIUM_PAD + MEDIUM_ICON_SIZE / 2.0, rect.center().y);
+        let icon_rect = egui::Rect::from_center_size(icon_center, vec2(MEDIUM_ICON_SIZE, MEDIUM_ICON_SIZE));
+        let tones = Tones { ink: color, ..Tones::of(theme::palette(ui.ctx()), glyph.badge(), enabled, selected) };
+        glyph.paint(painter, icon_rect, tones);
+        let text_pos = egui::pos2(icon_rect.right() + MEDIUM_GAP, rect.center().y);
+        painter.text(text_pos, egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(12.0), color);
+    }
+    r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, selected, label));
+    if enabled { r.on_hover_cursor(egui::CursorIcon::PointingHand) } else { r }
+}
+
 /// Size of a small stacked ribbon button.
 const STACK_BUTTON: egui::Vec2 = vec2(28.0, (BUTTON_HEIGHT - 4.0) / 3.0);
 
@@ -500,10 +592,9 @@ pub fn ribbon(ui: &mut Ui, state: &mut AppState) {
         (RibbonTab::Structure, t!("ribbon-structure")),
         (RibbonTab::Mep, t!("ribbon-mep")),
         (RibbonTab::MassingSite, t!("ribbon-massing-site")),
-        (RibbonTab::Insert, t!("ribbon-insert")),
-        (RibbonTab::Modify, t!("ribbon-modify")),
         (RibbonTab::Annotate, t!("ribbon-annotate")),
         (RibbonTab::View, t!("ribbon-view")),
+        (RibbonTab::Insert, t!("ribbon-insert")),
         (RibbonTab::Manage, t!("ribbon-manage")),
     ];
     // The Plugins tab, while a loaded plugin has buttons.
@@ -514,6 +605,8 @@ pub fn ribbon(ui: &mut Ui, state: &mut AppState) {
     } else {
         tabs.push((RibbonTab::Plugins, t!("ribbon-plugins")));
     }
+    // Modify last: the selection's edits, where the ribbon goes when something is selected.
+    tabs.push((RibbonTab::Modify, t!("ribbon-modify")));
     let text_widths: Vec<f32> = tabs
         .iter()
         .map(|(_, label)| ui.painter().layout_no_wrap(label.clone(), tab_font(true), PALETTE.text).size().x)
@@ -699,21 +792,21 @@ fn file_tab(ui: &mut Ui, state: &mut AppState) {
     group(ui, t!("group-help"), |ui| command_buttons(ui, state, &[UiCommand::About, UiCommand::CheckUpdates]));
 }
 
-/// Files brought into the project or written from it, and components to load.
+/// Files brought into the project, and the reusable types (components,
+/// detail components, title blocks) loaded or made. Exports live in File.
 fn insert_tab(ui: &mut Ui, state: &mut AppState) {
     use UiCommand::{
-        ComponentLibrary, ExportDxf, ExportGltf, ExportIfc, ImportCad, ImportGltf, ImportIfc, ImportImage, ImportObj,
-        ImportSkp, LoadComponent,
+        ComponentLibrary, CreateDetailComponent, EditComponent, ImportCad, ImportGltf, ImportIfc, ImportImage,
+        ImportObj, ImportSkp, LoadComponent, NewComponent, NewTitleBlock,
     };
     group(ui, t!("group-import"), |ui| {
         command_buttons(ui, state, &[ImportIfc, ImportCad, ImportSkp, ImportObj, ImportGltf, ImportImage]);
         plugin_file_entries(ui, state, false);
     });
-    group(ui, t!("group-export"), |ui| {
-        command_buttons(ui, state, &[ExportIfc, ExportGltf, ExportDxf]);
-        plugin_file_entries(ui, state, true);
+    group(ui, t!("group-library"), |ui| {
+        command_buttons(ui, state, &[LoadComponent, ComponentLibrary]);
+        labelled(ui, state, &[&[NewComponent, EditComponent], &[CreateDetailComponent, NewTitleBlock]]);
     });
-    group(ui, t!("group-library"), |ui| command_buttons(ui, state, &[LoadComponent, ComponentLibrary]));
 }
 
 fn place(category: Category) -> UiCommand {
@@ -730,39 +823,55 @@ fn architecture_tab(ui: &mut Ui, state: &mut AppState) {
     group(ui, t!("group-horizontal"), |ui| command_buttons(ui, state, &buttons(&[Floor, Ceiling, Roof, Shaft])));
     group(ui, t!("group-circulation"), |ui| command_buttons(ui, state, &buttons(&[Stair, Ramp, Railing])));
     group(ui, t!("group-room"), |ui| command_button(ui, state, place(Room)));
-    group(ui, t!("group-model"), |ui| {
-        command_button(ui, state, place(Sweep));
-        // Components, next to making, editing and loading them (one column of small buttons).
-        command_button(ui, state, place(Component));
-        stacks(ui, state, &[&[UiCommand::NewComponent, UiCommand::EditComponent, UiCommand::LoadComponent]]);
-        command_button(ui, state, UiCommand::ComponentLibrary);
-    });
+    // Making, editing and loading components live in Insert.
+    group(ui, t!("group-model"), |ui| command_buttons(ui, state, &buttons(&[Component, Sweep])));
     group(ui, t!("group-datum"), |ui| command_buttons(ui, state, &[place(Grid), UiCommand::AlignGridEnds]));
-    group(ui, t!("group-selection"), |ui| command_button(ui, state, UiCommand::Select));
 }
 
 /// Conceptual masses (and the buildings made from them) and the terrain.
 fn massing_site_tab(ui: &mut Ui, state: &mut AppState) {
     group(ui, t!("group-massing"), |ui| {
         command_buttons(ui, state, &[place(Category::Mass), UiCommand::PushPull]);
-        stacks(ui, state, &[&[UiCommand::MassWalls, UiCommand::MassSlabs, UiCommand::MassRoof]]);
+        labelled(ui, state, &[&[UiCommand::MassWalls, UiCommand::MassSlabs, UiCommand::MassRoof]]);
     });
-    group(ui, t!("group-site"), |ui| command_buttons(ui, state, &[place(Category::Topography), place(Category::Pad)]));
+    group(ui, t!("group-site"), |ui| {
+        command_buttons(ui, state, &[place(Category::Topography), place(Category::Pad), UiCommand::SiteLocation]);
+    });
 }
 
-/// The Structure tab's material: three stacked toggles.
+/// The Structure tab's material: a segmented control, three options in one
+/// framed box with the one picked filled, which sets the tab's groups.
 fn material_selector(ui: &mut Ui, state: &mut AppState) {
-    ui.vertical(|ui| {
-        for m in cc_core::StructuralMaterial::ALL {
-            let on = state.prefs.structure_material == m;
-            let label = crate::i18n::tr(m.key());
-            let response = ui.selectable_label(on, label.clone());
-            response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, on, label.clone()));
-            if response.clicked() {
-                state.prefs.structure_material = m;
-            }
+    let font = egui::FontId::proportional(12.0);
+    let labels: Vec<_> = cc_core::StructuralMaterial::ALL.iter().map(|m| (*m, crate::i18n::tr(m.key()))).collect();
+    let text_w = labels
+        .iter()
+        .map(|(_, l)| ui.painter().layout_no_wrap(l.clone(), font.clone(), PALETTE.text).size().x)
+        .fold(0.0, f32::max);
+    let segment = vec2(text_w + 24.0, STACK_BUTTON.y);
+    let (frame, _) = ui.allocate_exact_size(vec2(segment.x, BUTTON_HEIGHT), Sense::hover());
+    let box_rect = egui::Rect::from_center_size(frame.center(), vec2(segment.x, segment.y * labels.len() as f32));
+    let radius = theme::RADIUS as f32;
+    ui.painter().rect_filled(box_rect, radius, PALETTE.surface);
+    for (k, (m, label)) in labels.into_iter().enumerate() {
+        let rect = egui::Rect::from_min_size(box_rect.min + vec2(0.0, k as f32 * segment.y), segment);
+        let response = ui.interact(rect, ui.id().with(("structure-material", k)), Sense::click());
+        let on = state.prefs.structure_material == m;
+        let painter = ui.painter();
+        if on {
+            painter.rect_filled(rect.shrink(1.0), radius, PALETTE.accent_soft);
+        } else if response.hovered() {
+            painter.rect_filled(rect.shrink(1.0), radius, PALETTE.hover);
         }
-    });
+        let color = if on { PALETTE.accent_text } else { PALETTE.text };
+        let galley = painter.layout_no_wrap(label.clone(), font.clone(), color);
+        painter.galley(rect.center() - galley.size() / 2.0, galley, color);
+        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, on, label.clone()));
+        if response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            state.prefs.structure_material = m;
+        }
+    }
+    ui.painter().rect_stroke(box_rect, radius, Stroke::new(1.0, PALETTE.border), StrokeKind::Inside);
 }
 
 fn structure_tab(ui: &mut Ui, state: &mut AppState) {
@@ -778,13 +887,13 @@ fn structure_tab(ui: &mut Ui, state: &mut AppState) {
                 command_buttons(ui, state, &[column, beam, place(Category::Floor)]);
             });
             group(ui, t!("group-reinforcement"), |ui| {
-                stacks(ui, state, &[&[TypicalRebar, PileCapRebar, PileRebar], &[RebarView, SteelSchedule]]);
+                labelled(ui, state, &[&[TypicalRebar, PileCapRebar, PileRebar], &[RebarView, SteelSchedule]]);
             });
         }
         M::Steel => {
             group(ui, t!("group-structure"), |ui| command_buttons(ui, state, &[column, beam, Bracing]));
             group(ui, t!("group-framing"), |ui| {
-                stacks(
+                labelled(
                     ui,
                     state,
                     &[&[ColumnsAtGrids, BeamsOnGrids, BeamsBetweenColumns], &[GridFrame, Truss, SteelBuilding]],
@@ -792,63 +901,56 @@ fn structure_tab(ui: &mut Ui, state: &mut AppState) {
                 command_button(ui, state, LightSteelFrame);
             });
             group(ui, t!("group-connections"), |ui| {
-                stacks(ui, state, &[&[Connection(K::BasePlate), Connection(K::EndPlate), Connection(K::FinPlate)]])
+                labelled(ui, state, &[&[Connection(K::BasePlate), Connection(K::EndPlate), Connection(K::FinPlate)]])
             });
         }
         M::Timber => {
             group(ui, t!("group-structure"), |ui| command_buttons(ui, state, &[column, beam, Bracing]));
             group(ui, t!("group-framing"), |ui| {
-                stacks(ui, state, &[&[ColumnsAtGrids, BeamsOnGrids, BeamsBetweenColumns], &[GridFrame, Truss]]);
+                labelled(ui, state, &[&[ColumnsAtGrids, BeamsOnGrids, BeamsBetweenColumns], &[GridFrame, Truss]]);
                 command_button(ui, state, WoodFrame);
             });
             group(ui, t!("group-connections"), |ui| {
-                stacks(ui, state, &[&[Connection(K::TimberBolts), Connection(K::Hanger)]])
+                labelled(ui, state, &[&[Connection(K::TimberBolts), Connection(K::Hanger)]])
             });
         }
     }
-    group(ui, t!("group-profiles"), |ui| command_button(ui, state, Profiles));
+    // Profiles live in Manage, grids in Architecture.
     group(ui, t!("group-foundation"), |ui| {
         command_button(ui, state, place(Category::Foundation));
-        stacks(ui, state, &[&[FootingsUnderColumns, StripFootingsUnderWalls, FoundationSlab]]);
+        labelled(ui, state, &[&[FootingsUnderColumns, StripFootingsUnderWalls, FoundationSlab]]);
     });
     group(ui, t!("group-analytical"), |ui| {
-        stacks(ui, state, &[&[SlabJoinSupports, AnalyticalView, AnalyticalExport]]);
+        labelled(ui, state, &[&[SlabJoinSupports, AnalyticalView, AnalyticalExport]]);
     });
     group(ui, t!("group-documentation"), |ui| {
-        stacks(ui, state, &[&[StructuralPlan, NumberStructure, StructuralSchedules]]);
+        labelled(ui, state, &[&[StructuralPlan, NumberStructure, StructuralSchedules]]);
     });
-    group(ui, t!("group-datum"), |ui| command_buttons(ui, state, &[place(Category::Grid), AlignGridEnds]));
-    group(ui, t!("group-selection"), |ui| command_button(ui, state, Select));
 }
 
 fn mep_tab(ui: &mut Ui, state: &mut AppState) {
     use UiCommand::*;
     group(ui, t!("group-plumbing"), |ui| {
-        command_buttons(ui, state, &[place(Category::Pipe), place(Category::Valve), PlaceFixture, PipeCatalog]);
+        // The pipe catalog lives in Manage (and in the pipe tool's type list).
+        command_buttons(ui, state, &[place(Category::Pipe), place(Category::Valve), PlaceFixture]);
     });
     group(ui, t!("group-electrical"), |ui| {
         command_buttons(ui, state, &[place(Category::Conduit), place(Category::CableTray), PlaceDevice]);
     });
     group(ui, t!("group-communications"), |ui| {
         use cc_core::DeviceKind as D;
-        command_buttons(ui, state, &[PlaceDeviceOf(D::Rack), PlaceDeviceOf(D::DataOutlet)]);
-        stacks(ui, state, &[&[Cabling]]);
+        command_buttons(ui, state, &[PlaceDeviceOf(D::Rack), PlaceDeviceOf(D::DataOutlet), Cabling]);
     });
     group(ui, t!("group-lightning"), |ui| {
         use cc_core::DeviceKind as D;
         command_buttons(ui, state, &[place(Category::LightningConductor), PlaceDeviceOf(D::AirTerminal)]);
-        stacks(ui, state, &[&[PlaceDeviceOf(D::EarthElectrode), EarthRing, LpsCheck]]);
+        labelled(ui, state, &[&[PlaceDeviceOf(D::EarthElectrode), EarthRing, LpsCheck]]);
     });
-    group(ui, t!("group-systems"), |ui| command_buttons(ui, state, &[MepConnect, Systems]));
-    group(ui, t!("group-analysis"), |ui| command_button(ui, state, MepSizing));
-    group(ui, t!("group-documentation"), |ui| {
-        stacks(
-            ui,
-            state,
-            &[&[PlumbingPlan, ElectricalPlan, MepSchedules], &[CommunicationsPlan, LightningPlan, PanelDiagram]],
-        );
-    });
-    group(ui, t!("group-selection"), |ui| command_button(ui, state, Select));
+    group(ui, t!("group-systems"), |ui| command_buttons(ui, state, &[MepConnect, Systems, MepSizing]));
+    // The discipline plans, schedules and panel diagram: names too long for the row, so a menu.
+    let documentation = [PlumbingPlan, ElectricalPlan, CommunicationsPlan, LightningPlan, MepSchedules, PanelDiagram];
+    let label = t!("group-documentation");
+    group(ui, label.clone(), |ui| menu_of(ui, state, &label, &documentation));
 }
 
 pub fn dimension_icon(mode: DimensionMode) -> Icon {
@@ -873,9 +975,8 @@ fn annotate_tab(ui: &mut Ui, state: &mut AppState) {
             &[UiCommand::DetailLine, UiCommand::FilledRegion, UiCommand::MaskingRegion, UiCommand::LineStyles],
         )
     });
-    group(ui, t!("group-detail-components"), |ui| {
-        command_buttons(ui, state, &[UiCommand::DetailComponent, UiCommand::CreateDetailComponent])
-    });
+    // Making a detail component lives in Insert, with the other reusable types.
+    group(ui, t!("group-detail-components"), |ui| command_button(ui, state, UiCommand::DetailComponent));
     group(ui, t!("group-text"), |ui| command_buttons(ui, state, &[UiCommand::Text, UiCommand::AddLeader]));
     group(ui, t!("group-level-marks"), |ui| {
         command_buttons(ui, state, &[UiCommand::LevelMarkPlan, UiCommand::LevelMarkSection]);
@@ -883,7 +984,6 @@ fn annotate_tab(ui: &mut Ui, state: &mut AppState) {
     group(ui, t!("group-tags"), |ui| {
         command_buttons(ui, state, &[UiCommand::StructureTags, UiCommand::TagTypes]);
     });
-    group(ui, t!("group-selection"), |ui| command_button(ui, state, UiCommand::Select));
 }
 
 /// The text note selected alone, if any.
@@ -901,6 +1001,16 @@ pub fn env_stacks(ui: &mut Ui, state: &mut AppState, caption: String, families: 
 fn stacks(ui: &mut Ui, state: &mut AppState, families: &[&[UiCommand]]) {
     for family in families {
         if let Some(command) = stacked(ui, state, family) {
+            commands::run(state, &ui.ctx().clone(), command);
+        }
+    }
+}
+
+/// Families of medium buttons (icon and label), each starting its own
+/// column: for secondary commands whose icons need their names.
+fn labelled(ui: &mut Ui, state: &mut AppState, families: &[&[UiCommand]]) {
+    for family in families {
+        if let Some(command) = stacked_labelled(ui, state, family) {
             commands::run(state, &ui.ctx().clone(), command);
         }
     }
@@ -947,7 +1057,8 @@ fn clipboard_group(ui: &mut Ui, state: &mut AppState) {
             crate::clipboard::paste_aligned(state, true);
         }
     });
-    stacks(ui, state, &[&[UiCommand::Cut, UiCommand::ClipboardCopy, UiCommand::MatchType, UiCommand::CreateSimilar]]);
+    stacks(ui, state, &[&[UiCommand::Cut, UiCommand::ClipboardCopy]]);
+    labelled(ui, state, &[&[UiCommand::MatchType, UiCommand::CreateSimilar]]);
 }
 
 fn view_tab(ui: &mut Ui, state: &mut AppState) {
@@ -976,7 +1087,7 @@ fn view_tab(ui: &mut Ui, state: &mut AppState) {
         });
     });
     group(ui, t!("group-documentation"), |ui| {
-        command_buttons(ui, state, &[UiCommand::Legend, UiCommand::DraftingView, UiCommand::BrowserOrganization]);
+        command_buttons(ui, state, &[UiCommand::Legend, UiCommand::DraftingView]);
         let r = command_menu(ui, state, UiCommand::Schedule);
         egui::Popup::menu(&r).show(|ui| {
             for c in Category::SCHEDULABLE {
@@ -986,7 +1097,6 @@ fn view_tab(ui: &mut Ui, state: &mut AppState) {
             }
         });
         command_button(ui, state, UiCommand::Sheet);
-        command_button(ui, state, UiCommand::NewTitleBlock);
     });
     group(ui, t!("group-graphics"), |ui| {
         command_buttons(
@@ -1001,32 +1111,33 @@ fn view_tab(ui: &mut Ui, state: &mut AppState) {
             ],
         );
     });
-    group(ui, t!("group-temporary"), |ui| {
+    // Hiding and isolating: eight commands with long names, so a menu.
+    let label = t!("group-temporary");
+    group(ui, label.clone(), |ui| {
         use UiCommand::*;
-        stacks(
-            ui,
-            state,
-            &[
-                &[TempHide, TempIsolate, TempReset],
-                &[TempHideCategory, TempIsolateCategory, TempPermanent],
-                &[HideInView, OverrideGraphics],
-            ],
-        );
+        let commands = [
+            TempHide,
+            TempIsolate,
+            TempHideCategory,
+            TempIsolateCategory,
+            TempReset,
+            TempPermanent,
+            HideInView,
+            OverrideGraphics,
+        ];
+        menu_of(ui, state, &label, &commands);
     });
-    group(ui, t!("group-navigate"), |ui| command_button(ui, state, UiCommand::ZoomFit));
+    // Zoom to Fit is in each view's bar (and ZE).
     group(ui, t!("group-windows"), |ui| command_button(ui, state, UiCommand::CloseInactiveViews));
 }
 
 fn manage_tab(ui: &mut Ui, state: &mut AppState) {
     use UiCommand::*;
     group(ui, t!("group-project"), |ui| {
-        command_buttons(
-            ui,
-            state,
-            &[ProjectInfo, SiteLocation, Units, Levels, Materials, FillPatterns, Profiles, PipeCatalog],
-        )
+        command_buttons(ui, state, &[ProjectInfo, Units, Levels, Materials, FillPatterns, Profiles, PipeCatalog])
     });
-    group(ui, t!("group-graphics"), |ui| command_buttons(ui, state, &[ViewTemplates, ViewFilters]));
+    // View templates and filters live in View, the site's location in Massing & Site.
+    group(ui, t!("group-browser"), |ui| command_button(ui, state, BrowserOrganization));
     group(ui, t!("group-phasing"), |ui| command_button(ui, state, Phases));
     group(ui, t!("group-design-options"), |ui| {
         command_button(ui, state, DesignOptions);

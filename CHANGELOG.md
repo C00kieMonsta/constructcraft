@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- The ribbon is reorganized so that each command has one place in the tabs (first phase of the interface reorganization, see `docs/superpowers/specs/2026-11-25-ui-reorganization-design.md`). Exports live only in *File*; *Insert* imports files and loads or makes components, detail components and title blocks; *Manage* holds the project's definitions (profiles, the pipe catalog, browser organization) and no longer repeats view templates and filters; *Site Location* moved to *Massing & Site*; *Select* is only in *Modify*, now the last tab; grids live in *Architecture*. Secondary commands show their names beside their icons (medium buttons) instead of icons alone, *View → Hide/Isolate* and *MEP → Documentation* open as menus, Structure's material is a segmented control, property labels too long for their column end in an ellipsis, and the properties panel no longer ends with a Delete button (Delete, *Modify* and the palette remain).
 - The interface uses the IBM Plex Sans and IBM Plex Mono typefaces (SIL Open Font License 1.1) in place of Inter; drawings and exported images keep Inter.
 
 ### Fixed
