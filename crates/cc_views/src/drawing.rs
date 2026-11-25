@@ -217,6 +217,12 @@ pub struct Drawing2D {
     /// Elements drawn as background (imported CAD drawings): picked only
     /// where nothing else is.
     pub background: std::collections::BTreeSet<ElementId>,
+    /// Datum elements (grids, levels): their lines are picked after any
+    /// model line within reach, however near (see [`Self::hits_at`]).
+    pub datum: std::collections::BTreeSet<ElementId>,
+    /// Elements whose outline often lies on another's (floors, ceilings,
+    /// roofs, foundations, terrain, pads): among lines as near, picked last.
+    pub yielding: std::collections::BTreeSet<ElementId>,
     /// Tags that can be dragged: where each is and how far it was moved.
     pub tags: Vec<TagHandle>,
     /// Labels of fittings in services plans that can be dragged, by key
@@ -637,7 +643,9 @@ impl Drawing2D {
     }
 
     /// Every element under `p` within `tol`, in pick order and without
-    /// repeats: the lines by distance (the nearest first), then the fills and
+    /// repeats: the lines of the model before those of [`Self::datum`]
+    /// elements, each by distance (the nearest first; among lines within a
+    /// quarter of `tol` of each other, [`Self::yielding`] ones last), then the fills and
     /// pictures topmost first, then background elements (imported drawings)
     /// the same way. The first is what [`Self::hit_test`] picks; Tab steps
     /// through the others. At most [`MAX_HITS`].
@@ -790,8 +798,15 @@ impl Drawing2D {
                 }
             }
         }
+        // Model lines before datum ones; then by distance in steps of a quarter of
+        // `tol`, an outline lying on another's (a floor's under a wall's) after it.
         // A stable sort: among lines as near, the first drawn comes first.
-        lines.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let step = (tol * 0.25).max(f64::EPSILON);
+        let key = |(d, id): &(f64, ElementId)| {
+            let near = if d.is_finite() { (d / step).floor() as i64 } else { i64::MAX };
+            (self.datum.contains(id), near, self.yielding.contains(id))
+        };
+        lines.sort_by(|a, b| key(a).cmp(&key(b)).then(a.0.total_cmp(&b.0)));
         for (_, id) in lines {
             if add(id, out) {
                 return;
@@ -990,6 +1005,30 @@ mod tests {
     }
 
     /// The list is bounded.
+    /// A wall's face on a grid line and on a floor's edge: the wall is
+    /// picked first even nearer the grid, and before the floor where their
+    /// lines meet; the grid is still picked where no model line is near.
+    #[test]
+    fn model_lines_come_before_datum_and_outlines_yield() {
+        let (wall, grid, floor) = (ElementId(1), ElementId(2), ElementId(3));
+        let mut d = Drawing2D::default();
+        // The floor's edge is drawn first, on the wall's face.
+        d.line(v(0.0, 0.0), v(10.0, 0.0), LineStyle::Thin, Some(floor));
+        d.line(v(0.0, 0.0), v(10.0, 0.0), LineStyle::Cut, Some(wall));
+        d.line(v(0.0, 0.1), v(10.0, 0.1), LineStyle::Thin, Some(grid));
+        d.datum.insert(grid);
+        d.yielding.insert(floor);
+        let tol = 0.25;
+        assert_eq!(d.hits_at(v(5.0, 0.09), tol), vec![wall, floor, grid], "on the grid, near the wall");
+        assert_eq!(d.hits_at_all(v(5.0, 0.0), tol), vec![wall, floor, grid]);
+        assert_eq!(d.hit_test(v(5.0, 0.3), tol), Some(grid), "only the grid within reach");
+        // Without the ranks, the nearest line and the first drawn win as before.
+        d.datum.clear();
+        d.yielding.clear();
+        assert_eq!(d.hit_test(v(5.0, 0.09), tol), Some(grid));
+        assert_eq!(d.hit_test(v(5.0, 0.0), tol), Some(floor));
+    }
+
     #[test]
     fn hits_are_bounded() {
         let mut d = Drawing2D::default();

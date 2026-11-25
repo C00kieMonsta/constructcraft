@@ -84,7 +84,7 @@ struct Entry {
 }
 
 /// Lowercase without accents, so "niveis" finds "Níveis".
-fn fold(text: &str) -> String {
+pub(crate) fn fold(text: &str) -> String {
     text.chars()
         .flat_map(char::to_lowercase)
         .map(|c| match c {

@@ -126,6 +126,14 @@ Cancel, Repeat last, Zoom to Fit, View Properties, Visibility/Graphics.
 Engine commands do not change in any phase; only where the interface shows
 them. Scripts, MCP and `ccad` are unaffected.
 
+## Status
+
+- Phase 1: PR #511.
+- Phase 2: PR #512.
+- Phase 4: branch `feat/ui-reorg-phase-4` (pick order, Tab hint, selection filter, property search). The pre-highlight uses the full highlight color; a thicker outline would need a stroke width in `PaintOptions`.
+- Phase 3: PR #513, branch `feat/ui-reorg-phase-3` (File page, customizable quick access toolbar, compaction, launchers).
+- Phase 2 notes: Not done: *Repeat last* and *Cancel* in the context menu (the app keeps no last command), and a preference to turn off the automatic switch to Modify (that switch predates this work).
+
 ## Measuring
 
 Five CAD/BIM users before and after each phase, timing these tasks and

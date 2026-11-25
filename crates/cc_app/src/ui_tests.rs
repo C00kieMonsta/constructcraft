@@ -129,7 +129,7 @@ fn ribbon_snapshots() {
     // The rich tooltip of an unavailable command.
     let mut state = sample_state();
     state.ribbon_tab = RibbonTab::Modify;
-    let mut harness = ribbon_harness_sized(state, egui::vec2(900.0, 300.0));
+    let mut harness = ribbon_harness_sized(state, egui::vec2(1600.0, 300.0));
     harness.get_by_label(&t!("tool-move")).hover();
     harness.run();
     results.add(harness.try_snapshot("ribbon_tooltip"));
@@ -210,7 +210,10 @@ fn narrow_ribbon_scrolls() {
 /// tab's panel over the views, and running a command closes it.
 #[test]
 fn ribbon_collapses_and_peeks() {
-    let mut harness = ribbon_harness_sized(sample_state(), egui::vec2(1100.0, 220.0));
+    let mut state = sample_state();
+    // Text is in the default quick access toolbar; without it the button shows only in the panel.
+    state.prefs.quick_access = Some(Vec::new());
+    let mut harness = ribbon_harness_sized(state, egui::vec2(1100.0, 220.0));
     let tab = t!("ribbon-annotate");
     harness.get_by_label(&tab).click();
     harness.run();
@@ -316,9 +319,11 @@ fn ribbon_buttons_are_accessible() {
         let mut state = sample_state();
         state.ribbon_tab = tab;
         state.prefs.structure_material = material;
-        let mut harness = ribbon_harness(state, 1600.0);
-        // Families too long for the row open as menus: open each one.
-        let menus = [t!("group-temporary"), t!("group-documentation")];
+        // File is a page over the window: it needs the window's height.
+        let height = if tab == RibbonTab::File { 800.0 } else { 150.0 };
+        let mut harness = ribbon_harness_sized(state, egui::vec2(1600.0, height));
+        // Families too long for the row open as menus, and File's exports are a page: open each one.
+        let menus = [t!("group-temporary"), t!("group-documentation"), t!("group-export")];
         let mut open = vec![None];
         open.extend(menus.iter().map(Some));
         for menu in open {
@@ -332,6 +337,37 @@ fn ribbon_buttons_are_accessible() {
                 assert!(!label.trim().is_empty(), "{tab:?}: a button without a name");
                 found.insert(label);
             }
+        }
+    }
+    // Modify shows the commands of the selected category (and of the active sheet).
+    let mut state = sample_state();
+    let plan = state.project().views_of(cc_core::ViewCategory::FloorPlan).next().map(|v| v.id).unwrap();
+    let sweep = serde_json::json!({"path": [[0.0, 0.0], [3.0, 0.0]]});
+    let sweep = state.session.execute("sweep_create", sweep).unwrap()["id"].as_u64().unwrap();
+    let text = serde_json::json!({"view": plan.0, "position": [1.0, 1.0], "text": "A"});
+    let text = state.session.execute("text_create", text).unwrap()["id"].as_u64().unwrap();
+    let project = state.project();
+    let first = |c: cc_core::Category| project.elements_of(c).next().map(|e| e.id).unwrap();
+    let mut picks: Vec<Vec<cc_core::ElementId>> =
+        [cc_core::Category::Wall, cc_core::Category::Roof, cc_core::Category::Floor, cc_core::Category::Grid]
+            .map(|c| vec![first(c)])
+            .to_vec();
+    picks.push(vec![first(cc_core::Category::Component)]);
+    picks.push(vec![cc_core::ElementId(sweep), cc_core::ElementId(text)]);
+    let sheet = project.sheets_in_order()[0];
+    for pick in picks {
+        let mut state = sample_state();
+        state.session.execute("sweep_create", serde_json::json!({"path": [[0.0, 0.0], [3.0, 0.0]]})).unwrap();
+        state
+            .session
+            .execute("text_create", serde_json::json!({"view": plan.0, "position": [1.0, 1.0], "text": "A"}))
+            .unwrap();
+        state.selection = pick.into_iter().collect();
+        state.ribbon_tab = RibbonTab::Modify;
+        state.active_view = Some(sheet);
+        let harness = ribbon_harness(state, 2400.0);
+        for node in harness.query_all_by_role(Role::Button) {
+            found.insert(node.accesskit_node().label().unwrap_or_default());
         }
     }
     // The component environment shows its own ribbon.
@@ -7150,9 +7186,12 @@ fn tab_cycles_the_preselection_on_the_canvas() {
     let hint = |h: &Harness<'static, AppState>| h.state().hint.shown().map(str::to_string);
     let index = |h: &Harness<'static, AppState>| h.state().interaction.tab.cycle.map(|c| c.index);
 
-    // Over the wall: it is pre-selected, and the canvas takes Tab next frame.
+    // Over the wall: it is pre-selected, the status bar says Tab steps through
+    // what else is there, and the canvas takes Tab next frame.
     point(&mut harness, center);
-    assert_eq!(hint(&harness), Some(wall_text.clone()));
+    // Five candidates are under the pointer: the wall, its chain and what lies there.
+    let tab_hint = t!("status-preselect-tab", "label" => wall_text.clone(), "count" => 5);
+    assert_eq!(hint(&harness), Some(tab_hint.clone()));
     assert!(harness.state().interaction.tab.armed.is_some());
     assert_eq!(index(&harness), None);
     // Tab: the chain, counted among the candidates.
@@ -7177,7 +7216,7 @@ fn tab_cycles_the_preselection_on_the_canvas() {
     assert_eq!(index(&harness), None);
     // Back over the wall: the wall again, with no count.
     point(&mut harness, center);
-    assert_eq!((index(&harness), hint(&harness)), (None, Some(wall_text.clone())));
+    assert_eq!((index(&harness), hint(&harness)), (None, Some(tab_hint.clone())));
     // A click on the chain selects all its walls and ends the cycle.
     tab(&mut harness, 1);
     click(&mut harness, center);
@@ -7900,7 +7939,9 @@ fn plugin_exporters_and_importers_join_the_ribbon() {
     state.ribbon_tab = RibbonTab::File;
     let mut harness = wide_ribbon_harness(state);
     harness.run();
-    assert!(harness.query_by_role_and_label(Role::Button, "EnergyPlus (.idf)").is_some(), "File tab, Export");
+    harness.get_by_role_and_label(Role::Button, &t!("group-export")).click();
+    harness.run();
+    assert!(harness.query_by_role_and_label(Role::Button, "EnergyPlus (.idf)").is_some(), "File, Export page");
     assert!(harness.query_by_role_and_label(Role::Button, "Weather (.epw)").is_none(), "no Import group there");
     harness.state_mut().ribbon_tab = RibbonTab::Insert;
     harness.run();
@@ -8382,6 +8423,261 @@ fn plugin_catalog_tab_shows_categories_colors_and_details() {
     assert_eq!(harness.query_all_by_label("OMAR").count(), 2, "item card and details title shown");
     assert!(harness.query_by_label("000.697.68").is_some(), "article number shown");
     assert!(harness.query_by_role_and_label(Role::Button, &t!("lib-open-website")).is_some(), "Open Website shown");
+}
+
+/// With a wall selected the Modify tab is titled "Modify | Walls" and shows
+/// the wall commands; a grid shows its own and none of the wall's; nothing
+/// selected shows neither.
+#[test]
+fn modify_shows_the_selected_category_commands() {
+    let mut state = sample_state();
+    let wall = state.project().walls().next().map(|(e, _)| e.id).unwrap();
+    let grid = state.project().elements_of(cc_core::Category::Grid).next().map(|e| e.id).unwrap();
+    state.ribbon_tab = RibbonTab::Modify;
+    state.selection.insert(wall);
+    let harness = ribbon_harness(state, 2400.0);
+    let walls = crate::actions::t_category(cc_core::Category::Wall);
+    let title = format!("{} | {walls}", t!("ribbon-modify"));
+    assert!(harness.query_by_label(&title).is_some(), "the tab names the category");
+    for key in ["tool-flip-walls", "tool-attach-top", "edit-wall-profile"] {
+        assert!(harness.query_by_role_and_label(Role::Button, &crate::i18n::tr(key)).is_some(), "{key} with a wall");
+    }
+    assert!(harness.query_by_role_and_label(Role::Button, &t!("action-align-grid-ends")).is_none());
+
+    let mut state = sample_state();
+    state.ribbon_tab = RibbonTab::Modify;
+    state.selection.insert(grid);
+    let harness = ribbon_harness(state, 2400.0);
+    assert!(harness.query_by_role_and_label(Role::Button, &t!("action-align-grid-ends")).is_some());
+    assert!(harness.query_by_role_and_label(Role::Button, &t!("tool-attach-top")).is_none(), "no wall commands");
+
+    let mut state = sample_state();
+    state.ribbon_tab = RibbonTab::Modify;
+    state.selection.extend([wall, grid]);
+    let harness = ribbon_harness(state, 2400.0);
+    let title = format!("{} | {}", t!("ribbon-modify"), t!("ribbon-modify-several"));
+    assert!(harness.query_by_label(&title).is_some(), "several categories");
+    assert!(harness.query_by_role_and_label(Role::Button, &t!("tool-flip-walls")).is_some());
+    assert!(harness.query_by_role_and_label(Role::Button, &t!("action-align-grid-ends")).is_some());
+
+    let mut state = sample_state();
+    state.ribbon_tab = RibbonTab::Modify;
+    let harness = ribbon_harness(state, 2400.0);
+    assert!(harness.query_by_role_and_label(Role::Button, &t!("ribbon-modify")).is_some());
+    assert!(harness.query_by_role_and_label(Role::Button, &t!("tool-flip-walls")).is_none());
+}
+
+/// A right click on a wall in a plan selects it and opens its menu, which
+/// holds the wall's commands; picking Flip flips it as one undo step.
+#[test]
+fn right_click_opens_the_selection_menu() {
+    static ORIGIN: std::sync::OnceLock<glam::DVec2> = std::sync::OnceLock::new();
+    let mut state = sample_state();
+    // A point on a wall where a click takes the wall (no grid, opening or tag there).
+    let walls: Vec<_> = state.project().walls().map(|(e, w)| (e.id, e.level, w.start, w.end)).collect();
+    let (wall, plan, mid) = walls
+        .into_iter()
+        .flat_map(|(wall, level, a, b)| {
+            let across = (b - a).perp().normalize_or_zero();
+            (1..10).flat_map(move |k| [-0.1, 0.1].map(|off| (wall, level, a.lerp(b, k as f64 / 10.0) + across * off)))
+        })
+        .find_map(|(wall, level, at)| {
+            let p = state.project();
+            let plan = p.views.values().find(|v| v.is_plan() && v.level() == Some(level))?.id;
+            let drawing = state.drawing(plan)?;
+            let first = drawing.hits_at(at, 5.0 / 20.0).first().copied();
+            let tagged = drawing.tags.iter().any(|t| t.center.distance(at) < 2.0);
+            (first == Some(wall) && !tagged).then_some((wall, plan, at))
+        })
+        .unwrap();
+    ORIGIN.set(mid).unwrap();
+    state.active_view = Some(plan);
+    state.set_tool(crate::tools::Tool::Select);
+    let depth = state.session.doc.undo_depth();
+    let mut harness = themed_harness(state, egui::vec2(600.0, 400.0), egui::Theme::Light, |ui, state| {
+        let (resp, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
+        let Some(origin) = ORIGIN.get().copied() else { return };
+        let xf = crate::paint::Xf { screen: resp.rect.center(), origin, scale: 20.0 };
+        let Some(view) = state.active_view.and_then(|v| state.project().view(v).cloned()) else { return };
+        let Some(drawing) = state.drawing(view.id) else { return };
+        crate::tools::handle(ui, &resp, &painter, state, &view, &xf, &drawing);
+    });
+    harness.run();
+    let pos = egui::pos2(300.0, 200.0);
+    harness.input_mut().events.push(egui::Event::PointerMoved(pos));
+    harness.run();
+    for pressed in [true, false] {
+        let (button, modifiers) = (egui::PointerButton::Secondary, egui::Modifiers::NONE);
+        harness.input_mut().events.push(egui::Event::PointerButton { pos, button, pressed, modifiers });
+        harness.run();
+    }
+    harness.run();
+    assert_eq!(
+        harness.state().selection,
+        std::collections::BTreeSet::from([wall]),
+        "the wall under the pointer is selected"
+    );
+    assert_eq!(harness.state().interaction.element_menu, Some(plan));
+    // A menu entry's name is its label, then its shortcut.
+    let entry = |h: &Harness<'static, AppState>, key: &str| {
+        let label = crate::i18n::tr(key);
+        h.query_all_by_role(Role::Button)
+            .map(|n| n.accesskit_node().label().unwrap_or_default())
+            .find(|l| l.starts_with(&label))
+    };
+    for key in ["action-select-instances", "action-delete", "props-edit-type", "tool-attach-top"] {
+        assert!(entry(&harness, key).is_some(), "{key} in the menu");
+    }
+    let before = harness.state().project().element(wall).and_then(|e| e.as_wall()).map(|w| (w.start, w.end));
+    let flip = entry(&harness, "tool-flip-walls").unwrap();
+    harness.get_by_role_and_label(Role::Button, &flip).click();
+    harness.run();
+    harness.run();
+    let after = harness.state().project().element(wall).and_then(|e| e.as_wall()).map(|w| (w.start, w.end));
+    assert_ne!(before, after, "the wall was flipped");
+    assert_eq!(harness.state().session.doc.undo_depth(), depth + 1);
+    assert!(entry(&harness, "action-delete").is_none(), "the menu closed");
+}
+
+/// A narrow window first turns rows of large buttons into medium ones, then
+/// the last groups into menus, and scrolls only when nothing else fits; a
+/// collapsed group's menu holds its buttons.
+#[test]
+fn ribbon_compacts_before_scrolling() {
+    use crate::commands::UiCommand;
+    let state = sample_state();
+    let grid = UiCommand::Place(cc_core::Category::Grid).label(&state);
+    // Wide: as designed, no group menus.
+    let mut state = sample_state();
+    state.ribbon_tab = RibbonTab::Architecture;
+    let harness = ribbon_harness(state, 1600.0);
+    assert!(harness.query_by_role_and_label(Role::Button, &t!("group-datum")).is_none());
+    // Narrow: the last group is a menu and the row fits without arrows.
+    let mut state = sample_state();
+    state.ribbon_tab = RibbonTab::Architecture;
+    let mut harness = ribbon_harness_sized(state, egui::vec2(700.0, 400.0));
+    harness.run();
+    assert!(harness.query_by_label(&t!("ribbon-scroll-right")).is_none(), "compacted, not scrolled");
+    assert!(harness.query_by_role_and_label(Role::Button, &grid).is_none(), "Grid is inside the menu");
+    harness.get_by_role_and_label(Role::Button, &t!("group-datum")).click();
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, &grid).click();
+    harness.run();
+    assert!(matches!(harness.state().tool, crate::tools::Tool::Grid { .. }), "the menu's button runs");
+    // Wide again: back as designed.
+    harness.set_size(egui::vec2(1600.0, 400.0));
+    harness.run();
+    assert!(harness.query_by_role_and_label(Role::Button, &t!("group-datum")).is_none(), "groups back");
+    assert!(harness.query_by_role_and_label(Role::Button, &grid).is_some());
+}
+
+/// A ribbon button's right-click menu adds it to the quick access toolbar;
+/// the toolbar's menu moves and removes it, and restores the default set.
+#[test]
+fn quick_access_toolbar_is_customized() {
+    use crate::commands::UiCommand;
+    let mut state = sample_state();
+    state.ribbon_tab = RibbonTab::Manage;
+    let mut harness = ribbon_harness_sized(state, egui::vec2(1600.0, 500.0));
+    let levels = UiCommand::Levels.label(harness.state());
+    assert_eq!(harness.query_all_by_role_and_label(Role::Button, &levels).count(), 1, "only in the tab");
+    harness.get_by_role_and_label(Role::Button, &levels).click_secondary();
+    harness.run();
+    harness.get_by_role_and_label(Role::Button, &t!("qat-add")).click();
+    harness.run();
+    let ids = harness.state().prefs.quick_access.clone().unwrap();
+    assert_eq!(ids.last().map(String::as_str), Some("Levels"));
+    assert_eq!(harness.query_all_by_role_and_label(Role::Button, &levels).count(), 2, "and in the toolbar");
+    assert_eq!(crate::ribbon::quick_access(harness.state()).last(), Some(&UiCommand::Levels));
+    // Its menu moves it left, then removes it.
+    harness.get_by_role_and_label(Role::Button, &t!("qat-customize")).click();
+    harness.run();
+    harness.get_all_by_role_and_label(Role::Button, "←").last().unwrap().click();
+    harness.run();
+    let list = crate::ribbon::quick_access(harness.state());
+    assert_eq!(list[list.len() - 2], UiCommand::Levels, "moved one place left");
+    harness.get_all_by_role_and_label(Role::Button, "×").nth(list.len() - 2).unwrap().click();
+    harness.run();
+    assert!(!crate::ribbon::quick_access(harness.state()).contains(&UiCommand::Levels));
+    harness.get_by_role_and_label(Role::Button, &t!("qat-reset")).click();
+    harness.run();
+    assert_eq!(harness.state().prefs.quick_access, None, "the default set again");
+}
+
+/// File opens a page over the window with the recent projects and, on its
+/// Export page, the export formats; Esc goes back to the tab shown before.
+#[test]
+fn file_is_a_page_over_the_window() {
+    let mut state = sample_state();
+    state.ribbon_tab = RibbonTab::View;
+    state.recent = vec![std::path::PathBuf::from("Z:/nowhere/old house.ccad")];
+    let mut harness = ribbon_harness_sized(state, egui::vec2(1400.0, 700.0));
+    harness.get_by_label(&t!("ribbon-file")).click();
+    harness.run();
+    assert_eq!(harness.state().ribbon_tab, RibbonTab::File);
+    assert!(harness.query_by_role_and_label(Role::Button, "old house").is_some(), "the recent projects");
+    harness.get_by_role_and_label(Role::Button, &t!("group-export")).click();
+    harness.run();
+    let ifc = crate::commands::UiCommand::ExportIfc.label(harness.state());
+    assert!(harness.query_by_role_and_label(Role::Button, &ifc).is_some(), "the export formats");
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert_eq!(harness.state().ribbon_tab, RibbonTab::View, "back to the tab shown before");
+}
+
+/// The status bar's count opens the selection's filter: unchecking a
+/// category deselects it, checking it again brings it back, and *Only*
+/// keeps that category alone.
+#[test]
+fn the_selection_is_filtered_by_category() {
+    let mut state = sample_state();
+    let walls: Vec<_> = state.project().walls().map(|(e, _)| e.id).take(2).collect();
+    let grid = state.project().elements_of(cc_core::Category::Grid).next().map(|e| e.id).unwrap();
+    state.selection = walls.iter().copied().chain([grid]).collect();
+    let mut harness = themed_harness(state, egui::vec2(900.0, 400.0), egui::Theme::Light, |ui, state| {
+        ui.add_space(300.0);
+        crate::ribbon::status_bar(ui, state);
+    });
+    harness.get_by_label(&t!("status-selected", "count" => 3)).click();
+    harness.run();
+    let wall_row = format!("{} (2)", crate::actions::t_category(cc_core::Category::Wall));
+    harness.get_by_label(&wall_row).click();
+    harness.run();
+    assert_eq!(harness.state().selection, std::collections::BTreeSet::from([grid]), "walls unchecked");
+    harness.get_by_label(&wall_row).click();
+    harness.run();
+    assert_eq!(harness.state().selection.len(), 3, "walls checked again");
+    harness.get_all_by_label(&t!("selection-filter-only")).last().unwrap().click();
+    harness.run();
+    assert_eq!(harness.state().selection, std::collections::BTreeSet::from([grid]), "only the grids");
+}
+
+/// The properties panel's search keeps the rows whose name holds the text
+/// and leaves the others out: hidden, they no longer take clicks.
+#[test]
+fn properties_are_searched_by_name() {
+    let mut state = sample_state();
+    let level = state.project().levels[0].id.0;
+    let args = serde_json::json!({"level": level, "start": [100, 100], "end": [106, 100], "height": 3.0});
+    let wall = cc_core::ElementId(state.session.execute("wall_create", args).unwrap()["id"].as_u64().unwrap());
+    let params = serde_json::json!({"id": wall.0, "params": {"structural": true}});
+    state.session.execute("element_set", params).unwrap();
+    state.selection = [wall].into_iter().collect();
+    let mut harness = themed_harness(state, egui::vec2(360.0, 1600.0), egui::Theme::Light, |ui, state| {
+        crate::properties::show(ui, state);
+    });
+    harness.run();
+    // The search field is the first text field, above the rows.
+    harness.get_all_by_role(Role::TextInput).next().unwrap().focus();
+    harness.run();
+    harness.get_all_by_role(Role::TextInput).next().unwrap().type_text("zzzz");
+    harness.run();
+    let typed: Option<String> = harness.ctx.data(|d| d.get_temp(egui::Id::new("props-search")));
+    assert_eq!(typed.as_deref(), Some("zzzz"));
+    // The typical reinforcement button's row matches nothing: a click on it does nothing.
+    harness.get_by_label(&t!("action-rebar-typical")).click();
+    harness.run();
+    assert_eq!(harness.state().project().rebar_of(wall).count(), 0, "the hidden row took no click");
 }
 
 /// The Material Libraries dialog loads the materials checked of a built-in

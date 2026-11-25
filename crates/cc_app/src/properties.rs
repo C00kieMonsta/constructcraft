@@ -134,6 +134,28 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
 /// The properties of the selection (or the active view), under a header drawn by the caller.
 pub fn body(ui: &mut Ui, state: &mut AppState) {
+    // A search over the rows' names, kept while the app runs.
+    let search_id = egui::Id::new("props-search");
+    let mut search: String = ui.data(|d| d.get_temp(search_id)).unwrap_or_default();
+    egui::Frame::new().inner_margin(egui::Margin::symmetric(8, 5)).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            // A search left behind would hide rows of the next selection: × clears it.
+            if !search.is_empty() && ui.small_button("×").on_hover_text(t!("props-search-clear")).clicked() {
+                search.clear();
+            }
+            let field = egui::TextEdit::singleline(&mut search).hint_text(t!("props-search"));
+            ui.add(field.desired_width(f32::INFINITY));
+        });
+    });
+    ui.data_mut(|d| d.insert_temp(search_id, search.clone()));
+    let ctx = ui.ctx().clone();
+    crate::table::set_filter(&ctx, Some(crate::palette::fold(&search)));
+    body_rows(ui, state);
+    crate::table::set_filter(&ctx, None);
+}
+
+/// The rows of [`body`], searched for what the field above them holds.
+fn body_rows(ui: &mut Ui, state: &mut AppState) {
     egui::ScrollArea::vertical().id_salt("props").auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         // An open sketch shows its selected curve.
