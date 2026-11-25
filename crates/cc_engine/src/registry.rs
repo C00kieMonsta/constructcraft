@@ -454,6 +454,7 @@ registry![
         materials::MaterialDelete,
         materials::MaterialTextureSet,
         materials::MaterialTextureClear,
+        materials::MaterialLibraryImport,
         fill_patterns::FillPatternsList,
         fill_patterns::FillPatternGet,
         fill_patterns::FillPatternCreate,

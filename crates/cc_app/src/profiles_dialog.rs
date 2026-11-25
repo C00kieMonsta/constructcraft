@@ -16,6 +16,7 @@ use crate::state::AppState;
 use crate::t;
 use crate::table;
 use crate::theme::{self, PALETTE};
+use cc_core::profile_catalog::{self, CatalogRow, Series};
 use cc_core::structural_profile::MAX_NAME;
 use cc_core::{ProfileId, ProfileMaterial, ProfileShape};
 use cc_engine::Ref;
@@ -59,6 +60,7 @@ struct Row {
     id: ProfileId,
     name: String,
     material: ProfileMaterial,
+    shape: String,
     users: usize,
 }
 
@@ -71,9 +73,27 @@ struct Cache {
     detail: Option<(ProfileId, Value)>,
 }
 
+/// Which source the left column of the Profile Manager displays.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LeftTab {
+    Project,
+    Catalog,
+}
+
+/// A built-in catalog row selected for preview / one-click add.
+#[derive(Clone, PartialEq, Eq)]
+struct CatalogSelection {
+    series: String,
+    designation: String,
+}
+
 /// The open Profile Manager.
 pub struct ProfilesDialog {
     pub(crate) selected: Option<ProfileId>,
+    tab: LeftTab,
+    catalog_selected: Option<CatalogSelection>,
+    catalog_preview: Option<(CatalogSelection, Value)>,
+    expand_selected: bool,
     search: String,
     /// The profile that takes a deleted one's place in its types.
     replace_with: Option<ProfileId>,
@@ -138,13 +158,25 @@ pub fn resume(state: &mut AppState, id: ProfileId, edits: Option<Edits>) {
         None => open(state),
     }
     if let Some(d) = state.dialogs.profiles.as_mut() {
+        d.tab = LeftTab::Project;
         d.selected = Some(id);
+        d.expand_selected = true;
     }
+}
+
+fn default_catalog_selection() -> Option<CatalogSelection> {
+    let series = profile_catalog::series("W").or_else(|| profile_catalog::catalog().first())?;
+    let row = series.rows.first()?;
+    Some(CatalogSelection { series: series.code.to_string(), designation: row.designation.clone() })
 }
 
 fn open_with(state: &mut AppState, edits: Edits) {
     state.dialogs.profiles = Some(ProfilesDialog {
         selected: None,
+        tab: LeftTab::Project,
+        catalog_selected: default_catalog_selection(),
+        catalog_preview: None,
+        expand_selected: true,
         search: String::new(),
         replace_with: None,
         error: None,
@@ -196,6 +228,7 @@ fn refresh(state: &mut AppState, d: &mut ProfilesDialog) {
                     id: profile_id(r)?,
                     name: r["name"].as_str()?.to_string(),
                     material: ProfileMaterial::from_code(r["material"].as_str()?)?,
+                    shape: r["shape"].as_str().unwrap_or_default().to_string(),
                     users: r["users"].as_u64().unwrap_or(0) as usize,
                 })
             })
@@ -230,10 +263,10 @@ pub fn show(ctx: &Context, state: &mut AppState) {
     let response = Dialog::new("profiles", t!("profiles-title")).width(920.0).show(
         ctx,
         |ui| {
-            crate::dialog::two_columns(ui, [250.0, 660.0], |ui, column| {
+            crate::dialog::two_columns(ui, [270.0, 640.0], |ui, column| {
                 if column == 0 {
-                    list(ui, state, &mut d);
-                } else {
+                    left_panel(ui, state, &mut d);
+                } else if d.tab == LeftTab::Project {
                     ui.horizontal_top(|ui| {
                         ui.vertical(|ui| {
                             ui.set_width(PREVIEW);
@@ -243,6 +276,18 @@ pub fn show(ctx: &Context, state: &mut AppState) {
                         });
                         ui.add_space(8.0);
                         ui.vertical(|ui| details(ui, state, &mut d));
+                    });
+                } else {
+                    ensure_catalog_preview(&mut d);
+                    ui.horizontal_top(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_width(PREVIEW);
+                            if let Some((_, detail)) = &d.catalog_preview {
+                                preview(ui, detail);
+                            }
+                        });
+                        ui.add_space(8.0);
+                        ui.vertical(|ui| catalog_details(ui, state, &mut d));
                     });
                 }
             });
@@ -277,25 +322,68 @@ pub fn show(ctx: &Context, state: &mut AppState) {
 
 // ---------------------------------------------------------------- the list
 
-fn list(ui: &mut Ui, state: &mut AppState, d: &mut ProfilesDialog) {
+fn left_panel(ui: &mut Ui, state: &mut AppState, d: &mut ProfilesDialog) {
+    let cat_count: usize = profile_catalog::catalog().iter().map(|s| s.rows.len()).sum();
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .selectable_label(d.tab == LeftTab::Project, t!("profiles-tab-project", "count" => d.cache.list.len()))
+            .clicked()
+        {
+            d.tab = LeftTab::Project;
+        }
+        if ui.selectable_label(d.tab == LeftTab::Catalog, t!("profiles-tab-catalog", "count" => cat_count)).clicked() {
+            d.tab = LeftTab::Catalog;
+            if d.catalog_selected.is_none() {
+                d.catalog_selected = default_catalog_selection();
+                d.catalog_preview = None;
+            }
+        }
+    });
+    ui.add_space(4.0);
     ui.add(egui::TextEdit::singleline(&mut d.search).hint_text(t!("profiles-search")).desired_width(f32::INFINITY));
+    ui.add_space(4.0);
+    match d.tab {
+        LeftTab::Project => list(ui, state, d),
+        LeftTab::Catalog => catalog_list(ui, state, d),
+    }
+}
+
+fn force_section_open(ui: &Ui, id: &str) {
+    let state_id = ui.make_persistent_id(("prop-section", id));
+    ui.data_mut(|data| data.insert_persisted(state_id, true));
+}
+
+fn list(ui: &mut Ui, state: &mut AppState, d: &mut ProfilesDialog) {
     let search = d.search.trim().to_lowercase();
+    let selected_shape = d.selected.and_then(|id| d.cache.list.iter().find(|r| r.id == id)).map(|r| r.shape.clone());
+    let expand_selected = std::mem::take(&mut d.expand_selected);
     egui::Frame::new().stroke(Stroke::new(1.0, PALETTE.border)).show(ui, |ui| {
-        egui::ScrollArea::vertical().id_salt("profiles-list").max_height(400.0).auto_shrink([false, false]).show(
+        egui::ScrollArea::vertical().id_salt("profiles-list").max_height(380.0).auto_shrink([false, false]).show(
             ui,
             |ui| {
-                for m in ProfileMaterial::ALL {
+                let mut seen_shapes: Vec<String> = ProfileShape::CODES.iter().map(|c| (*c).to_string()).collect();
+                for r in &d.cache.list {
+                    if !seen_shapes.contains(&r.shape) {
+                        seen_shapes.push(r.shape.clone());
+                    }
+                }
+                for shape in seen_shapes {
                     let rows: Vec<(ProfileId, String)> = d
                         .cache
                         .list
                         .iter()
-                        .filter(|r| r.material == m && r.name.to_lowercase().contains(&search))
-                        .map(|r| (r.id, r.name.clone()))
+                        .filter(|r| r.shape == shape && r.name.to_lowercase().contains(&search))
+                        .map(|r| (r.id, format!("{}  ({})", r.name, tr(r.material.key()))))
                         .collect();
                     if rows.is_empty() {
                         continue;
                     }
-                    table::section(ui, &format!("profiles-{}", m.code()), tr(m.key()), |ui| {
+                    let sec_id = format!("profiles-shape-{shape}");
+                    if !search.is_empty() || (expand_selected && selected_shape.as_deref() == Some(shape.as_str())) {
+                        force_section_open(ui, &sec_id);
+                    }
+                    let label = if shape.is_empty() { t!("profiles-title") } else { shape_label(&shape) };
+                    table::section(ui, &sec_id, label, |ui| {
                         for (id, name) in rows {
                             if ui.selectable_label(d.selected == Some(id), name).clicked() {
                                 d.selected = Some(id);
@@ -312,6 +400,203 @@ fn list(ui: &mut Ui, state: &mut AppState, d: &mut ProfilesDialog) {
     buttons(ui, state, d);
 }
 
+fn catalog_list(ui: &mut Ui, state: &mut AppState, d: &mut ProfilesDialog) {
+    let search = d.search.trim().to_lowercase();
+    let series_list: Vec<&Series> = profile_catalog::catalog().iter().collect();
+    let mut shapes: Vec<&str> = Vec::new();
+    for s in &series_list {
+        if !shapes.contains(&s.shape) {
+            shapes.push(s.shape);
+        }
+    }
+    let project_names: BTreeSet<&str> = d.cache.list.iter().map(|r| r.name.as_str()).collect();
+
+    egui::Frame::new().stroke(Stroke::new(1.0, PALETTE.border)).show(ui, |ui| {
+        egui::ScrollArea::vertical()
+            .id_salt("profiles-catalog-list")
+            .max_height(410.0)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for shape in shapes {
+                    let matching_series: Vec<(&Series, Vec<&CatalogRow>)> = series_list
+                        .iter()
+                        .filter(|s| s.shape == shape)
+                        .filter_map(|&s| {
+                            let rows: Vec<&CatalogRow> = s
+                                .rows
+                                .iter()
+                                .filter(|r| {
+                                    search.is_empty()
+                                        || r.designation.to_lowercase().contains(&search)
+                                        || s.code.to_lowercase().contains(&search)
+                                        || tr(s.name_key).to_lowercase().contains(&search)
+                                })
+                                .collect();
+                            (!rows.is_empty()).then_some((s, rows))
+                        })
+                        .collect();
+                    if matching_series.is_empty() {
+                        continue;
+                    }
+                    let sec_id = format!("profiles-lib-{shape}");
+                    if !search.is_empty() {
+                        force_section_open(ui, &sec_id);
+                    }
+                    table::section(ui, &sec_id, shape_label(shape), |ui| {
+                        for (s, rows) in matching_series {
+                            let header_id = ui.make_persistent_id(("cat-series", s.code));
+                            let title = format!("{} — {} ({})", s.code, tr(s.name_key), rows.len());
+                            let mut header = egui::CollapsingHeader::new(title)
+                                .id_salt(header_id)
+                                .default_open(s.code == "W" || s.code == "IPE");
+                            if !search.is_empty() {
+                                header = header.open(Some(true));
+                            }
+                            header.show(ui, |ui| {
+                                for row in rows {
+                                    let is_sel = d
+                                        .catalog_selected
+                                        .as_ref()
+                                        .is_some_and(|sel| sel.series == s.code && sel.designation == row.designation);
+                                    let in_proj = project_names.contains(row.designation.as_str());
+                                    let label = if in_proj {
+                                        format!("✓ {}", row.designation)
+                                    } else {
+                                        row.designation.clone()
+                                    };
+                                    if ui.selectable_label(is_sel, label).clicked() {
+                                        d.catalog_selected = Some(CatalogSelection {
+                                            series: s.code.to_string(),
+                                            designation: row.designation.clone(),
+                                        });
+                                        d.catalog_preview = None;
+                                        d.error = None;
+                                    }
+                                }
+                            });
+                        }
+                    });
+                }
+            });
+    });
+    ui.add_space(6.0);
+    if let Some(sel) = d.catalog_selected.clone() {
+        let in_project = d.cache.list.iter().find(|r| r.name == sel.designation).map(|r| r.id);
+        ui.horizontal_wrapped(|ui| {
+            if let Some(id) = in_project {
+                if ui.button(t!("profiles-catalog-select-in-project")).clicked() {
+                    d.tab = LeftTab::Project;
+                    d.selected = Some(id);
+                    d.expand_selected = true;
+                }
+            } else if ui.button(t!("profiles-catalog-add-one")).clicked() {
+                import_from_catalog(state, d, &sel.series, vec![sel.designation.clone()]);
+            }
+            if let Some(s) = profile_catalog::series(&sel.series)
+                && ui.button(t!("profiles-catalog-add-series", "code" => s.code)).clicked()
+            {
+                let all: Vec<String> = s.rows.iter().map(|r| r.designation.clone()).collect();
+                import_from_catalog(state, d, s.code, all);
+            }
+        });
+    }
+}
+
+fn import_from_catalog(state: &mut AppState, d: &mut ProfilesDialog, series: &str, designations: Vec<String>) {
+    let command = cmd::ProfileImport { series: series.to_string(), designations, on_clash: None };
+    if let Some(out) = run(state, &mut d.error, None, command)
+        && let Some(id) = profile_id(&out["imported"][0])
+    {
+        d.selected = Some(id);
+        d.expand_selected = true;
+    }
+}
+
+fn material_density(m: ProfileMaterial) -> f64 {
+    let mut probe = cc_core::Material::new("", [0, 0, 0]);
+    cc_core::material::template_properties(&mut probe, m.material_class());
+    probe.physical.density.unwrap_or(0.0)
+}
+
+fn catalog_preview_json(series: &Series, row: &CatalogRow) -> Option<Value> {
+    let def = profile_catalog::row_to_def(series, row)?;
+    let pt = |p: DVec2| [p.x, p.y];
+    let params: serde_json::Map<String, Value> =
+        def.shape.params().into_iter().map(|(n, v)| (n, serde_json::json!(v))).collect();
+    let mut out = serde_json::json!({
+        "name": def.name,
+        "material": def.material.code(),
+        "shape": def.shape.code(),
+        "params": Value::Object(params),
+        "used_by": [],
+    });
+    if let (Some(o), Ok(outline)) = (out.as_object_mut(), def.outline()) {
+        let holes: Vec<Vec<[f64; 2]>> = outline.holes.iter().map(|h| h.iter().copied().map(pt).collect()).collect();
+        o.insert(
+            "outline".into(),
+            serde_json::json!({ "outer": outline.outer.iter().copied().map(pt).collect::<Vec<_>>(), "holes": holes }),
+        );
+        o.insert("properties".into(), serde_json::json!(outline.properties(material_density(def.material))));
+    }
+    Some(out)
+}
+
+fn ensure_catalog_preview(d: &mut ProfilesDialog) {
+    let Some(sel) = &d.catalog_selected else {
+        d.catalog_preview = None;
+        return;
+    };
+    if d.catalog_preview.as_ref().is_some_and(|(s, _)| s == sel) {
+        return;
+    }
+    d.catalog_preview = profile_catalog::series(&sel.series)
+        .and_then(|s| s.rows.iter().find(|r| r.designation == sel.designation).map(|r| (s, r)))
+        .and_then(|(s, r)| catalog_preview_json(s, r))
+        .map(|v| (sel.clone(), v));
+}
+
+fn catalog_details(ui: &mut Ui, _state: &mut AppState, d: &mut ProfilesDialog) {
+    let Some((sel, detail)) = d.catalog_preview.clone() else { return };
+    table::section(ui, "profiles-catalog-params", t!("profiles-params"), |ui| {
+        table::readonly_row(ui, &t!("prop-name"), sel.designation.clone());
+        let material = detail["material"].as_str().and_then(ProfileMaterial::from_code).unwrap_or_default();
+        table::readonly_row(ui, &t!("prop-material"), tr(material.key()));
+        let shape = detail["shape"].as_str().unwrap_or_default();
+        table::readonly_row(ui, &t!("prop-shape"), shape_label(shape));
+        for (param, value) in ordered_params(&detail) {
+            let degrees = param == "angle" || param == "sweep";
+            let shown = if degrees { value } else { value * 1000.0 };
+            let suffix = if degrees { "°" } else { " mm" };
+            let tip = crate::i18n::try_tr(&param_key(&param));
+            table::row_tip(ui, &param, tip.as_deref(), |ui| {
+                ui.label(format!("{} {suffix}", number(shown)));
+            });
+        }
+    });
+    if let Some(e) = &d.error {
+        ui.label(RichText::new(e).color(PALETTE.danger));
+    }
+    ui.add_space(6.0);
+    let p = &detail["properties"];
+    let get = |k: &str| p[k].as_f64().unwrap_or(f64::NAN);
+    table::section(ui, "profiles-catalog-properties", t!("profiles-properties"), |ui| {
+        let rows = [
+            ("profile-prop-area", get("area") * 1e4, "cm²"),
+            ("profile-prop-mass", get("linear_mass"), "kg/m"),
+            ("profile-prop-ix", get("ix") * 1e8, "cm⁴"),
+            ("profile-prop-iy", get("iy") * 1e8, "cm⁴"),
+            ("profile-prop-wx", get("wx") * 1e6, "cm³"),
+            ("profile-prop-wy", get("wy") * 1e6, "cm³"),
+            ("profile-prop-rx", get("rx") * 1e2, "cm"),
+            ("profile-prop-ry", get("ry") * 1e2, "cm"),
+            ("profile-prop-j", get("j") * 1e8, "cm⁴"),
+        ];
+        for (label, value, unit) in rows {
+            table::readonly_row(ui, &tr(label), format!("{} {unit}", number(value)));
+        }
+    });
+}
+
 fn buttons(ui: &mut Ui, state: &mut AppState, d: &mut ProfilesDialog) {
     let selected = d.selected;
     let users = selected.and_then(|id| d.cache.list.iter().find(|r| r.id == id)).map_or(0, |r| r.users);
@@ -326,6 +611,7 @@ fn buttons(ui: &mut Ui, state: &mut AppState, d: &mut ProfilesDialog) {
                     };
                     if let Some(out) = run(state, &mut d.error, None, command) {
                         d.selected = profile_id(&out);
+                        d.expand_selected = true;
                     }
                     ui.close();
                 }
@@ -337,6 +623,7 @@ fn buttons(ui: &mut Ui, state: &mut AppState, d: &mut ProfilesDialog) {
                 run(state, &mut d.error, None, cmd::ProfileDuplicate { profile: Ref::Id(id.0), name: None })
         {
             d.selected = profile_id(&out);
+            d.expand_selected = true;
         }
         let can_delete = selected.is_some() && (users == 0 || d.replace_with.is_some());
         if ui.add_enabled(can_delete, egui::Button::new(t!("profiles-delete"))).clicked()

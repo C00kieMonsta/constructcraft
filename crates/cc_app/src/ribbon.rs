@@ -806,7 +806,7 @@ fn structure_tab(ui: &mut Ui, state: &mut AppState) {
             });
         }
     }
-    group(ui, t!("group-profiles"), |ui| command_button(ui, state, Profiles));
+    group(ui, t!("group-profiles"), |ui| command_buttons(ui, state, &[Profiles, Materials]));
     group(ui, t!("group-foundation"), |ui| {
         command_button(ui, state, place(Category::Foundation));
         stacks(ui, state, &[&[FootingsUnderColumns, StripFootingsUnderWalls, FoundationSlab]]);
