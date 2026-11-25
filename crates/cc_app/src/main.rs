@@ -5,6 +5,7 @@
 
 mod actions;
 mod app;
+mod backstage;
 mod bracing_ui;
 mod browser;
 mod browser_org_dialog;
@@ -16,6 +17,7 @@ mod commands;
 mod component_env;
 mod component_sketch;
 mod connection_ui;
+mod context_menu;
 mod crafthouse;
 mod curtain_ui;
 mod design_options_ui;
