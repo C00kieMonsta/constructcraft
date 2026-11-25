@@ -47,6 +47,7 @@ mod level_rename;
 mod lightning_cabling;
 mod macro_editor;
 mod macros;
+mod material_libraries;
 mod mep_trays_valves;
 mod multi_edit;
 mod niche;

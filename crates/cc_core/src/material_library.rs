@@ -1,0 +1,378 @@
+//! Material libraries: the materials of one region or standard, as a file
+//! (JSON, format [`FILE_FORMAT`]) that the user picks and imports, as the
+//! pipe series of [`crate::pipe_catalog`] are. The built-in libraries are
+//! files in `assets/materials`, compiled into the binary and read once;
+//! users write their own with [`write_library`] (and the engine's
+//! `material_library_export`). Importing copies materials into
+//! [`Project::materials`](crate::Project): a project keeps working when a
+//! library changes.
+
+use crate::material::{Material, MaterialClass, template_properties};
+use crate::pipe_catalog::Region;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::sync::OnceLock;
+
+/// The file format this module reads and writes.
+pub const FILE_FORMAT: u64 = 1;
+/// The largest library file read, bytes.
+pub const MAX_FILE_BYTES: usize = 4 * 1024 * 1024;
+/// The most materials in one library.
+pub const MAX_MATERIALS: usize = 2000;
+/// The longest code, name, standard or material name, characters.
+const MAX_TEXT: usize = 200;
+/// The longest description or source, characters.
+const MAX_LONG_TEXT: usize = 2000;
+/// The most sources listed.
+const MAX_SOURCES: usize = 50;
+
+/// A library: its code (unique among libraries), name, region and standard,
+/// the documents its values come from, and its materials.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MaterialLibrary {
+    pub format: u64,
+    pub code: String,
+    pub name: String,
+    /// A [`Region`] code (`brazil`, `europe`, `us`), or empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub region: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub standard: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<String>,
+    pub materials: Vec<LibraryMaterial>,
+}
+
+impl MaterialLibrary {
+    /// The library's region, when its code is one of [`Region`]'s.
+    pub fn region(&self) -> Option<Region> {
+        Region::ALL.into_iter().find(|r| r.code() == self.region)
+    }
+
+    /// The material named `name` (case aside).
+    pub fn material(&self, name: &str) -> Option<&LibraryMaterial> {
+        self.materials.iter().find(|m| m.name.eq_ignore_ascii_case(name.trim()))
+    }
+}
+
+/// One material of a library: SI units as in [`crate::material::MaterialPhysical`]
+/// (kg/m³, W/(m·K), J/(kg·K), 1/K, MPa). Values left out take the class's
+/// template ([`template_properties`]) or stay unknown.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LibraryMaterial {
+    pub name: String,
+    #[serde(default)]
+    pub class: MaterialClass,
+    #[serde(default = "default_color")]
+    pub color: [u8; 3],
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub density: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thermal_conductivity: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub specific_heat: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thermal_expansion: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub youngs_modulus: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poisson: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compressive_strength: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yield_strength: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tensile_strength: Option<f64>,
+}
+
+fn default_color() -> [u8; 3] {
+    [180, 180, 180]
+}
+
+impl LibraryMaterial {
+    /// The project material it makes: the class's template, then the library's values.
+    pub fn to_material(&self) -> Material {
+        let mut m = Material::new(self.name.trim(), self.color);
+        template_properties(&mut m, self.class);
+        m.identity.class = self.class;
+        m.identity.description = self.description.clone();
+        let p = &mut m.physical;
+        for (value, field) in [
+            (self.density, &mut p.density),
+            (self.thermal_conductivity, &mut p.thermal_conductivity),
+            (self.specific_heat, &mut p.specific_heat),
+            (self.thermal_expansion, &mut p.thermal_expansion),
+            (self.youngs_modulus, &mut p.youngs_modulus),
+            (self.poisson, &mut p.poisson),
+            (self.compressive_strength, &mut p.compressive_strength),
+            (self.yield_strength, &mut p.yield_strength),
+            (self.tensile_strength, &mut p.tensile_strength),
+        ] {
+            if value.is_some() {
+                *field = value;
+            }
+        }
+        m
+    }
+
+    /// A project material as a library row (its identity, color and physical values).
+    pub fn of_material(m: &Material) -> Self {
+        let p = &m.physical;
+        Self {
+            name: m.name.clone(),
+            class: m.identity.class,
+            color: m.color,
+            description: m.identity.description.clone(),
+            density: p.density,
+            thermal_conductivity: p.thermal_conductivity,
+            specific_heat: p.specific_heat,
+            thermal_expansion: p.thermal_expansion,
+            youngs_modulus: p.youngs_modulus,
+            poisson: p.poisson,
+            compressive_strength: p.compressive_strength,
+            yield_strength: p.yield_strength,
+            tensile_strength: p.tensile_strength,
+        }
+    }
+
+    /// The physical values with their names, for checks.
+    fn values(&self) -> [(&'static str, Option<f64>); 9] {
+        [
+            ("density", self.density),
+            ("thermal_conductivity", self.thermal_conductivity),
+            ("specific_heat", self.specific_heat),
+            ("thermal_expansion", self.thermal_expansion),
+            ("youngs_modulus", self.youngs_modulus),
+            ("poisson", self.poisson),
+            ("compressive_strength", self.compressive_strength),
+            ("yield_strength", self.yield_strength),
+            ("tensile_strength", self.tensile_strength),
+        ]
+    }
+}
+
+/// Why a library file cannot be read.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LibraryError {
+    TooLarge(usize),
+    Json(String),
+    /// A format this version does not read.
+    Format(u64),
+    /// The library's fields.
+    Header(String),
+    /// A material row (counted from 0).
+    Material {
+        row: usize,
+        message: String,
+    },
+}
+
+impl std::fmt::Display for LibraryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooLarge(n) => write!(f, "the file has {n} bytes, more than {MAX_FILE_BYTES}"),
+            Self::Json(e) => write!(f, "not a material library: {e}"),
+            Self::Format(v) => write!(f, "library format {v} is not supported (expected {FILE_FORMAT})"),
+            Self::Header(e) => write!(f, "{e}"),
+            Self::Material { row, message } => write!(f, "material {}: {message}", row + 1),
+        }
+    }
+}
+
+/// Read a library file, bounded and checked: a code and a name, at most
+/// [`MAX_MATERIALS`] materials with distinct non-empty names, finite values
+/// that are not negative (Poisson's ratio from 0 to 0.5).
+pub fn read_library(text: &str) -> Result<MaterialLibrary, LibraryError> {
+    if text.len() > MAX_FILE_BYTES {
+        return Err(LibraryError::TooLarge(text.len()));
+    }
+    let value: Value = serde_json::from_str(text).map_err(|e| LibraryError::Json(e.to_string()))?;
+    let Some(format) = value.get("format") else {
+        return Err(LibraryError::Json("no format".into()));
+    };
+    match format.as_u64() {
+        Some(FILE_FORMAT) => {}
+        Some(other) => return Err(LibraryError::Format(other)),
+        None => return Err(LibraryError::Header(format!("format {format} is not a number"))),
+    }
+    let rows = match value.get("materials") {
+        Some(Value::Array(rows)) => rows.len(),
+        _ => return Err(LibraryError::Header("no materials list".into())),
+    };
+    if rows > MAX_MATERIALS {
+        return Err(LibraryError::Header(format!("more than {MAX_MATERIALS} materials")));
+    }
+    let mut lib: MaterialLibrary = serde_json::from_value(value).map_err(|e| LibraryError::Header(e.to_string()))?;
+    lib.code = lib.code.trim().to_string();
+    lib.name = lib.name.trim().to_string();
+    if lib.code.is_empty() || lib.name.is_empty() {
+        return Err(LibraryError::Header("a library needs a code and a name".into()));
+    }
+    let long = [&lib.code, &lib.name, &lib.standard, &lib.region].into_iter().any(|t| t.chars().count() > MAX_TEXT);
+    if long || lib.sources.len() > MAX_SOURCES || lib.sources.iter().any(|s| s.chars().count() > MAX_LONG_TEXT) {
+        return Err(LibraryError::Header("a field is too long".into()));
+    }
+    let mut names = std::collections::BTreeSet::new();
+    for (row, m) in lib.materials.iter_mut().enumerate() {
+        let fail = |message: String| LibraryError::Material { row, message };
+        m.name = m.name.trim().to_string();
+        if m.name.is_empty() || m.name.chars().count() > MAX_TEXT {
+            return Err(fail("a name of 1 to 200 characters is needed".into()));
+        }
+        if m.description.chars().count() > MAX_LONG_TEXT {
+            return Err(fail("the description is too long".into()));
+        }
+        if !names.insert(m.name.to_lowercase()) {
+            return Err(fail(format!("\"{}\" appears twice", m.name)));
+        }
+        for (field, v) in m.values() {
+            let Some(v) = v else { continue };
+            let poisson = field == "poisson";
+            if !v.is_finite() || v < 0.0 || (poisson && v > 0.5) {
+                return Err(fail(format!("{field} = {v} is out of range")));
+            }
+        }
+    }
+    Ok(lib)
+}
+
+/// The library as a file, readable by [`read_library`].
+pub fn write_library(lib: &MaterialLibrary) -> String {
+    let lib = MaterialLibrary { format: FILE_FORMAT, ..lib.clone() };
+    serde_json::to_string_pretty(&lib).unwrap_or_default() + "\n"
+}
+
+/// A built-in library file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuiltIn {
+    /// The library's code, as in the file.
+    pub code: &'static str,
+    /// The i18n key of the library's name: `material-library-<code lowercased>`.
+    pub name_key: &'static str,
+    pub region: Region,
+    /// The file's name in `assets/materials`.
+    pub file: &'static str,
+    /// The file's text.
+    pub text: &'static str,
+}
+
+/// Every built-in library file.
+pub const BUILT_IN: &[BuiltIn] = &[
+    BuiltIn {
+        code: "BR-ACO-ESTRUTURAL",
+        name_key: "material-library-br-aco-estrutural",
+        region: Region::Brazil,
+        file: "br-aco-estrutural.json",
+        text: include_str!("../assets/materials/br-aco-estrutural.json"),
+    },
+    BuiltIn {
+        code: "BR-ACO-ARMADURA",
+        name_key: "material-library-br-aco-armadura",
+        region: Region::Brazil,
+        file: "br-aco-armadura.json",
+        text: include_str!("../assets/materials/br-aco-armadura.json"),
+    },
+    BuiltIn {
+        code: "BR-CONCRETO",
+        name_key: "material-library-br-concreto",
+        region: Region::Brazil,
+        file: "br-concreto.json",
+        text: include_str!("../assets/materials/br-concreto.json"),
+    },
+];
+
+/// The built-in libraries, read once, in [`BUILT_IN`]'s order (a file
+/// that does not read is left out; a test reads them all).
+pub fn built_in() -> &'static [(BuiltIn, MaterialLibrary)] {
+    static LIBS: OnceLock<Vec<(BuiltIn, MaterialLibrary)>> = OnceLock::new();
+    LIBS.get_or_init(|| BUILT_IN.iter().filter_map(|b| read_library(b.text).ok().map(|lib| (*b, lib))).collect())
+}
+
+/// The built-in library of `code` (case aside).
+pub fn find(code: &str) -> Option<&'static (BuiltIn, MaterialLibrary)> {
+    built_in().iter().find(|(b, _)| b.code.eq_ignore_ascii_case(code.trim()))
+}
+
+/// NBR 6118:2023, 8.2.8: the initial tangent modulus `Eci` and the secant
+/// modulus `Ecs` (MPa) of a concrete of characteristic strength `fck_mpa`,
+/// with `αE = 1.0` (granite and gneiss). The built-in concretes' moduli are
+/// `Ecs` rounded to 100 MPa.
+pub fn concrete_modulus_nbr6118(fck_mpa: f64) -> (f64, f64) {
+    let fck = fck_mpa.max(0.0);
+    let eci = if fck <= 50.0 { 5600.0 * fck.sqrt() } else { 21_500.0 * (fck / 10.0 + 1.25).cbrt() };
+    let alpha_i = (0.8 + 0.2 * fck / 80.0).min(1.0);
+    (eci, alpha_i * eci)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_built_in_library_reads_and_matches_its_entry() {
+        assert_eq!(built_in().len(), BUILT_IN.len(), "every file reads");
+        let mut codes = std::collections::BTreeSet::new();
+        for (b, lib) in built_in() {
+            assert_eq!(lib.code, b.code, "{}", b.file);
+            assert_eq!(lib.region(), Some(b.region), "{}", b.file);
+            assert_eq!(b.name_key, format!("material-library-{}", b.code.to_lowercase()));
+            assert!(codes.insert(b.code), "{} repeats", b.code);
+            assert!(!lib.materials.is_empty() && !lib.sources.is_empty(), "{}", b.file);
+        }
+    }
+
+    /// The values the Brazilian libraries hold, against the standards they cite.
+    #[test]
+    fn brazilian_values_follow_their_standards() {
+        let steel = &find("br-aco-estrutural").unwrap().1;
+        let mr250 = steel.material("Aço MR250 (NBR 7007)").unwrap().to_material();
+        assert_eq!(mr250.identity.class, MaterialClass::Metal);
+        assert_eq!(mr250.physical.density, Some(7850.0));
+        assert_eq!(mr250.physical.youngs_modulus, Some(200_000.0));
+        assert_eq!((mr250.physical.yield_strength, mr250.physical.tensile_strength), (Some(250.0), Some(400.0)));
+        // Yield is no longer kept as the compressive strength.
+        assert_eq!(mr250.physical.compressive_strength, None);
+        let rebar = &find("BR-ACO-ARMADURA").unwrap().1;
+        let ca50 = rebar.material("Aço CA-50 (NBR 7480)").unwrap();
+        assert_eq!((ca50.yield_strength, ca50.youngs_modulus), (Some(500.0), Some(210_000.0)));
+        let concrete = &find("BR-CONCRETO").unwrap().1;
+        assert_eq!(concrete.materials.len(), 12, "C20 to C90");
+        for m in &concrete.materials {
+            let fck = m.compressive_strength.unwrap();
+            let ecs = (concrete_modulus_nbr6118(fck).1 / 100.0).round() * 100.0;
+            assert_eq!(m.youngs_modulus, Some(ecs), "{}", m.name);
+        }
+        // NBR 6118 Table 8.1: C30 has Ecs = 27 GPa, C90 47 GPa (rounded there).
+        let c30 = concrete.material("Concreto C30 (NBR 6118)").unwrap().youngs_modulus.unwrap();
+        let c90 = concrete.material("Concreto C90 (NBR 6118)").unwrap().youngs_modulus.unwrap();
+        assert!((c30 / 1000.0 - 27.0).abs() < 0.5 && (c90 / 1000.0 - 47.0).abs() < 0.5, "{c30} {c90}");
+    }
+
+    #[test]
+    fn files_round_trip_and_hostile_ones_are_refused() {
+        let (_, lib) = find("BR-CONCRETO").unwrap();
+        assert_eq!(read_library(&write_library(lib)).as_ref(), Ok(lib));
+        let base = |materials: &str| format!(r#"{{"format": 1, "code": "X", "name": "X", "materials": {materials}}}"#);
+        assert!(read_library(&base(r#"[{"name": "A"}]"#)).is_ok());
+        assert!(matches!(
+            read_library(&base(r#"[{"name": "A"}, {"name": " a "}]"#)),
+            Err(LibraryError::Material { row: 1, .. })
+        ));
+        assert!(matches!(
+            read_library(&base(r#"[{"name": "A", "poisson": 0.7}]"#)),
+            Err(LibraryError::Material { .. })
+        ));
+        assert!(matches!(read_library(&base(r#"[{"name": "A", "density": -1}]"#)), Err(LibraryError::Material { .. })));
+        assert!(matches!(read_library(&base(r#"[{"name": ""}]"#)), Err(LibraryError::Material { .. })));
+        assert!(matches!(read_library(r#"{"format": 2, "materials": []}"#), Err(LibraryError::Format(2))));
+        assert!(matches!(
+            read_library(r#"{"format": 1, "code": "", "name": "X", "materials": []}"#),
+            Err(LibraryError::Header(_))
+        ));
+        assert!(matches!(read_library("not json"), Err(LibraryError::Json(_))));
+        let many = format!("[{}]", vec![r#"{"name": "A"}"#; MAX_MATERIALS + 1].join(","));
+        assert!(matches!(read_library(&base(&many)), Err(LibraryError::Header(_))));
+    }
+}

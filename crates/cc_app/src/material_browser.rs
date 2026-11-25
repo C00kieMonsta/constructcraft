@@ -237,6 +237,10 @@ fn list(ui: &mut Ui, state: &mut AppState, height: f32) {
             crate::actions::run_command(state, materials::MaterialDelete { material: Ref::Name(name) });
             state.dialogs.material_browser.selected = None;
         }
+        // Materials of a region or standard (Brazil's steels and concretes…), and library files.
+        if ui.button(t!("mat-lib-open")).on_hover_text(t!("mat-lib-open-tip")).clicked() {
+            crate::material_library_dialog::open(state);
+        }
     });
 }
 
@@ -742,18 +746,19 @@ fn physical(ui: &mut Ui, state: &mut AppState, m: &Material) {
         ("phys-specific-heat", p.specific_heat, "J/(kg·K)", |x, v| x.physical.specific_heat = v),
         ("phys-expansion", p.thermal_expansion, "1/K", |x, v| x.physical.thermal_expansion = v),
     ];
-    let mechanical: [PhysicalRow; 4] = [
+    let mechanical: [PhysicalRow; 5] = [
         ("phys-youngs", p.youngs_modulus, "MPa", |x, v| x.physical.youngs_modulus = v),
         ("phys-poisson", p.poisson, "", |x, v| x.physical.poisson = v),
         ("phys-compressive", p.compressive_strength, "MPa", |x, v| x.physical.compressive_strength = v),
+        ("phys-yield", p.yield_strength, "MPa", |x, v| x.physical.yield_strength = v),
         ("phys-tensile", p.tensile_strength, "MPa", |x, v| x.physical.tensile_strength = v),
     ];
     for (title, rows, id) in
-        [(t!("mat-thermal"), thermal, "mat-thermal"), (t!("mat-mechanical"), mechanical, "mat-mech")]
+        [(t!("mat-thermal"), &thermal[..], "mat-thermal"), (t!("mat-mechanical"), &mechanical[..], "mat-mech")]
     {
         heading(ui, title);
         grid(ui, id, |ui| {
-            for (k, v, unit, set) in rows {
+            for &(k, v, unit, set) in rows {
                 ui.label(theme::muted(tr(k)));
                 optional_value(ui, state, m, k, v, unit, set);
                 ui.end_row();
