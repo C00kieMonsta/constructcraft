@@ -129,7 +129,7 @@ fn ribbon_snapshots() {
     // The rich tooltip of an unavailable command.
     let mut state = sample_state();
     state.ribbon_tab = RibbonTab::Modify;
-    let mut harness = ribbon_harness_sized(state, egui::vec2(900.0, 300.0));
+    let mut harness = ribbon_harness_sized(state, egui::vec2(1600.0, 300.0));
     harness.get_by_label(&t!("tool-move")).hover();
     harness.run();
     results.add(harness.try_snapshot("ribbon_tooltip"));
